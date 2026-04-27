@@ -72,7 +72,7 @@ if __name__ == '__main__':
     try:
         vecenv = pufferlib.vector.make(SamplePufferEnv,
             num_envs=1, num_workers=2, batch_size=3, backend=pufferlib.vector.Multiprocessing)
-    except pufferlib.APIUsageError:
+    except (AssertionError, ValueError):
         #Make sure num_envs divides num_workers, and both num_envs and num_workers should divide batch_size
         pass
     

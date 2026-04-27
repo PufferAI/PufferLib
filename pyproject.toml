@@ -1,25 +1,42 @@
 [project]
 name = "pufferlib"
-version = "3.0.0"
+version = "4.0.0"
 description = "Fast and sane reinforcement learning"
-requires-python = ">=3.9"
-license= {file = "LICENSE"}
+requires-python = ">=3.10"
+readme = {file = "README.md", content-type = "text/markdown"}
+license = {file = "LICENSE"}
 authors = [{ name = "Joseph Suarez", email = "jsuarez@puffer.ai" }]
 classifiers=[
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-dynamic = ["scripts", "dependencies", "optional-dependencies"]
+dependencies = [
+    "setuptools",
+    "numpy",
+    "torch>=2.9",
+    "rich",
+    "rich_argparse",
+    "gpytorch",
+    "scikit-learn",
+    "wandb",
+    "pybind11",
+]
+
+[project.scripts]
+puffer = "pufferlib.pufferl:main"
 
 [project.urls]
-Homepage = "https://github.com/PufferAI/PufferLib"
+Homepage = "https://puffer.ai"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pufferlib*"]
 
 [build-system]
-requires = ["setuptools", "wheel", "Cython", "numpy", "torch"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"

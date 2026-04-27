@@ -2,6 +2,13 @@
 c_*.c
 pufferlib/extensions.c
 pufferlib/puffernet.c
+logs/
+
+# Build dir
+build/
+
+# hipified cuda extensions dir [HIP/ROCM]
+pufferlib/extensions/hip/
 
 # Raylib
 raylib_wasm/
@@ -15,6 +22,7 @@ cy_*.c
 
 # C extensions
 *.so
+*.o
 
 # Distribution / packaging
 .Python
@@ -159,3 +167,8 @@ pufferlib/ocean/impulse_wars/*-release/
 pufferlib/ocean/impulse_wars/debug-*/
 pufferlib/ocean/impulse_wars/release-*/
 pufferlib/ocean/impulse_wars/benchmark/
+
+# Data
+resources/drive/data/*
+resources/drive/binaries/*
+
