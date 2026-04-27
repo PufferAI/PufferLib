@@ -185,6 +185,26 @@ static void assert_supply_doses(const char* label,
     ASSERT_INT_EQ(buf, player->stamina_doses, expected.stamina_doses);
 }
 
+static void test_start_wave_public_to_internal_mapping(void) {
+    printf("--- inferno start-wave public to internal mapping ---\n");
+
+    EncounterState* raw_state = inf_create();
+    InfernoState* state = (InfernoState*)raw_state;
+
+    inf_put_int(raw_state, "start_wave", 0);
+    ASSERT_INT_EQ("public wave 0 aliases internal wave 0", state->start_wave, 0);
+    inf_put_int(raw_state, "start_wave", 1);
+    ASSERT_INT_EQ("public wave 1 maps to internal wave 0", state->start_wave, 0);
+    inf_put_int(raw_state, "start_wave", 67);
+    ASSERT_INT_EQ("public wave 67 maps to single Jad internal wave", state->start_wave, 66);
+    inf_put_int(raw_state, "start_wave", 68);
+    ASSERT_INT_EQ("public wave 68 maps to triple Jad internal wave", state->start_wave, 67);
+    inf_put_int(raw_state, "start_wave", 69);
+    ASSERT_INT_EQ("public wave 69 maps to Zuk internal wave", state->start_wave, 68);
+
+    inf_destroy(raw_state);
+}
+
 static void test_reward_switches_between_healer_tags_and_damage(void) {
     printf("--- inferno reward switches between healer tags and damage ---\n");
 
@@ -1527,6 +1547,7 @@ int main(void) {
     test_meleer_dig_landing_order();
     test_reward_switches_between_healer_tags_and_damage();
     test_final_wave_reward_uses_zuk_low_watermark_progress();
+    test_start_wave_public_to_internal_mapping();
     test_inferno_reset_supplies_match_current_inventory();
     test_late_start_supply_profile_anchor_waves();
     test_late_start_supply_profile_interpolation_and_scale();

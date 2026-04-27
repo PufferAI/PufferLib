@@ -995,6 +995,15 @@ static void inf_require_valid_public_wave(int public_wave) {
     }
 }
 
+static int inf_public_start_wave_to_internal(int public_wave) {
+    if (public_wave < 0 || public_wave > INF_NUM_WAVES) {
+        fprintf(stderr, "inferno start_wave must be in [0, %d], got %d\n",
+            INF_NUM_WAVES, public_wave);
+        abort();
+    }
+    return (public_wave > 0) ? public_wave - 1 : 0;
+}
+
 static InfSupplyFractions inf_supply_profile_fractions(int public_wave) {
     inf_require_valid_public_wave(public_wave);
 
@@ -1151,7 +1160,7 @@ static void inf_reset(EncounterState* state, uint32_t seed) {
     s->player.y = is_zuk_wave ? INF_ZUK_PLAYER_START_Y : INF_PLAYER_START_Y;
     inf_rebuild_player_collision_flags(s);
 
-    /* pillars: all destroyed at end of wave 66 (index 65), so waves 66+ have none */
+    /* pillars are gone after public wave 66, so public waves 67-69 start without them. */
     for (int i = 0; i < INF_NUM_PILLARS; i++) {
         s->pillars[i].x = INF_PILLAR_POS[i][0];
         s->pillars[i].y = INF_PILLAR_POS[i][1];
@@ -4041,8 +4050,9 @@ static void inf_fill_render_entities(EncounterState* state, RenderEntity* out, i
 
 static void inf_put_int(EncounterState* state, const char* key, int value) {
     InfernoState* s = (InfernoState*)state;
-    /* wave is 1-indexed externally (wave 1 = first, wave 69 = Zuk), 0-indexed internally */
-    if (strcmp(key, "start_wave") == 0) s->start_wave = (value > 0) ? value - 1 : 0;
+    /* wave is 1-indexed externally (wave 1 = first, wave 69 = Zuk), 0-indexed internally.
+       public wave 0 is retained as an alias for a full run from wave 1. */
+    if (strcmp(key, "start_wave") == 0) s->start_wave = inf_public_start_wave_to_internal(value);
     else if (strcmp(key, "seed") == 0) s->rng_state = (uint32_t)value;
     else if (strcmp(key, "world_offset_x") == 0) s->world_offset_x = value;
     else if (strcmp(key, "world_offset_y") == 0) s->world_offset_y = value;

@@ -33,7 +33,7 @@ typedef struct {
     Log log;
 
     EncounterState* enc_state;
-    int config_start_wave;  /* the start_wave from config (not curriculum override) */
+    int config_start_wave;  /* internal start_wave from config, not curriculum override */
 
     int acts_staging[INF_NUM_ACTION_HEADS];
     unsigned char term_staging;
@@ -68,6 +68,23 @@ typedef struct {
 #define ACT_SIZES { ENCOUNTER_MOVE_ACTIONS, ENCOUNTER_OVERHEAD_DIM_PVE, INF_OBS_NPCS+1, 5, 2, 4, 3, 2, ENCOUNTER_OFFENSIVE_DIM }
 #define OBS_TENSOR_T FloatTensor
 #define Env InfernoEnv
+
+static int inferno_public_wave_from_config(DictItem* item, const char* key, int allow_zero) {
+    if (!item) return 0;
+    int wave = (int)item->value;
+    if ((double)wave != item->value) {
+        fprintf(stderr, "%s must be an integer public Inferno wave, got %.6f\n",
+            key, item->value);
+        abort();
+    }
+    if ((allow_zero && (wave < 0 || wave > INF_NUM_WAVES)) ||
+        (!allow_zero && (wave < 1 || wave > INF_NUM_WAVES))) {
+        fprintf(stderr, "%s must be in [%d, %d], got %d\n",
+            key, allow_zero ? 0 : 1, INF_NUM_WAVES, wave);
+        abort();
+    }
+    return wave;
+}
 
 /* global best episode tracking */
 static int g_best_wave = 0;
@@ -220,8 +237,8 @@ void c_step(Env* env) {
 
     if (is_term) {
         /* check if this episode is a new global best — if so, flush replay to disk.
-           for full runs (start_wave 0): best = highest wave reached, then fewest ticks.
-           for zuk-only (start_wave 68+): best = most damage to zuk (lowest zuk HP), then fewest ticks.
+           for full runs (internal start_wave 0): best = highest wave reached, then fewest ticks.
+           for Zuk-only (internal start_wave 68): best = most damage to Zuk, then fewest ticks.
            curriculum starts from mid-waves also record. */
         if (env->episode_actions && env->episode_action_len > 0) {
             InfernoState* st = (InfernoState*)env->enc_state;
@@ -410,8 +427,9 @@ void my_init(Env* env, Dict* kwargs) {
     memset(&env->log, 0, sizeof(Log));
 
     DictItem* start_wave = dict_get_unsafe(kwargs, "start_wave");
+    int sw = inferno_public_wave_from_config(start_wave, "start_wave", 1);
     if (start_wave)
-        ENCOUNTER_INFERNO.put_int(env->enc_state, "start_wave", (int)start_wave->value);
+        ENCOUNTER_INFERNO.put_int(env->enc_state, "start_wave", sw);
     ENCOUNTER_INFERNO.put_float(
         env->enc_state, "damage_reward_coeff",
         (float)dict_get_unsafe(kwargs, "damage_reward_coeff")->value);
@@ -428,9 +446,7 @@ void my_init(Env* env, Dict* kwargs) {
             env->enc_state, "late_start_supply_profile_scale",
             (float)supply_profile_scale->value);
     }
-    /* match the 1-indexed → 0-indexed conversion done by encounter's put_int */
-    int sw = start_wave ? (int)start_wave->value : 0;
-    env->config_start_wave = (sw > 0) ? sw - 1 : 0;
+    env->config_start_wave = inf_public_start_wave_to_internal(sw);
 
     const char* record_path = getenv("RECORD_REPLAY");
     const char* play_path = getenv("PLAY_REPLAY");
@@ -509,7 +525,8 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int num_buffers = (int)dict_get(vec_kwargs, "num_buffers")->value;
     int agents_per_buffer = total_agents / num_buffers;
     DictItem* base_start_wave_item = dict_get_unsafe(env_kwargs, "start_wave");
-    int base_start_wave = base_start_wave_item ? (int)base_start_wave_item->value : 0;
+    int base_start_wave = inferno_public_wave_from_config(
+        base_start_wave_item, "start_wave", 1);
 
     /* parse curriculum tiers from env config */
     static const char* wave_keys[] = {
@@ -525,7 +542,8 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
         DictItem* w = dict_get_unsafe(env_kwargs, wave_keys[i]);
         DictItem* f = dict_get_unsafe(env_kwargs, frac_keys[i]);
         if (w && f && f->value > 0.0) {
-            curriculum_waves[num_tiers] = (int)w->value;
+            curriculum_waves[num_tiers] =
+                inferno_public_wave_from_config(w, wave_keys[i], 0);
             curriculum_fracs[num_tiers] = (float)f->value;
             num_tiers++;
         }
@@ -629,8 +647,8 @@ void my_log(Log* log, Dict* out) {
 
     float wr = log->wins;
     float score;
-    int start_wave = (int)(log->start_wave + 0.5f);
-    if (start_wave >= 68) {
+    int internal_start_wave = (int)(log->start_wave + 0.5f);
+    if (internal_start_wave >= 68) {
         /* Zuk-only: score = fraction of lowest Zuk HP reached (0..1), wins = 1.0 */
         score = (1200.0f - log->min_zuk_hp_seen) / 1200.0f;
     } else {
