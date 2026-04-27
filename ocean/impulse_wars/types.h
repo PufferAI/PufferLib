@@ -6,7 +6,7 @@
 #include "raylib.h"
 #include "rlights.h"
 
-#include "include/cc_array.h"
+#include "cc_array.h"
 
 #include "settings.h"
 

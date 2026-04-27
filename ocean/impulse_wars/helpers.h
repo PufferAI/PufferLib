@@ -8,7 +8,7 @@
 
 #include "box2d/box2d.h"
 
-#include "include/cc_array.h"
+#include "cc_array.h"
 
 #ifndef NDEBUG
 #define ON_ERROR __builtin_trap()
@@ -121,7 +121,7 @@
 #define fastFree(ptr) free(ptr)
 #define fastFreeFn free
 #else
-#include "include/dlmalloc.h"
+#include "dlmalloc.h"
 #define fastMalloc(size) dlmalloc(size)
 #define fastMallocFn dlmalloc
 #define fastCalloc(nmemb, size) dlcalloc(nmemb, size)
