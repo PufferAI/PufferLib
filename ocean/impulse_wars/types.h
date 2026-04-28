@@ -413,7 +413,7 @@ typedef struct debugPoint {
 
 typedef struct iwEnv {
     uint8_t numDrones;
-    uint8_t numAgents;
+    uint8_t num_agents;
     uint8_t numTeams;
     bool teamsEnabled;
     bool sittingDuck;
@@ -439,15 +439,15 @@ typedef struct iwEnv {
     uint8_t *observations;
     float *rewards;
     float *actions;
-    uint8_t *masks;
-    uint8_t *terminals;
-    uint8_t *truncations;
+    //uint8_t *masks;
+    float *terminals;
+    //uint8_t *truncations;
 
     uint8_t frameRate;
     float deltaTime;
     uint8_t frameSkip;
     uint8_t box2dSubSteps;
-    uint64_t randState;
+    uint64_t rng;
     bool needsReset;
 
     uint16_t episodeLength;

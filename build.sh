@@ -75,6 +75,7 @@ CLANG_WARN=(
     -Wno-incompatible-pointer-types-discards-qualifiers
     -Wno-error=array-parameter
 )
+CLANG_OPT=()
 
 download() {
     local name=$1 url=$2
@@ -108,14 +109,20 @@ elif [ "$ENV" = "trailer" ]; then
     OUTPUT_NAME="trailer/trailer"
 elif [ "$ENV" = "impulse_wars" ]; then
     SRC_DIR="ocean/$ENV"
-    if [ "$MODE" = "web" ]; then BOX2D_NAME='box2d-web'
-    elif [ "$PLATFORM" = "Linux" ]; then BOX2D_NAME='box2d-linux-amd64'
-    else BOX2D_NAME='box2d-macos-arm64'
+    if [ "$MODE" = "web" ]; then
+        BOX2D_NAME='box2d-web'
+    elif [ "$PLATFORM" = "Linux" ]; then
+        BOX2D_NAME='box2d-linux-amd64'
+    else
+        BOX2D_NAME='box2d-macos-arm64'
     fi
+
     BOX2D_URL="https://github.com/capnspacehook/box2d/releases/latest/download"
     download "$BOX2D_NAME" "$BOX2D_URL/$BOX2D_NAME.tar.gz"
     INCLUDES+=(-I./$BOX2D_NAME/include -I./$BOX2D_NAME/src)
     LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2d.a")
+
+    CLANG_OPT=(-flto -fno-math-errno -march=native)
 elif [ -d "ocean/$ENV" ]; then
     SRC_DIR="ocean/$ENV"
 else
@@ -126,11 +133,11 @@ OUTPUT_NAME=${OUTPUT_NAME:-$ENV}
 
 # Standalone environment build
 if [ -n "$DEBUG" ] || [ "$MODE" = "local" ]; then
-    CLANG_OPT=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}")
+    CLANG_OPT+=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}")
     NVCC_OPT="-O0 -g"
     LINK_OPT="-g"
 else
-    CLANG_OPT=(-O2 -DNDEBUG "${CLANG_WARN[@]}")
+    CLANG_OPT+=(-O2 -DNDEBUG "${CLANG_WARN[@]}")
     NVCC_OPT="-O2 --threads 0"
     LINK_OPT="-O2"
 fi
@@ -242,6 +249,7 @@ echo "Compiling static library for $ENV..."
 ${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
     -I. -Isrc -I$SRC_DIR -Ivendor \
     -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
+    "${INCLUDES[@]}" \
     -DPLATFORM_DESKTOP \
     -fno-semantic-interposition -fvisibility=hidden \
     -fPIC -fopenmp \
@@ -273,7 +281,7 @@ if [ -z "$MODE" ]; then
 
     LINK_CMD=(
         ${CXX:-g++} -shared -fPIC -fopenmp
-        build/bindings.o "$STATIC_LIB" "$RAYLIB_A"
+        build/bindings.o "$STATIC_LIB" "${LINK_ARCHIVES[@]}"
         -L$CUDA_HOME/lib64 $CUDNN_LFLAG $NCCL_LFLAG
         "${WHEEL_RPATH_FLAGS[@]}"
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
@@ -298,7 +306,7 @@ elif [ "$MODE" = "cpu" ]; then
         src/bindings_cpu.cpp -o build/bindings_cpu.o
     LINK_CMD=(
         ${CXX:-g++} -shared -fPIC -fopenmp
-        build/bindings_cpu.o "$STATIC_LIB" "$RAYLIB_A"
+        build/bindings_cpu.o "$STATIC_LIB" "${LINK_ARCHIVES[@]}"
         -lm -lpthread $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
         -o "$OUTPUT"
@@ -317,7 +325,7 @@ elif [ "$MODE" = "profile" ]; then
         $PRECISION \
         -Xcompiler=-fopenmp \
         tests/profile_kernels.cu vendor/ini.c \
-        "$STATIC_LIB" "$RAYLIB_A" \
+        "$STATIC_LIB" "${LINK_ARCHIVES[@]}" \
         -lnccl -lnvidia-ml -lcublas -lcurand -lcudnn \
         -lGL -lm -lpthread $OMP_LIB \
         -o profile

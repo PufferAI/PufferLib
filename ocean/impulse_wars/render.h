@@ -809,7 +809,7 @@ void renderUI(const iwEnv *e, const bool starting) {
         char *playerType = "";
         if (droneControlledByHuman(e, drone->idx)) {
             playerType = "Human";
-        } else if (drone->idx < e->numAgents) {
+        } else if (drone->idx < e->num_agents) {
             playerType = "NN";
         } else {
             if (e->sittingDuck) {
@@ -1211,7 +1211,7 @@ void renderDroneGuides(iwEnv *e, const droneEntity *drone, const bool ending) {
     if (!b2VecEqual(drone->lastMove, b2Vec2_zero) && !ending) {
         const float moveMagnitude = b2Length(drone->lastMove);
         const float thrusterAngle = RAD2DEG * b2Atan2(-drone->lastMove.y, -drone->lastMove.x);
-        const float flickerWidth = randFloat(&e->randState, -0.05f, 0.05f);
+        const float flickerWidth = randFloat(&e->rng, -0.05f, 0.05f);
         const float thrusterWidth = 2.5f * ((halfDroneRadius * moveMagnitude) + halfDroneRadius + flickerWidth);
         const b2Vec2 thrusterPos = b2MulAdd(drone->pos, -thrusterWidth / 2.0f, drone->lastMove);
         const Color thrusterColor = Fade(getDroneColor(drone->idx), 0.9);
