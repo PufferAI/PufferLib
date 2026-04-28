@@ -23,7 +23,7 @@
 #define BLOOM_ADDITIVE 1
 #define BLOOM_SOFT_LIGHT 2
 
-noperspective in vec2 fragTexCoord;
+in vec2 fragTexCoord;
 
 uniform sampler2D uTexColor;
 uniform sampler2D uTexBloomBlur;

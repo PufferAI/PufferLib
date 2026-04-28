@@ -16,9 +16,9 @@ int main(void) {
     posix_memalign((void **)&e->observations, sizeof(void *), alignedSize(NUM_DRONES * obsBytes(NUM_DRONES), sizeof(float)));
     e->rewards = fastCalloc(NUM_DRONES, sizeof(float));
     e->actions = fastCalloc(NUM_DRONES * CONTINUOUS_ACTION_SIZE, sizeof(float));
-    //e->masks = fastCalloc(NUM_DRONES, sizeof(uint8_t));
+    // e->masks = fastCalloc(NUM_DRONES, sizeof(uint8_t));
     e->terminals = fastCalloc(NUM_DRONES, sizeof(float));
-    //e->truncations = fastCalloc(NUM_DRONES, sizeof(uint8_t));
+    // e->truncations = fastCalloc(NUM_DRONES, sizeof(uint8_t));
 
     rayClient *client = createRayClient();
     e->client = client;
@@ -41,9 +41,9 @@ int main(void) {
     free(e->observations);
     fastFree(e->actions);
     fastFree(e->rewards);
-    //fastFree(e->masks);
+    // fastFree(e->masks);
     fastFree(e->terminals);
-    //fastFree(e->truncations);
+    // fastFree(e->truncations);
     fastFree(e);
     destroyRayClient(client);
 #endif

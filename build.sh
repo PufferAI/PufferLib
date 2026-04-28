@@ -50,20 +50,23 @@ if [ "$ENV" = "all" ]; then
     exit 0
 fi
 
+STANDALONE_LDFLAGS=(-fuse-ld=lld)
+SHARED_LDFLAGS=(-fuse-ld=lld)
+
 # Linux/mac
 PLATFORM="$(uname -s)"
 if [ "$PLATFORM" = "Linux" ]; then
     RAYLIB_NAME='raylib-5.5_linux_amd64'
     OMP_LIB=-lomp5
     SANITIZE_FLAGS=(-fsanitize=address,undefined,bounds,pointer-overflow,leak -fno-omit-frame-pointer)
-    STANDALONE_LDFLAGS=(-lGL)
-    SHARED_LDFLAGS=(-Bsymbolic-functions)
+    STANDALONE_LDFLAGS+=(-lGL)
+    SHARED_LDFLAGS+=(-Bsymbolic-functions)
 else
     RAYLIB_NAME='raylib-5.5_macos'
     OMP_LIB=-lomp
     SANITIZE_FLAGS=()
-    STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
-    SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup)
+    STANDALONE_LDFLAGS+=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
+    SHARED_LDFLAGS+=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup)
 fi
 
 CLANG_WARN=(
@@ -120,9 +123,13 @@ elif [ "$ENV" = "impulse_wars" ]; then
     BOX2D_URL="https://github.com/capnspacehook/box2d/releases/latest/download"
     download "$BOX2D_NAME" "$BOX2D_URL/$BOX2D_NAME.tar.gz"
     INCLUDES+=(-I./$BOX2D_NAME/include -I./$BOX2D_NAME/src)
-    LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2d.a")
-
-    CLANG_OPT=(-flto -fno-math-errno -march=native)
+    
+    if [ -z "$DEBUG" ]; then
+        CLANG_OPT+=(-flto -fno-math-errno -march=native)
+        LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2d.a")
+    else
+        LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2dd.a")
+    fi
 elif [ -d "ocean/$ENV" ]; then
     SRC_DIR="ocean/$ENV"
 else
@@ -137,9 +144,9 @@ if [ -n "$DEBUG" ] || [ "$MODE" = "local" ]; then
     NVCC_OPT="-O0 -g"
     LINK_OPT="-g"
 else
-    CLANG_OPT+=(-O2 -DNDEBUG "${CLANG_WARN[@]}")
-    NVCC_OPT="-O2 --threads 0"
-    LINK_OPT="-O2"
+    CLANG_OPT+=(-O3 -DNDEBUG "${CLANG_WARN[@]}")
+    NVCC_OPT="-O3 --threads 0"
+    LINK_OPT="-O3"
 fi
 if [ "$MODE" = "local" ] || [ "$MODE" = "fast" ]; then
     FLAGS=(

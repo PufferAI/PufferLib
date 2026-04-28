@@ -463,6 +463,7 @@ void computeObs(iwEnv *e) {
 }
 
 void setupEnv(iwEnv *e) {
+    e->isSetup = true;
     e->needsReset = false;
 
     e->stepsLeft = e->totalSteps;
@@ -557,10 +558,11 @@ iwEnv *initEnv(iwEnv *e, uint8_t numDrones, uint8_t numAgents, int8_t mapIdx, ui
 
     e->continuousActions = continuousActions;
 
-    //e->truncations = fastCalloc(numDrones, sizeof(uint8_t));
+    // e->truncations = fastCalloc(numDrones, sizeof(uint8_t));
 
     setEnvFrameRate(e);
     e->rng = seed;
+    e->isSetup = false;
     e->needsReset = false;
 
     b2WorldDef worldDef = b2DefaultWorldDef();
@@ -620,8 +622,8 @@ void setRewards(iwEnv *e, float winReward, float selfKillPunishment, float enemy
 void clearEnv(iwEnv *e) {
     // rewards get cleared in stepEnv every step
     // memset(e->masks, 1, e->num_agents * sizeof(uint8_t));
-    memset(e->terminals, 0.0f, e->num_agents * sizeof(uint8_t));
-    //memset(e->truncations, 0x0, e->num_agents * sizeof(uint8_t));
+    memset(e->terminals, 0.0f, e->num_agents * sizeof(float));
+    // memset(e->truncations, 0x0, e->num_agents * sizeof(uint8_t));
 
     e->episodeLength = 0;
     memset(e->stats, 0x0, sizeof(e->stats));
@@ -666,30 +668,33 @@ void clearEnv(iwEnv *e) {
 }
 
 void destroyEnv(iwEnv *e) {
-    clearEnv(e);
+    if (e->isSetup) {
+        clearEnv(e);
 
-    for (uint8_t i = 0; i < NUM_MAPS; i++) {
-        pathingInfo *info = &e->mapPathing[i];
-        fastFree(info->paths);
-        fastFree(info->pathBuffer);
-    }
-    fastFree(e->mapPathing);
+        for (size_t i = 0; i < cc_array_size(e->walls); i++) {
+            wallEntity *wall = safe_array_get_at(e->walls, i);
+            destroyWall(e, wall, false);
+        }
 
-    for (size_t i = 0; i < cc_array_size(e->walls); i++) {
-        wallEntity *wall = safe_array_get_at(e->walls, i);
-        destroyWall(e, wall, false);
+        for (size_t i = 0; i < cc_array_size(e->cells); i++) {
+            mapCell *cell = safe_array_get_at(e->cells, i);
+            fastFree(cell);
+        }
+
+        for (size_t i = 0; i < cc_array_size(e->entities); i++) {
+            entity *ent = safe_array_get_at(e->entities, i);
+            fastFree(ent->id);
+            fastFree(ent);
+        }
+
+        for (uint8_t i = 0; i < NUM_MAPS; i++) {
+            pathingInfo *info = &e->mapPathing[i];
+            fastFree(info->paths);
+            fastFree(info->pathBuffer);
+        }
+        fastFree(e->mapPathing);
     }
 
-    for (size_t i = 0; i < cc_array_size(e->cells); i++) {
-        mapCell *cell = safe_array_get_at(e->cells, i);
-        fastFree(cell);
-    }
-
-    for (size_t i = 0; i < cc_array_size(e->entities); i++) {
-        entity *ent = safe_array_get_at(e->entities, i);
-        fastFree(ent->id);
-        fastFree(ent);
-    }
     b2DestroyIdPool(&e->idPool);
 
     cc_array_destroy(e->entities);
@@ -711,7 +716,9 @@ void destroyEnv(iwEnv *e) {
 }
 
 void resetEnv(iwEnv *e) {
-    clearEnv(e);
+    if (e->isSetup) {
+        clearEnv(e);
+    }
     setupEnv(e);
 }
 
@@ -821,7 +828,7 @@ agentActions _computeActions(iwEnv *e, droneEntity *drone, const agentActions *m
     agentActions actions = {0};
 
     if (manualActions == NULL) {
-        float (*envActions)[7] = (float(*)[7])e->actions;
+        float (*envActions)[7] = (float (*)[7])e->actions;
 
         uint8_t move = envActions[drone->idx][0];
         // 0 is no-op for both move and aim
@@ -1247,7 +1254,7 @@ void stepEnv(iwEnv *e) {
                 // }
 
                 DEBUG_LOG("terminating episode");
-                memset(e->terminals, 1.0f, e->num_agents * sizeof(float));            
+                memset(e->terminals, 1.0f, e->num_agents * sizeof(float));
 
                 Log log = {0};
                 log.length = e->episodeLength;

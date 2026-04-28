@@ -16,10 +16,10 @@
 
 #define DICTGET(key) dict_get(kwargs, key)->value
 
-void my_init(Env* env, Dict* kwargs) {
+void my_init(Env *env, Dict *kwargs) {
     initEnv(
         env,
-        2,
+        MAX_DRONES,
         1,
         -1,
         0,
@@ -48,17 +48,26 @@ void my_init(Env* env, Dict* kwargs) {
     initMaps(env);
 }
 
-#define _LOG_BUF_SIZE 128
-
-char *droneLog(char *buf, const uint8_t droneIdx, const char *name) {
-    snprintf(buf, _LOG_BUF_SIZE, "drone_%d_%s", droneIdx, name);
-    return buf;
-}
-
-char *weaponLog(char *buf, const uint8_t droneIdx, const uint8_t weaponIdx, const char *name) {
-    snprintf(buf, _LOG_BUF_SIZE, "drone_%d_%s_%s", droneIdx, weaponNames[weaponIdx], name);
-    return buf;
-}
+#define LOG_DRONE_STATS(log, out, idx, idxStr)                                                    \
+    dict_set(out, "drone_" idxStr "_returns", log->stats[idx].returns);                           \
+    dict_set(out, "drone_" idxStr "_distance_traveled", log->stats[idx].distanceTraveled);        \
+    dict_set(out, "drone_" idxStr "_abs_distance_traveled", log->stats[idx].absDistanceTraveled); \
+    dict_set(out, "drone_" idxStr "_brake_time", log->stats[idx].brakeTime);                      \
+    dict_set(out, "drone_" idxStr "_total_bursts", log->stats[idx].totalBursts);                  \
+    dict_set(out, "drone_" idxStr "_bursts_hit", log->stats[idx].burstsHit);                      \
+    dict_set(out, "drone_" idxStr "_energy_emptied", log->stats[idx].energyEmptied);              \
+    dict_set(out, "drone_" idxStr "_shields_broken", log->stats[idx].shieldsBroken);              \
+    dict_set(out, "drone_" idxStr "_own_shield_broken", log->stats[idx].ownShieldBroken);         \
+    dict_set(out, "drone_" idxStr "_self_kills", log->stats[idx].selfKills);                      \
+    dict_set(out, "drone_" idxStr "_kills", log->stats[idx].kills);                               \
+    dict_set(out, "drone_" idxStr "_unknown_kills", log->stats[idx].unknownKills);                \
+    dict_set(out, "drone_" idxStr "_wins", log->stats[idx].wins);                                 \
+    dict_set(out, "drone_" idxStr "_total_shots_fired", log->stats[idx].totalShotsFired);         \
+    dict_set(out, "drone_" idxStr "_total_shots_hit", log->stats[idx].totalShotsHit);             \
+    dict_set(out, "drone_" idxStr "_total_shots_taken", log->stats[idx].totalShotsTaken);         \
+    dict_set(out, "drone_" idxStr "_total_own_shots_taken", log->stats[idx].totalOwnShotsTaken);  \
+    dict_set(out, "drone_" idxStr "_total_picked_up", log->stats[idx].totalWeaponsPickedUp);      \
+    dict_set(out, "drone_" idxStr "_total_shot_distances", log->stats[idx].totalShotDistances)
 
 void my_log(Log *log, Dict *out) {
     dict_set(out, "episode_length", log->length);
@@ -67,39 +76,6 @@ void my_log(Log *log, Dict *out) {
     dict_set(out, "perf", log->stats[0].wins);
     dict_set(out, "score", log->stats[0].wins);
 
-    char buf[_LOG_BUF_SIZE] = {0};
-    for (uint8_t i = 0; i < MAX_DRONES; i++) {
-        dict_set(out, droneLog(buf, i, "returns"), log->stats[i].returns);
-        dict_set(out, droneLog(buf, i, "distance_traveled"), log->stats[i].distanceTraveled);
-        dict_set(out, droneLog(buf, i, "abs_distance_traveled"), log->stats[i].absDistanceTraveled);
-        dict_set(out, droneLog(buf, i, "brake_time"), log->stats[i].brakeTime);
-        dict_set(out, droneLog(buf, i, "total_bursts"), log->stats[i].totalBursts);
-        dict_set(out, droneLog(buf, i, "bursts_hit"), log->stats[i].burstsHit);
-        dict_set(out, droneLog(buf, i, "energy_emptied"), log->stats[i].energyEmptied);
-        dict_set(out, droneLog(buf, i, "shields_broken"), log->stats[i].shieldsBroken);
-        dict_set(out, droneLog(buf, i, "own_shield_broken"), log->stats[i].ownShieldBroken);
-        dict_set(out, droneLog(buf, i, "self_kills"), log->stats[i].selfKills);
-        dict_set(out, droneLog(buf, i, "kills"), log->stats[i].kills);
-        dict_set(out, droneLog(buf, i, "unknown_kills"), log->stats[i].unknownKills);
-        dict_set(out, droneLog(buf, i, "wins"), log->stats[i].wins);
-
-        // useful for debugging weapon balance, but really slows down
-        // sweeps due to adding a ton of extra logging data
-        //
-        // for (uint8_t j = 0; j < _NUM_WEAPONS; j++) {
-        //     dict_set(out, weaponLog(buf, i, j, "shots_fired"), log->stats[i].shotsFired[j]);
-        //     dict_set(out, weaponLog(buf, i, j, "shots_hit"), log->stats[i].shotsHit[j]);
-        //     dict_set(out, weaponLog(buf, i, j, "shots_taken"), log->stats[i].shotsTaken[j]);
-        //     dict_set(out, weaponLog(buf, i, j, "own_shots_taken"), log->stats[i].ownShotsTaken[j]);
-        //     dict_set(out, weaponLog(buf, i, j, "picked_up"), log->stats[i].weaponsPickedUp[j]);
-        //     dict_set(out, weaponLog(buf, i, j, "shot_distances"), log->stats[i].shotDistances[j]);
-        // }
-
-        dict_set(out, droneLog(buf, i, "total_shots_fired"), log->stats[i].totalShotsFired);
-        dict_set(out, droneLog(buf, i, "total_shots_hit"), log->stats[i].totalShotsHit);
-        dict_set(out, droneLog(buf, i, "total_shots_taken"), log->stats[i].totalShotsTaken);
-        dict_set(out, droneLog(buf, i, "total_own_shots_taken"), log->stats[i].totalOwnShotsTaken);
-        dict_set(out, droneLog(buf, i, "total_picked_up"), log->stats[i].totalWeaponsPickedUp);
-        dict_set(out, droneLog(buf, i, "total_shot_distances"), log->stats[i].totalShotDistances);
-    }
+    LOG_DRONE_STATS(log, out, 0, "0");
+    LOG_DRONE_STATS(log, out, 1, "1");
 }
