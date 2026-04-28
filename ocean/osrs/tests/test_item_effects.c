@@ -26,9 +26,6 @@
 
 #include "ocean/osrs/osrs_encounter.h"
 
-/* ======================================================================== */
-/* test harness (same macros as test_combat_math.c)                          */
-/* ======================================================================== */
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -870,9 +867,6 @@ static void test_loadout_defence_into_def_roll(void) {
     ASSERT_INT_EQ("def roll vs magic", def_roll_magic, 7811);
 }
 
-/* ======================================================================== */
-/* test: shared attack prep applies virtus ancient bonus only to ancients    */
-/* ======================================================================== */
 
 static void test_shared_prepare_attack_virtus_ancient_bonus(void) {
     printf("--- shared attack prep: virtus ancient bonus ---\n");
@@ -911,9 +905,6 @@ static void test_shared_prepare_attack_virtus_ancient_bonus(void) {
     ASSERT_INT_EQ("virtus non-ancient unchanged", non_ancient.max_hit, stats.max_hit);
 }
 
-/* ======================================================================== */
-/* test: shared attack prep applies tbow scaling from magic attack bonus     */
-/* ======================================================================== */
 
 static void test_shared_prepare_attack_tbow_scaling(void) {
     printf("--- shared attack prep: tbow scaling ---\n");
@@ -954,9 +945,6 @@ static void test_shared_prepare_attack_tbow_scaling(void) {
     );
 }
 
-/* ======================================================================== */
-/* main                                                                      */
-/* ======================================================================== */
 
 int main(void) {
     printf("=== item effects tests (cross-referenced with osrs-dps-calc) ===\n\n");

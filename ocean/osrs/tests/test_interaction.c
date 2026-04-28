@@ -14,9 +14,6 @@
 
 #include "ocean/osrs/osrs_interaction.h"
 
-/* ======================================================================== */
-/* test harness                                                              */
-/* ======================================================================== */
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -33,9 +30,6 @@ static int tests_failed = 0;
     } \
 } while (0)
 
-/* ======================================================================== */
-/* test: init                                                                */
-/* ======================================================================== */
 
 static void test_init(void) {
     printf("--- init ---\n");
@@ -45,9 +39,6 @@ static void test_init(void) {
     ASSERT_INT_EQ("not active", osrs_interaction_active(&ix), 0);
 }
 
-/* ======================================================================== */
-/* test: set                                                                 */
-/* ======================================================================== */
 
 static void test_set(void) {
     printf("--- set ---\n");
@@ -58,9 +49,6 @@ static void test_set(void) {
     ASSERT_INT_EQ("active", osrs_interaction_active(&ix), 1);
 }
 
-/* ======================================================================== */
-/* test: clear                                                               */
-/* ======================================================================== */
 
 static void test_clear(void) {
     printf("--- clear ---\n");
@@ -72,9 +60,6 @@ static void test_clear(void) {
     ASSERT_INT_EQ("not active", osrs_interaction_active(&ix), 0);
 }
 
-/* ======================================================================== */
-/* test: interrupt — MOVE                                                    */
-/* ======================================================================== */
 
 static void test_interrupt_move(void) {
     printf("--- interrupt: MOVE ---\n");
@@ -86,9 +71,6 @@ static void test_interrupt_move(void) {
     ASSERT_INT_EQ("target cleared", ix.target_slot, -1);
 }
 
-/* ======================================================================== */
-/* test: interrupt — EAT                                                     */
-/* ======================================================================== */
 
 static void test_interrupt_eat(void) {
     printf("--- interrupt: EAT ---\n");
@@ -100,9 +82,6 @@ static void test_interrupt_eat(void) {
     ASSERT_INT_EQ("target cleared", ix.target_slot, -1);
 }
 
-/* ======================================================================== */
-/* test: interrupt — DRINK                                                   */
-/* ======================================================================== */
 
 static void test_interrupt_drink(void) {
     printf("--- interrupt: DRINK ---\n");
@@ -114,9 +93,6 @@ static void test_interrupt_drink(void) {
     ASSERT_INT_EQ("target cleared", ix.target_slot, -1);
 }
 
-/* ======================================================================== */
-/* test: interrupt — EQUIP                                                   */
-/* ======================================================================== */
 
 static void test_interrupt_equip(void) {
     printf("--- interrupt: EQUIP ---\n");
@@ -128,9 +104,6 @@ static void test_interrupt_equip(void) {
     ASSERT_INT_EQ("target cleared", ix.target_slot, -1);
 }
 
-/* ======================================================================== */
-/* test: no interrupt — NONE                                                 */
-/* ======================================================================== */
 
 static void test_no_interrupt_none(void) {
     printf("--- no interrupt: NONE ---\n");
@@ -142,9 +115,6 @@ static void test_no_interrupt_none(void) {
     ASSERT_INT_EQ("target persists", ix.target_slot, 5);
 }
 
-/* ======================================================================== */
-/* test: no interrupt — PRAYER                                               */
-/* ======================================================================== */
 
 static void test_no_interrupt_prayer(void) {
     printf("--- no interrupt: PRAYER ---\n");
@@ -156,9 +126,6 @@ static void test_no_interrupt_prayer(void) {
     ASSERT_INT_EQ("target persists", ix.target_slot, 5);
 }
 
-/* ======================================================================== */
-/* test: no interrupt — SPEC                                                 */
-/* ======================================================================== */
 
 static void test_no_interrupt_spec(void) {
     printf("--- no interrupt: SPEC ---\n");
@@ -170,9 +137,6 @@ static void test_no_interrupt_spec(void) {
     ASSERT_INT_EQ("target persists", ix.target_slot, 5);
 }
 
-/* ======================================================================== */
-/* test: no interrupt — ATTACK                                               */
-/* ======================================================================== */
 
 static void test_no_interrupt_attack(void) {
     printf("--- no interrupt: ATTACK ---\n");
@@ -184,9 +148,6 @@ static void test_no_interrupt_attack(void) {
     ASSERT_INT_EQ("target persists", ix.target_slot, 5);
 }
 
-/* ======================================================================== */
-/* test: interrupt when no interaction                                       */
-/* ======================================================================== */
 
 static void test_interrupt_when_inactive(void) {
     printf("--- interrupt when no interaction ---\n");
@@ -197,9 +158,6 @@ static void test_interrupt_when_inactive(void) {
     ASSERT_INT_EQ("target still -1", ix.target_slot, -1);
 }
 
-/* ======================================================================== */
-/* test: set replaces                                                        */
-/* ======================================================================== */
 
 static void test_set_replaces(void) {
     printf("--- set replaces ---\n");
@@ -210,9 +168,6 @@ static void test_set_replaces(void) {
     ASSERT_INT_EQ("target_slot is 3", ix.target_slot, 3);
 }
 
-/* ======================================================================== */
-/* test: spec toggle                                                         */
-/* ======================================================================== */
 
 static void test_spec_toggle(void) {
     printf("--- spec toggle ---\n");
@@ -223,9 +178,6 @@ static void test_spec_toggle(void) {
     ASSERT_INT_EQ("disarmed after second toggle", spec_armed, 0);
 }
 
-/* ======================================================================== */
-/* test: spec disarm                                                         */
-/* ======================================================================== */
 
 static void test_spec_disarm(void) {
     printf("--- spec disarm ---\n");
@@ -234,9 +186,6 @@ static void test_spec_disarm(void) {
     ASSERT_INT_EQ("disarmed", spec_armed, 0);
 }
 
-/* ======================================================================== */
-/* main                                                                      */
-/* ======================================================================== */
 
 int main(void) {
     printf("=== osrs_interaction tests ===\n\n");

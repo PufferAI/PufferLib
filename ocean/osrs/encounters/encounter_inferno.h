@@ -31,9 +31,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* ======================================================================== */
-/* arena constants                                                           */
-/* ======================================================================== */
 
 #define INF_ARENA_MIN_X    11
 #define INF_ARENA_MAX_X    39
@@ -72,9 +69,6 @@ static const int INF_SPAWN_POS[INF_NUM_SPAWN_POS][2] = {
 #define INF_NUM_WAVES     69
 #define INF_NUM_ACTION_HEADS 9
 
-/* ======================================================================== */
-/* NPC types                                                                 */
-/* ======================================================================== */
 
 typedef enum {
     INF_NPC_NIBBLER = 0,      /* Jal-Nib: melee, eats pillars */
@@ -241,9 +235,6 @@ static void inf_build_npc_stats(void) {
     }
 }
 
-/* ======================================================================== */
-/* wave compositions                                                         */
-/* ======================================================================== */
 
 #define INF_MAX_NPCS_PER_WAVE 9  /* wave 62: NNN BB BL M R MA = 9 */
 
@@ -353,9 +344,6 @@ static const InfWaveDef INF_WAVES[INF_NUM_WAVES] = {
     #undef W
 };
 
-/* ======================================================================== */
-/* NPC state                                                                 */
-/* ======================================================================== */
 
 /* max active NPCs: wave 62 has 9 + blob splits (3 per blob, up to 2 blobs = 6) + healers */
 #define INF_MAX_NPCS      32
@@ -441,9 +429,6 @@ typedef struct {
     int hit_spell_type;      /* ENCOUNTER_SPELL_* from the pending hit that just landed */
 } InfNPC;
 
-/* ======================================================================== */
-/* pillar state                                                              */
-/* ======================================================================== */
 
 typedef struct {
     int x, y;
@@ -451,9 +436,6 @@ typedef struct {
     int active;
 } InfPillar;
 
-/* ======================================================================== */
-/* zuk state                                                                 */
-/* ======================================================================== */
 
 typedef struct {
     /* shield */
@@ -475,9 +457,6 @@ typedef struct {
     int has_paused;
 } InfZukState;
 
-/* ======================================================================== */
-/* weapon sets and pre-computed stats                                         */
-/* ======================================================================== */
 
 typedef enum {
     INF_GEAR_MAGE = 0,
@@ -537,9 +516,6 @@ static const uint8_t* const INF_LOADOUTS[INF_NUM_WEAPON_SETS] = {
 };
 
 /* tank overlay items (justiciar) */
-/* ======================================================================== */
-/* encounter state                                                           */
-/* ======================================================================== */
 
 typedef struct {
     int brew_doses;
@@ -707,9 +683,6 @@ static void inf_shuffle_spawns(InfernoState* s) {
     encounter_shuffle(s->spawn_order, INF_NUM_SPAWN_POS, &s->rng_state);
 }
 
-/* ======================================================================== */
-/* LOS helper: rebuild blocker array from active pillars                     */
-/* ======================================================================== */
 
 static void inf_rebuild_los(InfernoState* s) {
     s->los_blocker_count = 0;
@@ -895,9 +868,6 @@ static inline int inf_choose_attack_style_for_tick(
     return inf_attack_style_from_mask(style_mask);
 }
 
-/* ======================================================================== */
-/* dead mob store for mager resurrection                                     */
-/* ======================================================================== */
 
 static inline int inf_dead_mob_is_resurrectable(InfNPCType type) {
     switch (type) {
@@ -927,9 +897,6 @@ static void inf_store_dead_mob(InfernoState* s, InfNPC* npc) {
     dm->max_hp = npc->max_hp;
 }
 
-/* ======================================================================== */
-/* forward declarations                                                      */
-/* ======================================================================== */
 
 static float inf_compute_reward(InfernoState* s);
 static void inf_spawn_wave(InfernoState* s);
@@ -941,9 +908,6 @@ static void inf_queue_zuk_healer_sparks(InfernoState* s, const InfNPC* npc);
 static void inf_resolve_pending_sparks(InfernoState* s);
 static void inf_rebuild_player_collision_flags(InfernoState* s);
 
-/* ======================================================================== */
-/* lifecycle                                                                 */
-/* ======================================================================== */
 
 static EncounterState* inf_create(void) {
     InfernoState* s = (InfernoState*)calloc(1, sizeof(InfernoState));
@@ -1185,9 +1149,6 @@ static void inf_reset(EncounterState* state, uint32_t seed) {
     s->wave_spawn_delay = 10;
 }
 
-/* ======================================================================== */
-/* spawn: place NPCs for current wave                                        */
-/* ======================================================================== */
 
 /* find a free NPC slot, return index or -1 */
 static int inf_find_free_npc(InfernoState* s) {
@@ -1456,9 +1417,6 @@ static void inf_spawn_wave(InfernoState* s) {
     }
 }
 
-/* ======================================================================== */
-/* NPC AI: movement                                                          */
-/* ======================================================================== */
 
 static int inf_in_arena(int x, int y) {
     return x >= INF_ARENA_MIN_X && x <= INF_ARENA_MAX_X &&
@@ -1649,9 +1607,6 @@ static void inf_npc_move(InfernoState* s, int idx) {
         inf_stamp_npc_collision_footprint(s, npc->x, npc->y, npc->size);
 }
 
-/* ======================================================================== */
-/* NPC AI: meleer dig mechanic                                               */
-/* ======================================================================== */
 
 /* meleer digs when no LOS for 38+ ticks, 10% per tick, forced at 50 */
 static void inf_meleer_dig_check(InfernoState* s, int idx) {
@@ -1748,9 +1703,6 @@ static int inf_player_weapon_is(const InfernoState* s, uint8_t item) {
     return s->player.equipped[GEAR_SLOT_WEAPON] == item;
 }
 
-/* ======================================================================== */
-/* NPC AI: attacks                                                           */
-/* ======================================================================== */
 
 static void inf_npc_attack(InfernoState* s, int idx) {
     InfNPC* npc = &s->npcs[idx];
@@ -2154,9 +2106,6 @@ static void inf_npc_attack(InfernoState* s, int idx) {
     }
 }
 
-/* ======================================================================== */
-/* NPC AI: mager resurrection                                                */
-/* ======================================================================== */
 
 static int inf_find_mager_respawn_tile(
     InfernoState* s, int size, int* out_x, int* out_y
@@ -2217,9 +2166,6 @@ static int inf_mager_resurrect(InfernoState* s, int idx) {
     return 1;
 }
 
-/* ======================================================================== */
-/* NPC AI: jad healer spawning                                               */
-/* ======================================================================== */
 
 #define INF_JAD_HEALER_MAX_SPAWN_CANDIDATES 165
 
@@ -2291,9 +2237,6 @@ static void inf_jad_check_healers(InfernoState* s, int idx) {
     }
 }
 
-/* ======================================================================== */
-/* NPC AI: zuk phases                                                        */
-/* ======================================================================== */
 
 static void inf_zuk_tick(InfernoState* s) {
     if (!inf_is_final_wave(s)) return;
@@ -2469,9 +2412,6 @@ static void inf_resolve_pending_sparks(InfernoState* s) {
     }
 }
 
-/* ======================================================================== */
-/* NPC AI: tick all NPCs                                                     */
-/* ======================================================================== */
 
 static void inf_tick_npcs(InfernoState* s) {
     /* NPC per-tick flags are cleared in inf_step BEFORE inf_tick_player,
@@ -2516,9 +2456,6 @@ static void inf_tick_npcs(InfernoState* s) {
     }
 }
 
-/* ======================================================================== */
-/* player actions                                                            */
-/* ======================================================================== */
 
 #define INF_HEAD_MOVE      0   /* 25: idle + 8 walk + 16 run */
 #define INF_HEAD_PRAYER    1   /* 4: no_change, toggle_melee, toggle_ranged, toggle_magic (ENCOUNTER_OVERHEAD_DIM_PVE) */
@@ -2779,7 +2716,7 @@ static void inf_tick_player(InfernoState* s, const int* actions) {
     if (target > 0 && target <= INF_OBS_NPCS) {
         int obs_idx = target - 1;
         int npc_idx = s->current_obs_slots[obs_idx];
-        if (npc_idx >= 0 && npc_idx < INF_MAX_NPCS && 
+        if (npc_idx >= 0 && npc_idx < INF_MAX_NPCS &&
             s->npcs[npc_idx].active && s->npcs[npc_idx].death_ticks == 0 &&
             s->npcs[npc_idx].type != INF_NPC_ZUK_SHIELD) {
             osrs_interaction_set(&s->interaction, npc_idx);
@@ -3146,9 +3083,6 @@ static void inf_resolve_jad_prayer_checks_after_player(InfernoState* s) {
     }
 }
 
-/* ======================================================================== */
-/* reward                                                                    */
-/* ======================================================================== */
 
 static int inf_healer_is_actively_healing(const InfernoState* s, const InfNPC* npc) {
     if (!npc->active || npc->death_ticks > 0) return 0;
@@ -3194,9 +3128,6 @@ static float inf_compute_reward(InfernoState* s) {
     return reward;
 }
 
-/* ======================================================================== */
-/* step                                                                      */
-/* ======================================================================== */
 
 static void inf_step(EncounterState* state, const int* actions) {
     InfernoState* s = (InfernoState*)state;
@@ -3244,11 +3175,8 @@ static void inf_step(EncounterState* state, const int* actions) {
             spawn_wave_now = 1;
     }
     int in_wave_gap = (s->wave_spawn_delay > 0 || spawn_wave_now);
-
-    /* ------------------------------------------------------------------ */
     /* OSRS-style tick order: NPCs move/attack first, then projectile landings,
        then the player's movement/attack phase. */
-    /* ------------------------------------------------------------------ */
     if (!in_wave_gap) {
         inf_rebuild_player_collision_flags(s);
         inf_invalidate_los_cache(s);
@@ -3432,9 +3360,6 @@ static void inf_step(EncounterState* state, const int* actions) {
     }
 }
 
-/* ======================================================================== */
-/* observations                                                              */
-/* ======================================================================== */
 
 /* obs layout: 49 player + 12 pillar + 33*32 NPC + 5*8 pending hits = 1157 */
 #define INF_PLAYER_OBS_SIZE 52   /* +3 for offensive prayer one-hot (piety/rigour/augury) */
@@ -3485,10 +3410,7 @@ static void inf_write_obs(EncounterState* state, float* obs) {
     obs[i++] = (float)s->player.restore_doses / (float)full_supplies.restore_doses;
     obs[i++] = (float)s->player.current_prayer / 99.0f;
     obs[i++] = (float)s->wave / (float)INF_NUM_WAVES;
-    /* tick normalization: Zuk-only (~300 ticks) vs full runs (~18000 ticks) */
     obs[i++] = 0.0f;
-    //    (s->start_wave >= 68) ? (float)s->tick / 500.0f
-    //                                 : (float)s->tick / (float)INF_MAX_TICKS;
     obs[i++] = (s->weapon_set == INF_GEAR_MAGE) ? 1.0f : 0.0f;
     obs[i++] = (s->weapon_set == INF_GEAR_TBOW) ? 1.0f : 0.0f;
     obs[i++] = (s->weapon_set == INF_GEAR_BP) ? 1.0f : 0.0f;
@@ -3518,7 +3440,7 @@ static void inf_write_obs(EncounterState* state, float* obs) {
         int min_timer = 999;
         int min_style = 0;
         int has_melee_2 = 0, has_ranged_2 = 0, has_magic_2 = 0;
-        
+
         /* 1. Pending hits (handles Jad, which checks prayer on impact) */
         for (int h = 0; h < s->player_pending_hit_count; h++) {
             EncounterPendingHit* ph = &s->player_pending_hits[h];
@@ -3533,8 +3455,6 @@ static void inf_write_obs(EncounterState* state, float* obs) {
                     if (ph->attack_style == ATTACK_STYLE_RANGED) has_ranged_2 = 1;
                     if (ph->attack_style == ATTACK_STYLE_MAGIC) has_magic_2 = 1;
                 }
-                if (t == 1) {
-                                    }
             }
         }
 
@@ -3544,19 +3464,14 @@ static void inf_write_obs(EncounterState* state, float* obs) {
             InfNPC* npc = &s->npcs[n];
             if (!npc->active || npc->death_ticks > 0) continue;
             if (npc->type == INF_NPC_ZUK ||
-                npc->type == INF_NPC_ZUK_SHIELD || npc->type == INF_NPC_NIBBLER || 
+                npc->type == INF_NPC_ZUK_SHIELD || npc->type == INF_NPC_NIBBLER ||
                 npc->type == INF_NPC_HEALER_ZUK) continue;
-                
+
             const InfNPCStats* st = &INF_NPC_STATS[npc->type];
             if (npc->frozen_ticks > 0 || npc->stun_timer > 0) continue;
-            
-            /* Relaxed check: if they can reach us or shoot us soon, track them. */
+
             int dist = encounter_dist_to_npc(s->player.x, s->player.y, npc->x, npc->y, npc->size);
-            if (dist == 0) continue; /* Under us, usually can't attack or moves out */
-            
-            /* If they are completely out of range (more than 1 tile away from being able to attack), 
-               we might ignore them, but to be safe we'll just track all aggroed NPCs that are off cooldown. 
-               We'll just leave dist and LOS out of the strict filter. */
+            if (dist == 0) continue;
 
             int style = npc->attack_style;
             if (npc->type == INF_NPC_BLOB && npc->blob_scanned_prayer >= 0) {
@@ -3572,7 +3487,7 @@ static void inf_write_obs(EncounterState* state, float* obs) {
             int preview_style = inf_attack_style_obs_preview(style_mask);
 
             int t = npc->attack_timer;
-            if (t == 0) t = 1; /* Safety fallback if timer hit 0 */
+            if (t == 0) t = 1;
 
             if (t < min_timer) {
                 min_timer = t;
@@ -3583,7 +3498,7 @@ static void inf_write_obs(EncounterState* state, float* obs) {
                 if (style_mask & INF_STYLE_MASK_RANGED) has_ranged_2 = 1;
                 if (style_mask & INF_STYLE_MASK_MAGIC) has_magic_2 = 1;
             }
-                    }
+        }
 
         int conflict_count = has_melee_2 + has_ranged_2 + has_magic_2;
         obs[i++] = (min_timer < 999) ? (float)min_timer / 10.0f : 1.0f;
@@ -3647,11 +3562,11 @@ static void inf_write_obs(EncounterState* state, float* obs) {
 
     int obs_slots[INF_OBS_NPCS];
     for (int j = 0; j < INF_OBS_NPCS; j++) obs_slots[j] = -1;
-    
+
     int slot_counts[INF_NUM_NPC_TYPES] = {0};
     int slot_offsets[INF_NUM_NPC_TYPES];
     int slot_max[INF_NUM_NPC_TYPES];
-    
+
     slot_offsets[INF_NPC_MAGER] = 0; slot_max[INF_NPC_MAGER] = 2;
     slot_offsets[INF_NPC_RANGER] = 2; slot_max[INF_NPC_RANGER] = 2;
     slot_offsets[INF_NPC_MELEER] = 4; slot_max[INF_NPC_MELEER] = 2;
@@ -3702,14 +3617,14 @@ static void inf_write_obs(EncounterState* state, float* obs) {
     for (int k = 0; k < INF_OBS_NPCS; k++) {
         int n = obs_slots[k];
         int type = slot_types[k];
-        
+
         int has_style = (type == INF_NPC_BLOB || type == INF_NPC_JAD);
         int has_scan = (type == INF_NPC_BLOB);
         int has_los = (type != INF_NPC_NIBBLER && type != INF_NPC_MELEER && type != INF_NPC_HEALER_JAD && type != INF_NPC_ZUK_SHIELD);
         int has_aggro = (type != INF_NPC_NIBBLER && type != INF_NPC_ZUK_SHIELD);
         int has_timer = (type != INF_NPC_NIBBLER && type != INF_NPC_HEALER_JAD && type != INF_NPC_ZUK_SHIELD);
         int has_targeted = 1;
-        
+
         int num_features = 4; // HP, RelX, RelY, AoE
         if (has_timer) num_features += 1;
         if (has_style) num_features += 3;
@@ -3724,16 +3639,16 @@ static void inf_write_obs(EncounterState* state, float* obs) {
             obs[i++] = (float)(npc->x - px) / (float)INF_ARENA_WIDTH;
             obs[i++] = (float)(npc->y - py) / (float)INF_ARENA_HEIGHT;
             if (has_timer) obs[i++] = (float)npc->attack_timer / 10.0f;
-            
+
             if (has_style) {
                 int style = (npc->type == INF_NPC_JAD) ? npc->jad_attack_style : npc->attack_style;
                 obs[i++] = (style == ATTACK_STYLE_MELEE) ? 1.0f : 0.0f;
                 obs[i++] = (style == ATTACK_STYLE_RANGED) ? 1.0f : 0.0f;
                 obs[i++] = (style == ATTACK_STYLE_MAGIC) ? 1.0f : 0.0f;
             }
-            
+
             if (has_los) obs[i++] = inf_npc_has_los(s, n) ? 1.0f : 0.0f;
-            
+
             if (has_scan) {
                 if (npc->blob_scanned_prayer >= 0) {
                     OverheadPrayer scanned = (OverheadPrayer)npc->blob_scanned_prayer;
@@ -3744,7 +3659,7 @@ static void inf_write_obs(EncounterState* state, float* obs) {
                     obs[i++] = 0.0f; obs[i++] = 0.0f; obs[i++] = 0.0f;
                 }
             }
-            
+
             /* barrage AoE count: unique blocking NPCs in the 3x3 area */
             {
                 int aoe_count = 0;
@@ -3761,7 +3676,7 @@ static void inf_write_obs(EncounterState* state, float* obs) {
                 }
                 obs[i++] = (float)aoe_count / 8.0f;
             }
-            
+
             if (has_aggro) obs[i++] = (npc->aggro_target < 0) ? 1.0f : 0.0f;
             if (has_targeted) obs[i++] = (osrs_interaction_active(&s->interaction) && s->interaction.target_slot == n) ? 1.0f : 0.0f;
         } else {
@@ -3918,9 +3833,6 @@ static void inf_write_mask(EncounterState* state, float* mask) {
     mask[offset++] = (s->player.current_prayer > 0 || s->player.offensive_prayer == OFFENSIVE_PRAYER_AUGURY) ? 1.0f : 0.0f;
 }
 
-/* ======================================================================== */
-/* query functions                                                           */
-/* ======================================================================== */
 
 static float inf_get_reward(EncounterState* state) {
     return ((InfernoState*)state)->reward;
@@ -4113,9 +4025,6 @@ static void* inf_get_log(EncounterState* state) {
     return &s->log;
 }
 
-/* ======================================================================== */
-/* render post-tick: populate overlay projectiles for renderer               */
-/* ======================================================================== */
 
 
 static void inf_render_post_tick(EncounterState* state, EncounterOverlay* ov) {
@@ -4212,9 +4121,8 @@ static void inf_render_post_tick(EncounterState* state, EncounterOverlay* ov) {
                 /* InfernoTrainer JalXil RangedWeapon: reduceDelay=-2 (hit
                    delay +2 ticks), visualDelayTicks=3. visible duration =
                    (hit_delay + 2) - 3 = hit_delay - 1 ticks. start_delay=3
-                   ticks is set after the emit below. NOTE: sim-side hit delay
-                   is currently NOT adjusted by +2 — damage lands 2 ticks
-                   earlier than reference. */
+                   ticks is set after the emit below. the sim keeps the existing
+                   JalXil damage timing here. */
                 duration = (hit_delay - 1) * 30;
                 if (duration < 30) duration = 30;
                 break;
@@ -4356,9 +4264,6 @@ static void inf_render_post_tick(EncounterState* state, EncounterOverlay* ov) {
     }
 }
 
-/* ======================================================================== */
-/* human input translator                                                    */
-/* ======================================================================== */
 
 static void* inf_get_player_for_input(void* state, int idx) {
     InfernoState* s = (InfernoState*)state;
@@ -4474,9 +4379,6 @@ static void inf_step_human_commands(EncounterState* state, HumanInput* hi) {
     human_input_clear_pending(hi);
 }
 
-/* ======================================================================== */
-/* encounter definition                                                      */
-/* ======================================================================== */
 
 static const EncounterDef ENCOUNTER_INFERNO = {
     .name = "inferno",

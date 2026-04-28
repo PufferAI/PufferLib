@@ -30,9 +30,6 @@
 #include "osrs_combat.h"
 #include "osrs_items.h"
 
-/* ======================================================================== */
-/* damage pipeline result                                                    */
-/* ======================================================================== */
 
 typedef struct {
     int final_damage;       /* damage after prayer reduction */
@@ -106,9 +103,6 @@ static inline DamageResult osrs_apply_damage_pipeline(
     );
 }
 
-/* ======================================================================== */
-/* helpers                                                                   */
-/* ======================================================================== */
 
 /* check if player has a recoil-capable ring equipped.
    ring of recoil (finite charges) or ring of suffering (i) (infinite).

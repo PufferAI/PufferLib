@@ -50,9 +50,6 @@ typedef struct {
     int count;
 } ModelCache;
 
-/* ======================================================================== */
-/* loading                                                                    */
-/* ======================================================================== */
 
 static ModelCache* model_cache_load(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -139,9 +136,6 @@ static ModelCache* model_cache_load(const char* path) {
     return cache;
 }
 
-/* ======================================================================== */
-/* lookup                                                                     */
-/* ======================================================================== */
 
 static OsrsModel* model_cache_get(ModelCache* cache, uint32_t model_id) {
     if (!cache) return NULL;
@@ -192,9 +186,6 @@ static int item_has_sleeves(uint16_t item_id) {
     return 0;
 }
 
-/* ======================================================================== */
-/* cleanup                                                                    */
-/* ======================================================================== */
 
 static void model_cache_free(ModelCache* cache) {
     if (!cache) return;

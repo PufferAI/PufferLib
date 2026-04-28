@@ -30,9 +30,6 @@
 #define ANIM_MAX_LABELS 256
 #define ANIM_SINE_COUNT 2048
 
-/* ======================================================================== */
-/* sine/cosine table (matches OSRS Rasterizer3D, fixed-point scale 65536)     */
-/* ======================================================================== */
 
 static int anim_sine[ANIM_SINE_COUNT];
 static int anim_cosine[ANIM_SINE_COUNT];
@@ -48,9 +45,6 @@ static void anim_init_trig(void) {
     anim_trig_initialized = 1;
 }
 
-/* ======================================================================== */
-/* data structures                                                            */
-/* ======================================================================== */
 
 typedef struct {
     uint16_t base_id;
@@ -105,9 +99,6 @@ typedef struct {
     int*     group_counts;      /* [ANIM_MAX_LABELS] count per group */
 } AnimModelState;
 
-/* ======================================================================== */
-/* loading                                                                    */
-/* ======================================================================== */
 
 static uint8_t anim_read_u8(const uint8_t** p) {
     uint8_t v = **p; (*p)++;
@@ -235,9 +226,6 @@ static AnimCache* anim_cache_load(const char* path) {
     return cache;
 }
 
-/* ======================================================================== */
-/* lookup                                                                     */
-/* ======================================================================== */
 
 static AnimSequence* anim_get_sequence(AnimCache* cache, uint16_t seq_id) {
     if (!cache) return NULL;
@@ -259,9 +247,6 @@ static AnimFrameBase* anim_get_framebase(AnimCache* cache, uint16_t base_id) {
     return NULL;
 }
 
-/* ======================================================================== */
-/* per-model animation state                                                  */
-/* ======================================================================== */
 
 static AnimModelState* anim_model_state_create(
     const uint8_t* vertex_skins,
@@ -310,9 +295,6 @@ static void anim_model_state_free(AnimModelState* state) {
     free(state);
 }
 
-/* ======================================================================== */
-/* transform application (mirrors OSRS Model.transform)                       */
-/* ======================================================================== */
 
 static void anim_apply_frame(
     AnimModelState* state,
@@ -440,9 +422,6 @@ static void anim_apply_frame(
     }
 }
 
-/* ======================================================================== */
-/* two-track interleaved animation (matches OSRS Model.applyAnimationFrames)  */
-/* ======================================================================== */
 
 /**
  * Apply a single transform slot to the vertex state (extracted from anim_apply_frame
@@ -607,9 +586,6 @@ static void anim_apply_frame_interleaved(
     }
 }
 
-/* ======================================================================== */
-/* mesh re-expansion (apply animated base verts → expanded rendering verts)   */
-/* ======================================================================== */
 
 /**
  * Re-expand animated base vertices into the raylib mesh's expanded vertex buffer.
@@ -648,9 +624,6 @@ static void anim_update_mesh(
     }
 }
 
-/* ======================================================================== */
-/* cleanup                                                                    */
-/* ======================================================================== */
 
 static void anim_cache_free(AnimCache* cache) {
     if (!cache) return;

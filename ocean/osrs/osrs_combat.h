@@ -89,9 +89,6 @@ static inline float osrs_tbow_dmg_mult(int target_magic) {
     return mult;
 }
 
-/* ======================================================================== */
-/* shared encounter RNG (xorshift32)                                         */
-/* ======================================================================== */
 
 /* all encounters should use these instead of reimplementing.
    state must be non-zero. */
@@ -111,9 +108,6 @@ static inline float encounter_rand_float(uint32_t* rng_state) {
     return (float)(encounter_xorshift(rng_state) & 0xFFFF) / 65536.0f;
 }
 
-/* ======================================================================== */
-/* barrage AoE (3x3)                                                         */
-/* ======================================================================== */
 
 #define BARRAGE_MAX_HITS 9
 #define BARRAGE_FREEZE_TICKS 32
@@ -205,9 +199,6 @@ static inline BarrageResult osrs_barrage_resolve(
     return result;
 }
 
-/* ======================================================================== */
-/* NPC combat formulas (from InfernoTrainer/osrs-sdk)                        */
-/* ======================================================================== */
 
 /* NPC melee max hit: floor((str + 8) * (melee_str_bonus + 64) + 320) / 640) */
 static inline int osrs_npc_melee_max_hit(int str_level, int melee_str_bonus) {
@@ -304,9 +295,6 @@ static inline int encounter_prayer_correct_for_style(int prayer, int attack_styl
            (attack_style == 3 /* ATTACK_STYLE_MAGIC */  && prayer == 1 /* PRAYER_PROTECT_MAGIC */);
 }
 
-/* ======================================================================== */
-/* hit delay formulas (matching PvP + InfernoTrainer SDK)                    */
-/* ======================================================================== */
 
 /* magic hit delay: floor((1 + distance) / 3) + 1, +1 if attacker is player */
 static inline int encounter_magic_hit_delay(int distance, int is_player) {

@@ -30,9 +30,6 @@
 #include "osrs_items.h"
 #include "osrs_pvp_gear.h"
 
-/* ======================================================================== */
-/* OSRS color palette (from client widget rendering)                         */
-/* ======================================================================== */
 
 #define GUI_BG_DARK     CLITERAL(Color){ 62, 53, 41, 255 }
 #define GUI_BG_MEDIUM   CLITERAL(Color){ 75, 67, 54, 255 }
@@ -57,9 +54,6 @@
 /* OSRS text shadow: draw black at (+1,+1) then color on top */
 #define GUI_TEXT_SHADOW CLITERAL(Color){ 0, 0, 0, 255 }
 
-/* ======================================================================== */
-/* tab system — 7 tabs matching OSRS fixed-mode, drawn at TOP of panel       */
-/* ======================================================================== */
 
 typedef enum {
     GUI_TAB_COMBAT = 0,
@@ -72,18 +66,12 @@ typedef enum {
     GUI_TAB_COUNT = 7
 } GuiTab;
 
-/* ======================================================================== */
-/* equipment slot sprite indices (maps GEAR_SLOT_* to sprite array index)    */
-/* ======================================================================== */
 
 /* slot background sprite IDs from cache index 8:
    head=156, cape=157, neck=158, weapon=159, ring=160,
    body=161, shield=162, legs=163, hands=164, feet=165, tile=170 */
 #define GUI_NUM_SLOT_SPRITES 12  /* 11 slots + tile background */
 
-/* ======================================================================== */
-/* prayer icon indices                                                       */
-/* ======================================================================== */
 
 /* prayer icons — authoritative 29-entry standard book.
    enum order IS display order (left→right, top→bottom) in the 5×6 grid.
@@ -121,9 +109,6 @@ typedef enum {
     GUI_NUM_PRAYERS               /* = 29 */
 } GuiPrayerIdx;
 
-/* ======================================================================== */
-/* spell icon indices                                                        */
-/* ======================================================================== */
 
 /* Ancient spellbook sorted by level (Smoke→Shadow→Blood→Ice per row,
    Rush→Burst→Blitz→Barrage per family). Only Ice/Blood/Vengeance are
@@ -154,9 +139,6 @@ typedef enum {
     GUI_NUM_SPELLS
 } GuiSpellIdx;
 
-/* ======================================================================== */
-/* inventory slot system — unified grid for equipment + consumables           */
-/* ======================================================================== */
 
 /* inventory slot types: either an equipment item (ITEM_DATABASE index) or a consumable.
    consumables are tracked as counts in Player, not as individual ITEM_DATABASE entries,
@@ -231,9 +213,6 @@ typedef enum {
     INV_ACTION_DRINK,
 } InvAction;
 
-/* ======================================================================== */
-/* gui state: textures + layout                                              */
-/* ======================================================================== */
 
 typedef struct {
     GuiTab active_tab;
@@ -337,9 +316,6 @@ typedef struct {
     int pending_spell_highlight;
 } GuiState;
 
-/* ======================================================================== */
-/* sprite loading (called after InitWindow in render_make_client)            */
-/* ======================================================================== */
 
 /** Try loading a texture, returns 1 on success. */
 static int gui_try_load(Texture2D* tex, const char* path) {
@@ -571,9 +547,6 @@ static void gui_unload_sprites(GuiState* gs) {
     gs->sprites_loaded = 0;
 }
 
-/* ======================================================================== */
-/* short item names for slot display                                         */
-/* ======================================================================== */
 
 static const char* gui_item_short_name(uint8_t item_idx) {
     if (item_idx == ITEM_NONE || item_idx >= NUM_ITEMS) return "";
@@ -683,9 +656,6 @@ static const char* gui_item_short_name(uint8_t item_idx) {
     }
 }
 
-/* ======================================================================== */
-/* drawing helpers                                                           */
-/* ======================================================================== */
 
 /** Draw text with OSRS-style shadow (black at +1,+1, then color). */
 static void gui_text_shadow(const char* text, int x, int y, int size, Color color) {
@@ -744,9 +714,6 @@ static void gui_draw_equip_slot(GuiState* gs, int x, int y, int w, int h,
     }
 }
 
-/* ======================================================================== */
-/* status bar — compact HP/prayer/spec display above tab row                 */
-/* ======================================================================== */
 
 static void gui_draw_status_bar(GuiState* gs, Player* p) {
     int sx = gs->panel_x + 6;
@@ -784,9 +751,6 @@ static void gui_draw_status_bar(GuiState* gs, Player* p) {
                     sx + 4, sy + 1, 8, GUI_TEXT_WHITE);
 }
 
-/* ======================================================================== */
-/* tab bar — 7 tabs at TOP of panel (real OSRS fixed-mode layout)            */
-/* ======================================================================== */
 
 static void gui_draw_tab_bar(GuiState* gs) {
     /* tabs drawn at top: right after the status bar */
@@ -846,17 +810,11 @@ static int gui_handle_tab_click(GuiState* gs, int mouse_x, int mouse_y) {
     return 0;
 }
 
-/* ======================================================================== */
-/* content area Y: below status bar + tab row                                */
-/* ======================================================================== */
 
 static int gui_content_y(GuiState* gs) {
     return gs->panel_y + gs->status_bar_h + gs->tab_h;
 }
 
-/* ======================================================================== */
-/* inventory panel (interface 149) — 4x7 grid with equipment + consumables   */
-/* ======================================================================== */
 
 /* inventory grid dimensions — scaled to fill the 320px panel width.
    OSRS native: 42x36 cell pitch, 36x32 sprites. we scale ~1.81x so
@@ -1594,9 +1552,6 @@ static void gui_draw_inventory(GuiState* gs, Player* p) {
     }
 }
 
-/* ======================================================================== */
-/* equipment panel (interface 387: paperdoll layout only)                     */
-/* ======================================================================== */
 
 static void gui_draw_equipment(GuiState* gs, Player* p) {
     int oy = gui_content_y(gs) + 8;
@@ -1639,9 +1594,6 @@ static void gui_draw_equipment(GuiState* gs, Player* p) {
     gui_draw_equip_slot(gs, r3_x + 2 * (sw + gap), oy, sw, sh, GEAR_SLOT_RING, p->equipped[GEAR_SLOT_RING]);
 }
 
-/* ======================================================================== */
-/* prayer panel (interface 541) — single 5-column grid, all 25 prayers       */
-/* ======================================================================== */
 
 /* enum order is already display order — 5 cols × 6 rows, 29 prayers + 1 empty.
    grid is just the identity: position i maps to enum value i. */
@@ -1719,9 +1671,6 @@ static void gui_draw_prayer(GuiState* gs, Player* p) {
     }
 }
 
-/* ======================================================================== */
-/* combat panel (interface 593) — weapon + 4 style buttons + spec bar        */
-/* ======================================================================== */
 
 static void gui_draw_combat(GuiState* gs, Player* p) {
     int ox = gs->panel_x + 8;
@@ -1832,9 +1781,6 @@ static void gui_draw_combat(GuiState* gs, Player* p) {
                     ox + spec_w / 2 - 10, oy + 4, 10, GUI_TEXT_WHITE);
 }
 
-/* ======================================================================== */
-/* spellbook panel (interface 218: ancient magicks + vengeance)               */
-/* ======================================================================== */
 
 typedef struct {
     const char* name;
@@ -2114,9 +2060,6 @@ static void gui_draw_stats(GuiState* gs, Player* p) {
                     ox + 4, oy + 1, 10, GUI_TEXT_WHITE);
 }
 
-/* ======================================================================== */
-/* main GUI draw (dispatches to active tab)                                  */
-/* ======================================================================== */
 
 static void gui_cycle_entity(GuiState* gs) {
     if (gs->gui_entity_count <= 0) return;

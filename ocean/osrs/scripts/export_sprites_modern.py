@@ -335,7 +335,7 @@ def main() -> None:
 
         try:
             frames = decode_sprites(sprite_id, data)
-        except Exception as e:
+        except (IndexError, struct.error, ValueError) as e:
             print(f"  sprite {sprite_id}: decode error: {e}", file=sys.stderr)
             failed += 1
             continue

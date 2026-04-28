@@ -97,7 +97,7 @@ def decode_identity_kits_modern(reader: ModernCacheReader) -> dict[int, Identity
     for kit_id in sorted(file_ids):
         try:
             data = reader.read_config_entry(MODERN_CONFIG_IDK_GROUP, kit_id)
-        except Exception:
+        except (KeyError, FileNotFoundError):
             continue
 
         kit = IdentityKitDef(kit_id=kit_id)

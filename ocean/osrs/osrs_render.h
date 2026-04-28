@@ -29,9 +29,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* ======================================================================== */
-/* constants                                                                 */
-/* ======================================================================== */
 
 #define RENDER_TILE_SIZE       20
 /* window sized at 1.5x the OSRS fixed-client layout (765x503 → 1148x755)
@@ -71,9 +68,6 @@
 #define COLOR_TEXT_DIM     CLITERAL(Color){ 130, 130, 140, 255 }
 #define COLOR_LABEL        CLITERAL(Color){ 170, 170, 180, 255 }
 
-/* ======================================================================== */
-/* active projectile flights (sub-tick interpolation at 50 Hz)               */
-/* ======================================================================== */
 
 /* OSRS projectile flight parameters (from deob client Projectile.java):
  *   x/y: linear interpolation from source to target
@@ -122,9 +116,6 @@ typedef struct {
     int impact_gfx_id;          /* landing spotanim to spawn on arrival */
 } FlightProjectile;
 
-/* ======================================================================== */
-/* per-player composite model                                                */
-/* ======================================================================== */
 
 /* OSRS composites all body parts + equipment into a single merged model
  * before animating. this ensures vertex skin label groups span the full
@@ -158,9 +149,6 @@ typedef struct {
     int     needs_rebuild;
 } PlayerComposite;
 
-/* ======================================================================== */
-/* convex hull click detection (ported from RuneLite Jarvis.java)            */
-/* ======================================================================== */
 
 #define HULL_MAX_POINTS 256  /* max hull vertices (models rarely exceed 100) */
 
@@ -231,9 +219,6 @@ static int hull_contains(const ConvexHull2D* hull, int px, int py) {
     return inside;
 }
 
-/* ======================================================================== */
-/* render client                                                             */
-/* ======================================================================== */
 
 /* per-entity hitsplat slot matching OSRS Entity.java exactly:
    - hitmarkMove starts at +5.0, decreases by 0.25/client-tick, clamps at -5.0
@@ -248,9 +233,6 @@ typedef struct {
     int ticks_remaining;   /* counts down from 70 client ticks */
 } HitSplat;
 
-/* ======================================================================== */
-/* right-click context menu (OSRS-style)                                    */
-/* ======================================================================== */
 
 #define CONTEXT_MENU_MAX_ITEMS 8
 #define CONTEXT_MENU_ROW_H     15
@@ -489,9 +471,6 @@ static AnimFrameBase* render_get_framebase(RenderClient* rc, uint16_t base_id) {
     return fb;
 }
 
-/* ======================================================================== */
-/* coordinate helpers                                                        */
-/* ======================================================================== */
 
 static inline int render_world_to_screen_x_rc(RenderClient* rc, int world_x) {
     return (world_x - rc->arena_base_x) * RENDER_TILE_SIZE;
@@ -504,7 +483,6 @@ static inline int render_world_to_screen_y_rc(RenderClient* rc, int world_y) {
     return RENDER_HEADER_HEIGHT + flipped * RENDER_TILE_SIZE;
 }
 
-/* legacy wrappers using default FIGHT_AREA bounds */
 static inline int render_world_to_screen_x(int world_x) {
     return (world_x - FIGHT_AREA_BASE_X) * RENDER_TILE_SIZE;
 }
@@ -522,9 +500,6 @@ static int render_select_secondary(RenderClient* rc, int player_idx);
 /* forward declaration: inferno_npc_name is defined later in drawing section */
 static const char* inferno_npc_name(int npc_def_id);
 
-/* ======================================================================== */
-/* right-click context menu helpers                                          */
-/* ======================================================================== */
 
 /** Resolve display name for a render entity (NPC or player).
     Uses the same lookup chain as render_draw_panel_npc: zulrah forms,
@@ -800,9 +775,6 @@ static void context_menu_draw(RenderClient* rc) {
     }
 }
 
-/* ======================================================================== */
-/* lifecycle                                                                 */
-/* ======================================================================== */
 
 static RenderClient* render_make_client(void) {
     RenderClient* rc = (RenderClient*)calloc(1, sizeof(RenderClient));
@@ -1034,9 +1006,6 @@ static void render_init_overlay_models(RenderClient* rc) {
     if (rc->cloud_proj_model_ready) printf("overlay: cloud projectile model loaded\n");
 }
 
-/* ======================================================================== */
-/* projectile flight system                                                   */
-/* ======================================================================== */
 
 /**
  * Spawn a flight projectile with OSRS-accurate parabolic arc and target tracking.
@@ -1353,9 +1322,6 @@ static void render_destroy_client(RenderClient* rc) {
     free(rc);
 }
 
-/* ======================================================================== */
-/* input                                                                     */
-/* ======================================================================== */
 
 static void render_handle_input(RenderClient* rc, OsrsEnv* env) {
     RenderHumanAttackCtx attack_ctx = { .rc = rc, .env = env };
@@ -1715,9 +1681,6 @@ static void render_handle_input(RenderClient* rc, OsrsEnv* env) {
     }
 }
 
-/* ======================================================================== */
-/* rewind history                                                            */
-/* ======================================================================== */
 
 /* save current env state to history ring buffer (call after each pvp_step) */
 static void render_save_snapshot(RenderClient* rc, OsrsEnv* env) {
@@ -1758,11 +1721,8 @@ static void render_clear_history(RenderClient* rc) {
 /* forward declaration: render_push_splat used by render_post_tick, defined later */
 static void render_push_splat(RenderClient* rc, int damage, int pidx);
 
-/* ======================================================================== */
-/* entity population                                                         */
-/* ======================================================================== */
 
-/* populate rc->entities from env->players (legacy) or encounter vtable.
+/* populate rc->entities from env->players or encounter vtable.
    call before render_post_tick and pvp_render so all draw code uses rc->entities.
    uses fill_render_entities when available, falls back to get_entity + cast. */
 static void render_populate_entities(RenderClient* rc, OsrsEnv* env) {
@@ -1777,21 +1737,7 @@ static void render_populate_entities(RenderClient* rc, OsrsEnv* env) {
             for (int zi = 0; zi < count; zi++) {
                 if (rc->entities[zi].npc_def_id == 7706) { rc->zuk_active = 1; break; }
             }
-            /* debug: print entity info on first populate */
-            static int debug_once = 1;
-            if (debug_once && count > 0) {
-                debug_once = 0;
-                fprintf(stderr, "render_populate: %d entities\n", count);
-                for (int di = 0; di < count && di < 5; di++) {
-                    fprintf(stderr, "  [%d] type=%d npc_id=%d visible=%d size=%d pos=(%d,%d) hp=%d/%d\n",
-                            di, rc->entities[di].entity_type, rc->entities[di].npc_def_id,
-                            rc->entities[di].npc_visible, rc->entities[di].npc_size,
-                            rc->entities[di].x, rc->entities[di].y,
-                            rc->entities[di].current_hitpoints, rc->entities[di].base_hitpoints);
-                }
-            }
         } else {
-            /* legacy fallback: cast get_entity to Player* */
             int count = def->get_entity_count(env->encounter_state);
             if (count > MAX_RENDER_ENTITIES) count = MAX_RENDER_ENTITIES;
             rc->entity_count = count;
@@ -1815,9 +1761,6 @@ static void render_populate_entities(RenderClient* rc, OsrsEnv* env) {
     }
 }
 
-/* ======================================================================== */
-/* tick notification: position tracking, facing, effects                      */
-/* ======================================================================== */
 
 /**
  * Call BEFORE pvp_step to record pre-tick positions for movement direction.
@@ -2377,9 +2320,6 @@ static void render_get_visual_pos(
     }
 }
 
-/* ======================================================================== */
-/* hit splats                                                                */
-/* ======================================================================== */
 
 /* advance splat animation by one client tick (20ms).
    exact OSRS logic from Client.java:6107-6143 (mode 2 animated):
@@ -2430,9 +2370,6 @@ static void render_push_splat(RenderClient* rc, int damage, int pidx) {
 }
 
 
-/* ======================================================================== */
-/* drawing: grid                                                             */
-/* ======================================================================== */
 
 static void render_draw_grid(RenderClient* rc, OsrsEnv* env) {
     const CollisionMap* cmap = rc->collision_map;
@@ -2583,9 +2520,6 @@ static void render_draw_grid(RenderClient* rc, OsrsEnv* env) {
     }
 }
 
-/* ======================================================================== */
-/* drawing: players                                                          */
-/* ======================================================================== */
 
 static const char* render_prayer_label(OverheadPrayer p) {
     switch (p) {
@@ -2721,9 +2655,6 @@ static void render_draw_players(RenderClient* rc) {
     }
 }
 
-/* ======================================================================== */
-/* drawing: destination markers                                              */
-/* ======================================================================== */
 
 static void render_draw_dest_markers(RenderClient* rc) {
     int ts = RENDER_TILE_SIZE;
@@ -2739,9 +2670,6 @@ static void render_draw_dest_markers(RenderClient* rc) {
     }
 }
 
-/* ======================================================================== */
-/* drawing: splats                                                           */
-/* ======================================================================== */
 
 /* draw a hitsplat using the actual cache sprites (317 mode 0).
    Client.java:6052-6073: hitMarks[type].drawSprite(spriteDrawX - 12, spriteDrawY - 12)
@@ -2806,9 +2734,6 @@ static void render_draw_splats_2d(RenderClient* rc) {
     }
 }
 
-/* ======================================================================== */
-/* drawing: header                                                           */
-/* ======================================================================== */
 
 static void render_draw_header(RenderClient* rc, OsrsEnv* env) {
     DrawRectangle(0, 0, RENDER_WINDOW_W, RENDER_HEADER_HEIGHT, COLOR_HEADER_BG);
@@ -2851,9 +2776,6 @@ static void render_draw_header(RenderClient* rc, OsrsEnv* env) {
     }
 }
 
-/* ======================================================================== */
-/* drawing: NPC/boss info panel (below GUI tabs)                             */
-/* ======================================================================== */
 
 /** Look up inferno NPC name from npc_def_id. returns NULL if not an inferno NPC. */
 static const char* inferno_npc_name(int npc_def_id) {
@@ -2962,9 +2884,6 @@ static void render_draw_panel_npc(int x, int y, RenderEntity* p, OsrsEnv* env) {
 
 /* render_draw_panel removed — replaced by gui_draw() in osrs_pvp_gui.h */
 
-/* ======================================================================== */
-/* drawing: 3D world mode                                                    */
-/* ======================================================================== */
 
 static Camera3D render_build_3d_camera(RenderClient* rc) {
     Camera3D cam = { 0 };
@@ -2986,9 +2905,6 @@ static Camera3D render_build_3d_camera(RenderClient* rc) {
     return cam;
 }
 
-/* ======================================================================== */
-/* animation selection                                                        */
-/* ======================================================================== */
 
 /* animation sequence IDs (from OSRS 317 cache via export_animations.py) */
 #define ANIM_SEQ_IDLE           808
@@ -3095,9 +3011,6 @@ static int render_select_secondary(RenderClient* rc, int player_idx) {
     return ANIM_SEQ_WALK;
 }
 
-/* ======================================================================== */
-/* composite model building                                                   */
-/* ======================================================================== */
 
 /**
  * Append a single OsrsModel's geometry into the player composite.
@@ -3410,9 +3323,6 @@ static void composite_free(PlayerComposite* comp) {
     comp->anim_state = NULL;
 }
 
-/* ======================================================================== */
-/* per-player animation + composite orchestration                             */
-/* ======================================================================== */
 
 /**
  * Rebuild composite if equipment changed, run two-track animation, draw.
@@ -4205,9 +4115,6 @@ static void render_draw_3d_world(RenderClient* rc) {
     EndMode3D();
 }
 
-/* ======================================================================== */
-/* drawing: 2D overlay models (for 2D mode)                                  */
-/* ======================================================================== */
 
 static void render_draw_models_2d_overlay(RenderClient* rc) {
     if (!rc->model_cache) return;
@@ -4262,9 +4169,6 @@ static void render_draw_models_2d_overlay(RenderClient* rc) {
     EndMode3D();
 }
 
-/* ======================================================================== */
-/* overhead status: prayer icons + HP bar (2D overlay on 3D scene)            */
-/* ======================================================================== */
 
 /**
  * Draw overhead prayer icons and HP bars above players in 3D mode.
@@ -4438,9 +4342,6 @@ static void render_draw_overhead_status(RenderClient* rc, OsrsEnv* env) {
     }
 }
 
-/* ======================================================================== */
-/* main render entry point                                                   */
-/* ======================================================================== */
 
 void pvp_render(OsrsEnv* env) {
     RenderClient* rc = (RenderClient*)env->client;

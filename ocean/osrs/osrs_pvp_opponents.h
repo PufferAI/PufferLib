@@ -465,12 +465,8 @@ static inline int opp_toggle_for_prayer(OverheadPrayer p) {
     }
 }
 
-/* convert an OverheadAction intent (legacy set-semantic: MAGE/RANGED/MELEE/NONE/etc)
-   into a toggle action given the opponent's current prayer state. if already
-   on target, emits NO_CHANGE (no-op). if target is NONE, emits the toggle
-   matching the currently-active prayer to deactivate it. all opponent-AI
-   prayer emissions go through this so the new ENCOUNTER_OVERHEAD_TOGGLE_*
-   encoding is respected. */
+/* Convert opponent prayer intent into the toggle action required by the
+   encounter overhead encoding. */
 static inline void opp_emit_prayer(int* actions, Player* self, int target_overhead_action) {
     OverheadPrayer target_prayer;
     switch (target_overhead_action) {
@@ -2259,7 +2255,7 @@ static void opp_unpredictable_improved(OsrsEnv* env, OpponentState* opp, int* ac
         int action_delay = opp_sample_delay(env, UNPREDICTABLE_IMP_ACTION_CUM, UNPREDICTABLE_IMP_ACTION_CUM_LEN);
         if (action_delay == 0) {
             if (actual_attack == 3) {
-    
+
                 actions[HEAD_COMBAT] = ATTACK_ATK;
             } else if (actual_attack == 0) {
                 actions[HEAD_COMBAT] = ATTACK_ICE;
@@ -2460,10 +2456,10 @@ static void opp_unpredictable_onetick(OsrsEnv* env, OpponentState* opp, int* act
             } else {
                 opp_apply_gear_switch(actions, actual_style);
             }
-    
+
 
             if (actual_attack == 3) {
-    
+
                 actions[HEAD_COMBAT] = ATTACK_ATK;
             } else if (actual_attack == 0) {
                 actions[HEAD_COMBAT] = ATTACK_ICE;

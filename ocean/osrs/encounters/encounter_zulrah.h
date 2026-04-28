@@ -47,9 +47,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ======================================================================== */
-/* constants                                                                 */
-/* ======================================================================== */
 
 #define ZUL_ARENA_SIZE    28
 #define ZUL_NPC_SIZE      5
@@ -150,9 +147,6 @@ static const int ZUL_POSITIONS[ZUL_NUM_POSITIONS][2] = {
 #define ZUL_PLAYER_RESTORE_DOSES 8   /* prayer potion doses (4 per pot = 2 pots) */
 #define ZUL_MAX_TICKS         600
 
-/* ======================================================================== */
-/* observation and action space                                              */
-/* ======================================================================== */
 
 #define ZUL_NUM_OBS           84  /* +3 for offensive prayer one-hot (piety/rigour/augury) */
 #define ZUL_NUM_ACTION_HEADS  7
@@ -181,9 +175,6 @@ static const int ZUL_POSITIONS[ZUL_NUM_POSITIONS][2] = {
 #define ZUL_ATK_MAGE  1
 #define ZUL_ATK_RANGE 2
 
-/* ======================================================================== */
-/* enums                                                                     */
-/* ======================================================================== */
 
 typedef enum {
     ZUL_FORM_GREEN = 0,  /* 2042: serpentine, ranged */
@@ -203,9 +194,6 @@ typedef enum {
     ZUL_GEAR_RANGE,
 } ZulrahGearStyle;
 
-/* ======================================================================== */
-/* rotation data: action types for phase sequences                           */
-/* ======================================================================== */
 
 typedef enum {
     ZA_END = 0,           /* sentinel — end of action list */
@@ -362,9 +350,6 @@ static const int ZUL_ROT_LENGTHS[ZUL_NUM_ROTATIONS] = { 11, 11, 12, 13 };
 #undef ZA
 #undef ZE
 
-/* ======================================================================== */
-/* static arrays                                                             */
-/* ======================================================================== */
 
 static const int ZUL_ACTION_HEAD_DIMS[ZUL_NUM_ACTION_HEADS] = {
     ZUL_MOVE_DIM, ZUL_ATTACK_DIM, ZUL_PRAYER_DIM,
@@ -442,9 +427,6 @@ static int zul_tile_is_safe(int x, int y, int stand_id, int stall_id) {
     return 0;
 }
 
-/* ======================================================================== */
-/* structs                                                                   */
-/* ======================================================================== */
 
 typedef struct {
     int x, y;
@@ -587,9 +569,6 @@ typedef struct {
 /* RNG: use shared encounter_rand_int(), encounter_rand_float() from osrs_combat.h */
 static const EncounterLoadoutStats* zul_current_loadout_stats(ZulrahState* s, int is_mage);
 
-/* ======================================================================== */
-/* helpers                                                                   */
-/* ======================================================================== */
 
 static inline int zul_on_platform_bounds(int x, int y) {
     return x >= ZUL_PLATFORM_MIN && x <= ZUL_PLATFORM_MAX &&
@@ -633,9 +612,6 @@ static inline int zul_cap_damage(ZulrahState* s, int damage) {
     return damage;
 }
 
-/* ======================================================================== */
-/* damage application                                                        */
-/* ======================================================================== */
 
 /** Apply damage to the player. If attacker is non-NULL and player has a recoil
     ring equipped, reflects floor(damage * 0.1) + 1 back to the attacker.
@@ -682,9 +658,6 @@ static void zul_try_envenom(ZulrahState* s) {
     s->venom_timer = ZUL_VENOM_INTERVAL;
 }
 
-/* ======================================================================== */
-/* NPC accuracy roll                                                         */
-/* ======================================================================== */
 
 /* OSRS accuracy formula: if att > def: 1 - (def+2)/(2*(att+1)), else att/(2*(def+1)) */
 /* hit chance: use shared OSRS accuracy formula from osrs_combat.h */
@@ -703,9 +676,6 @@ static int zul_player_def_roll(ZulrahState* s, int attack_style) {
     return roll > 0 ? roll : 0;
 }
 
-/* ======================================================================== */
-/* zulrah attack dispatch                                                    */
-/* ======================================================================== */
 
 /* record a visual attack event for projectile rendering */
 static void zul_record_attack(ZulrahState* s, int src_x, int src_y,
@@ -834,9 +804,6 @@ static void zul_attack_jad(ZulrahState* s) {
     s->jad_is_magic_next = !s->jad_is_magic_next;
 }
 
-/* ======================================================================== */
-/* player attacks zulrah                                                     */
-/* ======================================================================== */
 
 /* per-form defence bonuses from MONSTER_DATABASE */
 static inline void zul_form_def_bonuses(ZulrahForm form, int* def_magic, int* def_ranged) {
@@ -1031,9 +998,6 @@ static void zul_player_spec(ZulrahState* s) {
     s->zulrah.hit_was_successful = (total_dmg > 0);
 }
 
-/* ======================================================================== */
-/* snakelings                                                                */
-/* ======================================================================== */
 
 /* pick a walkable spawn position for a snakeling, falling back to player's tile */
 static void zul_pick_snakeling_pos(ZulrahState* s, int* ox, int* oy) {
@@ -1140,9 +1104,6 @@ static void zul_snakeling_tick(ZulrahState* s) {
     }
 }
 
-/* ======================================================================== */
-/* clouds                                                                    */
-/* ======================================================================== */
 
 /* forward: needed by zul_spawn_cloud to get current phase's safe tiles */
 static const ZulRotationPhase* zul_current_phase(ZulrahState* s) {
@@ -1274,9 +1235,6 @@ static void zul_cloud_tick(ZulrahState* s) {
     }
 }
 
-/* ======================================================================== */
-/* venom                                                                     */
-/* ======================================================================== */
 
 static void zul_venom_tick(ZulrahState* s) {
     /* antivenom timer ticks down */
@@ -1293,9 +1251,6 @@ static void zul_venom_tick(ZulrahState* s) {
     s->venom_timer = ZUL_VENOM_INTERVAL;
 }
 
-/* ======================================================================== */
-/* thrall: arceuus greater ghost                                             */
-/* ======================================================================== */
 
 static void zul_thrall_tick(ZulrahState* s) {
     if (!s->thrall_active) {
@@ -1327,9 +1282,6 @@ static void zul_thrall_tick(ZulrahState* s) {
     s->total_damage_dealt += dmg;
 }
 
-/* ======================================================================== */
-/* phase machine: execute current action in rotation table                   */
-/* ======================================================================== */
 
 /* fire one instance of the current action (attack/cloud/snakeling) */
 static void zul_fire_action(ZulrahState* s, ZulActionType type) {
@@ -1523,9 +1475,6 @@ static void zul_phase_tick(ZulrahState* s) {
     }
 }
 
-/* ======================================================================== */
-/* player action processing                                                  */
-/* ======================================================================== */
 
 static void zul_process_movement(ZulrahState* s) {
     if (s->player_dest_x < 0 || s->player_dest_y < 0) return;
@@ -1660,9 +1609,6 @@ static void zul_apply_human_player_commands(ZulrahState* s) {
 }
 
 
-/* ======================================================================== */
-/* observations                                                              */
-/* ======================================================================== */
 
 static void zul_write_obs(EncounterState* state, float* obs) {
     ZulrahState* s = (ZulrahState*)state;
@@ -1760,9 +1706,6 @@ static void zul_write_obs(EncounterState* state, float* obs) {
     while (i < ZUL_NUM_OBS) obs[i++] = 0.0f;
 }
 
-/* ======================================================================== */
-/* action masks                                                              */
-/* ======================================================================== */
 
 static void zul_write_mask(EncounterState* state, float* mask) {
     ZulrahState* s = (ZulrahState*)state;
@@ -1837,9 +1780,6 @@ static void zul_write_mask(EncounterState* state, float* mask) {
     }
 }
 
-/* ======================================================================== */
-/* reward                                                                    */
-/* ======================================================================== */
 
 static float zul_compute_reward(ZulrahState* s) {
     /* terminal: +1 kill, 0 death (forfeiting future rewards is the penalty) */
@@ -1870,9 +1810,6 @@ static float zul_compute_reward(ZulrahState* s) {
     return r;
 }
 
-/* ======================================================================== */
-/* lifecycle                                                                 */
-/* ======================================================================== */
 
 static EncounterState* zul_create(void) {
     return (EncounterState*)calloc(1, sizeof(ZulrahState));
@@ -2108,9 +2045,6 @@ static void zul_step(EncounterState* state, const int* actions) {
     s->episode_return += s->reward;
 }
 
-/* ======================================================================== */
-/* heuristic policy (for visual debug + sanity checks)                       */
-/* ======================================================================== */
 
 static void zul_heuristic_actions(ZulrahState* s, int* actions) {
     /* zero all heads */
@@ -2208,9 +2142,6 @@ static void zul_heuristic_actions(ZulrahState* s, int* actions) {
     }
 }
 
-/* ======================================================================== */
-/* RL interface                                                              */
-/* ======================================================================== */
 
 static float zul_get_reward(EncounterState* state) {
     return ((ZulrahState*)state)->reward;
@@ -2380,9 +2311,6 @@ static void zul_render_post_tick(EncounterState* state, EncounterOverlay* ov) {
 }
 static int zul_get_winner(EncounterState* state) { return ((ZulrahState*)state)->winner; }
 
-/* ======================================================================== */
-/* human input translator                                                    */
-/* ======================================================================== */
 
 static void zul_translate_human_input(HumanInput* hi, int* actions, EncounterState* state) {
     for (int h = 0; h < ZUL_NUM_ACTION_HEADS; h++) actions[h] = 0;
@@ -2492,9 +2420,6 @@ static void zul_step_human_commands(EncounterState* state, HumanInput* hi) {
     human_input_clear_pending(hi);
 }
 
-/* ======================================================================== */
-/* encounter definition                                                      */
-/* ======================================================================== */
 
 static const EncounterDef ENCOUNTER_ZULRAH = {
     .name = "zulrah",

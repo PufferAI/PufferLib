@@ -693,10 +693,6 @@ def build_terrain_mesh(
                     verts.extend([wx, y_sw, nz, wx + 1, y_ne, nz - 1, wx, y_nw, nz - 1])
                     colors.extend([r, g, b, 255] * 3)
 
-                else:
-                    # empty tile (no underlay or overlay) — skip entirely
-                    pass
-
     return verts, colors
 
 

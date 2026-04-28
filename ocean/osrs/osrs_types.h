@@ -101,20 +101,12 @@
 #include <stdio.h>
 #include "osrs_interaction.h"
 
-// ============================================================================
-// ENVIRONMENT CONSTANTS
-// ============================================================================
-
 #define NUM_AGENTS 2
 #define MAX_PENDING_HITS 8
 #define HISTORY_SIZE 5
 
 #define TICK_DURATION_MS 600
 #define MAX_EPISODE_TICKS 300
-
-// ============================================================================
-// WILDERNESS AREA BOUNDS
-// ============================================================================
 
 #define WILD_MIN_X 2940
 #define WILD_MAX_X 3392
@@ -126,19 +118,11 @@
 #define FIGHT_AREA_HEIGHT 28
 #define FIGHT_NEARBY_RADIUS 5
 
-// ============================================================================
-// GAMEPLAY FLAGS
-// ============================================================================
-
 #define ONLY_SWITCH_PRAYER_WHEN_ABOUT_TO_ATTACK 1
 #define ONLY_SWITCH_GEAR_WHEN_ATTACK_SOON 1
 #define ALLOW_SMITE 1
 #define ALLOW_REDEMPTION 1
 #define ALLOW_MOVING_IF_CAN_ATTACK 0
-
-// ============================================================================
-// MAGIC SPELL LEVELS AND DAMAGE
-// ============================================================================
 
 #define ICE_RUSH_LEVEL 58
 #define ICE_BURST_LEVEL 70
@@ -162,16 +146,8 @@
 
 #define ATTACK_TIMER_INACTIVE -1000000
 
-// ============================================================================
-// EQUIPMENT SLOTS
-// ============================================================================
-
 // Number of equipment slots (HEAD, CAPE, NECK, AMMO, WEAPON, SHIELD, BODY, LEGS, HANDS, FEET, RING)
 #define NUM_GEAR_SLOTS 11
-
-// ============================================================================
-// CURRENT LOADOUT-BASED ACTION SPACE
-// ============================================================================
 // 8 action heads: one decision per head per tick. no click encoding.
 // current ocean envs use a loadout preset plus separate combat/prayer/etc. heads.
 
@@ -225,10 +201,7 @@ static const int ACTION_HEAD_DIMS[NUM_ACTION_HEADS] = {
 
 //* Observation size: 182 base + 1 voidwaker flag + 7 reward signals = 190 */
 #define SLOT_NUM_OBSERVATIONS 190
-
-// ============================================================================
 // PLAYER BASE STATS (NH maxed accounts - 99 all combat)
-// ============================================================================
 
 #define MAXED_BASE_ATTACK 99
 #define MAXED_BASE_STRENGTH 99
@@ -250,10 +223,6 @@ static const int ACTION_HEAD_DIMS[NUM_ACTION_HEADS] = {
 #define MAXED_MELEE_ATTACK_SPEED_OBS 4
 #define MAXED_RANGED_ATTACK_SPEED_OBS 5
 #define RUN_ENERGY_RECOVER_TICKS 3
-
-// ============================================================================
-// CORE ENUMS
-// ============================================================================
 
 typedef enum {
     ATTACK_STYLE_NONE = 0,
@@ -300,8 +269,7 @@ typedef enum {
      - invisible level bonuses (att / str / def) per osrs wiki "Combat Options"
      - attack speed modifier (rapid = base - 1)
      - attack range modifier (longrange = base + 2)
-   the 4 melee stances come first for backward compatibility with existing code
-   that cast `0` to mean ACCURATE. */
+   the 4 melee stances keep the existing enum order where 0 means accurate. */
 typedef enum {
     FIGHT_STYLE_ACCURATE = 0,             /* melee: +3 att. ranged: +3 att. powered staff: +3 magic. */
     FIGHT_STYLE_AGGRESSIVE,                /* melee: +3 str. */
@@ -318,10 +286,6 @@ typedef enum {
     MELEE_BONUS_SLASH,
     MELEE_BONUS_CRUSH
 } MeleeBonusType;
-
-// ============================================================================
-// SPECIAL ATTACK WEAPON ENUMS
-// ============================================================================
 
 typedef enum {
     MELEE_SPEC_NONE = 0,
@@ -357,10 +321,6 @@ typedef enum {
     MAGIC_SPEC_NONE = 0,
     MAGIC_SPEC_VOLATILE_STAFF
 } MagicSpecWeapon;
-
-// ============================================================================
-// LOADOUT-BASED ACTION ENUMS
-// ============================================================================
 
 /** Equipment slot indices. */
 typedef enum {
@@ -463,10 +423,6 @@ typedef enum {
     VENG_CAST,
 } VengAction;
 
-// ============================================================================
-// GEAR BONUS STRUCTS
-// ============================================================================
-
 /* Slot-based gear bonus struct used by the current ocean envs. same data as
    EquipmentBonuses (osrs_combat.h) but with a different naming convention
    (stab_attack vs attack_stab). the adapter compute_slot_gear_bonuses()
@@ -501,10 +457,6 @@ typedef struct {
     int melee_defence;
 } VisibleGearBonuses;
 
-// ============================================================================
-// COMBAT STRUCTS
-// ============================================================================
-
 typedef struct {
     int damage;
     int ticks_until_hit;
@@ -519,10 +471,7 @@ typedef struct {
     int is_morr_bleed;  // when this hit lands, set morr_dot_remaining to damage dealt
     OverheadPrayer defender_prayer_at_attack;
 } PendingHit;
-
-// ============================================================================
 // ENTITY TYPE (player vs NPC — used by renderer and encounter system)
-// ============================================================================
 
 typedef enum {
     ENTITY_PLAYER = 0,
@@ -578,10 +527,6 @@ typedef struct {
     OsrsMagicAttackKind confliction_magic_kind;
     OsrsTargetRef confliction_target;
 } OsrsItemEffectState;
-
-// ============================================================================
-// PLAYER / ENTITY STRUCT
-// ============================================================================
 
 typedef struct {
     EntityType entity_type;  /* ENTITY_PLAYER or ENTITY_NPC */
@@ -834,10 +779,6 @@ typedef struct {
     int gui_strength_bonus;
 } Player;
 
-// ============================================================================
-// LOGGING STRUCT
-// ============================================================================
-
 typedef struct {
     float episode_return;
     float episode_length;
@@ -865,7 +806,7 @@ typedef struct {
     float min_zuk_hp_seen;     /* lowest Zuk HP reached during the episode */
     float hp_restored;         /* HP restored to enemies (healers + mager) this episode */
     float zuk_healer_damage;   /* total damage dealt to Zuk healers this episode */
-    /* action noop rates per head (0=move,1=prayer,2=target,3=gear,4=eat,5=pot,6=spell,7=spec) */
+    /* Inferno action noop rates by named head. */
     float noop_move;
     float noop_prayer;
     float noop_target;
@@ -883,10 +824,6 @@ typedef struct {
     float n;
 } Log;
 
-// ============================================================================
-// REWARD SHAPING CONFIG
-// ============================================================================
-
 typedef struct {
     // Per-tick shaping coefficients
     float damage_dealt_coef;         // per-HP dealt
@@ -898,7 +835,7 @@ typedef struct {
     float melee_frozen_penalty;      // melee while frozen and out of range
     float wasted_eat_penalty;        // per wasted HP of healing overflow
     float premature_eat_penalty;     // eating above premature threshold
-    float magic_no_staff_penalty;    // casting magic without staff (deprecated, use gear_mismatch)
+    float magic_no_staff_penalty;    // casting magic without staff
     float gear_mismatch_penalty;     // attacking with negative bonus for the attack style
     float spec_off_prayer_bonus;     // spec when target not praying melee
     float spec_low_defence_bonus;    // spec when target in mage gear
@@ -920,10 +857,7 @@ typedef struct {
     int   click_penalty_threshold;   // free clicks before penalty kicks in
     float click_penalty_coef;        // penalty per excess click (negative)
 } RewardShapingConfig;
-
-// ============================================================================
 // OPPONENT TYPES (used by osrs_pvp_opponents.h functions)
-// ============================================================================
 
 typedef enum {
     OPP_NONE = 0,
@@ -1049,10 +983,6 @@ typedef struct {
 // Combined observation size: raw obs + action masks (for ocean mode)
 #define OCEAN_OBS_SIZE (SLOT_NUM_OBSERVATIONS + ACTION_MASK_SIZE)
 
-// ============================================================================
-// MAIN ENVIRONMENT STRUCT
-// ============================================================================
-
 typedef struct {
     Log log;
 
@@ -1090,8 +1020,7 @@ typedef struct {
     // PvP-only runtime state. encounters that bypass the PvP stack can ignore this.
     OsrsPvpRuntime pvp_runtime;
 
-    // Encounter dispatch (NULL = legacy step/reset path for backwards compat).
-    // When set, c_step/c_reset dispatch through these instead of the default path.
+    // Encounter dispatch. NULL uses the default PvP step/reset path.
     const void* encounter_def;     /* EncounterDef* — void* to avoid include dependency */
     void* encounter_state;          /* EncounterState* — owned by this env */
 
@@ -1113,10 +1042,6 @@ typedef struct {
     unsigned char _masks_buf[NUM_AGENTS * ACTION_MASK_SIZE];
 
 } OsrsEnv;
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
 
 static inline int abs_int(int val) {
     return val < 0 ? -val : val;
@@ -1168,10 +1093,6 @@ static inline int is_in_melee_range(Player* p, Player* t) {
     return (dx == 1 && dy == 0) || (dx == 0 && dy == 1);
 }
 
-// ============================================================================
-// RNG FUNCTIONS
-// ============================================================================
-
 static inline uint32_t xorshift32(uint32_t* state) {
     uint32_t x = *state;
     x ^= x << 13;
@@ -1197,10 +1118,6 @@ static inline int is_in_wilderness(int x, int y) {
 static inline int tile_hash(int x, int y) {
     return (x << 15) | y;
 }
-
-// ============================================================================
-// TIMER HELPERS
-// ============================================================================
 
 static inline int remaining_ticks(int ticks) {
     return ticks > 0 ? ticks : 0;

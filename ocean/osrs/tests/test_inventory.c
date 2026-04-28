@@ -15,9 +15,6 @@
 
 #include "ocean/osrs/osrs_inventory.h"
 
-/* ======================================================================== */
-/* test harness                                                              */
-/* ======================================================================== */
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -45,9 +42,6 @@ static int tests_failed = 0;
     } \
 } while (0)
 
-/* ======================================================================== */
-/* test: init                                                                */
-/* ======================================================================== */
 
 static void test_init(void) {
     printf("--- init ---\n");
@@ -64,9 +58,6 @@ static void test_init(void) {
     ASSERT_INT_EQ("free 28", osrs_inventory_free_slots(&inv), 28);
 }
 
-/* ======================================================================== */
-/* test: inventory add/remove                                                */
-/* ======================================================================== */
 
 static void test_add_remove(void) {
     printf("--- inventory add/remove ---\n");
@@ -99,9 +90,6 @@ static void test_add_remove(void) {
     ASSERT_INT_EQ("remove ags again fails", ok, 0);
 }
 
-/* ======================================================================== */
-/* test: inventory full                                                      */
-/* ======================================================================== */
 
 static void test_inventory_full(void) {
     printf("--- inventory full ---\n");
@@ -120,9 +108,6 @@ static void test_inventory_full(void) {
     ASSERT_INT_EQ("29th fails", s, -1);
 }
 
-/* ======================================================================== */
-/* test: find                                                                */
-/* ======================================================================== */
 
 static void test_find(void) {
     printf("--- find ---\n");
@@ -138,9 +123,6 @@ static void test_find(void) {
     ASSERT_INT_EQ("find missing", osrs_inventory_find(&inv, ITEM_AGS), -1);
 }
 
-/* ======================================================================== */
-/* test: equip direct                                                        */
-/* ======================================================================== */
 
 static void test_equip_direct(void) {
     printf("--- equip direct ---\n");
@@ -163,9 +145,6 @@ static void test_equip_direct(void) {
     ASSERT_UINT8_EQ("shield cleared", inv.equipment[GEAR_SLOT_SHIELD], ITEM_NONE);
 }
 
-/* ======================================================================== */
-/* test: equip from inventory                                                */
-/* ======================================================================== */
 
 static void test_equip_from_inventory(void) {
     printf("--- equip from inventory ---\n");
@@ -180,9 +159,6 @@ static void test_equip_from_inventory(void) {
     ASSERT_INT_EQ("inv count 0", osrs_inventory_count(&inv), 0);
 }
 
-/* ======================================================================== */
-/* test: equip swap (slot occupied, old item goes to inventory)              */
-/* ======================================================================== */
 
 static void test_equip_swap(void) {
     printf("--- equip swap ---\n");
@@ -201,9 +177,6 @@ static void test_equip_swap(void) {
     ASSERT_INT_EQ("inv count 1", osrs_inventory_count(&inv), 1);
 }
 
-/* ======================================================================== */
-/* test: two-handed equip (shield unequipped to inventory)                   */
-/* ======================================================================== */
 
 static void test_two_handed_equip(void) {
     printf("--- two-handed equip ---\n");
@@ -227,9 +200,6 @@ static void test_two_handed_equip(void) {
     ASSERT_INT_EQ("inv count 2", osrs_inventory_count(&inv), 2);
 }
 
-/* ======================================================================== */
-/* test: two-handed equip with no old weapon                                 */
-/* ======================================================================== */
 
 static void test_two_handed_no_old_weapon(void) {
     printf("--- two-handed no old weapon ---\n");
@@ -250,9 +220,6 @@ static void test_two_handed_no_old_weapon(void) {
     ASSERT_INT_EQ("inv count 1", osrs_inventory_count(&inv), 1);
 }
 
-/* ======================================================================== */
-/* test: two-handed fail (full inventory + shield equipped)                  */
-/* ======================================================================== */
 
 static void test_two_handed_fail(void) {
     printf("--- two-handed fail ---\n");
@@ -278,9 +245,6 @@ static void test_two_handed_fail(void) {
     ASSERT_UINT8_EQ("ags still in inv", inv.inventory[27], ITEM_AGS);
 }
 
-/* ======================================================================== */
-/* test: two-handed succeeds when exactly enough space                       */
-/* ======================================================================== */
 
 static void test_two_handed_exact_space(void) {
     printf("--- two-handed exact space ---\n");
@@ -303,9 +267,6 @@ static void test_two_handed_exact_space(void) {
     ASSERT_UINT8_EQ("shield cleared", inv.equipment[GEAR_SLOT_SHIELD], ITEM_NONE);
 }
 
-/* ======================================================================== */
-/* test: unequip to inventory                                                */
-/* ======================================================================== */
 
 static void test_unequip(void) {
     printf("--- unequip ---\n");
@@ -333,9 +294,6 @@ static void test_unequip(void) {
     ASSERT_UINT8_EQ("head still equipped", inv.equipment[GEAR_SLOT_HEAD], ITEM_HELM_NEITIZNOT);
 }
 
-/* ======================================================================== */
-/* test: gear slot mapping                                                   */
-/* ======================================================================== */
 
 static void test_gear_slot_mapping(void) {
     printf("--- gear slot mapping ---\n");
@@ -353,9 +311,6 @@ static void test_gear_slot_mapping(void) {
     ASSERT_INT_EQ("ags -> weapon",     osrs_item_gear_slot(ITEM_AGS),              GEAR_SLOT_WEAPON);
 }
 
-/* ======================================================================== */
-/* test: edge cases                                                          */
-/* ======================================================================== */
 
 static void test_edge_cases(void) {
     printf("--- edge cases ---\n");
@@ -388,9 +343,6 @@ static void test_edge_cases(void) {
     ASSERT_INT_EQ("unequip slot 11", osrs_unequip_to_inventory(&inv, NUM_GEAR_SLOTS), 0);
 }
 
-/* ======================================================================== */
-/* main                                                                      */
-/* ======================================================================== */
 
 int main(void) {
     printf("=== osrs_inventory.h tests ===\n\n");

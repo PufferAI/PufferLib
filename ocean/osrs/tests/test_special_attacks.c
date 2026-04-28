@@ -29,9 +29,6 @@
 #include "ocean/osrs/osrs_combat.h"
 #include "ocean/osrs/osrs_special_attacks.h"
 
-/* ======================================================================== */
-/* test harness (same pattern as test_combat_math.c)                        */
-/* ======================================================================== */
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -85,9 +82,6 @@ static void test_melee_spec_costs(void) {
     ASSERT_INT_EQ("abyssal bludgeon cost", get_melee_spec_cost(MELEE_SPEC_ABYSSAL_BLUDGEON),  50);
 }
 
-/* ======================================================================== */
-/* test: ranged spec energy costs                                           */
-/* ======================================================================== */
 
 static void test_ranged_spec_costs(void) {
     printf("--- ranged spec energy costs ---\n");
@@ -100,9 +94,6 @@ static void test_ranged_spec_costs(void) {
     ASSERT_INT_EQ("morrigan's cost",   get_ranged_spec_cost(RANGED_SPEC_MORRIGANS),    50);
 }
 
-/* ======================================================================== */
-/* test: magic spec energy costs                                            */
-/* ======================================================================== */
 
 static void test_magic_spec_costs(void) {
     printf("--- magic spec energy costs ---\n");
@@ -1146,9 +1137,6 @@ static void test_spec_dispatch(void) {
     ASSERT_INT_EQ("non-weapon damage", sr.total_damage, 0);
 }
 
-/* ======================================================================== */
-/* main                                                                     */
-/* ======================================================================== */
 
 int main(void) {
     printf("=== special attack tests (cross-referenced with osrs-dps-calc) ===\n\n");

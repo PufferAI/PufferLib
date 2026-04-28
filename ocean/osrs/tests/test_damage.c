@@ -23,9 +23,6 @@
 
 #include "ocean/osrs/osrs_damage.h"
 
-/* ======================================================================== */
-/* test harness                                                              */
-/* ======================================================================== */
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -41,9 +38,6 @@ static int tests_failed = 0;
     } \
 } while (0)
 
-/* ======================================================================== */
-/* prayer reduction through pipeline                                         */
-/* ======================================================================== */
 
 static void test_prayer_reduction(void) {
     printf("--- prayer reduction ---\n");
@@ -95,9 +89,6 @@ static void test_prayer_reduction(void) {
     ASSERT_INT_EQ("pve magic prayer block", r.final_damage, 0);
 }
 
-/* ======================================================================== */
-/* vengeance                                                                 */
-/* ======================================================================== */
 
 static void test_vengeance(void) {
     printf("--- vengeance ---\n");
@@ -142,9 +133,6 @@ static void test_vengeance(void) {
     ASSERT_INT_EQ("veng pve prayer block no reflect", r.veng_damage, 0);
 }
 
-/* ======================================================================== */
-/* recoil                                                                    */
-/* ======================================================================== */
 
 static void test_recoil(void) {
     printf("--- recoil ---\n");
@@ -192,9 +180,6 @@ static void test_recoil(void) {
     ASSERT_INT_EQ("recoil 99 -> 10", r.recoil_damage, 10);
 }
 
-/* ======================================================================== */
-/* smite                                                                     */
-/* ======================================================================== */
 
 static void test_smite(void) {
     printf("--- smite ---\n");
@@ -237,9 +222,6 @@ static void test_smite(void) {
     ASSERT_INT_EQ("smite after pvp prayer", r.smite_drain, 4);
 }
 
-/* ======================================================================== */
-/* full pipeline: PvP with all effects active                                */
-/* ======================================================================== */
 
 static void test_full_pipeline_pvp(void) {
     printf("--- full pipeline PvP ---\n");
@@ -273,9 +255,6 @@ static void test_full_pipeline_pvp(void) {
     ASSERT_INT_EQ("full pvp no prayer_blocked", r.prayer_blocked, 0);
 }
 
-/* ======================================================================== */
-/* full pipeline: PvE with veng + recoil, no smite, 100% prayer block        */
-/* ======================================================================== */
 
 static void test_full_pipeline_pve(void) {
     printf("--- full pipeline PvE ---\n");
@@ -304,9 +283,6 @@ static void test_full_pipeline_pve(void) {
     ASSERT_INT_EQ("pve no prayer smite", r.smite_drain, 0);
 }
 
-/* ======================================================================== */
-/* edge cases                                                                */
-/* ======================================================================== */
 
 static void test_edge_cases(void) {
     printf("--- edge cases ---\n");
@@ -341,9 +317,6 @@ static void test_edge_cases(void) {
     ASSERT_INT_EQ("99 damage smite", r.smite_drain, 24);
 }
 
-/* ======================================================================== */
-/* osrs_has_recoil_ring helper                                               */
-/* ======================================================================== */
 
 static void test_has_recoil_ring(void) {
     printf("--- has_recoil_ring ---\n");
@@ -367,9 +340,6 @@ static void test_has_recoil_ring(void) {
     ASSERT_INT_EQ("other ring", osrs_has_recoil_ring(equipped), 0);
 }
 
-/* ======================================================================== */
-/* main                                                                      */
-/* ======================================================================== */
 
 int main(void) {
     printf("=== osrs_damage.h test suite ===\n\n");

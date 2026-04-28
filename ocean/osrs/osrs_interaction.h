@@ -13,17 +13,11 @@
 #ifndef OSRS_INTERACTION_H
 #define OSRS_INTERACTION_H
 
-/* ======================================================================== */
-/* interaction state                                                         */
-/* ======================================================================== */
 
 typedef struct {
     int target_slot;    /* target entity slot index, -1 = no interaction */
 } OsrsInteraction;
 
-/* ======================================================================== */
-/* interaction management                                                    */
-/* ======================================================================== */
 
 static inline void osrs_interaction_set(OsrsInteraction* ix, int target_slot) {
     ix->target_slot = target_slot;
@@ -41,9 +35,6 @@ static inline void osrs_interaction_init(OsrsInteraction* ix) {
     ix->target_slot = -1;
 }
 
-/* ======================================================================== */
-/* action type constants                                                     */
-/* ======================================================================== */
 
 #define OSRS_IACT_NONE     0  /* no action / idle — does NOT interrupt */
 #define OSRS_IACT_MOVE     1  /* explicit ground click — INTERRUPTS */
@@ -54,9 +45,6 @@ static inline void osrs_interaction_init(OsrsInteraction* ix) {
 #define OSRS_IACT_SPEC     6  /* spec toggle — does NOT interrupt */
 #define OSRS_IACT_ATTACK   7  /* click to attack entity — SETS new interaction (not an interrupt) */
 
-/* ======================================================================== */
-/* interrupt checking                                                        */
-/* ======================================================================== */
 
 /* check if an action type interrupts the current interaction.
    if it does, clears the interaction and returns 1. otherwise returns 0.
@@ -78,9 +66,6 @@ static inline int osrs_interaction_check_interrupt(OsrsInteraction* ix, int acti
     }
 }
 
-/* ======================================================================== */
-/* spec armed state helpers                                                  */
-/* ======================================================================== */
 
 /* spec toggle: arm/disarm special attack.
    in real OSRS: clicking the spec orb toggles spec_armed.

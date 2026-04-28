@@ -26,17 +26,8 @@
 #include "osrs_bolt_procs.h"
 #include "osrs_pvp_gear.h"
 
-
-// ============================================================================
-// FORWARD DECLARATIONS
-// ============================================================================
-
 static void register_hit_calculated(OsrsEnv* env, int attacker_idx, int defender_idx,
                                      AttackStyle style, int total_damage);
-
-// ============================================================================
-// SPEC WEAPON ENUM-TO-ITEM MAPPING
-// ============================================================================
 
 /* maps PvP MeleeSpecWeapon enum → item index for osrs_resolve_spec / osrs_spec_cost.
    used internally by perform_attack and availability checks. */
@@ -75,11 +66,6 @@ static inline int pvp_magic_spec_to_item(MagicSpecWeapon w) {
         default:                        return ITEM_NONE;
     }
 }
-
-// ============================================================================
-// SPEC WEAPON COSTS (kept for osrs_pvp_observations.h compatibility)
-// ============================================================================
-
 static int get_melee_spec_cost(MeleeSpecWeapon weapon) {
     switch (weapon) {
         case MELEE_SPEC_AGS:             return 50;
@@ -120,11 +106,6 @@ static int get_magic_spec_cost(MagicSpecWeapon weapon) {
         default:                        return 50;
     }
 }
-
-// ============================================================================
-// SPEC WEAPON MULTIPLIERS (kept for osrs_pvp_observations.h compatibility)
-// ============================================================================
-
 static float get_melee_spec_str_mult(MeleeSpecWeapon weapon) {
     switch (weapon) {
         case MELEE_SPEC_AGS:             return 1.375f;
@@ -200,10 +181,6 @@ static float get_magic_spec_acc_mult(MagicSpecWeapon weapon) {
     }
 }
 
-// ============================================================================
-// PRAYER MULTIPLIERS
-// ============================================================================
-
 static inline float get_defence_prayer_mult(Player* p) {
     switch (p->offensive_prayer) {
         case OFFENSIVE_PRAYER_MELEE_LOW:
@@ -218,10 +195,7 @@ static inline float get_defence_prayer_mult(Player* p) {
             return 1.0f;
     }
 }
-
-// ============================================================================
 // EFFECTIVE LEVEL ADAPTERS (delegate to osrs_player_eff_level)
-// ============================================================================
 
 static int calculate_effective_attack(Player* p, AttackStyle style) {
     int base_level;
@@ -303,10 +277,6 @@ static int calculate_effective_defence(Player* p, AttackStyle incoming_style) {
     return osrs_player_eff_level(base_level, prayer_mult, style_bonus);
 }
 
-// ============================================================================
-// ATTACK/DEFENCE BONUS LOOKUPS
-// ============================================================================
-
 static MeleeBonusType get_melee_bonus_type(Player* p) {
     if (p->current_gear == GEAR_SPEC) {
         return MELEE_SPEC_BONUS_TYPES[p->melee_spec_weapon];
@@ -369,10 +339,7 @@ static int get_strength_bonus(Player* p, AttackStyle style) {
         default: return 0;
     }
 }
-
-// ============================================================================
 // HIT CHANCE AND MAX HIT (delegate to shared formulas)
-// ============================================================================
 
 static float calculate_hit_chance(OsrsEnv* env, Player* attacker, Player* defender,
                                    AttackStyle style, float acc_mult) {
@@ -414,10 +381,6 @@ static int calculate_max_hit(Player* p, AttackStyle style, float str_mult, int m
     return max_hit;
 }
 
-// ============================================================================
-// MAGIC SPELL HELPERS
-// ============================================================================
-
 static inline int get_ice_freeze_ticks(int current_magic) {
     if (current_magic >= ICE_BARRAGE_LEVEL) return 32;
     if (current_magic >= ICE_BLITZ_LEVEL) return 24;
@@ -445,10 +408,6 @@ static inline int get_blood_heal_percent(int current_magic) {
     if (current_magic >= BLOOD_BURST_LEVEL) return 15;
     return 10;
 }
-
-// ============================================================================
-// PVP HIT DELAY HELPERS
-// ============================================================================
 
 /* PvP-specific: dark bow second arrow and weapon-specific ranged delays.
    standard delays use encounter_magic_hit_delay / encounter_ranged_hit_delay
@@ -488,10 +447,6 @@ static inline int pvp_ranged_hit_delay_for_weapon(int distance, int is_special, 
     }
 }
 
-// ============================================================================
-// HIT QUEUE
-// ============================================================================
-
 static void queue_hit(Player* attacker, Player* defender, int damage,
                      AttackStyle style, int delay, int is_special, int hit_success,
                      int freeze_ticks, int heal_percent, int drain_type, int drain_percent,
@@ -515,10 +470,7 @@ static void queue_hit(Player* attacker, Player* defender, int damage,
     int actual_damage = osrs_prayer_reduce_damage(damage, defender->prayer, style, 1);
     attacker->last_queued_hit_damage += actual_damage;
 }
-
-// ============================================================================
 // DAMAGE APPLICATION (uses osrs_apply_damage_pipeline for core pipeline)
-// ============================================================================
 
 static void apply_damage(OsrsEnv* env, int attacker_idx, int defender_idx,
                          PendingHit* hit) {
@@ -645,10 +597,6 @@ static void process_pending_hits(OsrsEnv* env, int attacker_idx, int defender_id
     }
 }
 
-// ============================================================================
-// HIT STATISTICS TRACKING
-// ============================================================================
-
 static inline void push_recent_attack(AttackStyle* buffer, int* index, AttackStyle style) {
     buffer[*index] = style;
     *index = (*index + 1) % HISTORY_SIZE;
@@ -768,10 +716,6 @@ static void register_hit_calculated(
         push_recent_bool(attacker->recent_target_prayer_correct, &attacker->recent_target_prayer_correct_index, 0);
     }
 }
-
-// ============================================================================
-// ATTACK AVAILABILITY CHECKS
-// ============================================================================
 
 static inline int is_attack_available(Player* p) {
     if (ONLY_SWITCH_GEAR_WHEN_ATTACK_SOON && remaining_ticks(p->attack_timer) > 0) return 0;
@@ -923,10 +867,6 @@ static inline int get_ticks_until_next_hit(Player* p) {
     return min_ticks;
 }
 
-// ============================================================================
-// WEAPON RANGE
-// ============================================================================
-
 typedef enum {
     WEAPON_TYPE_STANDARD = 0,
     WEAPON_TYPE_HALBERD
@@ -949,10 +889,7 @@ static inline int get_attack_range(Player* p, AttackStyle style) {
             return 1;
     }
 }
-
-// ============================================================================
 // ATTACK EXECUTION (uses osrs_resolve_spec + osrs_resolve_bolt_proc)
-// ============================================================================
 
 static void perform_attack(OsrsEnv* env, int attacker_idx, int defender_idx,
                            AttackStyle style, int is_special, int magic_type, int distance) {

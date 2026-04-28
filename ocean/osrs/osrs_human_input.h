@@ -20,9 +20,6 @@
 /* forward declare — full struct lives in osrs_pvp_render.h */
 struct RenderClient;
 
-/* ======================================================================== */
-/* screen-to-world conversion                                                */
-/* ======================================================================== */
 
 /** Convert screen X to world tile X (inverse of render_world_to_screen_x_rc).
     tile_size = RENDER_TILE_SIZE (passed to avoid header ordering issues). */
@@ -40,9 +37,6 @@ static inline int human_screen_to_world_y(int screen_y, int arena_base_y,
     return arena_base_y + (arena_height - 1) - flipped;
 }
 
-/* ======================================================================== */
-/* click handlers — set semantic intents on HumanInput                       */
-/* ======================================================================== */
 
 /** Check if world tile (wx,wy) is within an NPC's bounding box.
     OSRS NPCs occupy npc_size x npc_size tiles anchored at (x,y) as southwest corner.
@@ -300,9 +294,6 @@ static void human_handle_combat_click(HumanInput* hi, GuiState* gs, Player* p,
     }
 }
 
-/* ======================================================================== */
-/* action translators — convert semantic intents to action arrays             */
-/* ======================================================================== */
 
 /** Translate human input to PvP 7-head action array for agent 0.
     Movement is target-relative (ADJACENT/UNDER/DIAGONAL/FARCAST_N). */
@@ -383,18 +374,12 @@ static void human_to_pvp_actions(HumanInput* hi, int* actions,
         }
     }
 
-    /* offensive prayer: encounters wire their HEAD_OFFENSIVE_* in their own translate
-       helper via encounter_translate_offensive_prayer(). PvP's HEAD_OFFENSIVE is
-       routed by pvp_actions.h. nothing to do here — direct mutation was legacy. */
     (void)agent;
 }
 
 /* shared translate helpers (encounter_translate_movement/prayer/target)
    live in osrs_encounter.h so encounter headers can use them directly. */
 
-/* ======================================================================== */
-/* visual feedback drawing                                                   */
-/* ======================================================================== */
 
 /* click cross sprite textures: 4 yellow (move) + 4 red (attack) animation frames.
    loaded from data/sprites/gui/cross_*.png, indexed [0..3] yellow, [4..7] red. */

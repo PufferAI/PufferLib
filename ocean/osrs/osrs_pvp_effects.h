@@ -19,9 +19,6 @@
 
 #define MAX_ACTIVE_EFFECTS 16
 
-/* ======================================================================== */
-/* spotanim metadata (hardcoded for the effects we care about)               */
-/* ======================================================================== */
 
 /* GFX IDs from spotanim.dat */
 #define GFX_BOLT            27
@@ -42,9 +39,6 @@
 #define GFX_DRAGON_DART     1122   /* dragon dart projectile (blowpipe) */
 #define GFX_RUNE_DART       231    /* rune dart projectile */
 #define GFX_BLOWPIPE_SPEC   1043   /* blowpipe special attack effect */
-/* TODO: add voidwaker lightning on-hit GFX (spotanim on opponent).
- * TODO: add VLS special attack on-hit effect.
- * combat mechanics for both work correctly, just missing visual effects. */
 
 typedef struct {
     int gfx_id;
@@ -83,9 +77,6 @@ static const SpotAnimMeta* spotanim_lookup(int gfx_id) {
     return NULL;
 }
 
-/* ======================================================================== */
-/* effect types                                                              */
-/* ======================================================================== */
 
 typedef enum {
     EFFECT_NONE = 0,
@@ -129,9 +120,6 @@ typedef struct {
     int tilt_angle;
 } ActiveEffect;
 
-/* ======================================================================== */
-/* internal helpers                                                          */
-/* ======================================================================== */
 
 /** Free an effect's animation state and mark it inactive. */
 static void effect_free(ActiveEffect* e) {
@@ -173,9 +161,6 @@ static void effect_init_anim_state(
         om->vertex_skins, om->base_vert_count);
 }
 
-/* ======================================================================== */
-/* effect lifecycle                                                          */
-/* ======================================================================== */
 
 /**
  * Spawn a spotanim effect at a world position (impact splash, etc).

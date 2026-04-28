@@ -212,10 +212,7 @@ static inline int can_move_diagonal(Player* p, Player* target, const CollisionMa
     }
     return !(dest_x == p->x && dest_y == p->y);
 }
-
-// ============================================================================
 // OBSERVATION NORMALIZATION DIVISORS (matches _OBS_NORM_DIVISORS in osrs_pvp.py)
-// ============================================================================
 
 static void init_obs_norm_divisors(float* d) {
     for (int i = 0; i < SLOT_NUM_OBSERVATIONS; i++) d[i] = 1.0f;
@@ -331,10 +328,6 @@ static void ocean_write_obs_p1(OsrsEnv* env) {
         dst[SLOT_NUM_OBSERVATIONS + i] = (float)mask[i];
     }
 }
-
-// ============================================================================
-// SLOT-BASED MODE - OBSERVATION GENERATION
-// ============================================================================
 
 /**
  * Generate slot-mode observations with per-slot item stats.

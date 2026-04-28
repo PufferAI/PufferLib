@@ -20,21 +20,12 @@
 #include "osrs_pvp_movement.h"
 #include "osrs_pvp_observations.h"  // For can_eat_food, can_use_potion, etc.
 #include "osrs_encounter.h"         // For ENCOUNTER_OVERHEAD_*, encounter_apply_*_action, encounter_drain_all_prayers
-
-// ============================================================================
-// PRAYER DRAIN
-// ============================================================================
 // prayer drain: encounter_drain_all_prayers() in osrs_encounter.h drives both
 // overhead and offensive drain in a single call with activation-tick skip.
 
 // NH gear prayer bonus: fury amulet +3, neitiznot helm +3 = 6 total.
 // hardcoded because these are always equipped regardless of gear set.
 #define PRAYER_BONUS 6
-
-
-// ============================================================================
-// CONSUMABLE ACTIONS
-// ============================================================================
 
 /**
  * Eat food (regular or karambwan).
@@ -215,10 +206,6 @@ static void drink_potion(Player* p, int potion_type) {
     p->food_timer = 3;
 }
 
-// ============================================================================
-// TIMER UPDATES
-// ============================================================================
-
 /** Update all per-tick timers for a player. */
 static void update_timers(Player* p) {
     p->damage_applied_this_tick = 0;
@@ -294,10 +281,6 @@ static void reset_tick_flags(Player* p) {
     p->clicks_this_tick = 0;
 }
 
-// ============================================================================
-// LOADOUT-BASED ACTION EXECUTION
-// ============================================================================
-
 // Forward declarations for phased execution
 static void execute_switches(OsrsEnv* env, int agent_idx, int* actions);
 static void execute_attacks(OsrsEnv* env, int agent_idx, int* actions);
@@ -331,10 +314,6 @@ static void execute_switches(OsrsEnv* env, int agent_idx, int* actions) {
     const CollisionMap* cmap = (const CollisionMap*)env->collision_map;
 
     p->consumable_used_this_tick = 0;
-
-    // =========================================================================
-    // PHASE 1: OVERHEAD PRAYER - must happen first so attacks see new prayer
-    // =========================================================================
 
     int overhead_action = actions[HEAD_OVERHEAD];
     int offensive_action = actions[HEAD_OFFENSIVE];
@@ -379,11 +358,6 @@ static void execute_switches(OsrsEnv* env, int agent_idx, int* actions) {
         p->offensive_prayer_just_activated = 1;
     }
     if (p->prayer != prev_prayer || p->offensive_prayer != prev_offensive) p->clicks_this_tick++;
-
-    // =========================================================================
-    // PHASE 2: LOADOUT SWITCH - equips dynamic gear slots, returns # changed
-    // =========================================================================
-
     int loadout_action = actions[HEAD_LOADOUT];
     int loadout_switches = apply_loadout(p, loadout_action);
     p->clicks_this_tick += loadout_switches;
@@ -395,18 +369,6 @@ static void execute_switches(OsrsEnv* env, int agent_idx, int* actions) {
         loadout_action == LOADOUT_SPEC_MAGIC || loadout_action == LOADOUT_GMAUL) {
         p->spec_armed = 1;
     }
-
-    // =========================================================================
-    // PHASE 3: OFFENSIVE PRAYER — agent-controlled via HEAD_OFFENSIVE, already
-    // applied in the overhead block above. auto-assignment based on loadout has
-    // been removed so the agent must manage offensive prayer like a real player
-    // (enabling prayer flicking).
-    // =========================================================================
-
-    // =========================================================================
-    // PHASE 4: CONSUMABLES - eating delays attack timer
-    // =========================================================================
-
     int food_action = actions[HEAD_FOOD];
     if (food_action == FOOD_EAT && can_eat_food(p)) {
         eat_food(p, 0);
@@ -460,11 +422,6 @@ static void execute_switches(OsrsEnv* env, int agent_idx, int* actions) {
         p->clicks_this_tick++;
         osrs_interaction_check_interrupt(&p->interaction, OSRS_IACT_EAT);
     }
-
-    // =========================================================================
-    // PHASE 5: MOVEMENT
-    // =========================================================================
-
     int combat_action = actions[HEAD_COMBAT];
     int is_spec_loadout = (loadout_action == LOADOUT_SPEC_MELEE ||
                            loadout_action == LOADOUT_SPEC_RANGE ||
@@ -502,11 +459,6 @@ static void execute_switches(OsrsEnv* env, int agent_idx, int* actions) {
     }
     if (move_action != MOVE_NONE)
         osrs_interaction_check_interrupt(&p->interaction, OSRS_IACT_MOVE);
-
-    // =========================================================================
-    // PHASE 6: VENGEANCE
-    // =========================================================================
-
     int veng_action = actions[HEAD_VENG];
     if (veng_action == VENG_CAST && p->is_lunar_spellbook &&
         !p->veng_active && remaining_ticks(p->veng_cooldown) == 0 &&
@@ -771,10 +723,6 @@ static void execute_actions(OsrsEnv* env, int agent_idx, int* actions) {
     execute_attacks(env, agent_idx, actions);
 }
 
-// ============================================================================
-// REWARD CALCULATION
-// ============================================================================
-
 /**
  * Calculate reward for an agent.
  *
@@ -848,10 +796,7 @@ static float calculate_reward(OsrsEnv* env, int agent_idx) {
             }
         }
     }
-
-    // ==========================================================================
     // Per-tick reward shaping
-    // ==========================================================================
     float tick_shaping = 0.0f;
 
     // Damage dealt: reward aggression
@@ -878,9 +823,6 @@ static float calculate_reward(OsrsEnv* env, int agent_idx) {
             tick_shaping += cfg->wrong_prayer_penalty;
         }
     }
-
-    // NOTE: prayer switch penalty moved above !cfg->enabled gate (always-on).
-    // Not duplicated here to avoid double-counting when shaping is enabled.
 
     // Off-prayer hit and offensive prayer checks: we attacked
     if (p->just_attacked) {

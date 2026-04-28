@@ -15,10 +15,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// ============================================================================
-// EQUIPMENT SLOTS
-// ============================================================================
-
 typedef enum {
     SLOT_HEAD = 0,
     SLOT_CAPE = 1,
@@ -46,10 +42,6 @@ typedef enum {
     OSRS_ITEM_EFFECT_ELYSIAN = 1u << 7,
 } OsrsItemEffectMask;
 
-// ============================================================================
-// ITEM STRUCT
-// ============================================================================
-
 typedef struct {
     uint16_t item_id;           // Real OSRS item ID
     char name[32];              // Human-readable name
@@ -72,16 +64,9 @@ typedef struct {
     int16_t prayer;
     uint32_t effect_mask;
 } Item;
-
-// ============================================================================
 // ITEM DATABASE INDICES + STATIC DATABASE (auto-generated from equipment.json)
-// ============================================================================
 
 #include "osrs_items_generated.h"
-
-// ============================================================================
-// LOOKUP TABLES
-// ============================================================================
 
 // Max items per slot (inventory width for dynamic gear)
 #define MAX_ITEMS_PER_SLOT_DB 10
@@ -134,10 +119,6 @@ static const uint8_t NUM_ITEMS_IN_SLOT[NUM_EQUIPMENT_SLOTS] = {
     [SLOT_RING]   = 8,   // berserker, seers (i), lightbearer, venator, recoil, suffering, magus, ultor
     [SLOT_AMMO]   = 3,   // diamond bolts (e), dragon arrows, opal dragon bolts (e)
 };
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
 
 /** Get item from database by index. Returns NULL if invalid. */
 static inline const Item* get_item(uint8_t item_index) {
@@ -220,10 +201,7 @@ static inline int item_is_two_handed(uint8_t item_index) {
             return 0;
     }
 }
-
-// ============================================================================
 // ITEM STATS EXTRACTION (for observations)
-// ============================================================================
 
 /** Normalization constants for item stats (max observed values in game). */
 #define STAT_NORM_ATTACK 150.0f

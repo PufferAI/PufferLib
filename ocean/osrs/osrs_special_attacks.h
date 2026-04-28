@@ -8,7 +8,7 @@
  * SHARED FUNCTIONS:
  *   osrs_spec_cost(weapon_idx)            spec energy cost for a weapon
  *   osrs_resolve_spec(weapon, ...)        resolve spec attack, return result
- *   osrs_blowpipe_spec_resolve(...)       legacy standalone blowpipe spec
+ *   osrs_blowpipe_spec_resolve(...)       blowpipe spec helper
  *
  * ref: .refs/osrs-dps-calc/src/lib/ for multipliers,
  *      .refs/osrs-sdk/src/weapons/ for behavior,
@@ -22,9 +22,6 @@
 #include "osrs_combat.h"
 #include "osrs_items.h"
 
-/* ======================================================================== */
-/* blowpipe spec constants (moved from osrs_combat.h)                        */
-/* ======================================================================== */
 
 #define BLOWPIPE_SPEC_ACC_MULT  2
 #define BLOWPIPE_SPEC_DMG_NUM   3   /* 1.5x = 3/2 */
@@ -32,8 +29,7 @@
 #define BLOWPIPE_SPEC_HEAL_PCT  50
 #define BLOWPIPE_SPEC_COST      50
 
-/* legacy standalone blowpipe spec (moved from osrs_combat.h).
-   prefer osrs_resolve_spec(ITEM_TOXIC_BLOWPIPE, ...) for new code. */
+/* Blowpipe special helper used by encounter code and focused tests. */
 static inline int osrs_blowpipe_spec_resolve(
     int base_att_roll, int base_max_hit,
     int target_def_level, int target_ranged_def_bonus,
@@ -47,9 +43,6 @@ static inline int osrs_blowpipe_spec_resolve(
     return 0;
 }
 
-/* ======================================================================== */
-/* SpecResult: shared result struct for all special attacks                   */
-/* ======================================================================== */
 
 typedef struct {
     int num_hits;               /* number of hits (1-4) */
@@ -64,9 +57,6 @@ typedef struct {
     int attack_speed_override;  /* 0 = use weapon speed, >0 = override */
 } SpecResult;
 
-/* ======================================================================== */
-/* osrs_spec_cost: energy cost by weapon item index                          */
-/* ======================================================================== */
 
 static inline int osrs_spec_cost(int weapon_item_idx) {
     switch (weapon_item_idx) {

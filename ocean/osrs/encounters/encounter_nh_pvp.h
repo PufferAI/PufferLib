@@ -22,17 +22,11 @@ static const int NH_PVP_ACTION_DIMS[] = {
     FOOD_DIM, POTION_DIM, KARAMBWAN_DIM, VENG_DIM
 };
 
-/* ======================================================================== */
-/* encounter state: just wraps OsrsEnv                                       */
-/* ======================================================================== */
 
 typedef struct {
     OsrsEnv env;
 } NhPvpState;
 
-/* ======================================================================== */
-/* lifecycle                                                                 */
-/* ======================================================================== */
 
 static EncounterState* nh_pvp_create(void) {
     NhPvpState* s = (NhPvpState*)calloc(1, sizeof(NhPvpState));
@@ -69,9 +63,6 @@ static void nh_pvp_step(EncounterState* state, const int* actions) {
     pvp_step(&s->env);
 }
 
-/* ======================================================================== */
-/* RL interface                                                              */
-/* ======================================================================== */
 
 static void nh_pvp_write_obs(EncounterState* state, float* obs_out) {
     NhPvpState* s = (NhPvpState*)state;
@@ -99,9 +90,6 @@ static int nh_pvp_is_terminal(EncounterState* state) {
     return s->env.episode_over;
 }
 
-/* ======================================================================== */
-/* entity access                                                             */
-/* ======================================================================== */
 
 static int nh_pvp_get_entity_count(EncounterState* state) {
     (void)state;
@@ -113,9 +101,6 @@ static void* nh_pvp_get_entity(EncounterState* state, int index) {
     return &s->env.players[index];
 }
 
-/* ======================================================================== */
-/* render entity population                                                  */
-/* ======================================================================== */
 
 static void nh_pvp_fill_render_entities(EncounterState* state, RenderEntity* out, int max_entities, int* count) {
     NhPvpState* s = (NhPvpState*)state;
@@ -126,9 +111,6 @@ static void nh_pvp_fill_render_entities(EncounterState* state, RenderEntity* out
     *count = n;
 }
 
-/* ======================================================================== */
-/* config                                                                    */
-/* ======================================================================== */
 
 static void nh_pvp_put_int(EncounterState* state, const char* key, int value) {
     NhPvpState* s = (NhPvpState*)state;
@@ -160,9 +142,6 @@ static void nh_pvp_put_ptr(EncounterState* state, const char* key, void* value) 
     }
 }
 
-/* ======================================================================== */
-/* logging and state queries                                                 */
-/* ======================================================================== */
 
 static void* nh_pvp_get_log(EncounterState* state) {
     NhPvpState* s = (NhPvpState*)state;
@@ -179,9 +158,6 @@ static int nh_pvp_get_winner(EncounterState* state) {
     return s->env.winner;
 }
 
-/* ======================================================================== */
-/* encounter definition                                                      */
-/* ======================================================================== */
 
 static const EncounterDef ENCOUNTER_NH_PVP = {
     .name = "nh_pvp",

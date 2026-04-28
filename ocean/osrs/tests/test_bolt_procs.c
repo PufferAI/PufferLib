@@ -18,9 +18,6 @@
 
 #include "ocean/osrs/osrs_bolt_procs.h"
 
-/* ======================================================================== */
-/* test harness                                                              */
-/* ======================================================================== */
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -48,9 +45,6 @@ static int tests_failed = 0;
     } \
 } while (0)
 
-/* ======================================================================== */
-/* 1. diamond proc chance: ~11% over 10000 trials                           */
-/* ======================================================================== */
 
 static void test_diamond_proc_chance(void) {
     printf("test_diamond_proc_chance\n");
@@ -66,9 +60,6 @@ static void test_diamond_proc_chance(void) {
     ASSERT_FLOAT_RANGE("diamond proc rate ~11%", rate, 0.08f, 0.14f);
 }
 
-/* ======================================================================== */
-/* 2. diamond effect max: floor(max_hit * 115/100) normal, 126/100 ZCB     */
-/* ======================================================================== */
 
 static void test_diamond_effect_max(void) {
     printf("test_diamond_effect_max\n");
@@ -101,9 +92,6 @@ static void test_diamond_effect_max(void) {
     ASSERT_INT_EQ("diamond ZCB max_seen <= 63", max_seen_zcb <= 63, 1);
 }
 
-/* ======================================================================== */
-/* 3. diamond ZCB spec: guaranteed proc on accurate hit, enhanced effectMax */
-/* ======================================================================== */
 
 static void test_diamond_zcb_spec(void) {
     printf("test_diamond_zcb_spec\n");
@@ -118,9 +106,6 @@ static void test_diamond_zcb_spec(void) {
     ASSERT_INT_EQ("diamond ZCB spec guaranteed proc", procs, trials);
 }
 
-/* ======================================================================== */
-/* 4. diamond miss: no proc on miss (unless ZCB spec)                       */
-/* ======================================================================== */
 
 static void test_diamond_miss(void) {
     printf("test_diamond_miss\n");
@@ -144,9 +129,6 @@ static void test_diamond_miss(void) {
     ASSERT_INT_EQ("diamond ZCB spec procs on miss", zcb_procs, 100);
 }
 
-/* ======================================================================== */
-/* 5. opal bonus damage: floor(99/10)=9 normal, floor(99/9)=11 ZCB         */
-/* ======================================================================== */
 
 static void test_opal_bonus_damage(void) {
     printf("test_opal_bonus_damage\n");
@@ -174,9 +156,6 @@ static void test_opal_bonus_damage(void) {
     ASSERT_INT_EQ("opal normal proc found", found_normal_bonus, 1);
 }
 
-/* ======================================================================== */
-/* 6. opal works on miss: proc can trigger when hit_accurate=0              */
-/* ======================================================================== */
 
 static void test_opal_works_on_miss(void) {
     printf("test_opal_works_on_miss\n");
@@ -191,9 +170,6 @@ static void test_opal_works_on_miss(void) {
     ASSERT_INT_EQ("opal procs on miss", procs > 0, 1);
 }
 
-/* ======================================================================== */
-/* 7. opal proc chance: ~5.5% over many trials                              */
-/* ======================================================================== */
 
 static void test_opal_proc_chance(void) {
     printf("test_opal_proc_chance\n");
@@ -209,9 +185,6 @@ static void test_opal_proc_chance(void) {
     ASSERT_FLOAT_RANGE("opal proc rate ~5.5%", rate, 0.04f, 0.07f);
 }
 
-/* ======================================================================== */
-/* 8. ruby HP-based damage: 500HP → normal=100, ZCB=110                     */
-/* ======================================================================== */
 
 static void test_ruby_hp_based_damage(void) {
     printf("test_ruby_hp_based_damage\n");
@@ -237,9 +210,6 @@ static void test_ruby_hp_based_damage(void) {
     ASSERT_INT_EQ("ruby normal proc found", found, 1);
 }
 
-/* ======================================================================== */
-/* 9. ruby cap: 1000HP capped at 100 (normal) / 110 (ZCB)                  */
-/* ======================================================================== */
 
 static void test_ruby_cap(void) {
     printf("test_ruby_cap\n");
@@ -264,9 +234,6 @@ static void test_ruby_cap(void) {
     ASSERT_INT_EQ("ruby normal cap proc found", found, 1);
 }
 
-/* ======================================================================== */
-/* 10. ruby miss: no proc on miss                                           */
-/* ======================================================================== */
 
 static void test_ruby_miss(void) {
     printf("test_ruby_miss\n");
@@ -280,9 +247,6 @@ static void test_ruby_miss(void) {
     ASSERT_INT_EQ("ruby miss = no proc", procs, 0);
 }
 
-/* ======================================================================== */
-/* 11. ruby ZCB spec: guaranteed proc + enhanced                            */
-/* ======================================================================== */
 
 static void test_ruby_zcb_spec(void) {
     printf("test_ruby_zcb_spec\n");
@@ -299,9 +263,6 @@ static void test_ruby_zcb_spec(void) {
     ASSERT_INT_EQ("ruby ZCB spec guaranteed", procs, trials);
 }
 
-/* ======================================================================== */
-/* 12. unknown bolt: dragon arrows → no proc                                */
-/* ======================================================================== */
 
 static void test_unknown_bolt(void) {
     printf("test_unknown_bolt\n");
@@ -317,9 +278,6 @@ static void test_unknown_bolt(void) {
     ASSERT_INT_EQ("unknown bolt + ZCB no proc", r2.proc_triggered, 0);
 }
 
-/* ======================================================================== */
-/* 13. edge cases: max_hit=0, ranged_level=1, target_hp=1                   */
-/* ======================================================================== */
 
 static void test_edge_cases(void) {
     printf("test_edge_cases\n");
@@ -349,9 +307,6 @@ static void test_edge_cases(void) {
     ASSERT_INT_EQ("diamond dragon bolts proc", rdd.proc_triggered, 1);
 }
 
-/* ======================================================================== */
-/* main                                                                      */
-/* ======================================================================== */
 
 int main(void) {
     printf("=== bolt proc tests ===\n\n");

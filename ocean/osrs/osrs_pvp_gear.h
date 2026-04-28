@@ -15,10 +15,6 @@
 #include "osrs_combat.h"
 #include "osrs_item_effects.h"
 
-// ============================================================================
-// MELEE SPEC WEAPON BONUS TYPES
-// ============================================================================
-
 static const MeleeBonusType MELEE_SPEC_BONUS_TYPES[] = {
     [MELEE_SPEC_NONE] = MELEE_BONUS_SLASH,
     [MELEE_SPEC_AGS] = MELEE_BONUS_SLASH,
@@ -37,10 +33,7 @@ static const MeleeBonusType MELEE_SPEC_BONUS_TYPES[] = {
     [MELEE_SPEC_DRAGON_MACE] = MELEE_BONUS_CRUSH,
     [MELEE_SPEC_ABYSSAL_BLUDGEON] = MELEE_BONUS_CRUSH,
 };
-
-// ============================================================================
 // WEAPON PRIORITY TABLES (best to worst within each style)
-// ============================================================================
 
 static const uint8_t MELEE_WEAPON_PRIORITY[] = {
     ITEM_VESTAS, ITEM_GHRAZI_RAPIER, ITEM_INQUISITORS_MACE, ITEM_ELDER_MAUL,
@@ -59,10 +52,6 @@ static const uint8_t MAGE_WEAPON_PRIORITY[] = {
 };
 #define MAGE_WEAPON_PRIORITY_LEN 5
 
-// ============================================================================
-// SPEC WEAPON PRIORITY TABLES
-// ============================================================================
-
 static const uint8_t MELEE_SPEC_PRIORITY[] = {
     ITEM_VESTAS, ITEM_ANCIENT_GS, ITEM_AGS, ITEM_DRAGON_CLAWS,
     ITEM_VOIDWAKER, ITEM_STATIUS_WARHAMMER, ITEM_DRAGON_DAGGER
@@ -80,10 +69,7 @@ static const uint8_t MAGIC_SPEC_PRIORITY[] = {
     ITEM_VOLATILE_STAFF
 };
 #define MAGIC_SPEC_PRIORITY_LEN 1
-
-// ============================================================================
 // ARMOR PRIORITY TABLES (per style)
-// ============================================================================
 
 // Body armor
 static const uint8_t TANK_BODY_PRIORITY[] = {
@@ -154,10 +140,7 @@ static const uint8_t MELEE_RING_PRIORITY[] = {ITEM_BERSERKER_RING};
 
 static const uint8_t MAGE_RING_PRIORITY[] = {ITEM_LIGHTBEARER, ITEM_SEERS_RING_I, ITEM_BERSERKER_RING};
 #define MAGE_RING_PRIORITY_LEN 3
-
-// ============================================================================
 // SLOT-BASED GEAR COMPUTATION FROM EQUIPPED[] ARRAY
-// ============================================================================
 
 /**
  * Compute total gear bonuses from equipped[] array.
@@ -175,10 +158,6 @@ static inline GearBonuses* get_slot_gear_bonuses(Player* p) {
     osrs_ensure_player_equipment(p);
     return &p->slot_cached_bonuses;
 }
-
-// ============================================================================
-// SPEC WEAPON MAPPING
-// ============================================================================
 
 /** Set spec weapon enums based on equipped weapon. */
 static inline void update_spec_weapons_for_weapon(Player* p, uint8_t weapon_item) {
@@ -246,10 +225,6 @@ static inline int item_is_spec_weapon(uint8_t weapon_item) {
     }
 }
 
-// ============================================================================
-// EQUIP AND GEAR DETECTION
-// ============================================================================
-
 /**
  * Equip item in slot-based mode.
  * Returns 1 if equipment changed, 0 if already equipped.
@@ -303,10 +278,6 @@ static inline int slot_equip_item(Player* p, int gear_slot, uint8_t item_idx) {
     return 1;
 }
 
-// ============================================================================
-// INVENTORY SEARCH HELPERS
-// ============================================================================
-
 /** Check if player has an item in the given slot's inventory. */
 static inline int player_has_item_in_slot(Player* p, int gear_slot, uint8_t item_idx) {
     for (int i = 0; i < p->num_items_in_slot[gear_slot]; i++) {
@@ -350,10 +321,6 @@ static inline uint8_t find_best_magic_spec(Player* p) {
 static inline int player_has_gmaul(Player* p) {
     return player_has_item_in_slot(p, GEAR_SLOT_WEAPON, ITEM_GRANITE_MAUL);
 }
-
-// ============================================================================
-// DYNAMIC LOADOUT RESOLUTION
-// ============================================================================
 
 /**
  * Resolve loadout for a given style from available inventory.
@@ -577,10 +544,6 @@ static inline int get_current_loadout(Player* p) {
     return 0;
 }
 
-// ============================================================================
-// LOADOUT-TO-GEAR MAPPING
-// ============================================================================
-
 /** Visible GearSet for each loadout (actual damage type, no GEAR_SPEC). */
 static inline GearSet loadout_to_gear_set(int loadout) {
     switch (loadout) {
@@ -595,10 +558,6 @@ static inline GearSet loadout_to_gear_set(int loadout) {
         default:                 return GEAR_MELEE;
     }
 }
-
-// ============================================================================
-// EQUIPMENT INIT
-// ============================================================================
 
 /** Get attack style for currently equipped weapon. */
 static inline AttackStyle get_slot_weapon_attack_style(Player* p) {
@@ -702,10 +661,6 @@ static inline int add_item_to_inventory(Player* p, int gear_slot, uint8_t item_i
     return 1;
 }
 
-// ============================================================================
-// UPGRADE REPLACEMENT TABLE
-// ============================================================================
-
 // Maps each loot item to the basic item it replaces (ITEM_NONE = doesn't replace)
 static const uint8_t UPGRADE_REPLACES[NUM_ITEMS] = {
     [ITEM_HELM_NEITIZNOT]       = ITEM_NONE,
@@ -795,10 +750,7 @@ static inline int remove_item_from_inventory(Player* p, int gear_slot, uint8_t i
 static inline int item_to_gear_slot(uint8_t item_idx) {
     return osrs_item_gear_slot(item_idx);
 }
-
-// ============================================================================
 // LOOT UPGRADE + 28-SLOT INVENTORY MODEL
-// ============================================================================
 
 // Chain upgrades: loot items that also obsolete other loot items.
 // UPGRADE_REPLACES handles basic→loot, these handle loot→loot chains.
@@ -932,10 +884,7 @@ static inline void add_loot_item(Player* p, uint8_t item_idx) {
     }
 
 }
-
-// ============================================================================
 // DYNAMIC FOOD COUNT (28-slot inventory model)
-// ============================================================================
 
 #define FIXED_INVENTORY_SLOTS 11  // 4 brews + 2 restores + 1 combat + 1 ranged + 2 karambwan + 1 rune pouch
 
@@ -956,10 +905,6 @@ static inline int compute_food_count(Player* p) {
     int food = 28 - FIXED_INVENTORY_SLOTS - switches;
     return food > 1 ? food : 1;
 }
-
-// ============================================================================
-// GEAR TIER RANDOMIZATION
-// ============================================================================
 
 // Loot tables for gear tiers (items that can drop from LMS chests)
 // Each chest gives 2 rolls from the same combined pool
@@ -1078,7 +1023,7 @@ static inline int sample_gear_tier(float weights[4], uint32_t* rng) {
         cumulative += weights[i];
         if (r < cumulative) return i;
     }
-    return 0; // Fallback to tier 0
+    return 0;
 }
 
 #endif // OSRS_PVP_GEAR_H

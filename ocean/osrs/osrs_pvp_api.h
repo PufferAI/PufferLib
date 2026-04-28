@@ -20,10 +20,6 @@
 #include "osrs_pvp_observations.h"
 #include "osrs_pvp_actions.h"
 
-// ============================================================================
-// PLAYER INITIALIZATION
-// ============================================================================
-
 /**
  * Initialize a player with default pure build stats and gear.
  *
@@ -209,10 +205,6 @@ static void init_player(Player* p) {
     p->prev_hp_percent = 1.0f;  // Full HP at start
 }
 
-// ============================================================================
-// FIGHT POSITIONING
-// ============================================================================
-
 /**
  * Set initial fight positions for both players.
  *
@@ -270,10 +262,6 @@ static void set_fight_positions(OsrsEnv* env) {
     env->players[1].dest_y = y1;
     env->players[1].is_moving = 0;
 }
-
-// ============================================================================
-// PUBLIC API
-// ============================================================================
 
 /**
  * Initialize internal buffer pointers for ocean pattern.
@@ -373,8 +361,6 @@ void pvp_reset(OsrsEnv* env) {
     }
     env->pid_shuffle_countdown = 100 + rand_int(env, 51); // 100-150 ticks
 
-    // NOTE: is_lms is NOT reset here - it's controlled by set_lms() from Python
-    // env->is_lms = 0;
     env->pvp_runtime.is_pvp_arena = 0;
 
     env->_episode_return = 0.0f;
@@ -382,9 +368,6 @@ void pvp_reset(OsrsEnv* env) {
     memset(env->rewards, 0, NUM_AGENTS * sizeof(float));
     memset(env->terminals, 0, NUM_AGENTS);
 
-    // Clear action buffers. With immediate application, pending is not used
-    // for timing - actions are applied in the same step they're input.
-    // This gives OSRS-correct 1-tick delay: action at tick N → effects at tick N+1.
     memset(env->pending_actions, 0, sizeof(env->pending_actions));
     memset(env->last_executed_actions, 0, sizeof(env->last_executed_actions));
 
@@ -465,10 +448,6 @@ void pvp_step(OsrsEnv* env) {
     reset_tick_flags(&env->players[0]);
     reset_tick_flags(&env->players[1]);
 
-    // ========================================================================
-    // PHASE 1: Gather actions from all sources into env->actions
-    // ========================================================================
-
     // Copy model's actions (player 0) or clear if C opponent controls p0
     if (env->pvp_runtime.use_c_opponent_p0) {
         memset(env->actions, 0, NUM_ACTION_HEADS * sizeof(int));
@@ -509,10 +488,6 @@ void pvp_step(OsrsEnv* env) {
 
     int first = env->pid_holder;
     int second = 1 - env->pid_holder;
-
-    // ========================================================================
-    // PHASE 2: Apply actions IMMEDIATELY (not pending from previous step)
-    // ========================================================================
 
     // Copy actions to local arrays for each agent
     int actions_p0[NUM_ACTION_HEADS];
@@ -645,10 +620,6 @@ void pvp_step(OsrsEnv* env) {
     if (env->players[1].veng_active) {
         env->players[0].observed_target_lunar_spellbook = 1;
     }
-
-    // ========================================================================
-    // PHASE 3: Increment tick
-    // ========================================================================
     env->tick++;
 
     if (!env->has_rng_seed) {
@@ -659,13 +630,8 @@ void pvp_step(OsrsEnv* env) {
         }
     }
 
-    // Keep pending in sync for compatibility (not used for timing anymore)
     memcpy(env->pending_actions, env->actions,
            NUM_AGENTS * NUM_ACTION_HEADS * sizeof(int));
-
-    // ========================================================================
-    // PHASE 4: Check win conditions
-    // ========================================================================
     for (int i = 0; i < NUM_AGENTS; i++) {
         if (env->players[i].current_hitpoints <= 0) {
             env->episode_over = 1;
@@ -678,10 +644,6 @@ void pvp_step(OsrsEnv* env) {
         env->episode_over = 1;
         env->winner = 1;
     }
-
-    // ========================================================================
-    // PHASE 5: Calculate rewards
-    // ========================================================================
     for (int i = 0; i < NUM_AGENTS; i++) {
         env->rewards[i] = calculate_reward(env, i);
 
@@ -692,19 +654,12 @@ void pvp_step(OsrsEnv* env) {
 
     // Accumulate agent 0's episode return (written to log at episode end)
     env->_episode_return += env->rewards[0];
-
-    // ========================================================================
-    // PHASE 6: Generate observations (current state, BEFORE new actions apply)
-    // ========================================================================
     for (int i = 0; i < NUM_AGENTS; i++) {
         generate_slot_observations(env, i);
         if (env->action_masks != NULL && (env->action_masks_agents & (1 << i))) {
             compute_action_masks(env, i);
         }
     }
-
-    // NOTE: reset_tick_flags() moved to START of pvp_step() so flags survive
-    // for get_state() to read after step returns
 
     // Write observations to PufferLib shared buffer
     ocean_write_obs(env);

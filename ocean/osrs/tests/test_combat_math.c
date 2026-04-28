@@ -28,9 +28,6 @@
 #include "ocean/osrs/osrs_encounter.h"
 #include "ocean/osrs/osrs_special_attacks.h"
 
-/* ======================================================================== */
-/* test harness                                                              */
-/* ======================================================================== */
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -1066,9 +1063,6 @@ static void test_edge_cases(void) {
     ASSERT_INT_EQ("lv1 magic max", stats.max_hit, 30);
 }
 
-/* ======================================================================== */
-/* main                                                                      */
-/* ======================================================================== */
 
 int main(void) {
     printf("=== combat math tests (cross-referenced with osrs-dps-calc) ===\n\n");

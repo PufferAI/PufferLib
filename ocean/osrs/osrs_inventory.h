@@ -26,9 +26,6 @@ typedef struct {
     uint8_t inventory[OSRS_INVENTORY_SIZE];
 } OsrsInventory;
 
-/* ======================================================================== */
-/* inventory management                                                      */
-/* ======================================================================== */
 
 /** initialize inventory: all slots to ITEM_NONE. */
 static inline void osrs_inventory_init(OsrsInventory* inv) {
@@ -86,9 +83,6 @@ static inline int osrs_inventory_remove_item(OsrsInventory* inv, uint8_t item_id
     return 1;
 }
 
-/* ======================================================================== */
-/* gear slot mapping                                                         */
-/* ======================================================================== */
 
 /** map item index to its gear slot. returns GearSlotIndex or -1 if unmapped.
     replaces item_to_gear_slot() in osrs_pvp_gear.h:820. */
@@ -110,9 +104,6 @@ static inline int osrs_item_gear_slot(uint8_t item_idx) {
     }
 }
 
-/* ======================================================================== */
-/* equipment management                                                      */
-/* ======================================================================== */
 
 /** equip item directly (not from inventory -- used for initial setup).
     places item in correct gear slot, no inventory interaction.

@@ -69,9 +69,6 @@
 /* opaque encounter state — each encounter defines its own struct */
 typedef struct EncounterState EncounterState;
 
-/* ======================================================================== */
-/* shared pending hit system for delayed projectile damage                   */
-/* ======================================================================== */
 
 #define ENCOUNTER_MAX_PENDING_HITS 8
 
@@ -227,9 +224,6 @@ static inline void encounter_set_projectile_offset(
     ov->projectiles[projectile_idx].offset_z = offset_z;
 }
 
-/* ======================================================================== */
-/* render entity: shared abstraction for renderer (value type, not pointer)  */
-/* ======================================================================== */
 
 typedef struct {
     EntityType entity_type;
@@ -388,9 +382,6 @@ static inline int encounter_apply_offensive_action(OffensivePrayer* offensive, i
     return activating;
 }
 
-/* ======================================================================== */
-/* shared movement: 25-action system (idle + 8 walk + 16 run)                */
-/* ======================================================================== */
 
 /* 25 movement actions: idle(0), walk(1-8), run(9-24) */
 #define ENCOUNTER_MOVE_ACTIONS 25
@@ -459,9 +450,6 @@ static inline int encounter_move_to_target(
     return steps;
 }
 
-/* ======================================================================== */
-/* shared BFS click-to-move (human mode + destination-based movement)        */
-/* ======================================================================== */
 
 /* shared BFS pathfind wrapper — translates local coords to world coords for pathfind_step.
    extra_blocked/blocked_ctx: optional callback for dynamic obstacles (pillars etc.).
@@ -532,9 +520,6 @@ static inline int encounter_move_toward_dest(
     return steps;
 }
 
-/* ======================================================================== */
-/* shared attack-target chase (auto-walk toward out-of-range target)         */
-/* ======================================================================== */
 
 /* footprint helpers for player-vs-target chase and range checks. */
 static inline int encounter_entity_footprint_distance(
@@ -732,9 +717,6 @@ static inline int encounter_chase_attack_target(
     return steps > 0 ? 1 : 0;
 }
 
-/* ======================================================================== */
-/* shared NPC step-out-from-under (OSRS: NPC shuffles off player tile)       */
-/* ======================================================================== */
 
 typedef int (*encounter_npc_blocked_fn)(void* ctx, int x, int y, int size);
 typedef int (*encounter_npc_overlap_hold_fn)(void* ctx);
@@ -790,9 +772,6 @@ static inline int encounter_npc_step_out_from_under(
     return ENCOUNTER_NPC_UNDER_PLAYER_NONE;
 }
 
-/* ======================================================================== */
-/* shared NPC greedy pathfinding                                             */
-/* ======================================================================== */
 
 /** check if the leading edge tiles are clear for an NPC moving in direction (dx, dy).
     for size>1 NPCs, OSRS checks the tiles along the leading edge that the NPC
@@ -948,9 +927,6 @@ static inline void encounter_damage_npc(
     *hit_damage = damage > 0 ? damage : 0;
 }
 
-/* ======================================================================== */
-/* shared NPC pending hit resolution (barrage freeze + blood heal)           */
-/* ======================================================================== */
 
 /** resolve a single NPC's pending hit. tick down, apply damage when it lands.
     ice barrage: sets *frozen_ticks = BARRAGE_FREEZE_TICKS on hit.
@@ -1013,8 +989,6 @@ static inline void encounter_resolve_player_pending_hits(
         if (hits[i].ticks_remaining <= 0) {
             int dmg = hits[i].damage;
             if (hits[i].check_prayer) {
-                /* legacy path: delay was 0 and check_prayer never decremented.
-                   happens if encounter sets check_prayer=1 with no delay — check now. */
                 if (encounter_prayer_correct_for_style(active_prayer, hits[i].attack_style)) {
                     dmg = 0;
                     if (prayer_correct_count) (*prayer_correct_count)++;
@@ -1022,16 +996,9 @@ static inline void encounter_resolve_player_pending_hits(
                     if (off_prayer_hit_count) (*off_prayer_hit_count)++;
                 }
             } else if (dmg > 0 && hits[i].attack_style != ATTACK_STYLE_NONE) {
-                /* Even if check_prayer was done at launch (e.g. non-Jad mobs), 
-                   it only zeroed dmg if correctly prayed AT LAUNCH.
-                   Wait, actually, for non-Jad, check_prayer is 0 and dmg is already computed.
-                   If dmg > 0, it means we took a hit. Was it an off-prayer hit? 
-                   Yes, because if we prayed correctly at launch, dmg would be 0.
-                   BUT we don't know if we just missed the pray or if it was typeless.
-                   We assume ATTACK_STYLE_NONE is typeless. */
                 if (off_prayer_hit_count) (*off_prayer_hit_count)++;
             }
-            
+
             encounter_damage_player(player, dmg, damage_received_acc);
             hits[i] = hits[--(*hit_count)];
             i--;
@@ -1039,9 +1006,6 @@ static inline void encounter_resolve_player_pending_hits(
     }
 }
 
-/* ======================================================================== */
-/* shared per-tick flag clearing for encounters                              */
-/* ======================================================================== */
 
 /** clear all per-tick animation/event flags on a player.
     call at the start of each encounter tick, then set flags as events happen.
@@ -1058,9 +1022,6 @@ static inline void encounter_clear_tick_flags(Player* p) {
     p->used_special_this_tick = 0;
 }
 
-/* ======================================================================== */
-/* shared reset helpers                                                      */
-/* ======================================================================== */
 
 /** resolve RNG seed for encounter reset. priority: explicit seed > saved state > default.
     all encounters MUST use this to ensure consistent RNG initialization. */
@@ -1504,9 +1465,6 @@ static inline int encounter_use_spec(Player* p, int cost) {
     return 1;
 }
 
-/* ======================================================================== */
-/* shared gear switching helpers for encounters                              */
-/* ======================================================================== */
 
 /** apply a full static loadout to player equipment and set gear state.
     used by Zulrah, Inferno, and future boss encounters with fixed loadouts. */
@@ -1549,9 +1507,6 @@ static void encounter_populate_inventory(
     }
 }
 
-/* ======================================================================== */
-/* shared human input translate helpers                                      */
-/* ======================================================================== */
 
 /** translate movement: convert absolute tile to 8-directional walk action.
     writes to actions[head_move]. head_move < 0 = skip. */
@@ -1601,9 +1556,6 @@ static inline void encounter_translate_target(HumanInput* hi, int* actions, int 
     actions[head_target] = hi->pending_target_idx + 1;
 }
 
-/* ======================================================================== */
-/* encounter definition (vtable)                                             */
-/* ======================================================================== */
 
 typedef struct {
     const char* name;           /* "nh_pvp", "cerberus", "jad", etc. */
@@ -1671,9 +1623,6 @@ typedef struct {
     int (*get_winner)(EncounterState* state);
 } EncounterDef;
 
-/* ======================================================================== */
-/* encounter registry                                                        */
-/* ======================================================================== */
 
 #define MAX_ENCOUNTERS 32
 

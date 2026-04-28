@@ -92,10 +92,6 @@ static int g_best_ticks = 999999;
 static int g_best_min_zuk_hp = 999999;  /* lowest Zuk HP reached (for Zuk-only training) */
 
 void c_step(Env* env) {
-    /* tick pacing lives in c_render — it blocks at the tick deadline calling
-       pvp_render at ~60fps so sub-tile interpolation can animate between sim
-       ticks. nothing to do here timing-wise. */
-
     int used_human_commands = 0;
     RenderClient* render_client = (RenderClient*)env->render_env.client;
 
@@ -625,14 +621,11 @@ void my_log(Log* log, Dict* out) {
     float unavoidable_rate = (off_prayer > 0.0f)
         ? log->unavoidable_off_prayer / off_prayer : 0.0f;
     dict_set(out, "unavoidable_off_prayer_rate", unavoidable_rate);
-    //dict_set(out, "unavoidable_off_prayer", log->unavoidable_off_prayer);
 
     dict_set(out, "brews_remaining", log->brews_remaining);
     dict_set(out, "restores_remaining", log->restores_remaining);
     dict_set(out, "prayer_at_death", log->prayer_at_death);
 
-    //dict_set(out, "npc_kills", log->npc_kills);
-    //dict_set(out, "gear_switches", log->gear_switches);
     dict_set(out, "current_ranged", log->current_ranged);
     dict_set(out, "current_magic", log->current_magic);
     dict_set(out, "behind_shield_pct", log->behind_shield_pct);
