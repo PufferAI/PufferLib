@@ -396,19 +396,9 @@ static FPClient* make_fp_client(void) {
     cl->frame = 0;
     cl->ground_offset = 0.0f;
 
-    const char* tex_paths[] = {
-        "/home/amma/PufferLib/resources/cpr/inflated_puff.png",
-        "resources/cpr/inflated_puff.png",
-        "../resources/cpr/inflated_puff.png",
-        "inflated_puff.png",
-    };
-    for (int i = 0; i < 4; i++) {
-        if (FileExists(tex_paths[i])) {
-            cl->puffer_tex = LoadTexture(tex_paths[i]);
-            cl->has_puffer = true;
-            break;
-        }
-    }
+    cl->puffer_tex = LoadTexture("../resources/flappy_puffer/inflated_puff.png");
+    cl->has_puffer = true;
+    
 
     unsigned int rng = (unsigned int)time(NULL);
     for (int i = 0; i < NUM_CLOUDS; i++) {
