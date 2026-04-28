@@ -191,6 +191,30 @@ if [ -z "$CUDNN_LFLAG" ]; then
     CUDNN_LFLAG=$(python -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
 fi
 
+# NCCL include/lib fallback (mirrors the cuDNN fallback above).
+# Needed when NCCL is provided by the nvidia-nccl-cu12 wheel in the active venv.
+NCCL_IFLAG=""
+NCCL_LFLAG=""
+for dir in /usr/include /usr/local/cuda/include; do
+    if [ -f "$dir/nccl.h" ]; then NCCL_IFLAG="-I$dir"; break; fi
+done
+for dir in /usr/lib/x86_64-linux-gnu /usr/local/cuda/lib64; do
+    if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then NCCL_LFLAG="-L$dir"; break; fi
+done
+if [ -z "$NCCL_IFLAG" ]; then
+    NCCL_IFLAG=$(python -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
+fi
+if [ -z "$NCCL_LFLAG" ]; then
+    NCCL_LFLAG=$(python -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
+fi
+
+WHEEL_RPATH_FLAGS=()
+for lib_flag in "$CUDNN_LFLAG" "$NCCL_LFLAG"; do
+    if [[ "$lib_flag" == -L* ]]; then
+        WHEEL_RPATH_FLAGS+=("-Wl,-rpath,${lib_flag#-L}")
+    fi
+done
+
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
 export CCACHE_BASEDIR="$(pwd)"
 export CCACHE_COMPILERCHECK=content
@@ -215,7 +239,7 @@ if [ ! -f "$BINDING_SRC" ]; then
 fi
 
 echo "Compiling static library for $ENV..."
-${CC:-clang} -c "${CLANG_OPT[@]}" \
+${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
     -I. -Isrc -I$SRC_DIR -Ivendor \
     -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
     -DPLATFORM_DESKTOP \
@@ -240,7 +264,7 @@ if [ -z "$MODE" ]; then
         -std=c++17 \
         -I. -Isrc \
         -I$PYTHON_INCLUDE -I$PYBIND_INCLUDE -I$NUMPY_INCLUDE \
-        -I$CUDA_HOME/include $CUDNN_IFLAG -I$RAYLIB_NAME/include \
+        -I$CUDA_HOME/include $CUDNN_IFLAG $NCCL_IFLAG -I$RAYLIB_NAME/include \
         -Xcompiler=-fopenmp \
         -DOBS_TENSOR_T=$OBS_TENSOR_T \
         -DENV_NAME=$ENV \
@@ -250,7 +274,8 @@ if [ -z "$MODE" ]; then
     LINK_CMD=(
         ${CXX:-g++} -shared -fPIC -fopenmp
         build/bindings.o "$STATIC_LIB" "$RAYLIB_A"
-        -L$CUDA_HOME/lib64 $CUDNN_LFLAG
+        -L$CUDA_HOME/lib64 $CUDNN_LFLAG $NCCL_LFLAG
+        "${WHEEL_RPATH_FLAGS[@]}"
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
         $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
@@ -285,7 +310,7 @@ elif [ "$MODE" = "profile" ]; then
     echo "Compiling profile binary ($ARCH)..."
     $NVCC $NVCC_OPT -arch=$ARCH -std=c++17 \
         -I. -Isrc -I$SRC_DIR -Ivendor \
-        -I$CUDA_HOME/include $CUDNN_IFLAG -I$RAYLIB_NAME/include \
+        -I$CUDA_HOME/include $CUDNN_IFLAG $NCCL_IFLAG -I$RAYLIB_NAME/include \
         -DOBS_TENSOR_T=$OBS_TENSOR_T \
         -DENV_NAME=$ENV \
         -Xcompiler=-DPLATFORM_DESKTOP \

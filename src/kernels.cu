@@ -153,6 +153,18 @@ __device__ __forceinline__ float logaddexp(float a, float b) {
     return (diff < -88.0f) ? m : m + log1pf(__expf(diff));
 }
 
+//TODO: Speed up. The previous version was misaligned.
+__device__ __forceinline__ void copy_bytes(
+    const char* __restrict__ src, char* __restrict__ dst,
+    int src_row, int dst_row, int row_bytes) {
+    const char* s = src + (int64_t)src_row * row_bytes;
+    char* d = dst + (int64_t)dst_row * row_bytes;
+    for (int i = threadIdx.x; i < row_bytes; i += blockDim.x) {
+        d[i] = s[i];
+    }
+}
+
+/*
 __device__ __forceinline__ void copy_bytes(const char* __restrict__ src,
         char* __restrict__ dst, int src_row, int dst_row, int row_bytes) {
     const int* soffset = (const int*)(src + (int64_t)src_row * row_bytes);
@@ -161,6 +173,7 @@ __device__ __forceinline__ void copy_bytes(const char* __restrict__ src,
         doffset[i] = soffset[i];
     }
 }
+*/
 
 // Transpose dims 0,1: [A, B, C] -> [B, A, C]. For 2D, pass C=1.
 __global__ void transpose_102(precision_t* __restrict__ dst,

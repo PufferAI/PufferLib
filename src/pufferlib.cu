@@ -494,14 +494,16 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
 
     cudaStream_t current_stream = tl_stream;
     if (pufferl->rollout_captured) {
-        cudaGraphLaunch(pufferl->fused_rollout_cudagraphs[graph], current_stream);
+        assert(cudaGraphLaunch(pufferl->fused_rollout_cudagraphs[graph], current_stream) == cudaSuccess
+                && "cudaGraphLaunch failed");
         profile_end(hypers.profile);
         return;
     }
 
     bool capturing = pufferl->epoch == hypers.cudagraphs;
     if (capturing) {
-        cudaStreamBeginCapture(current_stream, cudaStreamCaptureModeGlobal);
+        assert(cudaStreamBeginCapture(current_stream, cudaStreamCaptureModeGlobal) == cudaSuccess
+                && "cudaStreamBeginCapture failed");
     }
 
     RolloutBuf& rollouts = pufferl->rollouts;
@@ -552,9 +554,11 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
 
     if (capturing) {
         cudaGraph_t _graph;
-        cudaStreamEndCapture(current_stream, &_graph);
-        cudaGraphInstantiate(&pufferl->fused_rollout_cudagraphs[graph], _graph, 0);
-        cudaGraphDestroy(_graph);
+        assert(cudaStreamEndCapture(current_stream, &_graph) == cudaSuccess
+                && "cudaStreamEndCapture failed");
+        assert(cudaGraphInstantiate(&pufferl->fused_rollout_cudagraphs[graph], _graph, 0) == cudaSuccess
+                && "cudaGraphInstantiate failed");
+        assert(cudaGraphDestroy(_graph) == cudaSuccess && "cudaGraphDestroy failed");
         cudaDeviceSynchronize();
     }
     profile_end(hypers.profile);
@@ -1008,39 +1012,41 @@ __global__ void compute_prio_imp_weights(
     }
 }
 
-// Multinomial with replacement (uses cuRAND)
-__global__ void multinomial_sample(
-        int* __restrict__ out_idx, const float* __restrict__ probs,
-        float* __restrict__ cdf, int B, int num_samples,
-        uint64_t seed, int64_t* __restrict__ offset_ptr) {
-    int tid = threadIdx.x;
-    if (tid == 0) {
+__global__ void build_cdf(
+    float* __restrict__ cdf, const float* __restrict__ probs, int B) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
         float cum = 0.0f;
         for (int i = 0; i < B; i++) {
             cum += probs[i];
             cdf[i] = cum;
         }
     }
-    __syncthreads();
-    if (tid < num_samples) {
-        uint64_t base_off = *offset_ptr;
-        curandStatePhilox4_32_10_t rng_state;
-        curand_init(seed, base_off + tid, 0, &rng_state);
-        float u = curand_uniform(&rng_state);
-        int lo = 0, hi = B - 1;
-        while (lo < hi) {
-            int mid = (lo + hi) / 2;
-            if (cdf[mid] < u) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        out_idx[tid] = lo;
+}
+
+__global__ void advance_rng_offset(int64_t* __restrict__ offset_ptr, int64_t delta) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
+        *offset_ptr += delta;
     }
-    if (tid == 0) {
-        atomicAdd((unsigned long long*)offset_ptr, (unsigned long long)num_samples);
+}
+
+// Multinomial with replacement (uses cuRAND)
+__global__ void multinomial_sample(int* __restrict__ out_idx, const float* __restrict__ cdf,
+        int B, int num_samples, uint64_t seed, const int64_t* __restrict__ offset_ptr) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= num_samples) return;
+
+    uint64_t base_off = (uint64_t)(*offset_ptr);
+    curandStatePhilox4_32_10_t rng_state;
+    curand_init(seed, base_off + tid, 0, &rng_state);
+    float u = curand_uniform(&rng_state);
+
+    int lo = 0, hi = B - 1;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (cdf[mid] < u) lo = mid + 1;
+        else hi = mid;
     }
+    out_idx[tid] = lo;
 }
 
 // Prioritize high absolute advantage trajectories
@@ -1056,10 +1062,14 @@ void prio_replay_cuda(PrecisionTensor& advantages, float prio_alpha,
         advantages.data, bufs.prio_probs.data, prio_alpha, T);
     compute_prio_normalize<<<1, PRIO_BLOCK_SIZE, 0, stream>>>(
         bufs.prio_probs.data, B);
-    int block = fmaxf(((minibatch_segments + 31) / 32) * 32, 32);
-    multinomial_sample<<<1, block, 0, stream>>>(
-        bufs.idx.data, bufs.prio_probs.data,
-        bufs.cdf.data, B, minibatch_segments, seed, offset_ptr);
+    //int block = fmaxf(((minibatch_segments + 31) / 32) * 32, 32);
+    build_cdf<<<1, 1, 0, stream>>>(bufs.cdf.data, bufs.prio_probs.data, B);
+    int threads = 256;
+    int blocks = (minibatch_segments + threads - 1) / threads;
+    multinomial_sample<<<blocks, threads, 0, stream>>>(
+        bufs.idx.data, bufs.cdf.data, B, minibatch_segments, seed, offset_ptr);
+    advance_rng_offset<<<1, 1, 0, stream>>>(offset_ptr, (int64_t)minibatch_segments);
+
     int p3_blocks = (minibatch_segments + PRIO_BLOCK_SIZE - 1) / PRIO_BLOCK_SIZE;
     compute_prio_imp_weights<<<p3_blocks, PRIO_BLOCK_SIZE, 0, stream>>>(
         bufs.idx.data, bufs.prio_probs.data,
@@ -1368,7 +1378,8 @@ void train_impl(PuffeRL& pufferl) {
         } else {
             bool capturing = pufferl.train_warmup == hypers.cudagraphs;
             if (capturing) {
-                cudaStreamBeginCapture(train_stream, cudaStreamCaptureModeGlobal);
+                assert(cudaStreamBeginCapture(train_stream, cudaStreamCaptureModeGlobal) == cudaSuccess
+                        && "cudaStreamBeginCapture failed");
             }
 
             cudaStream_t stream = train_stream;
@@ -1400,9 +1411,11 @@ void train_impl(PuffeRL& pufferl) {
             }
             if (capturing) {
                 cudaGraph_t _graph;
-                cudaStreamEndCapture(train_stream, &_graph);
-                cudaGraphInstantiate(&pufferl.train_cudagraph, _graph, 0);
-                cudaGraphDestroy(_graph);
+                assert(cudaStreamEndCapture(train_stream, &_graph) == cudaSuccess
+                        && "cudaStreamEndCapture failed");
+                assert(cudaGraphInstantiate(&pufferl.train_cudagraph, _graph, 0) == cudaSuccess
+                        && "cudaGraphInstantiate failed");
+                assert(cudaGraphDestroy(_graph) == cudaSuccess && "cudaGraphDestroy failed");
                 cudaDeviceSynchronize();
                 pufferl.train_captured = true;
             }

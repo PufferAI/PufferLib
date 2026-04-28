@@ -556,7 +556,7 @@ void copy_hypers_to_clipboard(Env *env, char* buffer, int ary_idx) {
     for (int hyper_idx = 0; hyper_idx < env->n; hyper_idx++) {
         Hyper *hyper = &env->hypers[hyper_idx];
         char *slash = strchr(hyper->key, '/');
-        if (!slash) {
+        if (!slash || ary_idx >= hyper->n) {
             continue;
         }
 
