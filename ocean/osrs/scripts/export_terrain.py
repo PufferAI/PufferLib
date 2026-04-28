@@ -126,10 +126,10 @@ def _rgb_to_hsl(rgb: int, flo: FloorDef) -> None:
 
     h = 0.0
     s = 0.0
-    l = (mn + mx) / 2.0
+    lightness = (mn + mx) / 2.0
 
     if mn != mx:
-        if l < 0.5:
+        if lightness < 0.5:
             s = (mx - mn) / (mx + mn)
         else:
             s = (mx - mn) / (2.0 - mx - mn)
@@ -145,13 +145,13 @@ def _rgb_to_hsl(rgb: int, flo: FloorDef) -> None:
 
     flo.hue = max(0, min(255, int(h * 256.0)))
     flo.saturation = max(0, min(255, int(s * 256.0)))
-    flo.lightness = max(0, min(255, int(l * 256.0)))
+    flo.lightness = max(0, min(255, int(lightness * 256.0)))
     flo.luminance = flo.lightness
 
-    if l > 0.5:
-        flo.blend_hue_multiplier = int((1.0 - l) * s * 512.0)
+    if lightness > 0.5:
+        flo.blend_hue_multiplier = int((1.0 - lightness) * s * 512.0)
     else:
-        flo.blend_hue_multiplier = int(l * s * 512.0)
+        flo.blend_hue_multiplier = int(lightness * s * 512.0)
 
     if flo.blend_hue_multiplier < 1:
         flo.blend_hue_multiplier = 1
@@ -160,17 +160,17 @@ def _rgb_to_hsl(rgb: int, flo: FloorDef) -> None:
     flo.hsl16 = _hsl24to16(flo.hue, flo.saturation, flo.luminance)
 
 
-def _hsl24to16(h: int, s: int, l: int) -> int:
+def _hsl24to16(h: int, s: int, lightness: int) -> int:
     """Convert 24-bit HSL to 16-bit packed HSL (FloorDefinition.hsl24to16)."""
-    if l > 179:
+    if lightness > 179:
         s //= 2
-    if l > 192:
+    if lightness > 192:
         s //= 2
-    if l > 217:
+    if lightness > 217:
         s //= 2
-    if l > 243:
+    if lightness > 243:
         s //= 2
-    return ((h // 4) << 10) + ((s // 32) << 7) + l // 2
+    return ((h // 4) << 10) + ((s // 32) << 7) + lightness // 2
 
 
 
@@ -417,12 +417,12 @@ def apply_light(hsl16: int, light: int) -> int:
     """Apply lighting intensity to an HSL16 color (method187)."""
     if hsl16 == -1:
         return 0xBC614E
-    l = (light * (hsl16 & 0x7F)) // 128
-    if l < 2:
-        l = 2
-    elif l > 126:
-        l = 126
-    return (hsl16 & 0xFF80) + l
+    packed_lightness = (light * (hsl16 & 0x7F)) // 128
+    if packed_lightness < 2:
+        packed_lightness = 2
+    elif packed_lightness > 126:
+        packed_lightness = 126
+    return (hsl16 & 0xFF80) + packed_lightness
 
 
 def hsl16_to_rgb(hsl16: int) -> tuple[int, int, int]:

@@ -6,91 +6,6 @@
  * shared ABI, not universal game truth.
  */
 
-/* ============================================================================
- * CRITICAL: OSRS TICK-BASED TIMING MODEL
- * ============================================================================
- *
- * READ THIS BEFORE MODIFYING ANY COMBAT OR MOVEMENT CODE.
- *
- * The current simulation models a 600ms tick cycle. actions are queued and
- * execute on the NEXT tick, not immediately. encounter-specific ordering can
- * still layer on top of that shared queue.
- *
- * ---------------------------------------------------------------------------
- * TICK TIMING OVERVIEW
- * ---------------------------------------------------------------------------
- *
- *   TICK N (current state):
- *     - Player SEES: positions, HP, gear, prayers, everything visible
- *     - Player QUEUES: their reaction to what they see (actions for next tick)
- *     - Actions execute: NOTHING YET - actions are just queued
- *
- *   TICK N+1 (next tick):
- *     - Queued actions from tick N EXECUTE (movement first, then attacks)
- *     - New state becomes visible
- *     - Player queues new reaction
- *
- * ---------------------------------------------------------------------------
- * MOVEMENT + ATTACK IN SAME TICK
- * ---------------------------------------------------------------------------
- *
- * When you queue an attack, the game automatically handles movement:
- *
- *   Example: dist=3, melee weapon (range=1), queue "attack"
- *     - Tick N+1: move 2 tiles (running), now dist=1, attack fires
- *     - Both movement and attack happen in the SAME tick
- *
- *   Example: dist=0 (under target), queue "attack"
- *     - Tick N+1: auto-step to adjacent tile (dist=1), attack fires
- *     - The step-out is IMPLICIT - part of the attack action
- *
- * ---------------------------------------------------------------------------
- * CONFLICTING ACTIONS (IMPORTANT!)
- * ---------------------------------------------------------------------------
- *
- * When EXPLICIT movement conflicts with IMPLICIT attack movement:
- *
- *   Example: dist=0, queue BOTH "attack" AND "move under"
- *     - Attack needs: step out to dist=1
- *     - Movement wants: stay at dist=0
- *     - RESULT: Explicit movement wins, attack is CANCELLED
- *
- * This is because the end state cannot be BOTH dist=1 (for attack) AND
- * dist=0 (from explicit movement). Explicit actions override implicit ones.
- *
- * ---------------------------------------------------------------------------
- * STEP UNDER STRATEGY (current NH/PvP model)
- * ---------------------------------------------------------------------------
- *
- * Common tactic when opponent is frozen:
- *
- *   Tick 9: You're under frozen opponent (dist=0), queue "attack" ONLY
- *   Tick 10: Step out to dist=1, attack fires, queue "move under" ONLY
- *   Tick 11: Move back under (dist=0), opponent couldn't hit you
- *
- * The frozen opponent can only hit you if they ALSO queue attack on tick 9.
- * Both attacks would fire on tick 10 when you're both effectively at dist=1.
- *
- * ---------------------------------------------------------------------------
- * RECORDING FORMAT
- * ---------------------------------------------------------------------------
- *
- * Fight recordings show for each tick:
- *   - STATE: What the player sees RIGHT NOW (positions, HP, gear, etc.)
- *   - ACTIONS: What the player QUEUED as reaction (executes NEXT tick)
- *
- * Example (valid sequence):
- *   Tick 9 state: dist=3, actions=["RNG"]
- *   Tick 10 state: dist=1, attack fires (moved 2 tiles + attacked)
- *
- * Counter-example (conflicting sequence - attack cancelled):
- *   Tick 9 state: dist=0, actions=["RNG", "under"]
- *   Tick 10 state: dist=0, NO attack (explicit "under" cancelled the attack)
- *   The attack needed dist=1, but "under" forced dist=0. Conflict resolved
- *   by cancelling the attack - explicit movement wins over implicit step-out.
- *
- * ========================================================================= */
-
 #ifndef OSRS_TYPES_H
 #define OSRS_TYPES_H
 
@@ -916,7 +831,6 @@ typedef struct {
     int potion_cooldown;
     int karambwan_cooldown;
 
-    /* Phase 2: onetick + realistic policy state */
     int fake_switch_pending;         /* 0/1 */
     int fake_switch_style;           /* OPP_STYLE_* or -1 */
     int opponent_prayer_at_fake;     /* OPP_STYLE_* or -1 (style they were praying) */
@@ -925,30 +839,25 @@ typedef struct {
     int pending_prayer_delay;        /* ticks remaining before applying */
     int last_target_gear_style;      /* OPP_STYLE_* or -1, tracks previous tick */
 
-    /* Per-episode eating thresholds (randomized with noise) */
     float eat_triple_threshold;       /* base 0.30, range [0.25, 0.35] */
     float eat_double_threshold;       /* base 0.50, range [0.45, 0.55] */
     float eat_brew_threshold;         /* base 0.70, range [0.65, 0.75] */
 
-    /* Per-episode randomized decision parameters */
     float prayer_accuracy;            /* chance of correct defensive prayer [0,1] */
     float off_prayer_rate;            /* chance of attacking off-prayer [0,1] */
     float offensive_prayer_rate;      /* chance of using offensive prayer [0,1] */
     float action_delay_chance;        /* per-tick chance to skip prayer+attack [0,0.3] */
     float mistake_rate;               /* per-tick chance to pick random prayer [0,0.15] */
 
-    /* Boss opponent reading ability (master_nh, savant_nh) */
     float read_chance;               /* 0.0-1.0, chance to "read" agent action each tick */
     int has_read_this_tick;          /* 1 if read succeeded this tick */
     AttackStyle read_agent_style;    /* agent's pending attack style (if read) */
     OverheadPrayer read_agent_prayer;/* agent's pending overhead prayer (if read) */
     int read_agent_moving;           /* boss read: 1 if agent is moving (not attacking) */
 
-    /* Anti-kite flee tracking */
     int prev_dist_to_target;         /* previous tick distance for flee tracking */
     int target_fleeing_ticks;        /* consecutive ticks distance has been increasing */
 
-    /* gmaul_combo state */
     int combo_state;                 /* 0=idle, 1=spec_fired (follow with gmaul next tick) */
     float ko_threshold;              /* target HP fraction to trigger KO sequence */
 

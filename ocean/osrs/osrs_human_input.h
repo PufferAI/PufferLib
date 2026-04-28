@@ -408,7 +408,6 @@ static void human_draw_click_cross(HumanInput* hi, Texture2D* cross_sprites, int
         /* center sprite on click position (OSRS draws at mouseX-8, mouseY-8 for 16px) */
         DrawTexture(tex, cx - tex.width / 2, cy - tex.height / 2, WHITE);
     } else {
-        /* fallback: simple X lines */
         float progress = 1.0f - (float)hi->click_cross_timer / CLICK_CROSS_ANIM_TICKS;
         int alpha = (int)(progress * 255);
         Color c = hi->click_is_attack

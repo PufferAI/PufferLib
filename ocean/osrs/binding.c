@@ -10,12 +10,7 @@
 
 #include "osrs_env.h"
 
-/* Wrapper struct: vecenv-compatible fields at top + embedded OsrsEnv.
- * vecenv.h's create_static_vec assigns to env->observations, env->actions,
- * env->rewards, env->terminals directly. These fields must match vecenv's
- * expected types (void*, float*, float*, float*). The embedded OsrsEnv has
- * its own identically-named fields with different types — pvp_init sets those
- * to internal inline buffers, so there's no conflict. */
+/* vecenv-compatible header fields must stay first. */
 typedef struct {
     void* observations;
     float* actions;
@@ -27,7 +22,6 @@ typedef struct {
 
     OsrsEnv pvp;
 
-    /* staging buffers for type conversion */
     int ocean_acts_staging[NUM_ACTION_HEADS];
     unsigned char ocean_term_staging;
 } MetalPvpEnv;
@@ -38,22 +32,15 @@ typedef struct {
 #define OBS_TENSOR_T FloatTensor
 #define Env MetalPvpEnv
 
-/* c_step/c_reset/c_close/c_render must be defined BEFORE including vecenv.h
- * because vecenv.h calls them inside its implementation section without
- * forward-declaring them (they're expected to come from the env header). */
-
 void c_step(Env* env) {
-    /* float actions from vecenv → int staging for PVP */
     for (int i = 0; i < NUM_ATNS; i++) {
         env->ocean_acts_staging[i] = (int)env->actions[i];
     }
 
     pvp_step(&env->pvp);
 
-    /* terminal: unsigned char → float for vecenv */
     env->terminals[0] = (float)env->ocean_term_staging;
 
-    /* copy PVP log to wrapper log on episode end */
     if (env->ocean_term_staging) {
         env->log.episode_return = env->pvp.log.episode_return;
         env->log.episode_length = env->pvp.log.episode_length;
@@ -70,8 +57,6 @@ void c_step(Env* env) {
 }
 
 void c_reset(Env* env) {
-    /* Wire ocean pointers to vecenv shared buffers (deferred from my_init because
-     * create_static_vec assigns env->observations/rewards AFTER my_vec_init). */
     env->pvp.ocean_io.agent_obs = (float*)env->observations;
     env->pvp.ocean_io.agent_rewards = env->rewards;
     env->pvp.ocean_io.agent_terminals = &env->ocean_term_staging;
@@ -94,13 +79,6 @@ void my_init(Env* env, Dict* kwargs) {
 
     pvp_init(&env->pvp);
 
-    /* Ocean pointer wiring is DEFERRED to c_reset because my_init runs inside
-     * my_vec_init BEFORE create_static_vec assigns the shared buffer pointers
-     * (env->observations, env->actions, env->rewards, env->terminals are NULL
-     * at this point). c_reset runs after buffer assignment and does the wiring.
-     *
-     * For now, point ocean pointers at internal staging so pvp_reset doesn't
-     * crash on writes to ocean_term/ocean_rew. */
     env->pvp.ocean_io.agent_obs = NULL;
     env->pvp.ocean_io.agent_rewards = env->pvp._rews_buf;
     env->pvp.ocean_io.agent_terminals = &env->ocean_term_staging;
@@ -108,7 +86,6 @@ void my_init(Env* env, Dict* kwargs) {
     env->pvp.ocean_io.agent_obs_p1 = NULL;
     env->pvp.ocean_io.selfplay_mask = NULL;
 
-    /* config from Dict (all values are double) */
     env->pvp.pvp_runtime.use_c_opponent = 1;
     env->pvp.auto_reset = 1;
     env->pvp.is_lms = 1;
@@ -122,7 +99,6 @@ void my_init(Env* env, Dict* kwargs) {
     DictItem* shaping_en = dict_get_unsafe(kwargs, "shaping_enabled");
     env->pvp.shaping.enabled = shaping_en ? (int)shaping_en->value : 0;
 
-    /* reward shaping coefficients (same defaults as ocean_binding.c) */
     env->pvp.shaping.damage_dealt_coef = 0.005f;
     env->pvp.shaping.damage_received_coef = -0.005f;
     env->pvp.shaping.correct_prayer_bonus = 0.03f;
@@ -149,14 +125,11 @@ void my_init(Env* env, Dict* kwargs) {
     env->pvp.shaping.click_penalty_threshold = 5;
     env->pvp.shaping.click_penalty_coef = -0.003f;
 
-    /* gear: default tier 0 (basic LMS) */
     env->pvp.pvp_runtime.gear_tier_weights[0] = 1.0f;
     env->pvp.pvp_runtime.gear_tier_weights[1] = 0.0f;
     env->pvp.pvp_runtime.gear_tier_weights[2] = 0.0f;
     env->pvp.pvp_runtime.gear_tier_weights[3] = 0.0f;
 
-    /* pvp_reset sets up game state (players, positions, gear, etc.)
-     * but does NOT write to ocean buffers — that happens in c_reset. */
     pvp_reset(&env->pvp);
 }
 
@@ -168,11 +141,6 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "damage_received", log->damage_received);
 }
 
-/* ========================================================================
- * PFSP: set/get opponent pool weights across all envs
- * Called from Python via pybind11 wrappers in metal_bindings.mm
- * ======================================================================== */
-
 void binding_set_pfsp_weights(StaticVec* vec, int* pool, int* cum_weights, int pool_size) {
     Env* envs = (Env*)vec->envs;
     if (pool_size > MAX_OPPONENT_POOL) pool_size = MAX_OPPONENT_POOL;
@@ -183,9 +151,6 @@ void binding_set_pfsp_weights(StaticVec* vec, int* pool, int* cum_weights, int p
             envs[e].pvp.pvp_runtime.pfsp.pool[i] = (OpponentType)pool[i];
             envs[e].pvp.pvp_runtime.pfsp.cum_weights[i] = cum_weights[i];
         }
-        /* Only reset on first configuration — restarts the episode that was started
-         * during env creation before the pool was set (would have used fallback opponent).
-         * Periodic weight updates must NOT reset: that would corrupt PufferLib's rollout. */
         if (was_unconfigured) {
             c_reset(&envs[e]);
         }
@@ -206,7 +171,6 @@ void binding_get_pfsp_stats(StaticVec* vec, float* out_wins, float* out_episodes
         out_episodes[i] = 0.0f;
     }
 
-    /* Aggregate and reset (read-and-reset pattern) */
     for (int e = 0; e < vec->size; e++) {
         for (int i = 0; i < envs[e].pvp.pvp_runtime.pfsp.pool_size; i++) {
             out_wins[i] += envs[e].pvp.pvp_runtime.pfsp.wins[i];

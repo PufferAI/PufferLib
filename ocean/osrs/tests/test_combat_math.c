@@ -54,15 +54,11 @@ static int tests_failed = 0;
                (label), _a, _e, _t); \
     } \
 } while (0)
-
-/* ======================================================================== */
 /* test: osrs_hit_chance                                                     */
 /*                                                                           */
 /* ref: BaseCalc.ts getNormalAccuracyRoll                                    */
 /*   att > def: 1 - (def + 2) / (2 * (att + 1))                            */
 /*   att <= def: att / (2 * (def + 1))                                      */
-/* ======================================================================== */
-
 static void test_hit_chance(void) {
     printf("--- osrs_hit_chance ---\n");
 
@@ -108,14 +104,10 @@ static void test_hit_chance(void) {
         osrs_hit_chance(20000, 12000),
         1.0f - 12002.0f / 40002.0f, 1e-4f);
 }
-
-/* ======================================================================== */
 /* test: NPC melee max hit                                                   */
 /*                                                                           */
 /* formula: floor((str + 8) * (bonus + 64) + 320) / 640)                    */
 /* this is a simplified NPC formula (not player). ref: OSRS wiki.            */
-/* ======================================================================== */
-
 static void test_npc_melee_max_hit(void) {
     printf("--- osrs_npc_melee_max_hit ---\n");
 
@@ -134,13 +126,9 @@ static void test_npc_melee_max_hit(void) {
     /* str=0, bonus=0: ((8)*(64)+320)/640 = (512+320)/640 = 832/640 = 1 */
     ASSERT_INT_EQ("str=0 bonus=0", osrs_npc_melee_max_hit(0, 0), 1);
 }
-
-/* ======================================================================== */
 /* test: NPC ranged max hit                                                  */
 /*                                                                           */
 /* formula: floor(0.5 + (range + 8) * (bonus + 64) / 640)                  */
-/* ======================================================================== */
-
 static void test_npc_ranged_max_hit(void) {
     printf("--- osrs_npc_ranged_max_hit ---\n");
 
@@ -156,13 +144,9 @@ static void test_npc_ranged_max_hit(void) {
     /* range=0, bonus=0: 0.5 + 8*64/640 = 0.5 + 0.8 = 1.3 -> 1 */
     ASSERT_INT_EQ("range=0 bonus=0", osrs_npc_ranged_max_hit(0, 0), 1);
 }
-
-/* ======================================================================== */
 /* test: NPC magic max hit                                                   */
 /*                                                                           */
 /* formula: base_spell_dmg * magic_dmg_pct / 100 (integer division)         */
-/* ======================================================================== */
-
 static void test_npc_magic_max_hit(void) {
     printf("--- osrs_npc_magic_max_hit ---\n");
 
@@ -172,15 +156,11 @@ static void test_npc_magic_max_hit(void) {
     ASSERT_INT_EQ("base=0 pct=200", osrs_npc_magic_max_hit(0, 200), 0);
     ASSERT_INT_EQ("base=50 pct=150", osrs_npc_magic_max_hit(50, 150), 75);
 }
-
-/* ======================================================================== */
 /* test: NPC attack roll                                                     */
 /*                                                                           */
 /* formula: (att_level + 9) * (att_bonus + 64)                              */
 /* NPCs have +9 invisible boost (not +8 like players with no stance).       */
 /* ref: OSRS wiki, PlayerVsNPCCalc.ts getNPCDefenceRoll (uses +9 for NPCs) */
-/* ======================================================================== */
-
 static void test_npc_attack_roll(void) {
     printf("--- osrs_npc_attack_roll ---\n");
 
@@ -201,13 +181,9 @@ static void test_npc_attack_roll(void) {
        NPC def roll = (135+9) * (20+64) = 144 * 84 = 12096 */
     ASSERT_INT_EQ("abyssal demon (135,20)", osrs_npc_attack_roll(135, 20), 12096);
 }
-
-/* ======================================================================== */
 /* test: osrs_npc_max_hit dispatch                                           */
 /*                                                                           */
 /* verifies the style-based dispatcher returns correct values.               */
-/* ======================================================================== */
-
 static void test_npc_max_hit_dispatch(void) {
     printf("--- osrs_npc_max_hit (dispatch) ---\n");
 
@@ -229,15 +205,11 @@ static void test_npc_max_hit_dispatch(void) {
     /* style=0 (none): should return 0 */
     ASSERT_INT_EQ("none dispatch", osrs_npc_max_hit(0, 200, 200, 50, 50, 30, 175), 0);
 }
-
-/* ======================================================================== */
 /* test: player defence roll vs NPC                                          */
 /*                                                                           */
 /* ref: BaseCalc.ts / OSRS wiki                                             */
 /*   vs melee/ranged: (def_level + 8) * (def_bonus + 64)                   */
 /*   vs magic: (floor(magic*0.7 + def*0.3) + 8) * (def_bonus + 64)        */
-/* ======================================================================== */
-
 static void test_player_def_roll(void) {
     printf("--- osrs_player_def_roll_vs_npc ---\n");
 
@@ -267,13 +239,9 @@ static void test_player_def_roll(void) {
     ASSERT_INT_EQ("vs magic low_magic high_def",
         osrs_player_def_roll_vs_npc(99, 1, 200, 3 /* magic */), 10032);
 }
-
-/* ======================================================================== */
 /* test: encounter_player_def_bonus                                          */
 /*                                                                           */
 /* selects the correct defence bonus for incoming NPC attack.               */
-/* ======================================================================== */
-
 static void test_player_def_bonus(void) {
     printf("--- encounter_player_def_bonus ---\n");
 
@@ -290,16 +258,12 @@ static void test_player_def_bonus(void) {
     ASSERT_INT_EQ("melee crush",
         encounter_player_def_bonus(stab, slash, crush, magic, ranged, 1, 2), 120);
 }
-
-/* ======================================================================== */
 /* test: overhead prayer style check                                         */
 /*                                                                           */
 /* ref: OSRS wiki prayer mechanics                                          */
 /*   melee attack (1) blocked by protect melee (3)                          */
 /*   ranged attack (2) blocked by protect ranged (2)                        */
 /*   magic attack (3) blocked by protect magic (1)                          */
-/* ======================================================================== */
-
 static void test_prayer_correct(void) {
     printf("--- encounter_prayer_correct_for_style ---\n");
 
@@ -329,16 +293,12 @@ static void test_prayer_correct(void) {
     ASSERT_INT_EQ("none->magic",
         encounter_prayer_correct_for_style(0, 3), 0);
 }
-
-/* ======================================================================== */
 /* test: hit delay formulas                                                  */
 /*                                                                           */
 /* ref: osrs-sdk, InfernoTrainer blowpipe.ts, MagicWeapon.ts               */
 /*   magic:    floor((1 + distance) / 3) + 1 [+1 if player]                */
 /*   ranged:   floor((3 + distance) / 6) + 1 [+1 if player]                */
 /*   blowpipe: floor(distance / 6) + 1 [+1 if player]                      */
-/* ======================================================================== */
-
 static void test_hit_delays(void) {
     printf("--- hit delay formulas ---\n");
 
@@ -362,14 +322,10 @@ static void test_hit_delays(void) {
     ASSERT_INT_EQ("bp d=6 plr",  encounter_blowpipe_hit_delay(6, 1), 3);
     ASSERT_INT_EQ("bp d=12 npc", encounter_blowpipe_hit_delay(12, 0), 3); /* 2+1=3 */
 }
-
-/* ======================================================================== */
 /* test: chebyshev distance to multi-tile NPC                                */
 /*                                                                           */
 /* encounter_dist_to_npc(px, py, nx, ny, npc_size)                          */
 /* returns chebyshev distance from (px,py) to nearest tile of NPC at (nx,ny)*/
-/* ======================================================================== */
-
 static void test_dist_to_npc(void) {
     printf("--- encounter_dist_to_npc ---\n");
 
@@ -394,8 +350,6 @@ static void test_dist_to_npc(void) {
     /* player adjacent to 3x3: (5,5)-(7,7), player at (4,4): nearest(5,5), dx=1,dy=1 -> 1 */
     ASSERT_INT_EQ("3x3 diagonal adj", encounter_dist_to_npc(4, 4, 5, 5, 3), 1);
 }
-
-/* ======================================================================== */
 /* test: twisted bow multipliers                                             */
 /*                                                                           */
 /* our C code returns a float multiplier. the reference uses integer         */
@@ -413,8 +367,6 @@ static void test_dist_to_npc(void) {
 /*                                                                           */
 /* our C uses float division (no integer truncation of intermediates).       */
 /* expected divergence: up to ~0.01 in the multiplier.                      */
-/* ======================================================================== */
-
 /* reference tbow accuracy multiplier using integer truncation (matching TS) */
 static float ref_tbow_acc_mult(int magic) {
     int m = magic < 250 ? magic : 250;
@@ -479,16 +431,12 @@ static void test_tbow_multipliers(void) {
     ASSERT_INT_EQ("acc monotonic 100<200", osrs_tbow_acc_mult(100) < osrs_tbow_acc_mult(200), 1);
     ASSERT_INT_EQ("dmg monotonic 0<100", osrs_tbow_dmg_mult(0) < osrs_tbow_dmg_mult(100), 1);
 }
-
-/* ======================================================================== */
 /* test: blowpipe special attack                                             */
 /*                                                                           */
 /* ref: Blowpipe.ts — 2x accuracy, 1.5x max hit                            */
 /*   spec_att_roll = base_att_roll * 2                                      */
 /*   spec_max = base_max_hit * 3 / 2                                        */
 /*   def_roll = (target_def + 8) * (target_ranged_def + 64)                */
-/* ======================================================================== */
-
 static void test_blowpipe_spec(void) {
     printf("--- osrs_blowpipe_spec_resolve ---\n");
 
@@ -526,16 +474,12 @@ static void test_blowpipe_spec(void) {
     /* should have some misses */
     ASSERT_INT_EQ("spec has misses", num_zeros > 0, 1);
 }
-
-/* ======================================================================== */
 /* test: encounter_compute_loadout_stats (player loadout)                    */
 /*                                                                           */
 /* ref: PlayerVsNPCCalc.ts getPlayerMaxMeleeHit, getPlayerMaxMeleeAttackRoll*/
 /*                                                                           */
 /* tests loadout stat computation using items from ITEM_DATABASE.            */
 /* base_level=99 to match typical inferno/pvm scenarios.                     */
-/* ======================================================================== */
-
 /* helper: fill loadout with ITEM_NONE */
 static void clear_loadout(uint8_t loadout[NUM_GEAR_SLOTS]) {
     memset(loadout, 255, NUM_GEAR_SLOTS);
@@ -719,13 +663,9 @@ static void test_loadout_magic_no_prayer(void) {
     /* max_hit = floor(30 * (1.0 + 15/100.0) * 1.0) = floor(30 * 1.15) = floor(34.5) = 34 */
     ASSERT_INT_EQ("max_hit", stats.max_hit, 34);
 }
-
-/* ======================================================================== */
 /* test: loadout with full gear (multi-slot)                                 */
 /*                                                                           */
 /* verifies that stats from multiple gear slots sum correctly.               */
-/* ======================================================================== */
-
 static void test_loadout_full_ranged(void) {
     printf("--- loadout: tbow + masori + anguish + vambs, rigour ---\n");
 
@@ -768,13 +708,9 @@ static void test_loadout_full_ranged(void) {
     int att_roll = stats.eff_level * (stats.attack_bonus + 64);
     ASSERT_INT_EQ("attack_roll", att_roll, 33642);
 }
-
-/* ======================================================================== */
 /* test: encounter_update_loadout_level (brew drain / boost recomputation)   */
 /*                                                                           */
 /* verifies that eff_level and max_hit update correctly after stat changes.  */
-/* ======================================================================== */
-
 static void test_update_loadout_level(void) {
     printf("--- encounter_update_loadout_level ---\n");
 
@@ -825,14 +761,10 @@ static void test_update_loadout_level(void) {
     /* max_hit still = floor(30 * 1.15 * 1.04) = 35 */
     ASSERT_INT_EQ("magic drained max", stats.max_hit, 35);
 }
-
-/* ======================================================================== */
 /* test: full combat scenario (NPC attacks player)                           */
 /*                                                                           */
 /* combines NPC attack roll + player defence roll + hit chance into one      */
 /* end-to-end check. uses realistic inferno-style stats.                     */
-/* ======================================================================== */
-
 static void test_full_npc_attack_scenario(void) {
     printf("--- full NPC attack scenario ---\n");
 
@@ -857,14 +789,10 @@ static void test_full_npc_attack_scenario(void) {
     int jad_max = osrs_npc_melee_max_hit(480, 0);
     ASSERT_INT_EQ("jad melee max", jad_max, 49);
 }
-
-/* ======================================================================== */
 /* test: RNG sanity checks                                                   */
 /*                                                                           */
 /* verify encounter_xorshift, encounter_rand_int, encounter_rand_float      */
 /* produce values in expected ranges and aren't degenerate.                  */
-/* ======================================================================== */
-
 static void test_rng(void) {
     printf("--- RNG sanity ---\n");
 
@@ -906,14 +834,10 @@ static void test_rng(void) {
     }
     ASSERT_INT_EQ("rand_float [0,1)", float_ok, 1);
 }
-
-/* ======================================================================== */
 /* test: barrage AoE resolve                                                 */
 /*                                                                           */
 /* verify primary target always rolled, AoE only within 1 tile,             */
 /* damage bounds, and freeze application.                                    */
-/* ======================================================================== */
-
 static void test_barrage_resolve(void) {
     printf("--- osrs_barrage_resolve ---\n");
 
@@ -974,14 +898,10 @@ static void test_barrage_resolve(void) {
     ASSERT_INT_EQ("ice freeze applied", freeze_applied, 1);
     ASSERT_INT_EQ("freeze duration", BARRAGE_FREEZE_TICKS, 32);
 }
-
-/* ======================================================================== */
 /* test: defence bonus sum verification                                      */
 /*                                                                           */
 /* verifies that encounter_compute_loadout_stats correctly sums defence      */
 /* bonuses across all gear slots (needed for player_def_roll calculations).  */
-/* ======================================================================== */
-
 static void test_loadout_def_bonuses(void) {
     printf("--- loadout defence bonus sums ---\n");
 
@@ -1022,13 +942,9 @@ static void test_loadout_def_bonuses(void) {
     ASSERT_INT_EQ("def_magic", stats.def_magic, exp_magic);
     ASSERT_INT_EQ("def_ranged", stats.def_ranged, exp_ranged);
 }
-
-/* ======================================================================== */
 /* test: edge cases for level 1 and no gear                                  */
 /*                                                                           */
 /* verifies formulas don't break at minimum values.                         */
-/* ======================================================================== */
-
 static void test_edge_cases(void) {
     printf("--- edge cases: level 1, no gear ---\n");
 

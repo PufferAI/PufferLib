@@ -13,9 +13,7 @@ Usage:
 """
 
 import argparse
-import copy
 import io
-import struct
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +21,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from modern_cache_reader import (
     ModernCacheReader,
-    read_big_smart,
     read_i32,
     read_string,
     read_u8,
@@ -32,22 +29,17 @@ from modern_cache_reader import (
     read_u32,
 )
 from export_models import (
-    MDL2_MAGIC,
     ModelData,
     _merge_models,
     decode_model,
-    expand_model,
     load_model_modern,
     write_models_binary,
 )
 from export_animations import (
-    ANIM_MAGIC,
-    FrameBaseDef,
     FrameDef,
     SequenceDef,
     _parse_normal_frame,
     load_modern_framebases,
-    parse_modern_framebase,
     write_animations_binary,
 )
 from modern_cache_reader import parse_sequence as parse_modern_sequence
@@ -525,10 +517,6 @@ def main() -> None:
     reader = ModernCacheReader(args.modern_cache)
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    # ================================================================
-    # step 1: read NPC definitions from config index 2, group 9
-    # ================================================================
     print("reading NPC definitions from modern cache (index 2, group 9)...")
     npc_files = reader.read_group(2, MODERN_NPC_CONFIG_GROUP)
     print(f"  {len(npc_files)} total NPC entries in group 9")
@@ -567,10 +555,6 @@ def main() -> None:
             all_anim_ids.add(attack_anim)
         for anim_id in INFERNO_EXTRA_ANIMS.get(npc_id, {}).values():
             all_anim_ids.add(anim_id)
-
-    # ================================================================
-    # step 2: read SpotAnim/GFX definitions
-    # ================================================================
     print("\n\nreading SpotAnim/GFX definitions (index 2, group 13)...")
     spotanim_files = reader.read_group(2, MODERN_SPOTANIM_CONFIG_GROUP)
     print(f"  {len(spotanim_files)} total spotanim entries")
@@ -596,10 +580,6 @@ def main() -> None:
     print(f"  {sorted(all_model_ids)}")
     print(f"total unique animation IDs to export: {len(all_anim_ids)}")
     print(f"  {sorted(all_anim_ids)}")
-
-    # ================================================================
-    # step 3: export NPC models
-    # ================================================================
     print("\n\nexporting NPC + GFX models...")
     all_models: list[ModelData] = []
 
@@ -669,10 +649,6 @@ def main() -> None:
     write_models_binary(models_path, all_models)
     file_size = models_path.stat().st_size
     print(f"\nwrote {len(all_models)} models ({file_size:,} bytes) to {models_path}")
-
-    # ================================================================
-    # step 4: export animations
-    # ================================================================
     print("\n\nexporting animations...")
     seq_files = reader.read_group(2, MODERN_SEQ_CONFIG_GROUP)
 
@@ -746,10 +722,6 @@ def main() -> None:
     anims_path = output_dir / "inferno.anims"
     available_seqs = all_anim_ids & set(sequences.keys())
     write_animations_binary(anims_path, framebases, all_frames, sequences, available_seqs)
-
-    # ================================================================
-    # step 5: update npc_models.h
-    # ================================================================
     print("\n\nupdating npc_models_inferno.h...")
     header_path = Path(__file__).resolve().parent.parent / "data" / "npc_models_inferno.h"
 
@@ -814,13 +786,7 @@ def main() -> None:
         f.write("#endif /* NPC_MODELS_INFERNO_H */\n")
 
     print(f"wrote {header_path}")
-
-    # ================================================================
-    # step 6: print encounter_inferno.h mapping table
-    # ================================================================
-    print("\n\n========================================")
-    print("INF_NPC_DEF_IDS mapping table for encounter_inferno.h:")
-    print("========================================")
+    print("\n\nINF_NPC_DEF_IDS mapping table for encounter_inferno.h:")
     print("static const int INF_NPC_DEF_IDS[INF_NUM_NPC_TYPES] = {")
 
     inf_type_to_npc = {

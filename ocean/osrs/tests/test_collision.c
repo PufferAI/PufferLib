@@ -34,10 +34,6 @@ static int tests_failed = 0;
     } \
 } while(0)
 
-/* =========================================================================
- * collision map basics
- * ========================================================================= */
-
 TEST(test_null_map_all_traversable) {
     ASSERT(collision_traversable_north(NULL, 0, 100, 100));
     ASSERT(collision_traversable_south(NULL, 0, 100, 100));
@@ -93,10 +89,6 @@ TEST(test_flag_set_and_unset) {
 
     collision_map_free(map);
 }
-
-/* =========================================================================
- * directional traversal checks
- * ========================================================================= */
 
 TEST(test_blocked_tile_not_traversable) {
     CollisionMap* map = collision_map_create();
@@ -162,10 +154,6 @@ TEST(test_multi_tile_occupant) {
     collision_map_free(map);
 }
 
-/* =========================================================================
- * binary save/load
- * ========================================================================= */
-
 TEST(test_save_and_load) {
     CollisionMap* map = collision_map_create();
     collision_mark_blocked(map, 0, 3200, 3520);
@@ -189,10 +177,6 @@ TEST(test_save_and_load) {
     collision_map_free(loaded);
     remove(path);
 }
-
-/* =========================================================================
- * pathfinding
- * ========================================================================= */
 
 TEST(test_pathfind_already_at_dest) {
     PathResult r = pathfind_step(NULL, 0, 100, 100, 100, 100, NULL, NULL);
@@ -279,13 +263,6 @@ TEST(test_pathfind_respects_wall_flags) {
     collision_map_free(map);
 }
 
-/* =========================================================================
- * integration: step_toward_destination with collision
- *
- * we can't include the full osrs_pvp.h here (too many deps), so we
- * replicate the core logic of step_toward_destination for testing.
- * ========================================================================= */
-
 typedef struct { int x, y, dest_x, dest_y; } TestPlayer;
 
 static int test_step_toward(TestPlayer* p, const CollisionMap* cmap) {
@@ -356,10 +333,6 @@ TEST(test_step_no_collision_map) {
     ASSERT(p.x == 101 && p.y == 101);
 }
 
-/* =========================================================================
- * wilderness coordinates test — verify the region hash works for real coords
- * ========================================================================= */
-
 TEST(test_wilderness_coordinates) {
     CollisionMap* map = collision_map_create();
 
@@ -377,13 +350,8 @@ TEST(test_wilderness_coordinates) {
     collision_map_free(map);
 }
 
-/* =========================================================================
- * main
- * ========================================================================= */
-
 int main(void) {
-    printf("collision system tests\n");
-    printf("======================\n\n");
+    printf("collision system tests\n\n");
 
     printf("collision map basics:\n");
     RUN(test_null_map_all_traversable);
@@ -416,7 +384,6 @@ int main(void) {
     printf("\nwilderness coordinates:\n");
     RUN(test_wilderness_coordinates);
 
-    printf("\n======================\n");
     printf("%d passed, %d failed\n", tests_passed, tests_failed);
     return tests_failed > 0 ? 1 : 0;
 }

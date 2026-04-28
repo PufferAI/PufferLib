@@ -33,10 +33,6 @@
 #define OPP_STYLE_MELEE   2
 #define OPP_STYLE_SPEC    3
 
-/* =========================================================================
- * Utility: map OPP_STYLE_* to LOADOUT_* presets
- * ========================================================================= */
-
 static inline int opp_style_to_loadout(int style) {
     switch (style) {
         case OPP_STYLE_MAGE:   return LOADOUT_MAGE;
@@ -51,19 +47,13 @@ static inline void opp_apply_gear_switch(int* actions, int style) {
     actions[HEAD_LOADOUT] = opp_style_to_loadout(style);
 }
 
-/* Fake switch: same loadout set, no attack action follows */
 static inline void opp_apply_fake_switch(int* actions, int style) {
     actions[HEAD_LOADOUT] = opp_style_to_loadout(style);
 }
 
-/* Tank gear: LOADOUT_TANK equips dhide body, rune legs, spirit shield */
 static inline void opp_apply_tank_gear(int* actions) {
     actions[HEAD_LOADOUT] = LOADOUT_TANK;
 }
-
-/* =========================================================================
- * Consumable availability helpers
- * ========================================================================= */
 
 typedef struct {
     int can_food;
@@ -92,18 +82,12 @@ static inline OppConsumables opp_get_consumables(OpponentState* opp, Player* sel
     return c;
 }
 
-/* (opp_apply_gear_switch is defined above as inline loadout assignment) */
-
-/* =========================================================================
- * Prayer helpers
- * ========================================================================= */
-
 static inline AttackStyle opp_get_gear_style(Player* p) {
     int s = get_item_attack_style(p->equipped[GEAR_SLOT_WEAPON]);
     if (s == 3) return ATTACK_STYLE_MAGIC;
     if (s == 2) return ATTACK_STYLE_RANGED;
     if (s == 1) return ATTACK_STYLE_MELEE;
-    return ATTACK_STYLE_MAGIC;  /* Default */
+    return ATTACK_STYLE_MAGIC;
 }
 
 static inline int opp_get_defensive_prayer(Player* target) {
@@ -111,7 +95,7 @@ static inline int opp_get_defensive_prayer(Player* target) {
     if (target_style == ATTACK_STYLE_MAGIC)  return OVERHEAD_MAGE;
     if (target_style == ATTACK_STYLE_RANGED) return OVERHEAD_RANGED;
     if (target_style == ATTACK_STYLE_MELEE)  return OVERHEAD_MELEE;
-    return OVERHEAD_MAGE;  /* Default to mage */
+    return OVERHEAD_MAGE;
 }
 
 static inline int opp_has_prayer_active(Player* self, int prayer_action) {
@@ -120,10 +104,6 @@ static inline int opp_has_prayer_active(Player* self, int prayer_action) {
     if (prayer_action == OVERHEAD_MAGE)   return self->prayer == PRAYER_PROTECT_MAGIC;
     return 0;
 }
-
-/* =========================================================================
- * Attack style helpers
- * ========================================================================= */
 
 static inline int opp_attack_ready(Player* self) {
     return self->attack_timer <= 0;
@@ -185,10 +165,6 @@ static inline void opp_update_flee_tracking(OpponentState* opp, Player* self, Pl
     }
     opp->prev_dist_to_target = dist;
 }
-
-/* =========================================================================
- * Per-episode randomization: ranges table for all opponent types
- * ========================================================================= */
 
 typedef struct { float base; float variance; } RandRange;
 
@@ -286,10 +262,6 @@ static inline int opp_apply_prayer_mistake(OsrsEnv* env, OpponentState* opp, int
     return correct_prayer;
 }
 
-/* =========================================================================
- * Phase 2: probability constants for unpredictable policies
- * ========================================================================= */
-
 /* unpredictable_improved prayer delays: 70% instant, 20% 1-tick, 8% 2-tick, 2% 3-tick */
 static const float UNPREDICTABLE_IMP_PRAYER_CUM[] = {0.70f, 0.90f, 0.98f, 1.00f};
 #define UNPREDICTABLE_IMP_PRAYER_CUM_LEN 4
@@ -311,10 +283,6 @@ static const float UNPREDICTABLE_OT_ACTION_CUM[] = {0.90f, 0.98f, 1.00f};
 #define UNPREDICTABLE_IMP_SUBOPTIMAL_ATTACK 0.03f
 #define UNPREDICTABLE_OT_FAKE_FAIL          0.12f
 #define UNPREDICTABLE_OT_WRONG_PREDICT      0.08f
-
-/* =========================================================================
- * Phase 2: helper functions for onetick + unpredictable policies
- * ========================================================================= */
 
 /* Weighted delay sampling from cumulative weight array */
 static inline int opp_sample_delay(OsrsEnv* env, const float* cum_weights, int num_weights) {
@@ -432,7 +400,6 @@ static int opp_apply_consumables(OsrsEnv* env, OpponentState* opp, int* actions,
         actions[HEAD_FOOD] = FOOD_EAT;
         opp->food_cooldown = 3;
     } else if (hp_pct < 0.60f && cons.can_karambwan) {
-        /* Karambwan as fallback food (no sharks left) */
         actions[HEAD_KARAMBWAN] = KARAM_EAT;
         opp->karambwan_cooldown = 2;
     } else if (opp_is_drained(self) && hp_pct < 0.90f && cons.can_brew) {
@@ -553,10 +520,6 @@ static void opp_handle_delayed_prayer(OsrsEnv* env, OpponentState* opp, int* act
     /* Process pending prayer (may apply this tick if delay=0) */
     opp_process_pending_prayer(opp, actions, self);
 }
-
-/* =========================================================================
- * Policy implementations
- * ========================================================================= */
 
 /* --- TrueRandom: random value per action head --- */
 static void opp_true_random(OsrsEnv* env, int* actions) {
@@ -1034,12 +997,6 @@ static void opp_improved(OsrsEnv* env, OpponentState* opp, int* actions) {
     }
 }
 
-/* =========================================================================
- * Novice NH: learning player — 60% correct prayer, random attacks, good eating
- * Bridges easy opponents to intermediate. No off-prayer logic, no offensive
- * prayers, no movement. Just consistent attacking and sometimes-correct prayer.
- * ========================================================================= */
-
 static void opp_novice_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
     Player* target = &env->players[0];
@@ -1145,11 +1102,6 @@ static void opp_novice_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
         }
     }
 }
-
-/* =========================================================================
- * Apprentice NH: 60% correct prayer, 20% off-prayer attacks, 20% offensive
- * prayer, random 30% spec, drain restore. Bridges novice_nh to competent_nh.
- * ========================================================================= */
 
 static void opp_apprentice_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -1258,11 +1210,6 @@ static void opp_apprentice_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
         }
     }
 }
-
-/* =========================================================================
- * Competent NH: 75% correct prayer, 25% off-prayer attacks, 25% offensive
- * prayers, 50% conditional spec. Bridges apprentice_nh to intermediate_nh.
- * ========================================================================= */
 
 static void opp_competent_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -1395,12 +1342,6 @@ static void opp_competent_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     }
 }
 
-/* =========================================================================
- * Intermediate NH: getting the hang of it — 85% correct prayer, 70% off-prayer
- * attacks, 50% offensive prayers. No movement, no fakes. Bridges novice_nh
- * to improved.
- * ========================================================================= */
-
 static void opp_intermediate_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
     Player* target = &env->players[0];
@@ -1530,12 +1471,6 @@ static void opp_intermediate_nh(OsrsEnv* env, OpponentState* opp, int* actions) 
         }
     }
 }
-
-/* =========================================================================
- * Advanced NH: near-improved — 100% correct prayer, 90% off-prayer attacks,
- * 75% offensive prayers, same spec as improved, farcast 3 but no step under.
- * Bridges intermediate_nh to improved.
- * ========================================================================= */
 
 static void opp_advanced_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -1671,12 +1606,6 @@ static void opp_advanced_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
         }
     }
 }
-
-/* =========================================================================
- * Proficient NH: 92% off-prayer, 80% offensive prayer, 25% step under.
- * Introduces step under at low rate between advanced_nh (no step under)
- * and expert_nh (50% step under).
- * ========================================================================= */
 
 static void opp_proficient_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -1816,12 +1745,6 @@ static void opp_proficient_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     }
 }
 
-/* =========================================================================
- * Expert NH: 95% off-prayer, 85% offensive prayer, 50% step under.
- * Introduces step under mechanic at reduced rate while keeping attack
- * parameters between advanced_nh and improved.
- * ========================================================================= */
-
 static void opp_expert_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
     Player* target = &env->players[0];
@@ -1959,11 +1882,6 @@ static void opp_expert_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
         }
     }
 }
-
-/* =========================================================================
- * Phase 2 Policy: Onetick
- * Fake switches, tank gear, smart spec, boost pots, 1-tick attacks.
- * ========================================================================= */
 
 static void opp_onetick(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -2175,11 +2093,6 @@ static void opp_onetick(OsrsEnv* env, OpponentState* opp, int* actions) {
     (void)prayer_pct;
 }
 
-/* =========================================================================
- * Phase 2 Policy: RealisticImproved
- * Improved with prayer delays, wrong prayer chance, attack delays.
- * ========================================================================= */
-
 static void opp_unpredictable_improved(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
     Player* target = &env->players[0];
@@ -2279,11 +2192,6 @@ static void opp_unpredictable_improved(OsrsEnv* env, OpponentState* opp, int* ac
 
     (void)potion_used;
 }
-
-/* =========================================================================
- * Phase 2 Policy: RealisticOnetick
- * Onetick + prayer delays + fake execution failures + wrong prediction.
- * ========================================================================= */
 
 static void opp_unpredictable_onetick(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -2481,11 +2389,6 @@ static void opp_unpredictable_onetick(OsrsEnv* env, OpponentState* opp, int* act
     }
 }
 
-/* =========================================================================
- * Helper: decode agent's pending action to extract attack style and prayer
- * Used by boss opponents (master_nh, savant_nh) for "reading" ability.
- * ========================================================================= */
-
 static void opp_read_agent_action(OsrsEnv* env, OpponentState* opp) {
     opp->has_read_this_tick = 0;
     opp->read_agent_style = ATTACK_STYLE_NONE;
@@ -2543,19 +2446,16 @@ static void opp_read_agent_action(OsrsEnv* env, OpponentState* opp) {
     else if (overhead == ENCOUNTER_OVERHEAD_TOGGLE_SMITE)  opp->read_agent_prayer = PRAYER_SMITE;
     else if (overhead == ENCOUNTER_OVERHEAD_TOGGLE_REDEMPTION) opp->read_agent_prayer = PRAYER_REDEMPTION;
 
-    /* Extract movement intent */
     opp->read_agent_moving = is_move_action(attack) ? 1 : 0;
 }
 
-/* Get defensive prayer against agent's read attack style */
 static inline int opp_get_read_defensive_prayer(OpponentState* opp) {
     if (opp->read_agent_style == ATTACK_STYLE_MAGIC) return OVERHEAD_MAGE;
     if (opp->read_agent_style == ATTACK_STYLE_RANGED) return OVERHEAD_RANGED;
     if (opp->read_agent_style == ATTACK_STYLE_MELEE) return OVERHEAD_MELEE;
-    return -1;  /* No read or unknown */
+    return -1;
 }
 
-/* Check if a style would hit agent off-prayer (using read info) */
 static inline int opp_style_off_read_prayer(OpponentState* opp, int style) {
     if (opp->read_agent_prayer == PRAYER_NONE) return 1;  /* No read, assume off */
     if (style == OPP_STYLE_MAGE && opp->read_agent_prayer != PRAYER_PROTECT_MAGIC) return 1;
@@ -2563,12 +2463,6 @@ static inline int opp_style_off_read_prayer(OpponentState* opp, int style) {
     if (style == OPP_STYLE_MELEE && opp->read_agent_prayer != PRAYER_PROTECT_MELEE) return 1;
     return 0;  /* Would hit on-prayer */
 }
-
-/* =========================================================================
- * Boss Policy: Master NH
- * Onetick-perfect mechanics + 10% chance to "read" agent's pending action.
- * When read succeeds: prays correctly against incoming attack, attacks off-prayer.
- * ========================================================================= */
 
 static void opp_master_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -2781,31 +2675,15 @@ static void opp_master_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     (void)prayer_pct;
 }
 
-/* =========================================================================
- * Boss Policy: Savant NH
- * Onetick-perfect mechanics + 25% chance to "read" agent's pending action.
- * Same as master_nh but with higher read chance.
- * ========================================================================= */
-
 static void opp_savant_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     /* Savant uses the same logic as master, just with higher read_chance (set in reset) */
     opp_master_nh(env, opp, actions);
 }
 
-/* =========================================================================
- * Boss Policy: Nightmare NH
- * Same as master/savant but with 50% read chance - extremely difficult.
- * ========================================================================= */
-
 static void opp_nightmare_nh(OsrsEnv* env, OpponentState* opp, int* actions) {
     /* Nightmare uses the same logic as master, just with 50% read_chance (set in reset) */
     opp_master_nh(env, opp, actions);
 }
-
-/* =========================================================================
- * Vengeance Fighter: lunar spellbook, melee/range only, no freeze/blood.
- * Expert-level prayer/eating, veng on cooldown, melee spec only.
- * ========================================================================= */
 
 static void opp_veng_fighter(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -2923,12 +2801,6 @@ static void opp_veng_fighter(OsrsEnv* env, OpponentState* opp, int* actions) {
         }
     }
 }
-
-/* =========================================================================
- * Blood Healer: sustain fighter using blood barrage as primary healing.
- * Works at all tiers — ahrim staff can cast blood spells regardless of gear.
- * Farcast-5, reduced food reliance, blood barrage heavy when damaged.
- * ========================================================================= */
 
 static void opp_blood_healer(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
@@ -3070,12 +2942,6 @@ static void opp_blood_healer(OsrsEnv* env, OpponentState* opp, int* actions) {
         }
     }
 }
-
-/* =========================================================================
- * Gmaul Combo: KO specialist with spec → gmaul instant follow-up.
- * Degrades to improved-style at tier 0 (DDS spec only, no gmaul combo).
- * At tier 1+ with gmaul available, fires spec→gmaul for burst KO.
- * ========================================================================= */
 
 #define COMBO_IDLE       0
 #define COMBO_SPEC_FIRED 1
@@ -3242,13 +3108,6 @@ static void opp_gmaul_combo(OsrsEnv* env, OpponentState* opp, int* actions) {
     }
 }
 
-/* =========================================================================
- * Range Kiter: ranged-dominant fighter who maintains distance.
- * Works at all tiers — rune crossbow does ranged damage at tier 0.
- * Gains spec capability at higher tiers (ACB/ZCB/dark bow/morr jav).
- * Maintains farcast-5, ice barrage to freeze, ranged primary (~60-70%).
- * ========================================================================= */
-
 static void opp_range_kiter(OsrsEnv* env, OpponentState* opp, int* actions) {
     Player* self = &env->players[1];
     Player* target = &env->players[0];
@@ -3362,10 +3221,8 @@ static void opp_range_kiter(OsrsEnv* env, OpponentState* opp, int* actions) {
                 actual_attack = 2;  /* ATK */
             }
 
-            /* Boost potions */
             opp_apply_boost_potion(env, opp, actions, self, attack_style, 0);
 
-            /* Melee spec (DDS etc) when close — fallback */
             int melee_spec_cost = get_melee_spec_cost(self->melee_spec_weapon);
             int can_melee_spec = (self->special_energy >= melee_spec_cost &&
                                  target->prayer != PRAYER_PROTECT_MELEE &&
@@ -3406,10 +3263,6 @@ static void opp_range_kiter(OsrsEnv* env, OpponentState* opp, int* actions) {
         }
     }
 }
-
-/* =========================================================================
- * Mixed policy selection (MixedEasy/MixedMedium/MixedHard/MixedHardBalanced)
- * ========================================================================= */
 
 /* MixedEasy weights: panicking=0.18, true_random=0.18, weak_random=0.18,
    semi_random=0.15, sticky_prayer=0.10, random_eater=0.10, prayer_rookie=0.06,
@@ -3458,17 +3311,12 @@ static OpponentType opp_select_from_pool(
     return pool[pool_size - 1];
 }
 
-/* =========================================================================
- * Main entry point: generate opponent action
- * ========================================================================= */
-
 static void opponent_reset(OsrsEnv* env, OpponentState* opp) {
     opp->food_cooldown = 0;
     opp->potion_cooldown = 0;
     opp->karambwan_cooldown = 0;
     opp->current_prayer_set = 0;
 
-    /* Phase 2 state reset */
     opp->fake_switch_pending = 0;
     opp->fake_switch_style = -1;
     opp->opponent_prayer_at_fake = -1;

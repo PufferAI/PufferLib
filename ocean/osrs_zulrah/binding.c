@@ -20,12 +20,9 @@
 #include "osrs_render.h"
 #pragma GCC diagnostic pop
 
-/* total obs = raw obs + action mask */
 #define ZUL_TOTAL_OBS (ZUL_NUM_OBS + ZUL_ACTION_MASK_SIZE)
 
-/* wrapper struct: vecenv-compatible fields at top + encounter state.
- * vecenv.h's create_static_vec assigns env->observations, env->actions,
- * env->rewards, env->terminals directly. */
+/* vecenv-compatible header fields must stay first. */
 typedef struct {
     void* observations;
     float* actions;
@@ -37,7 +34,6 @@ typedef struct {
 
     EncounterState* enc_state;
 
-    /* staging buffer for action type conversion */
     int acts_staging[ZUL_NUM_ACTION_HEADS];
     unsigned char term_staging;
 
@@ -49,8 +45,6 @@ typedef struct {
 #define ACT_SIZES {ZUL_MOVE_DIM, ZUL_ATTACK_DIM, ZUL_PRAYER_DIM, ZUL_FOOD_DIM, ZUL_POTION_DIM, ZUL_SPEC_DIM, ZUL_OFFENSIVE_DIM}
 #define OBS_TENSOR_T FloatTensor
 #define Env ZulrahEnv
-
-/* c_step/c_reset/c_close/c_render must be defined BEFORE including vecenv.h */
 
 void c_step(Env* env) {
     int used_human_commands = 0;
@@ -81,15 +75,12 @@ void c_step(Env* env) {
     if (!used_human_commands)
         ENCOUNTER_ZULRAH.step(env->enc_state, env->acts_staging);
 
-    /* write obs + mask directly (mask appended after raw obs) */
     float* obs = (float*)env->observations;
     ENCOUNTER_ZULRAH.write_obs(env->enc_state, obs);
     ENCOUNTER_ZULRAH.write_mask(env->enc_state, obs + ZUL_NUM_OBS);
 
-    /* reward */
     env->rewards[0] = ENCOUNTER_ZULRAH.get_reward(env->enc_state);
 
-    /* terminal */
     int is_term = ENCOUNTER_ZULRAH.is_terminal(env->enc_state);
     env->term_staging = (unsigned char)is_term;
     env->terminals[0] = (float)is_term;
@@ -112,7 +103,6 @@ void c_step(Env* env) {
         env->log.wave += (float)zs->total_phases_completed;
         env->log.n += 1.0f;
 
-        /* auto-reset */
         ENCOUNTER_ZULRAH.reset(env->enc_state, 0);
         ENCOUNTER_ZULRAH.write_obs(env->enc_state, obs);
         ENCOUNTER_ZULRAH.write_mask(env->enc_state, obs + ZUL_NUM_OBS);
@@ -162,7 +152,6 @@ void c_render(Env* env) {
         rc->npc_anim_cache = anim_cache_load("data/zulrah.anims");
     }
 
-    /* eval pacing: sleep to match tick rate (9/0 keys slow/speed up) */
     RenderClient* rc = (RenderClient*)re->client;
     if (rc && rc->ticks_per_second > 0.0f) {
         double interval = 1.0 / rc->ticks_per_second;
@@ -179,7 +168,6 @@ void my_init(Env* env, Dict* kwargs) {
     env->enc_state = ENCOUNTER_ZULRAH.create();
     memset(&env->log, 0, sizeof(Log));
 
-    /* gear tier config (default 0 = budget) */
     DictItem* gear = dict_get_unsafe(kwargs, "gear_tier");
     if (gear) {
         ENCOUNTER_ZULRAH.put_int(env->enc_state, "gear_tier", (int)gear->value);
@@ -193,7 +181,6 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "damage_dealt", log->damage_dealt);
     dict_set(out, "damage_received", log->damage_received);
 
-    /* prayer correctness rate */
     float prayer_rate = (log->prayer_total > 0.0f)
         ? log->prayer_correct / log->prayer_total : 0.0f;
     dict_set(out, "prayer_correct_rate", prayer_rate);
@@ -205,7 +192,6 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "venom_ticks", log->brews_used);     /* reused field */
     dict_set(out, "phases_completed", log->wave);      /* reused field */
 
-    /* composite score: winrate-gated efficiency */
     float wr = log->wins;
     float speed_bonus = (wr > 0.1f)
         ? (1.0f - log->episode_length / (float)ZUL_MAX_TICKS) * 0.3f : 0.0f;

@@ -87,17 +87,7 @@ static inline int osrs_spec_cost(int weapon_item_idx) {
         default:                        return 0;
     }
 }
-
-/* ======================================================================== */
-/* osrs_resolve_spec: dispatch special attack by weapon item index            */
-/*                                                                           */
-/* att_roll: base attack roll (eff_level * (bonus + 64)), unmodified         */
-/* max_hit: base max hit, unmodified by spec                                 */
-/* def_roll: target's base defence roll (eff_def * (def_bonus + 64))         */
-/* target_def_level: target's current defence level (for drain calcs)        */
-/* rng_state: pointer to xorshift32 RNG state                                */
-/* ======================================================================== */
-
+/** Resolve a special attack by weapon item index. */
 static inline SpecResult osrs_resolve_spec(
     int weapon_item_idx, int att_roll, int max_hit,
     int def_roll, int target_def_level, uint32_t* rng_state
@@ -105,8 +95,6 @@ static inline SpecResult osrs_resolve_spec(
     SpecResult r = {0, {0, 0, 0, 0}, 0, 0, 0, 0, 0, 0, 0, 0};
 
     switch (weapon_item_idx) {
-
-    /* ---- MELEE ---- */
 
     /* AGS: 2x accuracy, 1.375x max hit (godsword 1.1 * 1.25).
        ref: osrs-dps-calc [2,1] acc, [11,10]*[5,4] str */
@@ -329,8 +317,6 @@ static inline SpecResult osrs_resolve_spec(
         break;
     }
 
-    /* ---- RANGED ---- */
-
     /* blowpipe: 2x accuracy, 1.5x max hit, heal 50% of damage.
        ref: osrs-sdk Blowpipe.ts, osrs_combat.h (moved here) */
     case ITEM_TOXIC_BLOWPIPE: {
@@ -432,8 +418,6 @@ static inline SpecResult osrs_resolve_spec(
         r.total_damage = r.damage[0];
         break;
     }
-
-    /* ---- MAGIC ---- */
 
     /* volatile nightmare staff: 1.5x accuracy, max hit = min(58, 58*floor(magic_lvl/99)+1).
        at 99 magic (our sim): max 58. below 99: max 1 (hard level gate).

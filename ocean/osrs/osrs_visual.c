@@ -494,9 +494,7 @@ static void run_visual(OsrsEnv* env, const char* encounter_name, const char* rep
         rc->terrain = terrain_load("data/zulrah.terrain");
         rc->objects = objects_load("data/zulrah.objects");
 
-        /* Zulrah coordinate alignment
-           ============================
-           three coordinate spaces are in play:
+        /* Zulrah coordinate alignment: three coordinate spaces are in play:
 
            1. OSRS world coords: absolute tile positions (e.g. 2256, 3061).
               terrain, objects, and collision maps are all authored in this space.
@@ -723,8 +721,7 @@ int main(int argc, char** argv) {
         env.ocean_io.agent_rewards = env.rewards;
         env.ocean_io.agent_terminals = env.terminals;
 
-        printf("OSRS PvP C Environment Demo\n");
-        printf("===========================\n\n");
+        printf("OSRS PvP C Environment Demo\n\n");
 
         printf("Running single verbose episode...\n");
         run_random_episode(&env, 1);

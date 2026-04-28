@@ -303,8 +303,6 @@ static inline void encounter_resolve_attack_target(
         }
     }
 }
-
-/* ======================================================================== */
 /* canonical prayer action encoding (toggle semantics, matches OSRS)         */
 /*                                                                           */
 /* real OSRS has no "turn off" button — clicking an active prayer icon       */
@@ -321,8 +319,6 @@ static inline void encounter_resolve_attack_target(
 /*   3. calling encounter_apply_offensive_action() on pretick                */
 /*   4. calling encounter_drain_all_prayers() on pretick (handles both slots */
 /*      + activation-tick skip + pp=0 auto-clear)                            */
-/* ======================================================================== */
-
 /* overhead action encoding. dim depends on encounter:
    - PvE (inferno/zulrah): 4 dim, actions 0-3 only
    - PvP: 6 dim, full range */
@@ -888,14 +884,10 @@ static inline int encounter_npc_step_toward(
         return 1;
     return 0;
 }
-
-/* ======================================================================== */
 /* shared damage application helpers                                         */
 /*                                                                           */
 /* ENCOUNTERS: use these instead of manually subtracting HP, clamping,       */
 /* and setting hit splat flags. prevents bugs from forgetting a step.        */
-/* ======================================================================== */
-
 /** apply damage to a player. updates HP (clamped to 0), sets hit splat flags,
     and accumulates damage into a per-tick tracker (for reward calculation).
     damage_tracker can be NULL if not needed.
@@ -1031,8 +1023,6 @@ static inline uint32_t encounter_resolve_seed(uint32_t saved_rng, uint32_t expli
     if (explicit_seed != 0) rng = explicit_seed;
     return rng;
 }
-
-/* ======================================================================== */
 /* shared prayer drain                                                       */
 /*                                                                           */
 /* ENCOUNTERS: call encounter_drain_all_prayers() each tick to drain prayer  */
@@ -1046,8 +1036,6 @@ static inline uint32_t encounter_resolve_seed(uint32_t saved_rng, uint32_t expli
 /*                                                                           */
 /* protection prayers (melee/ranged/magic): drain_effect = 12               */
 /* rigour: drain_effect = 24, augury: drain_effect = 24                     */
-/* ======================================================================== */
-
 /** drain effect values for overhead prayers.
     from the OSRS prayer table — higher values drain faster.
     used by both PvE encounters and PvP. */
@@ -1123,9 +1111,6 @@ static inline void encounter_drain_all_prayers(Player* p, int prayer_bonus) {
         }
     }
 }
-
-
-/* ======================================================================== */
 /* shared loadout stat computation                                           */
 /*                                                                           */
 /* ENCOUNTERS: do NOT manually compute attack bonuses, max hits, or          */
@@ -1136,8 +1121,6 @@ static inline void encounter_drain_all_prayers(Player* p, int prayer_bonus) {
 /*   EncounterLoadoutStats — computed combat stats for one gear loadout      */
 /*   OffensivePrayer       — prayer enum (NONE, PIETY, RIGOUR, AUGURY, low-tiers) */
 /*   encounter_compute_loadout_stats() — derive stats from loadout + prayer  */
-/* ======================================================================== */
-
 /** combat stats derived from a gear loadout + prayer + style.
     computed once at reset, read during combat.
     prayer multipliers and style_bonus are stored for dynamic recomputation
@@ -1281,16 +1264,12 @@ static inline void encounter_compute_loadout_stats(
         out->max_hit = (int)(0.5 + eff_str_level * (eb.melee_strength + 64) / 640.0);
     }
 }
-
-/* ======================================================================== */
 /* dynamic max hit recomputation (after brew drain / potion boost)            */
 /*                                                                           */
 /* ENCOUNTERS: call encounter_update_loadout_level() whenever the player's   */
 /* current combat level changes (brew drain, restore, bastion boost).        */
 /* this recomputes eff_level and max_hit using the stored prayer multiplier  */
 /* and strength bonus from the initial encounter_compute_loadout_stats().    */
-/* ======================================================================== */
-
 /** recompute eff_level and max_hit for a loadout using a (possibly drained/boosted)
     current combat level AND current offensive prayer. call whenever either changes:
       - offensive prayer toggle (pretick action)
@@ -1349,8 +1328,6 @@ static inline void encounter_compute_player_equipped_stats(
         out);
     encounter_update_loadout_level(out, p->offensive_prayer, current_att, current_str);
 }
-
-/* ======================================================================== */
 /* shared potion stat effects (brew drain, restore, bastion boost)           */
 /*                                                                           */
 /* ENCOUNTERS: call these when the player drinks a potion. they modify the   */
@@ -1360,8 +1337,6 @@ static inline void encounter_compute_player_equipped_stats(
 /* sara brew:     heals HP, boosts def, drains att/str/ranged/magic          */
 /* super restore: restores all drained stats toward base (caps at base)      */
 /* bastion:       boosts ranged above base, boosts def                       */
-/* ======================================================================== */
-
 /** sara brew stat drain. call AFTER healing HP (which is encounter-specific).
     drains att/str/ranged/magic by floor(current/10)+2 each (uses CURRENT level).
     boosts defence by floor(current_def/5)+2, capped at base + max boost from base.
@@ -1442,16 +1417,12 @@ static inline void encounter_recompute_loadout_max_hits(
         }
     }
 }
-
-/* ======================================================================== */
 /* shared special attack energy                                              */
 /*                                                                           */
 /* ENCOUNTERS: call encounter_tick_spec_regen() every game tick. call         */
 /* encounter_use_spec() when the player activates a special attack.          */
 /* OSRS: energy 0-100, starts at 100, regens +10 every 50 ticks (30s).      */
 /* lightbearer halves regen interval to 25 ticks.                            */
-/* ======================================================================== */
-
 /** tick special attack energy regeneration from current equipped gear. */
 static inline void encounter_tick_spec_regen(Player* p) {
     osrs_tick_special_regen(p);

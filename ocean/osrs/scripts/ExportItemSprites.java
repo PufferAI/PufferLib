@@ -156,14 +156,8 @@ public class ExportItemSprites {
             SpriteManager spriteManager = new SpriteManager(store);
             spriteManager.load();
 
-            // texture manager — may fail on modern cache format, potions don't need textures
             TextureManager textureManager = new TextureManager(store);
-            try {
-                textureManager.load();
-            } catch (Exception e) {
-                System.err.println("warning: TextureManager.load() failed: " + e.getMessage());
-                System.err.println("  continuing without textures (potions render fine without them)");
-            }
+            textureManager.load();
 
             // parse item IDs to export
             Set<Integer> targetIds = new HashSet<>();
@@ -192,27 +186,22 @@ public class ExportItemSprites {
                 if (itemDef.name == null || itemDef.name.equalsIgnoreCase("null")) continue;
                 if (targetIds.isEmpty() && itemDef.inventoryModel <= 0) continue;
 
-                try {
-                    BufferedImage sprite = ItemSpriteFactory.createSprite(
-                        itemManager, modelProvider, spriteManager, textureManager,
-                        itemDef.id, 1, 1, 0x303030, false);
+                BufferedImage sprite = ItemSpriteFactory.createSprite(
+                    itemManager, modelProvider, spriteManager, textureManager,
+                    itemDef.id, 1, 1, 0x303030, false);
 
-                    if (sprite == null) {
-                        System.err.println("  item " + itemDef.id + " (" + itemDef.name + "): null sprite");
-                        failed++;
-                        continue;
-                    }
-
-                    File out = new File(outDir, itemDef.id + ".png");
-                    ImageIO.write(sprite, "PNG", out);
-                    exported++;
-
-                    System.out.println("  " + itemDef.id + " (" + itemDef.name + "): "
-                        + sprite.getWidth() + "x" + sprite.getHeight());
-                } catch (Exception ex) {
-                    System.err.println("  item " + itemDef.id + " (" + itemDef.name + "): " + ex.getMessage());
+                if (sprite == null) {
+                    System.err.println("  item " + itemDef.id + " (" + itemDef.name + "): null sprite");
                     failed++;
+                    continue;
                 }
+
+                File out = new File(outDir, itemDef.id + ".png");
+                ImageIO.write(sprite, "PNG", out);
+                exported++;
+
+                System.out.println("  " + itemDef.id + " (" + itemDef.name + "): "
+                    + sprite.getWidth() + "x" + sprite.getHeight());
             }
 
             System.out.println("\nexported " + exported + " item sprites, " + failed + " failed");

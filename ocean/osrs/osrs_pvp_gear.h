@@ -386,8 +386,6 @@ static inline void resolve_loadout(Player* p, int loadout, uint8_t out[NUM_DYNAM
         }
         case LOADOUT_MAGE:
         case LOADOUT_TANK: {
-            // MAGE uses best magic weapon + magic gear
-            // TANK uses best magic weapon + defensive body/legs/shield
             uint8_t weapon = find_best_available(p, GEAR_SLOT_WEAPON, MAGE_WEAPON_PRIORITY, MAGE_WEAPON_PRIORITY_LEN);
             if (weapon != ITEM_NONE) out[0] = weapon;
 
@@ -403,7 +401,6 @@ static inline void resolve_loadout(Player* p, int loadout, uint8_t out[NUM_DYNAM
                 uint8_t neck = find_best_available(p, GEAR_SLOT_NECK, MAGE_NECK_PRIORITY, MAGE_NECK_PRIORITY_LEN);
                 if (neck != ITEM_NONE) out[6] = neck;
             } else {
-                // TANK: defensive shield/body/legs/head/neck
                 uint8_t shield = find_best_available(p, GEAR_SLOT_SHIELD, TANK_SHIELD_PRIORITY, TANK_SHIELD_PRIORITY_LEN);
                 if (shield != ITEM_NONE) out[1] = shield;
                 uint8_t body = find_best_available(p, GEAR_SLOT_BODY, TANK_BODY_PRIORITY, TANK_BODY_PRIORITY_LEN);
@@ -906,22 +903,17 @@ static inline int compute_food_count(Player* p) {
     return food > 1 ? food : 1;
 }
 
-// Loot tables for gear tiers (items that can drop from LMS chests)
-// Each chest gives 2 rolls from the same combined pool
 static const uint8_t CHEST_LOOT[] = {
-    // offensive
     ITEM_DRAGON_CLAWS, ITEM_AGS, ITEM_ANCIENT_GS, ITEM_GRANITE_MAUL,
     ITEM_VOLATILE_STAFF, ITEM_ZARYTE_CROSSBOW, ITEM_ARMADYL_CROSSBOW,
     ITEM_DARK_BOW, ITEM_GHRAZI_RAPIER, ITEM_INQUISITORS_MACE,
     ITEM_KODAI_WAND, ITEM_STAFF_OF_DEAD, ITEM_ELDER_MAUL,
     ITEM_HEAVY_BALLISTA, ITEM_OCCULT_NECKLACE, ITEM_INFERNAL_CAPE,
     ITEM_SEERS_RING_I, ITEM_MAGES_BOOK,
-    // defensive
     ITEM_ANCESTRAL_HAT, ITEM_ANCESTRAL_TOP, ITEM_ANCESTRAL_BOTTOM,
     ITEM_AHRIMS_ROBETOP, ITEM_AHRIMS_ROBESKIRT, ITEM_KARILS_TOP,
     ITEM_BANDOS_TASSETS, ITEM_BLESSED_SPIRIT_SHIELD,
     ITEM_FURY, ITEM_ETERNAL_BOOTS,
-    // barrows armor + opal bolts
     ITEM_TORAGS_PLATELEGS, ITEM_DHAROKS_PLATELEGS, ITEM_VERACS_PLATESKIRT,
     ITEM_TORAGS_HELM, ITEM_DHAROKS_HELM, ITEM_VERACS_HELM, ITEM_GUTHANS_HELM,
     ITEM_OPAL_DRAGON_BOLTS,

@@ -331,15 +331,11 @@ static inline void encounter_shuffle(int* arr, int n, uint32_t* rng) {
         int tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
     }
 }
-
-/* ======================================================================== */
 /* player-side combat primitives                                             */
 /*                                                                           */
 /* pure math for player effective levels, attack rolls, and max hits.        */
 /* ref: .refs/osrs-dps-calc/src/lib/PlayerVsNPCCalc.ts                      */
 /*      .refs/osrs-dps-calc/src/lib/BaseCalc.ts:105-110                     */
-/* ======================================================================== */
-
 /* player effective level: floor(base * prayer_mult) + style_bonus + 8.
    prayer_mult: 1.0 (none), 1.20 (piety/rigour att), 1.23 (piety/rigour str),
    1.25 (augury). style_bonus: 0 (rapid/autocast), +3 (accurate), +1 (controlled).
@@ -347,8 +343,6 @@ static inline void encounter_shuffle(int* arr, int n, uint32_t* rng) {
 static inline int osrs_player_eff_level(int base_level, float prayer_mult, int style_bonus) {
     return (int)(base_level * prayer_mult) + style_bonus + 8;
 }
-
-/* ======================================================================== */
 /* stance (FightStyle) → combat modifiers.                                   */
 /*                                                                           */
 /* single source of truth for "what does this stance do". replaces the raw   */
@@ -358,8 +352,6 @@ static inline int osrs_player_eff_level(int base_level, float prayer_mult, int s
 /*                                                                           */
 /* ref: osrs wiki "Combat Options", .refs/osrs-dps-calc PlayerVsNPCCalc.ts   */
 /*      and Equipment.ts:245-270 (rapid speed -1).                           */
-/* ======================================================================== */
-
 /* attack level bonus for the stance.
    melee: accurate +3, controlled +1.
    ranged: accurate +3.

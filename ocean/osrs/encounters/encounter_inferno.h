@@ -1978,7 +1978,6 @@ static void inf_npc_attack(InfernoState* s, int idx) {
         return;
     }
 
-    /* inferno has NPC-specific melee fallback rules when close enough to hit. */
     {
         int style_mask = inf_attack_style_options_mask(
             s, npc, stats, actual_style, dist);
@@ -3709,7 +3708,6 @@ static void inf_write_obs(EncounterState* state, float* obs) {
         }
     }
 
-    /* sanity: verify we wrote exactly INF_NUM_OBS features */
     if (i != INF_NUM_OBS) {
         fprintf(stderr, "BUG: inf_write_obs wrote %d features, expected %d\n", i, INF_NUM_OBS);
         abort();

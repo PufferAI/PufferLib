@@ -23,7 +23,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from modern_cache_reader import (
     ModernCacheReader,
-    read_big_smart,
     read_i32,
     read_string,
     read_u8,
@@ -33,17 +32,13 @@ from modern_cache_reader import (
 )
 from modern_cache_reader import parse_sequence as parse_modern_sequence
 from export_models import (
-    MDL2_MAGIC,
     ModelData,
     _merge_models,
     decode_model,
-    expand_model,
     load_model_modern,
     write_models_binary,
 )
 from export_animations import (
-    ANIM_MAGIC,
-    FrameBaseDef,
     FrameDef,
     SequenceDef,
     _parse_normal_frame,
@@ -53,7 +48,7 @@ from export_animations import (
 
 # gameval parser from tools dir
 sys.path.insert(0, str(Path(__file__).parent))
-from gameval_parser import load_gameval, resolve_names, reverse_lookup
+from gameval_parser import load_gameval, resolve_names
 
 # modern cache layout
 MODERN_NPC_CONFIG_GROUP = 9
@@ -61,9 +56,6 @@ MODERN_SPOTANIM_CONFIG_GROUP = 13
 MODERN_SEQ_CONFIG_GROUP = 12
 MODERN_FRAME_INDEX = 0
 MODERN_FRAMEBASE_INDEX = 1
-
-
-# ---- dataclasses (copied from export_inferno_npcs.py) ----
 
 @dataclass
 class NpcDef:
@@ -105,9 +97,6 @@ class SpotAnimDef:
     rotation: int = 0
     ambient: int = 0
     contrast: int = 0
-
-
-# ---- cache parsers (copied from export_inferno_npcs.py) ----
 
 def parse_modern_npc_def(npc_id: int, data: bytes) -> NpcDef:
     """Parse modern OSRS NPC definition from opcode stream."""
@@ -323,9 +312,6 @@ def parse_modern_spotanim(spotanim_id: int, data: bytes) -> SpotAnimDef:
 
     return d
 
-
-# ---- model helpers (copied from export_inferno_npcs.py) ----
-
 def apply_recolors(md: ModelData, src: list[int], dst: list[int]) -> None:
     """Apply recolor pairs to model face colors in-place."""
     for i, color in enumerate(md.face_colors):
@@ -345,9 +331,6 @@ def apply_scale(md: ModelData, width_scale: int, height_scale: int) -> None:
         md.vertices_x[i] = int(md.vertices_x[i] * ws)
         md.vertices_y[i] = int(md.vertices_y[i] * hs)
         md.vertices_z[i] = int(md.vertices_z[i] * ws)
-
-
-# ---- main pipeline ----
 
 def main() -> None:
     """Manifest-driven export of encounter NPC models + animations."""
@@ -373,17 +356,9 @@ def main() -> None:
     args = parser.parse_args()
     group = args.group
     group_upper = group.upper()
-
-    # ================================================================
-    # step 1: load gameval constants
-    # ================================================================
     print("loading gameval constants...")
     anim_ids, npc_ids, spotanim_ids = load_gameval()
     print(f"  {len(anim_ids)} anims, {len(npc_ids)} npcs, {len(spotanim_ids)} spotanims")
-
-    # ================================================================
-    # step 2: load manifest, filter by group
-    # ================================================================
     print(f"\nloading manifest {args.manifest}, filtering group={group!r}...")
     with open(args.manifest) as f:
         manifest = json.load(f)
@@ -393,10 +368,6 @@ def main() -> None:
         print(f"error: no manifest entries with visual.group={group!r}", file=sys.stderr)
         sys.exit(1)
     print(f"  {len(entries)} NPCs in group {group!r}")
-
-    # ================================================================
-    # step 3: open cache, read NPC + spotanim configs
-    # ================================================================
     reader = ModernCacheReader(args.modern_cache)
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -458,10 +429,6 @@ def main() -> None:
         print(f"  NPC {npc_id} ({comment}): models={npc.model_ids}, "
               f"idle={npc.idle_anim}, walk={npc.walk_anim}, "
               f"attacks={attack_ids}, extras={extra_ids}")
-
-    # ================================================================
-    # step 4: export NPC models
-    # ================================================================
     print("\nexporting NPC models...")
     all_models: list[ModelData] = []
 
@@ -494,10 +461,6 @@ def main() -> None:
         merged.model_id = 0xC0000 + npc_id
         all_models.append(merged)
         print(f"  NPC {npc_id} ({npc.name}): {merged.vertex_count} verts, {merged.face_count} faces")
-
-    # ================================================================
-    # step 5: resolve spotanims, export GFX models
-    # ================================================================
     spotanim_defs: dict[int, SpotAnimDef] = {}
     spotanim_name_for_id: dict[int, str] = {}
 
@@ -545,18 +508,10 @@ def main() -> None:
                 print(f"  GFX {gfx_id} model {sa.model_id}: {md.vertex_count} verts")
             exported_gfx_models.add(md.model_id)
             all_models.append(md)
-
-    # ================================================================
-    # step 6: write models binary
-    # ================================================================
     models_path = output_dir / f"{group}.models"
     write_models_binary(models_path, all_models)
     file_size = models_path.stat().st_size
     print(f"\nwrote {len(all_models)} models ({file_size:,} bytes) to {models_path}")
-
-    # ================================================================
-    # step 7: export animations (follows export_inferno_npcs.py lines 618-690)
-    # ================================================================
     print("\nexporting animations...")
     seq_files = reader.read_group(2, MODERN_SEQ_CONFIG_GROUP)
 
@@ -632,10 +587,6 @@ def main() -> None:
     write_animations_binary(anims_path, framebases, all_frames, sequences, available_seqs)
     anims_size = anims_path.stat().st_size
     print(f"wrote {len(available_seqs)} sequences ({anims_size:,} bytes) to {anims_path}")
-
-    # ================================================================
-    # step 8: write C header
-    # ================================================================
     prefix = group_upper[:3] + "_GEN"
 
     header_path = output_dir / f"npc_models_{group}.h"
@@ -644,7 +595,7 @@ def main() -> None:
     print(f"\nwriting C header {header_path}...")
 
     with open(header_path, "w") as f:
-        f.write(f"/* generated by tools/export_encounter_npcs.py -- do not edit */\n")
+        f.write("/* generated by tools/export_encounter_npcs.py -- do not edit */\n")
         f.write(f"#ifndef {guard}\n")
         f.write(f"#define {guard}\n\n")
         f.write('#include <stdint.h>\n')

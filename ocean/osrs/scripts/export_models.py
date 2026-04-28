@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from modern_cache_reader import ModernCacheReader, decompress_container, read_string
+from export_textures import TextureAtlas
 
 _read_string = read_string
 
@@ -713,20 +714,12 @@ def _decode_type2(model_id: int, data: bytes) -> ModelData | None:
     var14 = _read_ubyte(data, off + 7)   # has transparency
     var15 = _read_ubyte(data, off + 8)   # has face skins
     var16 = _read_ubyte(data, off + 9)   # has vertex skins
-    var17 = _read_ubyte(data, off + 10)  # has animaya
+    _ = _read_ubyte(data, off + 10)  # has animaya
     var18 = _read_ushort(data, off + 11)  # vertex X len
     var19 = _read_ushort(data, off + 13)  # vertex Y len
-    var20 = _read_ushort(data, off + 15)  # vertex Z len
+    _ = _read_ushort(data, off + 15)  # vertex Z len
     var21 = _read_ushort(data, off + 17)  # face index len
-    # off+19..20 unused? Actually var22 = readUShort at off+19
-    # Wait — the footer is 23 bytes. 2+2+1+1+1+1+1+1+1+2+2+2+2 = 19. Plus magic 2 = 21.
-    # Actually decodeType2 footer reads: 2+2+1+1+1+1+1+1+1+2+2+2+2+2 = 21 data + 2 magic = 23
-    # Let me re-check: var9(2)+var10(2)+var11(1)+var12(1)+var13(1)+var14(1)+var15(1)+var16(1)+var17(1)
-    #   +var18(2)+var19(2)+var20(2)+var21(2)+magic(2) = 4+7+8+2 = 21. Hmm that's 21 not 23.
-    # Actually: 2+2+1+1+1+1+1+1+1+2+2+2+2 = 19. So there must be one more ushort.
-    # Looking at Java: var22 = var4.readUShort() at the end of the footer. That's face tex len.
     var22 = _read_ushort(data, off + 19)  # tex len (= face_tex_len not used by us, but 0xFF-2)
-    # Actually off + 19 + 2 = off + 21, then magic at off+21..22. Total = 23. Correct.
 
     # section offsets (mirrors Java decodeType2)
     # type2: vertex flags start at offset 0 (var23=0 in Java)
@@ -739,7 +732,6 @@ def _decode_type2(model_id: int, data: bytes) -> ModelData | None:
     if var13 == 255:
         var24 += var10
 
-    var27 = var24            # face skin offset
     if var15 == 1:
         var24 += var10
 
@@ -750,7 +742,6 @@ def _decode_type2(model_id: int, data: bytes) -> ModelData | None:
     var29 = var24            # vertex skin offset
     var24 += var22           # tex len
 
-    var30 = var24            # face transparency offset
     if var14 == 1:
         var24 += var10
 
@@ -760,7 +751,6 @@ def _decode_type2(model_id: int, data: bytes) -> ModelData | None:
     var32 = var24            # face color offset
     var24 += var10 * 2
 
-    var33 = var24            # texture coords offset
     var24 += var11 * 6
 
     var34 = var24            # vertex X offset
@@ -811,7 +801,7 @@ def _decode_old_format(model_id: int, data: bytes) -> ModelData | None:
     var16 = _read_ubyte(data, off + 9)   # has vertex skins
     var17 = _read_ushort(data, off + 10)  # vertex X len
     var18 = _read_ushort(data, off + 12)  # vertex Y len
-    var19 = _read_ushort(data, off + 14)  # vertex Z len
+    _ = _read_ushort(data, off + 14)  # vertex Z len
     var20 = _read_ushort(data, off + 16)  # face index len
 
     # section offset calculation (exact mirror of Java)
@@ -824,7 +814,6 @@ def _decode_old_format(model_id: int, data: bytes) -> ModelData | None:
     if var13 == 255:
         var22 += var10
 
-    var25 = var22             # face skin offset
     if var15 == 1:
         var22 += var10
 
@@ -836,7 +825,6 @@ def _decode_old_format(model_id: int, data: bytes) -> ModelData | None:
     if var16 == 1:
         var22 += var9
 
-    var28 = var22             # face transparency offset
     if var14 == 1:
         var22 += var10
 
@@ -846,7 +834,6 @@ def _decode_old_format(model_id: int, data: bytes) -> ModelData | None:
     var30 = var22             # face color offset
     var22 += var10 * 2
 
-    var31 = var22             # texture coords offset
     var22 += var11 * 6
 
     var32 = var22             # vertex X offset
@@ -919,7 +906,6 @@ def _decode_type1(model_id: int, data: bytes) -> ModelData | None:
 
     # section offsets (exact mirror of Java decodeType1)
     var26 = var11 + var9
-    var56 = var26             # face render type offset
     if var12 == 1:
         var26 += var10
 
@@ -930,7 +916,6 @@ def _decode_type1(model_id: int, data: bytes) -> ModelData | None:
     if var13 == 255:
         var26 += var10
 
-    var30 = var26             # face skin offset
     if var15 == 1:
         var26 += var10
 
@@ -938,7 +923,6 @@ def _decode_type1(model_id: int, data: bytes) -> ModelData | None:
     if var17 == 1:
         var26 += var9
 
-    var32 = var26             # face transparency offset
     if var14 == 1:
         var26 += var10
 
@@ -949,7 +933,6 @@ def _decode_type1(model_id: int, data: bytes) -> ModelData | None:
     if var16 == 1:
         var26 += var10 * 2
 
-    var35 = var26             # tex map offset
     var26 += var22
 
     var36 = var26             # face color offset
@@ -963,9 +946,7 @@ def _decode_type1(model_id: int, data: bytes) -> ModelData | None:
     var26 += var20
 
     # texture coordinates
-    var40 = var26             # tex type 0 coords
     var26 += tex_type0 * 6
-    var41 = var26             # tex type 1-3 coords
     var26 += tex_type13 * 6
     # ... (more tex data, but we don't need it)
 
@@ -1011,7 +992,7 @@ def _decode_type3(model_id: int, data: bytes) -> ModelData | None:
     var15 = _read_ubyte(data, off + 8)   # has face skins
     var16 = _read_ubyte(data, off + 9)   # has face textures
     var17 = _read_ubyte(data, off + 10)  # has vertex skins
-    var18 = _read_ubyte(data, off + 11)  # has animaya
+    _ = _read_ubyte(data, off + 11)  # has animaya
     var19 = _read_ushort(data, off + 12)  # vertex X len
     var20 = _read_ushort(data, off + 14)  # vertex Y len
     var21 = _read_ushort(data, off + 16)  # vertex Z len
@@ -1036,7 +1017,6 @@ def _decode_type3(model_id: int, data: bytes) -> ModelData | None:
 
     # section offsets (exact mirror of Java decodeType3)
     var28 = var11 + var9
-    var58 = var28             # face render type offset
     if var12 == 1:
         var28 += var10
 
@@ -1047,14 +1027,12 @@ def _decode_type3(model_id: int, data: bytes) -> ModelData | None:
     if var13 == 255:
         var28 += var10
 
-    var32 = var28             # face skin offset
     if var15 == 1:
         var28 += var10
 
     var33 = var28             # tex index / vertex skin region
     var28 += var24            # tex_index_len
 
-    var34 = var28             # face transparency offset
     if var14 == 1:
         var28 += var10
 
@@ -1065,7 +1043,6 @@ def _decode_type3(model_id: int, data: bytes) -> ModelData | None:
     if var16 == 1:
         var28 += var10 * 2
 
-    var37 = var28             # tex map offset
     var28 += var23            # tex_map_len
 
     var38 = var28             # FACE COLOR offset
@@ -1079,9 +1056,7 @@ def _decode_type3(model_id: int, data: bytes) -> ModelData | None:
     var28 += var21
 
     # texture coordinates section (we skip but need for total size check)
-    var42 = var28             # tex type 0 coords
     var28 += tex_type0 * 6
-    var43 = var28             # tex type 1-3 coords
     var28 += tex_type13 * 6
     # ... (more tex data for type 1-3 and type 2)
 
@@ -1214,7 +1189,7 @@ def _merge_models(models: list[ModelData]) -> ModelData:
 def expand_model(
     model: ModelData,
     tex_colors: dict[int, int] | None = None,
-    atlas: "TextureAtlas | None" = None,
+    atlas: TextureAtlas | None = None,
 ) -> tuple[list[float], list[tuple[int, int, int, int]], list[float]]:
     """Expand indexed model to per-vertex (3 verts per face, no index buffer).
 
@@ -1282,9 +1257,15 @@ def expand_model(
                 nx *= bias
                 ny *= bias
                 nz *= bias
-                ax -= nx; ay -= ny; az -= nz
-                bx -= nx; by -= ny; bz -= nz
-                cx -= nx; cy -= ny; cz -= nz
+                ax -= nx
+                ay -= ny
+                az -= nz
+                bx -= nx
+                by -= ny
+                bz -= nz
+                cx -= nx
+                cy -= ny
+                cz -= nz
 
         verts.extend([ax, ay, az, bx, by, bz, cx, cy, cz])
 
@@ -1796,7 +1777,7 @@ def main() -> None:
                     dragon_bolt_base.face_colors[fi] = dst
         dragon_bolt_base.model_id = 0xD0001  # synthetic ID for dragon bolt
         wield_models.append(dragon_bolt_base)
-        print(f"  built dragon bolt model (recolored 3135 -> 0xD0001)")
+        print("  built dragon bolt model (recolored 3135 -> 0xD0001)")
 
     print(f"\n{len(needed_models)} unique equipment + spotanim models to export")
 

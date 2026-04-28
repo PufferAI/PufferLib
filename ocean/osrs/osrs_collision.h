@@ -20,10 +20,6 @@
 #include <string.h>
 #include <stdio.h>
 
-/* =========================================================================
- * COLLISION FLAG CONSTANTS (from TraversalConstants.java)
- * ========================================================================= */
-
 #define COLLISION_NONE                   0x000000
 #define COLLISION_WALL_NORTH_WEST        0x000001
 #define COLLISION_WALL_NORTH             0x000002
@@ -47,10 +43,6 @@
 #define COLLISION_BRIDGE                 0x040000
 #define COLLISION_BLOCKED                0x200000
 
-/* =========================================================================
- * REGION DATA STRUCTURE
- * ========================================================================= */
-
 #define REGION_SIZE      64
 #define REGION_HEIGHT_LEVELS 4
 
@@ -58,10 +50,6 @@
 typedef struct {
     int flags[REGION_HEIGHT_LEVELS][REGION_SIZE][REGION_SIZE];
 } CollisionRegion;
-
-/* =========================================================================
- * REGION MAP (hash map of regions keyed by region hash)
- * ========================================================================= */
 
 #define REGION_MAP_CAPACITY 256  /* power of 2, enough for wilderness + surroundings */
 
@@ -75,10 +63,6 @@ typedef struct {
     int count;
 } CollisionMap;
 
-/* =========================================================================
- * COORDINATE HELPERS
- * ========================================================================= */
-
 /** Compute region hash from global tile coordinates. */
 static inline int collision_region_hash(int x, int y) {
     return ((x >> 6) << 8) | (y >> 6);
@@ -88,10 +72,6 @@ static inline int collision_region_hash(int x, int y) {
 static inline int collision_local(int coord) {
     return coord & 0x3F;
 }
-
-/* =========================================================================
- * REGION MAP OPERATIONS
- * ========================================================================= */
 
 /** Initialize a collision map (all slots empty). */
 static inline void collision_map_init(CollisionMap* map) {
@@ -166,10 +146,6 @@ static inline void collision_map_free(CollisionMap* map) {
     free(map);
 }
 
-/* =========================================================================
- * FLAG READ/WRITE
- * ========================================================================= */
-
 /** Get collision flags for a global tile coordinate. Returns 0 if region not loaded. */
 static inline int collision_get_flags(const CollisionMap* map, int height, int x, int y) {
     if (map == NULL) return COLLISION_NONE;
@@ -218,17 +194,6 @@ static inline void collision_mark_occupant(CollisionMap* map, int height, int x,
         }
     }
 }
-
-/* =========================================================================
- * TRAVERSAL CHECKS (ported from TraversalMap.java)
- *
- * Each check tests the DESTINATION tile for incoming wall flags + BLOCKED.
- * For diagonals: also checks the two cardinal intermediate tiles.
- *
- * All functions take a CollisionMap* which may be NULL (= all traversable).
- * Height is always 0 for PvP (single plane). The height param is kept for
- * future multi-plane support.
- * ========================================================================= */
 
 /** Check if flag bits are INACTIVE (none set) on a tile. */
 static inline int collision_is_inactive(const CollisionMap* map, int height, int x, int y, int flag) {
@@ -332,18 +297,6 @@ static inline int collision_traversable_step(const CollisionMap* map, int height
     return 1;
 }
 
-/* =========================================================================
- * BINARY COLLISION MAP I/O
- *
- * Format:
- *   4 bytes: magic "CMAP"
- *   4 bytes: version (1)
- *   4 bytes: region_count
- *   For each region:
- *     4 bytes: region_hash (key)
- *     REGION_HEIGHT_LEVELS * REGION_SIZE * REGION_SIZE * 4 bytes: flags
- * ========================================================================= */
-
 #define COLLISION_MAP_MAGIC 0x50414D43  /* "CMAP" in little-endian */
 #define COLLISION_MAP_VERSION 1
 
@@ -423,19 +376,6 @@ static inline int collision_map_save(const CollisionMap* map, const char* path) 
     fclose(f);
     return 0;
 }
-
-/* =========================================================================
- * LINE OF SIGHT — fixed-point ray tracing with directional masks
- *
- * used by inferno pillars, zulrah safespots, and any future encounter
- * that needs projectile blocking around obstacles.
- *
- * algorithm: Bresenham-style ray trace in Q16 fixed-point from tile center.
- * each blocker has a directional bitmask indicating which sides block sight.
- * FULL_MASK blocks from all directions.
- *
- * reference: osrs-sdk LineOfSight.ts
- * ========================================================================= */
 
 #define LOS_FULL_MASK   0x20000
 #define LOS_EAST_MASK   0x01000

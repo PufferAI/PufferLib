@@ -57,15 +57,11 @@ static int tests_failed = 0;
 static void clear_loadout(uint8_t loadout[NUM_GEAR_SLOTS]) {
     memset(loadout, 255, NUM_GEAR_SLOTS);
 }
-
-/* ======================================================================== */
 /* reference tbow multipliers with integer truncation (matching TS impl)     */
 /*                                                                           */
 /* ref: PlayerVsNPCCalc.ts tbowScaling()                                    */
 /*   accuracy: factor=10, base=140, cap=1.40                                */
 /*   damage:   factor=14, base=250, cap=2.50                                */
-/* ======================================================================== */
-
 static float ref_tbow_acc(int magic) {
     int m = magic < 250 ? magic : 250;
     int t2 = (3 * m - 10) / 100;
@@ -89,15 +85,11 @@ static float ref_tbow_dmg(int magic) {
     if (mult < 0.0f) mult = 0.0f;
     return mult;
 }
-
-/* ======================================================================== */
 /* test: tbow accuracy multiplier — edge cases and boundary behavior         */
 /*                                                                           */
 /* magic is clamped to [0, 250]. accuracy cap = 1.40, floor = 0.00.         */
 /* our C uses float division; TS ref uses integer truncation on intermediates*/
 /* so we allow up to 0.01 tolerance.                                        */
-/* ======================================================================== */
-
 static void test_tbow_acc_edge_cases(void) {
     printf("--- tbow accuracy: edge cases ---\n");
 
@@ -149,14 +141,10 @@ static void test_tbow_acc_edge_cases(void) {
     }
     ASSERT_INT_EQ("acc monotonic 0..250", monotonic, 1);
 }
-
-/* ======================================================================== */
 /* test: tbow damage multiplier — edge cases and inverted-U shape            */
 /*                                                                           */
 /* damage mult peaks around magic~100 and decreases at extremes.            */
 /* cap = 2.50, floor = 0.00.                                                */
-/* ======================================================================== */
-
 static void test_tbow_dmg_edge_cases(void) {
     printf("--- tbow damage: edge cases ---\n");
 
@@ -196,13 +184,9 @@ static void test_tbow_dmg_edge_cases(void) {
     ASSERT_INT_EQ("dmg monotonic 100<250",
         osrs_tbow_dmg_mult(100) < osrs_tbow_dmg_mult(250), 1);
 }
-
-/* ======================================================================== */
 /* test: tbow cap and floor bounds sweep                                     */
 /*                                                                           */
 /* sweep magic 0..350 and verify both multipliers stay in valid range.      */
-/* ======================================================================== */
-
 static void test_tbow_cap_behavior(void) {
     printf("--- tbow cap and floor bounds ---\n");
 
@@ -216,14 +200,10 @@ static void test_tbow_cap_behavior(void) {
     ASSERT_INT_EQ("acc in [0, 1.4] for m=0..350", acc_ok, 1);
     ASSERT_INT_EQ("dmg in [0, 2.5] for m=0..350", dmg_ok, 1);
 }
-
-/* ======================================================================== */
 /* test: PvP prayer protection — correct overhead reduces damage by 40%      */
 /*                                                                           */
 /* ref: osrs_pvp_combat.h line 561 — actual_damage = (int)(damage * 0.6f)   */
 /* in PvP, correct overhead prayer reduces incoming damage by 40%.           */
-/* ======================================================================== */
-
 static void test_prayer_pvp_reduction(void) {
     printf("--- PvP prayer: 40%% damage reduction ---\n");
 
@@ -257,14 +237,10 @@ static void test_prayer_pvp_reduction(void) {
         ASSERT_INT_EQ(label, actual, expected);
     }
 }
-
-/* ======================================================================== */
 /* test: PvE prayer protection — correct overhead blocks damage entirely     */
 /*                                                                           */
 /* ref: encounter_inferno.h — if (prayer_matches) { dmg = 0; }             */
 /* in PvE (inferno, Zulrah, etc.), correct overhead sets damage to 0.       */
-/* ======================================================================== */
-
 static void test_prayer_pve_block(void) {
     printf("--- PvE prayer: full damage block ---\n");
 
@@ -305,15 +281,11 @@ static void test_prayer_pve_block(void) {
     if (prayer_matches) dmg = 0;
     ASSERT_INT_EQ("pve wrong prayer passthrough", dmg, 50);
 }
-
-/* ======================================================================== */
 /* test: wrong prayer — exhaustive no-reduction check                        */
 /*                                                                           */
 /* prayer enum: NONE=0, MAGIC=1, RANGED=2, MELEE=3                         */
 /* style enum:  NONE=0, MELEE=1, RANGED=2, MAGIC=3                         */
 /* every wrong prayer+style pair must return 0.                             */
-/* ======================================================================== */
-
 static void test_prayer_wrong_no_reduction(void) {
     printf("--- wrong prayer: no reduction ---\n");
 
@@ -339,16 +311,12 @@ static void test_prayer_wrong_no_reduction(void) {
     ASSERT_INT_EQ("prot_ranged vs none", encounter_prayer_correct_for_style(2, 0), 0);
     ASSERT_INT_EQ("prot_melee vs none",  encounter_prayer_correct_for_style(3, 0), 0);
 }
-
-/* ======================================================================== */
 /* test: NPC defensive rolls against player attacks                          */
 /*                                                                           */
 /* NPC defence roll = (def_level + 9) * (style_def_bonus + 64).             */
 /* same formula as osrs_npc_attack_roll (NPCs use +9 invisible boost).      */
 /*                                                                           */
 /* ref: PlayerVsNPCCalc.ts getNPCDefenceRoll, DefenceRolls.test.ts          */
-/* ======================================================================== */
-
 static void test_npc_def_roll_vs_player(void) {
     printf("--- NPC defence rolls vs player attacks ---\n");
 
@@ -393,16 +361,12 @@ static void test_npc_def_roll_vs_player(void) {
     ASSERT_INT_EQ("negative def bonus",
         osrs_npc_attack_roll(200, -20), 9196);
 }
-
-/* ======================================================================== */
 /* test: player attack roll — full mage gear                                 */
 /*                                                                           */
 /* kodai + ancestral hat/top/bottom + occult + ward (f) + tormented +       */
 /* eternal boots + seers ring (i) + god cape. augury prayer.                 */
 /*                                                                           */
 /* ref: PlayerVsNPCCalc.ts getPlayerMaxMagicAttackRoll                      */
-/* ======================================================================== */
-
 static void test_player_att_roll_full_mage(void) {
     printf("--- player att roll: full mage (10 slots, augury) ---\n");
 
@@ -445,13 +409,9 @@ static void test_player_att_roll_full_mage(void) {
     int att_roll = stats.eff_level * (stats.attack_bonus + 64);
     ASSERT_INT_EQ("attack_roll", att_roll, 32076);
 }
-
-/* ======================================================================== */
 /* test: player attack roll — rapier + defender + infernal cape (piety)      */
 /*                                                                           */
 /* ref: PlayerVsNPCCalc.ts getPlayerMaxMeleeAttackRoll                      */
-/* ======================================================================== */
-
 static void test_player_att_roll_melee_with_defender(void) {
     printf("--- player att roll: rapier + defender + infernal cape, piety ---\n");
 
@@ -489,13 +449,9 @@ static void test_player_att_roll_melee_with_defender(void) {
     int att_roll = stats.eff_level * (stats.attack_bonus + 64);
     ASSERT_INT_EQ("attack_roll", att_roll, 23562);
 }
-
-/* ======================================================================== */
 /* test: player attack roll — blowpipe (rigour)                              */
 /*                                                                           */
 /* ref: PlayerVsNPCCalc.ts getPlayerMaxRangedAttackRoll                     */
-/* ======================================================================== */
-
 static void test_player_att_roll_ranged_blowpipe(void) {
     printf("--- player att roll: blowpipe, rigour ---\n");
 
@@ -528,13 +484,9 @@ static void test_player_att_roll_ranged_blowpipe(void) {
     int att_roll = stats.eff_level * (stats.attack_bonus + 64);
     ASSERT_INT_EQ("attack_roll", att_roll, 11844);
 }
-
-/* ======================================================================== */
 /* test: loadout edge case — all empty slots, all 3 styles                   */
 /*                                                                           */
 /* with no gear (all ITEM_NONE), stats should reflect bare-handed combat.   */
-/* ======================================================================== */
-
 static void test_loadout_empty_all_styles(void) {
     printf("--- loadout: all empty, all 3 styles ---\n");
 
@@ -579,14 +531,10 @@ static void test_loadout_empty_all_styles(void) {
     /* max_hit = floor(30 * (1.0 + 0/100.0) * 1.0) = 30 */
     ASSERT_INT_EQ("empty magic max", stats.max_hit, 30);
 }
-
-/* ======================================================================== */
 /* test: loadout with all 11 gear slots filled                               */
 /*                                                                           */
 /* verifies stats sum across every slot. uses a full mage setup with        */
 /* god blessing in ammo slot to hit all 11 slots.                           */
-/* ======================================================================== */
-
 static void test_loadout_all_slots_filled(void) {
     printf("--- loadout: all 11 slots filled (full mage) ---\n");
 
@@ -632,14 +580,10 @@ static void test_loadout_all_slots_filled(void) {
     ASSERT_INT_EQ("all_slots attack_speed", stats.attack_speed, 4); /* kodai */
     ASSERT_INT_EQ("all_slots attack_range", stats.attack_range, 10);
 }
-
-/* ======================================================================== */
 /* test: two-handed weapon loadout (AGS)                                     */
 /*                                                                           */
 /* 2H weapons use ITEM_NONE in shield slot. verifies no shield bonus leaks  */
 /* and weapon stats compute correctly.                                       */
-/* ======================================================================== */
-
 static void test_loadout_two_handed_weapon(void) {
     printf("--- loadout: AGS (two-handed), piety ---\n");
 
@@ -680,14 +624,10 @@ static void test_loadout_two_handed_weapon(void) {
     int att_roll = stats.eff_level * (stats.attack_bonus + 64);
     ASSERT_INT_EQ("2h attack_roll", att_roll, 24696);
 }
-
-/* ======================================================================== */
 /* test: item_is_two_handed classification                                   */
 /*                                                                           */
 /* verify all known 2H weapons return 1, and 1H weapons / non-weapons       */
 /* return 0.                                                                 */
-/* ======================================================================== */
-
 static void test_two_handed_classification(void) {
     printf("--- item_is_two_handed ---\n");
 
@@ -713,14 +653,10 @@ static void test_two_handed_classification(void) {
     ASSERT_INT_EQ("defender 1h",  item_is_two_handed(ITEM_DRAGON_DEFENDER), 0);
     ASSERT_INT_EQ("ITEM_NONE 1h", item_is_two_handed(ITEM_NONE), 0);
 }
-
-/* ======================================================================== */
 /* test: end-to-end hit chance — player attacks NPC                          */
 /*                                                                           */
 /* combines player attack roll (from loadout) with NPC defence roll to      */
 /* compute final hit chance via osrs_hit_chance. realistic scenarios.        */
-/* ======================================================================== */
-
 static void test_hit_chance_player_vs_npc(void) {
     printf("--- hit chance: player vs NPC (end-to-end) ---\n");
 
@@ -798,14 +734,10 @@ static void test_hit_chance_player_vs_npc(void) {
         ASSERT_INT_EQ("empty mage vs weak > 0.9", chance > 0.9f, 1);
     }
 }
-
-/* ======================================================================== */
 /* test: defence bonus selection picks correct stat per attack style          */
 /*                                                                           */
 /* ref: osrs_combat_shared.h encounter_player_def_bonus                     */
 /* uses asymmetric values so any cross-wiring is detectable.                */
-/* ======================================================================== */
-
 static void test_def_bonus_selection(void) {
     printf("--- defence bonus selection by style ---\n");
 
@@ -822,14 +754,10 @@ static void test_def_bonus_selection(void) {
     ASSERT_INT_EQ("magic",
         encounter_player_def_bonus(stab, slash, crush, magic, ranged, 3, 0), 44);
 }
-
-/* ======================================================================== */
 /* test: gear defence bonuses feed into player_def_roll correctly            */
 /*                                                                           */
 /* rapier + defender + infernal cape defence sums ->                         */
 /* osrs_player_def_roll_vs_npc with those bonuses.                          */
-/* ======================================================================== */
-
 static void test_loadout_defence_into_def_roll(void) {
     printf("--- loadout def bonuses -> player_def_roll ---\n");
 

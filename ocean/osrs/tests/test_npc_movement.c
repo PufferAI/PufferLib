@@ -124,13 +124,9 @@ static void test_far_npc_walks(void) {
     ASSERT_EQ("diagonal step x+1", x, 1);
     ASSERT_EQ("diagonal step y+1", y, 1);
 }
-
-/* ======================================================================== */
 /* entity_has_line_of_sight: regression for current-target LOS. inferno      */
 /* movement needs size-aware mob->mob LOS (e.g. mager -> Zuk shield), and   */
 /* melee helpers must stay cardinal-only.                                    */
-/* ======================================================================== */
-
 static void test_entity_los_to_multi_tile_target_in_range_clear(void) {
     printf("--- LOS to multi-tile target: in range, clear ray ---\n");
     int has = entity_has_line_of_sight(NULL, 0, 20, 36, 4, 23, 44, 5, 15);

@@ -523,32 +523,24 @@ void pvp_step(OsrsEnv* env) {
     update_timers(&env->players[0]);
     update_timers(&env->players[1]);
 
-    // Save HP percent BEFORE actions execute (for reward shaping eat checks)
     for (int i = 0; i < NUM_AGENTS; i++) {
         Player* pi = &env->players[i];
         pi->prev_hp_percent = (float)pi->current_hitpoints / (float)pi->base_hitpoints;
     }
 
-    // Resolve local action arrays by PID order
     int* agent_actions[NUM_AGENTS];
     agent_actions[0] = actions_p0;
     agent_actions[1] = actions_p1;
 
-    // Save positions before movement for walk/run detection
     int pre_move_x[NUM_AGENTS], pre_move_y[NUM_AGENTS];
     for (int i = 0; i < NUM_AGENTS; i++) {
         pre_move_x[i] = env->players[i].x;
         pre_move_y[i] = env->players[i].y;
     }
 
-    // CRITICAL: Two-phase execution for correct prayer timing
-    // Phase 2A: Apply switches (gear, prayer, consumables, movement) for BOTH players
-    // This ensures attacks will see the correct prayer state
     execute_switches(env, first, agent_actions[first]);
     execute_switches(env, second, agent_actions[second]);
 
-    // Decrement consumable timers AFTER eating so obs shows correct countdown
-    // (eat → 2, 1, Ready instead of eat → 3, 2, 1 with Ready never visible)
     for (int i = 0; i < NUM_AGENTS; i++) {
         Player* pi = &env->players[i];
         if (pi->food_timer > 0) pi->food_timer--;
@@ -556,38 +548,27 @@ void pvp_step(OsrsEnv* env) {
         if (pi->karambwan_timer > 0) pi->karambwan_timer--;
     }
 
-    // Resolve same-tile stacking (OSRS prevents unfrozen players from sharing a tile)
     if (env->players[0].x == env->players[1].x &&
         env->players[0].y == env->players[1].y) {
         resolve_same_tile(&env->players[second], &env->players[first], (const CollisionMap*)env->collision_map);
     }
 
-    // Phase 2B: Attack movement for BOTH players (auto-walk to melee range, step-out)
-    // All movements resolve before any range checks, matching OSRS tick processing.
-    // This prevents PID-dependent behavior where one player's movement check depends
-    // on whether the other player has already stepped out.
     execute_attack_movement(env, first, agent_actions[first]);
     execute_attack_movement(env, second, agent_actions[second]);
 
-    // Resolve same-tile after attack movements (step-out may have caused overlap)
     if (env->players[0].x == env->players[1].x &&
         env->players[0].y == env->players[1].y) {
         resolve_same_tile(&env->players[second], &env->players[first], (const CollisionMap*)env->collision_map);
     }
 
-    // Phase 2C: Attack combat for BOTH players (range check + attack + chase)
-    // dist is recomputed from CURRENT positions after all movements resolved.
     execute_attack_combat(env, first, agent_actions[first]);
     execute_attack_combat(env, second, agent_actions[second]);
 
-    // Resolve same-tile after attack-phase chase movement
     if (env->players[0].x == env->players[1].x &&
         env->players[0].y == env->players[1].y) {
         resolve_same_tile(&env->players[second], &env->players[first], (const CollisionMap*)env->collision_map);
     }
 
-    // Compute walk vs run: Chebyshev distance moved this tick
-    // 1 tile = walk, 2+ tiles = run (OSRS sends 1 waypoint for walk, 2 for run)
     for (int i = 0; i < NUM_AGENTS; i++) {
         int dx = abs(env->players[i].x - pre_move_x[i]);
         int dy = abs(env->players[i].y - pre_move_y[i]);

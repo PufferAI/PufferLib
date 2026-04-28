@@ -55,13 +55,9 @@ static int tests_failed = 0;
                (label), _a, _e, _t); \
     } \
 } while (0)
-
-/* ======================================================================== */
 /* test: melee spec energy costs                                            */
 /*                                                                          */
 /* ref: OSRS wiki special attack page, osrs_pvp_combat.h:38-53             */
-/* ======================================================================== */
-
 static void test_melee_spec_costs(void) {
     printf("--- melee spec energy costs ---\n");
 
@@ -100,14 +96,10 @@ static void test_magic_spec_costs(void) {
 
     ASSERT_INT_EQ("volatile staff cost", get_magic_spec_cost(MAGIC_SPEC_VOLATILE_STAFF), 55);
 }
-
-/* ======================================================================== */
 /* test: melee spec accuracy multipliers                                    */
 /*                                                                          */
 /* ref: PlayerVsNPCCalc.ts:292-311 (godswords [2,1]=2x, DDS [23,20]=1.15x, */
 /*      abyssal dagger [5,4]=1.25x, etc.)                                  */
-/* ======================================================================== */
-
 static void test_melee_spec_acc_multipliers(void) {
     printf("--- melee spec accuracy multipliers ---\n");
 
@@ -145,8 +137,6 @@ static void test_melee_spec_acc_multipliers(void) {
     /* abyssal bludgeon: no accuracy bonus */
     ASSERT_FLOAT_EQ("bludgeon acc",    get_melee_spec_acc_mult(MELEE_SPEC_ABYSSAL_BLUDGEON), 1.0f, 1e-5f);
 }
-
-/* ======================================================================== */
 /* test: melee spec strength multipliers                                    */
 /*                                                                          */
 /* ref: PlayerVsNPCCalc.ts:453-485                                          */
@@ -155,8 +145,6 @@ static void test_melee_spec_acc_multipliers(void) {
 /*   BGS: [11,10]=1.21x total => 1.1*1.1 = 1.21x                          */
 /*   ZGS/SGS: [11,10] only => 1.1x (no additional)                         */
 /*   DDS: [23,20] = 1.15x; statius: [5,4] = 1.25x; dmace: [3,2] = 1.5x  */
-/* ======================================================================== */
-
 static void test_melee_spec_str_multipliers(void) {
     printf("--- melee spec strength multipliers ---\n");
 
@@ -191,15 +179,11 @@ static void test_melee_spec_str_multipliers(void) {
     /* abyssal bludgeon: 1.20x (base; real spec adds missing prayer %) */
     ASSERT_FLOAT_EQ("bludgeon str",    get_melee_spec_str_mult(MELEE_SPEC_ABYSSAL_BLUDGEON), 1.20f, 1e-3f);
 }
-
-/* ======================================================================== */
 /* test: ranged spec accuracy multipliers                                   */
 /*                                                                          */
 /* ref: PlayerVsNPCCalc.ts:579-589                                          */
 /*   dark bow: no acc bonus. ballista: [5,4]=1.25x.                        */
 /*   ZCB: [2,1]=2.0x. MSB: [10,7]~1.43x. dragon knife: none.             */
-/* ======================================================================== */
-
 static void test_ranged_spec_acc_multipliers(void) {
     printf("--- ranged spec accuracy multipliers ---\n");
 
@@ -210,15 +194,11 @@ static void test_ranged_spec_acc_multipliers(void) {
     ASSERT_FLOAT_EQ("MSB acc",          get_ranged_spec_acc_mult(RANGED_SPEC_MSB),          1.0f, 1e-5f);
     ASSERT_FLOAT_EQ("morrigan's acc",   get_ranged_spec_acc_mult(RANGED_SPEC_MORRIGANS),    1.0f, 1e-5f);
 }
-
-/* ======================================================================== */
 /* test: ranged spec strength multipliers                                   */
 /*                                                                          */
 /* ref: PlayerVsNPCCalc.ts:738-757                                          */
 /*   dark bow with dragon arrows: [15,10]=1.5x, min 8, max 48 clamped.    */
 /*   ballista: [5,4]=1.25x.                                                */
-/* ======================================================================== */
-
 static void test_ranged_spec_str_multipliers(void) {
     printf("--- ranged spec strength multipliers ---\n");
 
@@ -229,25 +209,17 @@ static void test_ranged_spec_str_multipliers(void) {
     ASSERT_FLOAT_EQ("MSB str",          get_ranged_spec_str_mult(RANGED_SPEC_MSB),          1.0f,  1e-5f);
     ASSERT_FLOAT_EQ("morrigan's str",   get_ranged_spec_str_mult(RANGED_SPEC_MORRIGANS),    1.0f,  1e-5f);
 }
-
-/* ======================================================================== */
 /* test: magic spec accuracy multiplier                                     */
 /*                                                                          */
 /* ref: PlayerVsNPCCalc.ts:855-856 volatile staff [3,2]=1.5x               */
-/* ======================================================================== */
-
 static void test_magic_spec_acc_multiplier(void) {
     printf("--- magic spec accuracy multiplier ---\n");
 
     ASSERT_FLOAT_EQ("volatile staff acc", get_magic_spec_acc_mult(MAGIC_SPEC_VOLATILE_STAFF), 1.5f, 1e-5f);
 }
-
-/* ======================================================================== */
 /* test: blowpipe spec constants (osrs_combat.h)                            */
 /*                                                                          */
 /* ref: osrs-sdk Blowpipe.ts: 2x accuracy, 1.5x damage, 50% heal, 50 cost */
-/* ======================================================================== */
-
 static void test_blowpipe_spec_constants(void) {
     printf("--- blowpipe spec constants ---\n");
 
@@ -258,14 +230,10 @@ static void test_blowpipe_spec_constants(void) {
     ASSERT_INT_EQ("blowpipe heal pct",   BLOWPIPE_SPEC_HEAL_PCT, 50);
     ASSERT_INT_EQ("blowpipe spec cost",  BLOWPIPE_SPEC_COST,     50);
 }
-
-/* ======================================================================== */
 /* test: blowpipe spec damage calculation                                   */
 /*                                                                          */
 /* osrs_blowpipe_spec_resolve: 2x att roll, 1.5x max hit, single hit.     */
 /* with forced-hit scenario (high att, low def) we can check max hit cap.  */
-/* ======================================================================== */
-
 static void test_blowpipe_spec_resolve(void) {
     printf("--- blowpipe spec resolve ---\n");
 
@@ -302,8 +270,6 @@ static void test_blowpipe_spec_resolve(void) {
     /* min_seen should be 0 (possible miss or 0 roll) */
     ASSERT_INT_EQ("blowpipe min is 0", min_seen, 0);
 }
-
-/* ======================================================================== */
 /* test: dragon claws cascade structure                                     */
 /*                                                                          */
 /* ref: .refs/osrs-dps-calc/src/lib/dists/claws.ts                         */
@@ -317,8 +283,6 @@ static void test_blowpipe_spec_resolve(void) {
 /*                                                                          */
 /* our impl differs slightly from ref (PvP variant) but structure matches. */
 /* we test: 4 hits always queued, acc mult = 1.35x, str mult = 1.0x.      */
-/* ======================================================================== */
-
 static void test_dragon_claws_cascade(void) {
     printf("--- dragon claws cascade ---\n");
 
@@ -349,15 +313,11 @@ static void test_dragon_claws_cascade(void) {
     ASSERT_INT_EQ("claws roll3 low",  max_hit * 1 / 4, 10);
     ASSERT_INT_EQ("claws roll3 high", max_hit + max_hit * 1 / 4 - 1, 49);
 }
-
-/* ======================================================================== */
 /* test: voidwaker spec mechanics                                           */
 /*                                                                          */
 /* voidwaker: guaranteed magic damage at 50-150% of melee max hit.         */
 /* ref: PlayerVsNPCCalc.ts:464-466 — min=floor(maxHit/2), max=maxHit+min  */
 /*      also: accuracy is 1.0 (guaranteed hit, line 1207-1208)             */
-/* ======================================================================== */
-
 static void test_voidwaker_mechanics(void) {
     printf("--- voidwaker mechanics ---\n");
 
@@ -379,15 +339,11 @@ static void test_voidwaker_mechanics(void) {
     ASSERT_INT_EQ("VW min damage (max=1)", min_d1, 0);
     ASSERT_INT_EQ("VW max damage (max=1)", max_d1, 1);
 }
-
-/* ======================================================================== */
 /* test: VLS (Vesta's longsword) spec mechanics                             */
 /*                                                                          */
 /* "Feint": 20-120% of base max hit, accuracy vs 25% of opponent's def     */
 /* this is a custom PvP spec (not in reference PvNPC calc).                */
 /* our code: osrs_pvp_combat.h:928-962                                      */
-/* ======================================================================== */
-
 static void test_vls_mechanics(void) {
     printf("--- VLS spec mechanics ---\n");
 
@@ -409,14 +365,10 @@ static void test_vls_mechanics(void) {
     int reduced_def = (int)(full_def_roll * 0.25f);
     ASSERT_INT_EQ("VLS def reduction", reduced_def, 2500);
 }
-
-/* ======================================================================== */
 /* test: statius warhammer spec (LMS, DWH path in our code)                 */
 /*                                                                          */
 /* statius warhammer (LMS): 35% cost, 1.25x acc, 1.25x str,               */
 /* 30% defence drain on hit. no minimum hit floor.                          */
-/* ======================================================================== */
-
 static void test_statius_warhammer_mechanics(void) {
     printf("--- statius warhammer (LMS) spec ---\n");
 
@@ -439,15 +391,11 @@ static void test_statius_warhammer_mechanics(void) {
     ASSERT_INT_EQ("DWH drain (def=2)", low_drain, 0);
     ASSERT_INT_EQ("DWH clamp (def=2)", clamped, 2);
 }
-
-/* ======================================================================== */
 /* test: BGS spec mechanics                                                 */
 /*                                                                          */
 /* BGS drains defence by the damage dealt (drain_type=2).                  */
 /* cost=50%, acc=2.0x, str=1.21x (godsword 1.1 * bgs 1.1).               */
 /* ref: PlayerVsNPCCalc.ts:458-459 [11,10] for godsword + BGS damage.     */
-/* ======================================================================== */
-
 static void test_bgs_mechanics(void) {
     printf("--- BGS spec ---\n");
 
@@ -469,13 +417,9 @@ static void test_bgs_mechanics(void) {
     if (result < 1) result = 1;
     ASSERT_INT_EQ("BGS drain clamp (dmg=90, def=80)", result, 1);
 }
-
-/* ======================================================================== */
 /* test: ZGS spec mechanics                                                 */
 /*                                                                          */
 /* ZGS: 50% cost, 2.0x acc, 1.1x str, applies 32-tick freeze on hit.      */
-/* ======================================================================== */
-
 static void test_zgs_mechanics(void) {
     printf("--- ZGS spec ---\n");
 
@@ -484,13 +428,9 @@ static void test_zgs_mechanics(void) {
     ASSERT_FLOAT_EQ("ZGS str",   get_melee_spec_str_mult(MELEE_SPEC_ZGS),  1.1f, 1e-3f);
     /* freeze ticks set to 32 in perform_attack when applies_freeze=1 (line 1502-1503) */
 }
-
-/* ======================================================================== */
 /* test: SGS spec mechanics                                                 */
 /*                                                                          */
 /* SGS: 50% cost, 2.0x acc, 1.1x str, heals 50% of damage dealt.         */
-/* ======================================================================== */
-
 static void test_sgs_mechanics(void) {
     printf("--- SGS spec ---\n");
 
@@ -499,15 +439,11 @@ static void test_sgs_mechanics(void) {
     ASSERT_FLOAT_EQ("SGS str",   get_melee_spec_str_mult(MELEE_SPEC_SGS),  1.1f, 1e-3f);
     /* heal_percent=50 set in perform_attack when heals_attacker=1 (line 1505-1506) */
 }
-
-/* ======================================================================== */
 /* test: ancient godsword spec mechanics                                    */
 /*                                                                          */
 /* ancient GS: 50% cost, 2.0x acc, 1.1x str.                              */
 /* blood sacrifice: 25 magic damage at 8 tick delay if any hit lands,      */
 /* + heals attacker 15% of target max HP (capped at 15 in PvP).           */
-/* ======================================================================== */
-
 static void test_ancient_gs_mechanics(void) {
     printf("--- ancient godsword spec ---\n");
 
@@ -527,8 +463,6 @@ static void test_ancient_gs_mechanics(void) {
     if (heal2 > 15) heal2 = 15;
     ASSERT_INT_EQ("ancient GS heal capped (hp=120)", heal2, 15);
 }
-
-/* ======================================================================== */
 /* test: dark bow spec mechanics                                            */
 /*                                                                          */
 /* dark bow: 55% cost, 1.0x acc, 1.5x str, 2 hits.                        */
@@ -536,8 +470,6 @@ static void test_ancient_gs_mechanics(void) {
 /* ref: PlayerVsNPCCalc.ts:751-757 — min=8 (dragon arrows), max=48,       */
 /*      [15,10]=1.5x damage with dragon arrows.                            */
 /* our code: osrs_pvp_combat.h:989-1015                                     */
-/* ======================================================================== */
-
 static void test_dark_bow_mechanics(void) {
     printf("--- dark bow spec ---\n");
 
@@ -567,16 +499,12 @@ static void test_dark_bow_mechanics(void) {
     /* miss case: damage = 8 (minimum guaranteed per our code line 1008) */
     ASSERT_INT_EQ("dbow miss min", 8, 8);
 }
-
-/* ======================================================================== */
 /* test: morrigan's javelin (Phantom Strike) bleed mechanics                */
 /*                                                                          */
 /* morrigan's: 50% cost, 1.0x acc, 1.0x str (just ranged hit).            */
 /* on hit: sets morr_dot_remaining = damage dealt (post-prayer).           */
 /* bleed: 5 HP every 3 ticks until remaining exhausted.                     */
 /* our code: osrs_pvp_api.h:633-646                                         */
-/* ======================================================================== */
-
 static void test_morrigans_bleed(void) {
     printf("--- morrigan's javelin bleed ---\n");
 
@@ -630,15 +558,11 @@ static void test_morrigans_bleed(void) {
     ASSERT_INT_EQ("morr bleed total (1)", total_bleed, 1);
     ASSERT_INT_EQ("morr bleed ticks (1)", bleed_ticks, 1);
 }
-
-/* ======================================================================== */
 /* test: volatile nightmare staff spec                                      */
 /*                                                                          */
 /* volatile staff: 55% cost, 1.5x acc.                                     */
 /* max hit = min(58, 58 * floor(magicLevel/99) + 1) at 99 magic = 58.     */
 /* ref: PlayerVsNPCCalc.ts:924-925                                          */
-/* ======================================================================== */
-
 static void test_volatile_staff_mechanics(void) {
     printf("--- volatile nightmare staff spec ---\n");
 
@@ -659,16 +583,12 @@ static void test_volatile_staff_mechanics(void) {
     if (vol_max < 1) vol_max = 1;
     ASSERT_INT_EQ("volatile max (lvl 98)", vol_max, 1);
 }
-
-/* ======================================================================== */
 /* test: double-hit spec weapons                                            */
 /*                                                                          */
 /* DDS (dragon dagger): 2 hits, 25% cost, 1.20x acc, 1.15x str.          */
 /* abyssal dagger: 2 hits, 50% cost, 1.25x acc, 0.85x str.               */
 /* dragon knife: 2 hits, 25% cost, 1.0x acc, 1.0x str.                    */
 /* MSB (magic shortbow i): 2 hits, 55% cost, 1.0x acc, 1.0x str.         */
-/* ======================================================================== */
-
 static void test_double_hit_specs(void) {
     printf("--- double-hit spec weapons ---\n");
 
@@ -692,13 +612,9 @@ static void test_double_hit_specs(void) {
     ASSERT_FLOAT_EQ("MSB acc", get_ranged_spec_acc_mult(RANGED_SPEC_MSB), 1.0f, 1e-5f);
     ASSERT_FLOAT_EQ("MSB str", get_ranged_spec_str_mult(RANGED_SPEC_MSB), 1.0f, 1e-5f);
 }
-
-/* ======================================================================== */
 /* test: granite maul spec (instant)                                        */
 /*                                                                          */
 /* gmaul: 50% cost, 1.0x acc, 1.0x str, instant attack (resets timer).    */
-/* ======================================================================== */
-
 static void test_granite_maul_mechanics(void) {
     printf("--- granite maul spec ---\n");
 
@@ -706,14 +622,10 @@ static void test_granite_maul_mechanics(void) {
     ASSERT_FLOAT_EQ("gmaul acc",    get_melee_spec_acc_mult(MELEE_SPEC_GRANITE_MAUL),   1.0f, 1e-5f);
     ASSERT_FLOAT_EQ("gmaul str",    get_melee_spec_str_mult(MELEE_SPEC_GRANITE_MAUL),   1.0f, 1e-5f);
 }
-
-/* ======================================================================== */
 /* test: heavy ballista spec                                                */
 /*                                                                          */
 /* ballista: 65% cost, 1.25x acc, 1.25x str.                              */
 /* ref: PlayerVsNPCCalc.ts:584 [5,4]=1.25x acc, line 744 [5,4]=1.25x str  */
-/* ======================================================================== */
-
 static void test_ballista_mechanics(void) {
     printf("--- heavy ballista spec ---\n");
 
@@ -721,14 +633,10 @@ static void test_ballista_mechanics(void) {
     ASSERT_FLOAT_EQ("ballista acc",   get_ranged_spec_acc_mult(RANGED_SPEC_BALLISTA),   1.25f, 1e-3f);
     ASSERT_FLOAT_EQ("ballista str",   get_ranged_spec_str_mult(RANGED_SPEC_BALLISTA),   1.25f, 1e-3f);
 }
-
-/* ======================================================================== */
 /* test: ZCB spec (ACB removed — non-DPS bolt proc spec, UNIMPLEMENTED_SPECS) */
 /*                                                                          */
 /* ZCB: 75% cost, 2.0x acc, 1.0x str.                                     */
 /* ref: PlayerVsNPCCalc.ts:580 [2,1]=2.0x acc for ZCB.                    */
-/* ======================================================================== */
-
 static void test_crossbow_specs(void) {
     printf("--- crossbow specs (ZCB) ---\n");
 
@@ -738,14 +646,10 @@ static void test_crossbow_specs(void) {
     ASSERT_FLOAT_EQ("ZCB acc",   get_ranged_spec_acc_mult(RANGED_SPEC_ZCB),    2.0f, 1e-5f);
     ASSERT_FLOAT_EQ("ZCB str",   get_ranged_spec_str_mult(RANGED_SPEC_ZCB),    1.0f, 1e-5f);
 }
-
-/* ======================================================================== */
 /* test: melee spec two-handed classification                               */
 /*                                                                          */
 /* godswords, dragon claws, abyssal bludgeon are two-handed.               */
 /* DDS, gmaul, VW, DWH, VLS, abyssal dagger, dlong, dmace are one-handed. */
-/* ======================================================================== */
-
 static void test_melee_spec_two_handed(void) {
     printf("--- melee spec two-handed classification ---\n");
 
@@ -766,13 +670,9 @@ static void test_melee_spec_two_handed(void) {
     ASSERT_INT_EQ("dlong one-handed",    is_melee_spec_two_handed(MELEE_SPEC_DRAGON_LONGSWORD),  0);
     ASSERT_INT_EQ("dmace one-handed",    is_melee_spec_two_handed(MELEE_SPEC_DRAGON_MACE),       0);
 }
-
-/* ======================================================================== */
 /* test: melee spec bonus types (stab/slash/crush)                          */
 /*                                                                          */
 /* ref: osrs_pvp_gear.h MELEE_SPEC_BONUS_TYPES[]                           */
-/* ======================================================================== */
-
 static void test_melee_spec_bonus_types(void) {
     printf("--- melee spec bonus types ---\n");
 
@@ -782,15 +682,11 @@ static void test_melee_spec_bonus_types(void) {
     ASSERT_INT_EQ("DDS is stab",         MELEE_SPEC_BONUS_TYPES[MELEE_SPEC_DRAGON_DAGGER],    MELEE_BONUS_STAB);
     ASSERT_INT_EQ("DWH is crush",        MELEE_SPEC_BONUS_TYPES[MELEE_SPEC_DWH],              MELEE_BONUS_CRUSH);
 }
-
-/* ======================================================================== */
 /* test: ranged spec hit delays                                             */
 /*                                                                          */
 /* ref: osrs_pvp_combat.h:497-513                                           */
 /* dragon knife / morrigan's: 1 tick. ballista: 3 ticks.                   */
 /* dark bow / MSB / ZCB: default ranged formula.                           */
-/* ======================================================================== */
-
 static void test_ranged_spec_hit_delays(void) {
     printf("--- ranged spec hit delays ---\n");
 
@@ -817,13 +713,9 @@ static void test_ranged_spec_hit_delays(void) {
     ASSERT_INT_EQ("non-special delay",
         pvp_ranged_hit_delay_for_weapon(distance, 0, RANGED_SPEC_DRAGON_KNIFE), expected_default);
 }
-
-/* ======================================================================== */
 /* test: spec energy sufficiency checks                                     */
 /*                                                                          */
 /* verify can_spec / energy checks respect costs correctly.                */
-/* ======================================================================== */
-
 static void test_spec_energy_checks(void) {
     printf("--- spec energy sufficiency ---\n");
 
@@ -852,15 +744,11 @@ static void test_spec_energy_checks(void) {
     ASSERT_INT_EQ("volatile: 55 >= 55", 55 >= get_magic_spec_cost(MAGIC_SPEC_VOLATILE_STAFF), 1);
     ASSERT_INT_EQ("volatile: 54 >= 55", 54 >= get_magic_spec_cost(MAGIC_SPEC_VOLATILE_STAFF), 0);
 }
-
-/* ======================================================================== */
 /* test: max hit calculation with spec str multiplier                       */
 /*                                                                          */
 /* uses calculate_max_hit directly with a synthetic player to verify that   */
 /* str_mult is applied correctly.                                           */
 /* formula: floor(((eff_str * (str_bonus + 64) + 320) / 640) * str_mult)   */
-/* ======================================================================== */
-
 static void test_max_hit_with_spec_mult(void) {
     printf("--- max hit with spec str multiplier ---\n");
 
@@ -943,15 +831,11 @@ static void test_max_hit_with_spec_mult(void) {
     int bal_max = calculate_max_hit(&p, ATTACK_STYLE_RANGED, 1.25f, 30);
     ASSERT_INT_EQ("ballista max hit (1.25x)", bal_max, 30);
 }
-
-/* ======================================================================== */
 /* test: spec accuracy affects hit chance correctly                         */
 /*                                                                          */
 /* calculate_hit_chance applies acc_mult to the attack roll.               */
 /* formula: attack_roll = eff_attack * (att_bonus + 64) * acc_mult          */
 /* then normal accuracy formula.                                            */
-/* ======================================================================== */
-
 static void test_hit_chance_with_spec_acc(void) {
     printf("--- hit chance with spec accuracy ---\n");
 
@@ -1020,14 +904,10 @@ static void test_hit_chance_with_spec_acc(void) {
     ASSERT_FLOAT_EQ("base acc value", base_acc, expected_base, 1e-3f);
     ASSERT_FLOAT_EQ("AGS acc value",  ags_acc,  expected_ags,  1e-3f);
 }
-
-/* ======================================================================== */
 /* test: osrs_resolve_spec dispatch                                         */
 /*                                                                          */
 /* verifies the shared spec dispatch returns correct costs and sensible     */
 /* damage values for each weapon category.                                  */
-/* ======================================================================== */
-
 static void test_spec_dispatch(void) {
     printf("--- osrs_resolve_spec dispatch ---\n");
     uint32_t rng = 12345;

@@ -1883,8 +1883,6 @@ static void gui_draw_spellbook(GuiState* gs, Player* p) {
                     ox, oy, 10, p->veng_cooldown > 0 ? GUI_TEXT_RED : GUI_TEXT_GREEN);
     (void)p;
 }
-
-/* ======================================================================== */
 /* stats panel — OSRS-authentic skills tab layout                            */
 /*                                                                           */
 /* matches the real OSRS fixed-mode skills interface: 3-column grid,         */
@@ -1897,8 +1895,6 @@ static void gui_draw_spellbook(GuiState* gs, Player* p) {
 /*   col 1: Hitpoints, Agility, Herblore, Thieving, Crafting, Fletch, ...   */
 /*   col 2: Mining, Smithing, Fishing, Cooking, Firemaking, WC, ...          */
 /* we show rows 0-5 (the 7 combat skills) and leave col 2 empty.            */
-/* ======================================================================== */
-
 /* skill icon indices (matches skill_icon_files load order) */
 #define SKILL_ICON_ATTACK    0
 #define SKILL_ICON_STRENGTH  1

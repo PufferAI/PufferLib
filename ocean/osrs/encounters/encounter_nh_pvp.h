@@ -184,12 +184,11 @@ static const EncounterDef ENCOUNTER_NH_PVP = {
     .put_float = nh_pvp_put_float,
     .put_ptr = nh_pvp_put_ptr,
 
-    .render_post_tick = NULL,  /* NH PvP uses existing render_post_tick for now */
+    .render_post_tick = NULL,
     .get_log = nh_pvp_get_log,
     .get_tick = nh_pvp_get_tick,
     .get_winner = nh_pvp_get_winner,
 
-    /* NH PvP uses its own human_to_pvp_actions translator via the PvP code path. */
     .translate_human_input = NULL,
     .head_move = -1,
     .head_prayer = -1,
