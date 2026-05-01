@@ -440,6 +440,7 @@ StaticVec* create_static_vec(int total_agents, int num_buffers, int gpu, Dict* v
             env->terminals = vec->terminals + slot;
             buf_agent += env->num_agents;
         }
+        assert(buf_agent == vec->agents_per_buffer && "buffer agents don't match total agents");
     }
 
     return vec;

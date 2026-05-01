@@ -1,6 +1,6 @@
 #include "drmario.h"
 
-#define OBS_SIZE 394
+#define OBS_SIZE 133
 #define NUM_ATNS 1       
 #define ACT_SIZES {7}     
 #define OBS_TENSOR_T FloatTensor
