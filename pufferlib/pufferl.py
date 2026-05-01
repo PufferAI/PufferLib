@@ -403,6 +403,11 @@ def eval(env_name, args=None, load_path=None):
     args = args or load_config(env_name)
     args['reset_state'] = False
     args['train']['horizon'] = 1
+    # Eval batches are total_agents*1, so cap minibatch to that to satisfy
+    # the divisibility check. Training-time minibatch may be larger.
+    eval_batch = args['vec']['total_agents']
+    if args['train']['minibatch_size'] > eval_batch:
+        args['train']['minibatch_size'] = eval_batch
 
     backend = _resolve_backend(args)
     pufferl = backend.create_pufferl(args)
