@@ -122,6 +122,7 @@ void static_vec_omp_step(StaticVec* vec);
 void static_vec_seq_step(StaticVec* vec);
 void static_vec_render(StaticVec* vec, int env_id);
 void static_vec_read_profile(StaticVec* vec, float out[NUM_EVAL_PROF]);
+const char* get_static_env_name(void);
 
 // Env info
 int get_obs_size(void);
@@ -172,7 +173,14 @@ static inline size_t obs_element_size(void) {
 
 #define _STRINGIFY(x)   #x
 #define  STRINGIFY(x)  _STRINGIFY(x)
+#ifndef ENV_NAME
+#define ENV_NAME unknown
+#endif
 const char dtype_symbol[] = STRINGIFY(OBS_TENSOR_T);
+
+const char* get_static_env_name(void) {
+    return STRINGIFY(ENV_NAME);
+}
 
 #include <omp.h>
 #include <stdatomic.h>

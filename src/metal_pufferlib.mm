@@ -590,7 +590,7 @@ void train_impl(PuffeRL& pufferl) {
                 pufferl.advantages_puf.data,
                 pufferl.prio_bufs.mb_prio.data,
                 minibatch_segments,
-                pufferl.fp16_obs_buf.bytes, s);
+                pufferl.fp16_obs_buf.bytes, pufferl.train_fp16, s);
             // gather masks from train_masks into mb_masks using same priority indices.
             // reuses index_copy_kernel as a gather: dst[i] = src[idx[i]].
             if (pufferl.has_mask) {
@@ -772,9 +772,6 @@ void train_impl(PuffeRL& pufferl) {
         MetalStream* mts = (MetalStream*)ts;
         for (int mb = 0; mb < total_minibatches; ++mb) {
             run_minibatch(ts, train_rng_offset, false);
-            // Commit current command buffer when ring is >75% full to prevent
-            // overflow on high replay_ratio configs. Metal queue serial execution
-            // guarantees the GPU finishes reading ring data before we overwrite it.
             if (mb + 1 < total_minibatches &&
                 mts->const_ring_offset > MTL_CONST_RING_SIZE * 3 / 4) {
                 mts->commit_chunk();

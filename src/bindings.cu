@@ -2,12 +2,25 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <cstring>
+#include <stdexcept>
+#include <string>
 #include "pufferlib.cu"
 
 #define _PUFFER_STRINGIFY(x) #x
 #define PUFFER_STRINGIFY(x) _PUFFER_STRINGIFY(x)
 
 namespace py = pybind11;
+
+static void assert_static_env_name_matches(void) {
+    const char* binding_env_name = PUFFER_STRINGIFY(ENV_NAME);
+    const char* static_env_name = get_static_env_name();
+    if (strcmp(binding_env_name, static_env_name) != 0) {
+        throw std::runtime_error(
+            std::string("compiled _C env mismatch: binding env_name=") +
+            binding_env_name + ", static_env_name=" + static_env_name);
+    }
+}
 
 // Wrapper functions for Python bindings
 pybind11::dict puf_log(pybind11::object pufferl_obj) {
@@ -106,7 +119,7 @@ pybind11::dict puf_eval_log(pybind11::object pufferl_obj) {
     pufferl.last_log_step = pufferl.global_step;
  
     pybind11::dict env_dict;
-    Dict* env_out = create_dict(32);
+    Dict* env_out = create_dict(64);
     static_vec_eval_log(pufferl.vec, env_out);
     for (int i = 0; i < env_out->size; i++) {
         env_dict[env_out->items[i].key] = env_out->items[i].value;
@@ -248,7 +261,7 @@ Dict* py_dict_to_c_dict(py::dict py_dict) {
 }
 
 // ============================================================================
-// Python-facing VecEnv: wraps StaticVec for use from python_pufferl.py.
+// Python-facing VecEnv wrapper.
 // After vec_step(), GPU buffers are current — Python wraps them zero-copy
 // with torch.from_blob(ptr, shape, dtype, device='cuda').
 // ============================================================================
@@ -318,7 +331,7 @@ void cpu_vec_step_py(VecEnv& ve, long long actions_ptr) {
 }
 
 py::dict vec_log(VecEnv& ve) {
-    Dict* out = create_dict(32);
+    Dict* out = create_dict(64);
     static_vec_log(ve.vec, out);
     py::dict result;
     for (int i = 0; i < out->size; i++) {
@@ -410,6 +423,8 @@ std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
 }
 
 PYBIND11_MODULE(_C, m) {
+    assert_static_env_name_matches();
+
     // Multi-GPU: generate NCCL unique ID (call on rank 0, pass bytes to all ranks)
     m.def("get_nccl_id", []() {
         ncclUniqueId id;
@@ -454,6 +469,7 @@ PYBIND11_MODULE(_C, m) {
 
     m.attr("precision_bytes") = (int)sizeof(precision_t);
     m.attr("env_name") = PUFFER_STRINGIFY(ENV_NAME);
+    m.attr("static_env_name") = get_static_env_name();
     m.attr("gpu") = 1;
 
     // Core functions

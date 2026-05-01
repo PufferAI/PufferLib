@@ -10,6 +10,13 @@
 #include "puf_types.h"
 #include <cassert>
 #include <atomic>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 struct MetalStream {
@@ -75,7 +82,11 @@ static inline MetalStream *mtl_resolve_stream(cudaStream_t s) {
 
 static inline void mtl_ensure_stream_synced(cudaStream_t s) {
   MetalStream *ms = mtl_resolve_stream(s);
-  if (ms->enc_active || ms->pending_work) ms->sync();
+  if (ms->flushed) {
+    ms->wait_completed();
+  } else if (ms->enc_active || ms->pending_work) {
+    ms->sync();
+  }
 }
 
 void *mtl_create_stream();
@@ -123,6 +134,62 @@ inline void mtl_set_tensor(MetalStream *ms, const PufTensor &t,
 
 id<MTLBuffer> mtl_buffer_for_ptr(const void *ptr, NSUInteger *out_offset);
 
+inline bool mtl_const_ring_reserve_range(NSUInteger current_offset,
+                                         NSUInteger raw_size,
+                                         NSUInteger *next_offset) {
+  if (raw_size > MTL_CONST_RING_SIZE ||
+      current_offset > MTL_CONST_RING_SIZE) {
+    return false;
+  }
+
+  NSUInteger aligned = (raw_size + 15) & ~(NSUInteger)15;
+  if (aligned > MTL_CONST_RING_SIZE - current_offset) {
+    return false;
+  }
+
+  *next_offset = current_offset + aligned;
+  return true;
+}
+
+inline int mtl_parse_int_config_value(const char *key, double value) {
+  if (!std::isfinite(value)) {
+    throw std::invalid_argument(std::string(key) + " must be a finite integer");
+  }
+  double rounded = std::round(value);
+  if (rounded < (double)std::numeric_limits<int>::min() ||
+      rounded > (double)std::numeric_limits<int>::max()) {
+    throw std::invalid_argument(std::string(key) + " is outside int range");
+  }
+  return (int)rounded;
+}
+
+inline int mtl_validate_nonzero_config_value(const char *key, int value) {
+  if (value == 0) {
+    throw std::invalid_argument(std::string(key) + " must be nonzero");
+  }
+  return value;
+}
+
+inline int mtl_validate_positive_config_value(const char *key, int value) {
+  if (value <= 0) {
+    throw std::invalid_argument(std::string(key) + " must be positive");
+  }
+  return value;
+}
+
+inline void mtl_validate_divisible_config_values(const char *numerator_key,
+                                                 int numerator,
+                                                 const char *denominator_key,
+                                                 int denominator) {
+  mtl_validate_nonzero_config_value(denominator_key, denominator);
+  if (numerator % denominator != 0) {
+    throw std::invalid_argument(std::string(numerator_key) + " must be divisible by " +
+                                denominator_key + ": " +
+                                std::to_string(numerator) + " % " +
+                                std::to_string(denominator) + " != 0");
+  }
+}
+
 inline void mtl_set_tensor(MetalStream *ms, const FloatTensor &t,
                            uint32_t index) {
   NSUInteger offset;
@@ -135,14 +202,22 @@ inline void mtl_set_tensor(MetalStream *ms, const FloatTensor &t,
 }
 template <typename T>
 inline void mtl_set_params(MetalStream *ms, const T &params, uint32_t index) {
-  NSUInteger aligned = (sizeof(T) + 15) & ~15;
-  assert(ms->const_ring_offset + aligned <= MTL_CONST_RING_SIZE);
+  NSUInteger next_offset = 0;
+  if (!mtl_const_ring_reserve_range(ms->const_ring_offset, sizeof(T),
+                                    &next_offset)) {
+    std::fprintf(stderr,
+                 "mtl_set_params: constant ring overflow: offset=%llu size=%llu capacity=%llu\n",
+                 (unsigned long long)ms->const_ring_offset,
+                 (unsigned long long)sizeof(T),
+                 (unsigned long long)MTL_CONST_RING_SIZE);
+    std::abort();
+  }
   memcpy((char *)[ms->const_ring contents] + ms->const_ring_offset,
          &params, sizeof(T));
   uint64_t addr = ms->const_ring.gpuAddress + ms->const_ring_offset;
   [ms->arg_table setAddress:addr atIndex:index];
   ms->bound_addresses[index] = addr;
-  ms->const_ring_offset += aligned;
+  ms->const_ring_offset = next_offset;
 }
 
 inline void mtl_dispatch_1d(MetalStream *ms, id<MTLComputePipelineState> pso,

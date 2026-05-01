@@ -279,7 +279,12 @@ static mach_timebase_info_data_t g_timebase = {0, 0};
 static bool g_gpu_timing_enabled = false;
 static double g_gpu_exec_ns = 0.0;
 static double g_sched_wait_ns = 0.0;
-static constexpr NSUInteger kMetalSyncTimeoutMs = 300000; // 5 min — worst-case sweep configs push 3K+ minibatches per epoch
+static constexpr NSUInteger kMetalSyncTimeoutMs = 300000;
+
+static void mtl_abort_sync_timeout(const char *where) {
+  std::fprintf(stderr, "Metal sync timeout in %s\n", where);
+  std::abort();
+}
 
 static double mach_to_ns(uint64_t ticks) {
   if (g_timebase.denom == 0) mach_timebase_info(&g_timebase);
@@ -311,7 +316,7 @@ void MetalStream::sync() {
     [q signalEvent:sync_event value:val];
     BOOL signaled = [sync_event waitUntilSignaledValue:val timeoutMS:kMetalSyncTimeoutMs];
     if (!signaled) {
-      assert(false && "Metal sync timeout in MetalStream::sync");
+      mtl_abort_sync_timeout("MetalStream::sync");
     }
     if (gpu_start > 0 && gpu_end > 0) {
       g_gpu_exec_ns += (gpu_end - gpu_start) * 1e9;
@@ -322,7 +327,7 @@ void MetalStream::sync() {
     [q signalEvent:sync_event value:val];
     BOOL signaled = [sync_event waitUntilSignaledValue:val timeoutMS:kMetalSyncTimeoutMs];
     if (!signaled) {
-      assert(false && "Metal sync timeout in MetalStream::sync");
+      mtl_abort_sync_timeout("MetalStream::sync");
     }
   }
   uint64_t t1 = mach_absolute_time();
@@ -357,7 +362,19 @@ void MetalStream::commit_chunk() {
   id<MTL4CommandBuffer> bufs[] = { cmd };
   id<MTL4CommandQueue> q =
       (this == &ctx->train_stream) ? ctx->train_queue : ctx->queue;
+  uint64_t t0 = mach_absolute_time();
+  uint64_t val = ++sync_event_value;
   [q commit:bufs count:1];
+  [q signalEvent:sync_event value:val];
+  BOOL signaled = [sync_event waitUntilSignaledValue:val timeoutMS:kMetalSyncTimeoutMs];
+  if (!signaled) {
+    mtl_abort_sync_timeout("MetalStream::commit_chunk");
+  }
+  uint64_t t1 = mach_absolute_time();
+  g_sync_count++;
+  g_sync_total_ns += mach_to_ns(t1 - t0);
+  pending_work = false;
+  flushed = false;
 
   cmd = [ctx->device newCommandBuffer];
   assert(cmd && "Failed to allocate Metal command buffer for chunked training");
@@ -369,7 +386,7 @@ void MetalStream::wait_completed() {
     uint64_t t0 = mach_absolute_time();
     BOOL signaled = [sync_event waitUntilSignaledValue:flush_event_val timeoutMS:kMetalSyncTimeoutMs];
     if (!signaled) {
-      assert(false && "Metal sync timeout in MetalStream::wait_completed");
+      mtl_abort_sync_timeout("MetalStream::wait_completed");
     }
     uint64_t t1 = mach_absolute_time();
     g_sync_count++;
@@ -1246,16 +1263,13 @@ int cudaFreeHost(void *ptr) {
 int cudaSetDevice(int /*device*/) { return 0; }
 
 int cudaDeviceSynchronize(void) {
-  if (g_ctx.stream.enc_active)
-    g_ctx.stream.sync();
+  mtl_ensure_stream_synced((cudaStream_t)&g_ctx.stream);
+  mtl_ensure_stream_synced((cudaStream_t)&g_ctx.train_stream);
   return 0;
 }
 
-int cudaStreamSynchronize(void * /*stream*/) {
-  // No-op on Metal. GPU work is already synced inside net_callback_wrapper
-  // (ensure_gpu_synced under mutex). The vecenv memcpys are also no-ops
-  // (unified memory). Calling sync() here would race with other buffer
-  // threads that hold the GPU mutex and have an active encoder.
+int cudaStreamSynchronize(void *stream) {
+  mtl_ensure_stream_synced((cudaStream_t)stream);
   return 0;
 }
 

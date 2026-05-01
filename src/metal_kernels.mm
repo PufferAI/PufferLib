@@ -931,7 +931,7 @@ void prio_sample(int minibatch_segments, int total_agents,
 void mtl_select_copy(RolloutBuf &rollouts, TrainGraph &graph,
                       const int64_t *idx, const float *advantages,
                       const float *mb_prio, int mb_segs,
-                      void *fp16_obs_out, cudaStream_t stream) {
+                      void *fp16_obs_out, bool train_fp16, cudaStream_t stream) {
   int obs_row_bytes = (int)(puf_numel(rollouts.observations.shape) /
                             rollouts.observations.shape[0]) *
                       (int)sizeof(float);
@@ -964,8 +964,8 @@ void mtl_select_copy(RolloutBuf &rollouts, TrainGraph &graph,
   mtl_set_ptr(ms, mb_prio, 13);
 
   struct {
-    int obs_row_bytes, act_row_bytes, lp_row_bytes, horizon;
-  } params = {obs_row_bytes, act_row_bytes, lp_row_bytes, horizon};
+    int obs_row_bytes, act_row_bytes, lp_row_bytes, horizon, train_fp16;
+  } params = {obs_row_bytes, act_row_bytes, lp_row_bytes, horizon, train_fp16 ? 1 : 0};
   mtl_set_params(ms, params, 14);
 
   mtl_set_ptr(ms, fp16_obs_out, 15);
@@ -1196,10 +1196,10 @@ static PrecisionTensor encoder_forward(void *w, void *activations,
   EncoderWeights *ew = (EncoderWeights *)w;
   EncoderActivations *a = (EncoderActivations *)activations;
   MetalStream *ms = mtl_resolve_stream(stream);
-  if (a->saved_input.data) {
-    PufTensor dst = to_puf(a->saved_input), src = to_puf(input);
-    puf_copy(dst, src, stream);
-  }
+  /* Alias input into saved_input for the backward weight-grad GEMM.
+   * mb_obs persists untouched between forward and backward of the same
+   * minibatch, so a pointer alias is equivalent to a copy. */
+  a->saved_input.data = input.data;
 
   PufTensor inp = to_puf(input), wt = to_puf(ew->weight), out = to_puf(a->out);
   puf_mm(inp, wt, out, stream);
@@ -1241,7 +1241,7 @@ static void encoder_reg_train(void *w, void *activations,
       .wgrad = {.shape = {ew->out_dim, ew->in_dim}, .dtype_size = precision},
   };
   alloc_register(acts, &a->out);
-  alloc_register(acts, &a->saved_input);
+  /* saved_input is aliased to the encoder input in encoder_forward; no allocation. */
   alloc_register(grads, &a->wgrad);
 }
 

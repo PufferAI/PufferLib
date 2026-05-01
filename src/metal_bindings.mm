@@ -1,6 +1,7 @@
 #include "metal_pufferlib.mm"
 
 #include <chrono>
+#include <cstring>
 #include <mach/mach.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -36,6 +37,16 @@ static std::string tensor_repr(const FloatTensor& tensor) {
         "], %lld elems)",
         (long long)puf_numel(tensor.shape));
     return std::string(buffer);
+}
+
+static void assert_static_env_name_matches(void) {
+    const char* binding_env_name = PUFFER_STRINGIFY(ENV_NAME);
+    const char* static_env_name = get_static_env_name();
+    if (strcmp(binding_env_name, static_env_name) != 0) {
+        throw std::runtime_error(
+            std::string("compiled _C env mismatch: binding env_name=") +
+            binding_env_name + ", static_env_name=" + static_env_name);
+    }
 }
 
 static py::dict get_utilization(int gpu_id) {
@@ -223,8 +234,17 @@ static void save_weights(py::object pufferl_obj, const std::string& path) {
     if (!f) {
         throw std::runtime_error("Failed to open " + path + " for writing");
     }
-    fwrite(pufferl.alloc_fp32.params.mem, 1, nbytes, f);
-    fclose(f);
+    size_t expected = (size_t)nbytes;
+    size_t written = fwrite(pufferl.alloc_fp32.params.mem, 1, expected, f);
+    int close_result = fclose(f);
+    if (written != expected) {
+        throw std::runtime_error(
+            "Failed to write " + path + ": expected " + std::to_string(expected)
+            + " bytes, wrote " + std::to_string(written));
+    }
+    if (close_result != 0) {
+        throw std::runtime_error("Failed to close " + path + " after writing");
+    }
 }
 
 static void load_weights(py::object pufferl_obj, const std::string& path) {
@@ -299,17 +319,67 @@ static void py_puff_advantage_cpu(
 }
 
 static double get_config(py::dict& kwargs, const char* key) {
-    assert(kwargs.contains(key) && "Missing config key");
-    return kwargs[key].cast<double>();
+    if (!kwargs.contains(key)) {
+        throw std::invalid_argument(std::string("Missing config key: ") + key);
+    }
+    try {
+        return kwargs[key].cast<double>();
+    } catch (const py::cast_error&) {
+        throw std::invalid_argument(std::string(key) + " must be numeric");
+    }
 }
 
-static Dict* py_dict_to_c_dict(py::dict py_dict) {
+static int get_config_int(py::dict& kwargs, const char* key) {
+    return mtl_parse_int_config_value(key, get_config(kwargs, key));
+}
+
+static int get_config_positive_int(py::dict& kwargs, const char* key) {
+    return mtl_validate_positive_config_value(key, get_config_int(kwargs, key));
+}
+
+static long get_config_positive_long(py::dict& kwargs, const char* key) {
+    double value = get_config(kwargs, key);
+    if (!std::isfinite(value)) {
+        throw std::invalid_argument(std::string(key) + " must be a finite positive integer");
+    }
+    double rounded = std::round(value);
+    if (rounded <= 0.0) {
+        throw std::invalid_argument(std::string(key) + " must be a positive integer");
+    }
+    if (rounded > (double)std::numeric_limits<long>::max()) {
+        throw std::invalid_argument(std::string(key) + " is outside long range");
+    }
+    return (long)rounded;
+}
+
+static uint64_t get_config_uint64(py::dict& kwargs, const char* key) {
+    double value = get_config(kwargs, key);
+    if (!std::isfinite(value) || std::trunc(value) != value || value < 0.0) {
+        throw std::invalid_argument(std::string(key) + " must be a non-negative integer");
+    }
+    if (value > (double)std::numeric_limits<uint64_t>::max()) {
+        throw std::invalid_argument(std::string(key) + " is outside uint64 range");
+    }
+    return (uint64_t)value;
+}
+
+static bool is_python_side_channel_env_key(const char* key) {
+    return std::strcmp(key, "record_best_replay_path") == 0 ||
+           std::strcmp(key, "play_replay_path") == 0;
+}
+
+static Dict* py_dict_to_c_dict(py::dict py_dict, bool is_env_dict) {
     Dict* c_dict = create_dict(py_dict.size());
     for (auto item : py_dict) {
         const char* key = PyUnicode_AsUTF8(item.first.ptr());
+        if (!key) {
+            throw std::invalid_argument("Config dict keys must be strings");
+        }
         try {
             dict_set(c_dict, key, item.second.cast<double>());
         } catch (const py::cast_error&) {
+            if (is_env_dict && is_python_side_channel_env_key(key)) continue;
+            throw std::invalid_argument(std::string(key) + " must be numeric");
         }
     }
     return c_dict;
@@ -330,10 +400,12 @@ static std::unique_ptr<VecEnv> create_vec(py::dict args, int gpu = 0) {
     py::dict vec_kwargs = args["vec"].cast<py::dict>();
     py::dict env_kwargs = args["env"].cast<py::dict>();
 
-    int total_agents = (int)get_config(vec_kwargs, "total_agents");
-    int num_buffers = (int)get_config(vec_kwargs, "num_buffers");
-    Dict* vec_dict = py_dict_to_c_dict(vec_kwargs);
-    Dict* env_dict = py_dict_to_c_dict(env_kwargs);
+    int total_agents = get_config_positive_int(vec_kwargs, "total_agents");
+    int num_buffers = get_config_positive_int(vec_kwargs, "num_buffers");
+    mtl_validate_divisible_config_values(
+        "total_agents", total_agents, "num_buffers", num_buffers);
+    Dict* vec_dict = py_dict_to_c_dict(vec_kwargs, false);
+    Dict* env_dict = py_dict_to_c_dict(env_kwargs, true);
 
     auto ve = std::make_unique<VecEnv>();
     {
@@ -394,21 +466,21 @@ static std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
     py::dict policy_kwargs = args["policy"].cast<py::dict>();
 
     HypersT hypers;
-    hypers.total_agents = get_config(vec_kwargs, "total_agents");
-    hypers.num_buffers = get_config(vec_kwargs, "num_buffers");
-    hypers.num_threads = get_config(vec_kwargs, "num_threads");
-    hypers.horizon = get_config(train_kwargs, "horizon");
-    hypers.hidden_size = get_config(policy_kwargs, "hidden_size");
-    hypers.num_layers = get_config(policy_kwargs, "num_layers");
-    hypers.seed = args.contains("seed") ? (uint64_t)get_config(args, "seed")
-        : train_kwargs.contains("seed") ? (uint64_t)get_config(train_kwargs, "seed") : 42;
+    hypers.total_agents = get_config_positive_int(vec_kwargs, "total_agents");
+    hypers.num_buffers = get_config_positive_int(vec_kwargs, "num_buffers");
+    hypers.num_threads = get_config_positive_int(vec_kwargs, "num_threads");
+    hypers.horizon = get_config_positive_int(train_kwargs, "horizon");
+    hypers.hidden_size = get_config_positive_int(policy_kwargs, "hidden_size");
+    hypers.num_layers = get_config_positive_int(policy_kwargs, "num_layers");
+    hypers.seed = args.contains("seed") ? get_config_uint64(args, "seed")
+        : train_kwargs.contains("seed") ? get_config_uint64(train_kwargs, "seed") : 42;
     hypers.lr = get_config(train_kwargs, "learning_rate");
     hypers.min_lr_ratio = get_config(train_kwargs, "min_lr_ratio");
     hypers.anneal_lr = get_config(train_kwargs, "anneal_lr");
     hypers.beta1 = get_config(train_kwargs, "beta1");
-    hypers.minibatch_size = get_config(train_kwargs, "minibatch_size");
+    hypers.minibatch_size = get_config_positive_int(train_kwargs, "minibatch_size");
     hypers.replay_ratio = get_config(train_kwargs, "replay_ratio");
-    hypers.total_timesteps = get_config(train_kwargs, "total_timesteps");
+    hypers.total_timesteps = get_config_positive_long(train_kwargs, "total_timesteps");
     hypers.max_grad_norm = get_config(train_kwargs, "max_grad_norm");
     hypers.clip_coef = get_config(train_kwargs, "clip_coef");
     hypers.vf_clip_coef = get_config(train_kwargs, "vf_clip_coef");
@@ -434,13 +506,24 @@ static std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
     hypers.train_fp16 =
         (train_kwargs.contains("train_fp16") && get_config(train_kwargs, "train_fp16") > 0) ||
         (args.contains("train_fp16") && get_config(args, "train_fp16") > 0);
-    hypers.gpu_id = args.contains("gpu_id") ? (int)get_config(args, "gpu_id") : 0;
+    hypers.gpu_id = args.contains("gpu_id") ? get_config_int(args, "gpu_id") : 0;
+    mtl_validate_divisible_config_values(
+        "total_agents", hypers.total_agents, "num_buffers", hypers.num_buffers);
+    mtl_validate_divisible_config_values(
+        "minibatch_size", hypers.minibatch_size, "horizon", hypers.horizon);
+    long long batch_size_long = (long long)hypers.total_agents * (long long)hypers.horizon;
+    if (batch_size_long > (long long)std::numeric_limits<int>::max()) {
+        throw std::invalid_argument("total_agents * horizon is outside int range");
+    }
+    int batch_size = (int)batch_size_long;
+    mtl_validate_divisible_config_values(
+        "total_agents * horizon", batch_size, "minibatch_size", hypers.minibatch_size);
 
     mtl_enable_gpu_timing(hypers.profile);
 
     std::string env_name = args["env_name"].cast<std::string>();
-    Dict* vec_dict = py_dict_to_c_dict(vec_kwargs);
-    Dict* env_dict = py_dict_to_c_dict(env_kwargs);
+    Dict* vec_dict = py_dict_to_c_dict(vec_kwargs, false);
+    Dict* env_dict = py_dict_to_c_dict(env_kwargs, true);
 
     std::unique_ptr<PuffeRL> pufferl;
     {
@@ -452,6 +535,8 @@ static std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
 }
 
 PYBIND11_MODULE(_C, m) {
+    assert_static_env_name_matches();
+
     m.def("get_nccl_id", []() -> py::bytes {
         throw std::runtime_error("Metal backend does not support multi-GPU");
     });
@@ -459,6 +544,7 @@ PYBIND11_MODULE(_C, m) {
 
     m.attr("precision_bytes") = 4;
     m.attr("env_name") = PUFFER_STRINGIFY(ENV_NAME);
+    m.attr("static_env_name") = get_static_env_name();
     m.attr("gpu") = 0;
 
     m.def("log", &puf_log);

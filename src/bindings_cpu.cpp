@@ -2,6 +2,8 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <stdexcept>
+#include <string>
 
 #define _PUFFER_STRINGIFY(x) #x
 #define PUFFER_STRINGIFY(x) _PUFFER_STRINGIFY(x)
@@ -11,6 +13,16 @@
 #include "vecenv.h"
 
 namespace py = pybind11;
+
+static void assert_static_env_name_matches(void) {
+    const char* binding_env_name = PUFFER_STRINGIFY(ENV_NAME);
+    const char* static_env_name = get_static_env_name();
+    if (strcmp(binding_env_name, static_env_name) != 0) {
+        throw std::runtime_error(
+            std::string("compiled _C env mismatch: binding env_name=") +
+            binding_env_name + ", static_env_name=" + static_env_name);
+    }
+}
 
 // Stub out CUDA functions that the static lib references (dead code when gpu=0)
 extern "C" {
@@ -141,7 +153,7 @@ static void cpu_vec_step_py(VecEnv& ve, long long actions_ptr) {
 }
 
 static py::dict vec_log(VecEnv& ve) {
-    Dict* out = create_dict(32);
+    Dict* out = create_dict(64);
     static_vec_log(ve.vec, out);
     py::dict result;
     for (int i = 0; i < out->size; i++)
@@ -161,8 +173,11 @@ static void vec_close(VecEnv& ve) {
 // ============================================================================
 
 PYBIND11_MODULE(_C, m) {
+    assert_static_env_name_matches();
+
     m.attr("precision_bytes") = 4;
     m.attr("env_name") = PUFFER_STRINGIFY(ENV_NAME);
+    m.attr("static_env_name") = get_static_env_name();
     m.attr("gpu") = 0;
 
     m.def("puff_advantage_cpu", &py_puff_advantage_cpu);
