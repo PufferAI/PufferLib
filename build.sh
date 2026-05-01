@@ -241,6 +241,7 @@ STATIC_CFLAGS=(
     -I. -Isrc -I"$SRC_DIR" -Ivendor
     -I./"$RAYLIB_NAME"/include
     -DPLATFORM_DESKTOP
+    -DENV_NAME="$ENV"
     -fvisibility=hidden
     -fPIC
 )
