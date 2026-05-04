@@ -573,6 +573,9 @@ static void td_prepare_wave(TowerDefence* env) {
 static void td_start_round(TowerDefence* env) {
     if (env->status_code != TD_STATUS_WARMUP && env->status_code != TD_STATUS_INTERMISSION) return;
     env->status_code = TD_STATUS_SPAWNING;
+    // Preserve the JS raw-v2 checkpoint ABI: startNextRound keeps the
+    // intermission scalar at 2 while the new wave is spawning. It is a policy
+    // compatibility feature, not an active countdown outside intermission.
     env->intermission_remaining = 2.0f;
     td_prepare_wave(env);
 }
