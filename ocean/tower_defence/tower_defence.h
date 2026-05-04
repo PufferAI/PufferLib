@@ -573,7 +573,7 @@ static void td_prepare_wave(TowerDefence* env) {
 static void td_start_round(TowerDefence* env) {
     if (env->status_code != TD_STATUS_WARMUP && env->status_code != TD_STATUS_INTERMISSION) return;
     env->status_code = TD_STATUS_SPAWNING;
-    env->intermission_remaining = 0.0f;
+    env->intermission_remaining = 2.0f;
     td_prepare_wave(env);
 }
 
