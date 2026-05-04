@@ -653,7 +653,9 @@ static void td_advance_world(TowerDefence* env, float* reward) {
     for (int s = 0; s < env->active_spawns; s++) {
         TdSpawn* spawn = &env->spawns[s];
         while (spawn->emitted < spawn->count && env->wave_elapsed >= spawn->next_time) {
-            td_add_enemy(env, spawn->type, spawn->camo, spawn->fortified, spawn->regrow, 0.0f);
+            if (td_add_enemy(env, spawn->type, spawn->camo, spawn->fortified, spawn->regrow, 0.0f) < 0) {
+                break;
+            }
             spawn->emitted += 1;
             spawn->next_time += spawn->interval;
         }
