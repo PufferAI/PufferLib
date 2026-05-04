@@ -1,20 +1,23 @@
 #include "four_rooms.h"
 
-#define Env FourRooms
-#include "../env_binding.h"
+#define OBS_SIZE (7 * 7 * 3)
+#define NUM_ATNS 1
+#define ACT_SIZES {7}
+#define OBS_TENSOR_T ByteTensor
 
-static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->size = unpack(kwargs, "size");
+#define Env FourRooms
+#include "vecenv.h"
+
+void my_init(Env* env, Dict* kwargs) {
+    env->num_agents = 1;
+    env->size = (int)dict_get(kwargs, "size")->value;
     env->see_through_walls = 0;
-    // Allocate grid memory for full state (stores OBJECT_IDX values)
     env->grid = (unsigned char*)calloc(env->size * env->size, sizeof(unsigned char));
-    return 0;
 }
 
-static int my_log(PyObject* dict, Log* log) {
-    assign_to_dict(dict, "perf", log->perf);
-    assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "episode_return", log->episode_return);
-    assign_to_dict(dict, "episode_length", log->episode_length);
-    return 0;
+void my_log(Log* log, Dict* out) {
+    dict_set(out, "perf", log->perf);
+    dict_set(out, "score", log->score);
+    dict_set(out, "episode_return", log->episode_return);
+    dict_set(out, "episode_length", log->episode_length);
 }

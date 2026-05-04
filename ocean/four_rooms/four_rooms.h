@@ -4,7 +4,7 @@
 
 // Action space
 const unsigned char LEFT = 0;
-const unsigned char RIGHT = 1; 
+const unsigned char RIGHT = 1;
 const unsigned char FORWARD = 2;
 const unsigned char PICKUP = 3; // Unused
 const unsigned char DROP = 4; // Unused
@@ -49,9 +49,10 @@ typedef struct {
 typedef struct {
     Log log;
     unsigned char* observations; // 7x7x3 observation: (OBJECT_IDX, COLOR_IDX, STATE) per cell
-    int* actions;
+    float* actions;
     float* rewards;
-    unsigned char* terminals;
+    float* terminals;
+    int num_agents;
     int size; // default 19
     int tick;
     int agent_x, agent_y;
@@ -59,8 +60,14 @@ typedef struct {
     int goal_x, goal_y;
     unsigned char* grid; // Stores OBJECT_IDX values
     int see_through_walls;
+    unsigned int rng;
+    int texture_loaded;
     Texture2D puffers;
 } FourRooms;
+
+static inline int four_rooms_rand(FourRooms* env, int n) {
+    return rand_r(&env->rng) % n;
+}
 
 void add_log(FourRooms* env) {
     env->log.perf += (env->rewards[0] > 0) ? 1.0 : 0.0;
@@ -114,27 +121,27 @@ void generate_observation(FourRooms* env) {
     // Generate 7x7x3 observation centered on agent's view direction
     int view_size = 7;
     int half_view = view_size / 2;
-    
+
     // Calculate the center of the view based on agent's direction
     int center_x = env->agent_x;
     int center_y = env->agent_y;
-    
+
     // Shift center forward in the direction the agent is facing
     if (env->agent_dir == 0) center_x += half_view; // East
     else if (env->agent_dir == 1) center_y += half_view; // South
     else if (env->agent_dir == 2) center_x -= half_view; // West
     else if (env->agent_dir == 3) center_y -= half_view; // North
-    
+
     for (int i = 0; i < view_size; i++) {
         for (int j = 0; j < view_size; j++) {
             int world_x = center_x - half_view + j;
             int world_y = center_y - half_view + i;
-            
+
             // Calculate flat index for this cell in the 7x7x3 observation
             int base_idx = (i * view_size + j) * 3;
-            
+
             unsigned char object_idx, color_idx, state;
-            
+
             // Check bounds, out of bounds is treated as wall
             if (world_x < 0 || world_x >= env->size || world_y < 0 || world_y >= env->size) {
                 object_idx = WALL;
@@ -147,7 +154,7 @@ void generate_observation(FourRooms* env) {
             } else {
                 int grid_idx = world_y * env->size + world_x;
                 unsigned char grid_cell = env->grid[grid_idx];
-                
+
                 // Map grid cell to MiniGrid encoding
                 switch (grid_cell) {
                     case EMPTY:
@@ -177,7 +184,7 @@ void generate_observation(FourRooms* env) {
                         break;
                 }
             }
-            
+
             env->observations[base_idx] = object_idx;
             env->observations[base_idx + 1] = color_idx;
             env->observations[base_idx + 2] = state;
@@ -187,10 +194,10 @@ void generate_observation(FourRooms* env) {
 
 void create_four_rooms_grid(FourRooms* env) {
     int size = env->size;
-    
+
     // Clear grid
     memset(env->grid, EMPTY, size * size * sizeof(unsigned char));
-    
+
     // Create outer walls
     for (int i = 0; i < size; i++) {
         env->grid[0 * size + i] = WALL; // Top
@@ -198,80 +205,80 @@ void create_four_rooms_grid(FourRooms* env) {
         env->grid[i * size + 0] = WALL; // Left
         env->grid[i * size + (size-1)] = WALL; // Right
     }
-    
+
     int room_w = size / 2;
     int room_h = size / 2;
-    
+
     // Create vertical separating wall
     for (int y = 0; y < size; y++) {
         env->grid[y * size + room_w] = WALL;
     }
-    
+
     // Create horizontal separating wall
     for (int x = 0; x < size; x++) {
         env->grid[room_h * size + x] = WALL;
     }
-    
+
     // Create 4 gaps in the separating walls
     // Gap in vertical wall (top half)
-    int gap_y1 = 1 + rand() % (room_h - 2);
+    int gap_y1 = 1 + four_rooms_rand(env, room_h - 2);
     env->grid[gap_y1 * size + room_w] = EMPTY;
-    
+
     // Gap in vertical wall (bottom half)
-    int gap_y2 = room_h + 1 + rand() % (room_h - 2);
+    int gap_y2 = room_h + 1 + four_rooms_rand(env, room_h - 2);
     env->grid[gap_y2 * size + room_w] = EMPTY;
-    
+
     // Gap in horizontal wall (left half)
-    int gap_x1 = 1 + rand() % (room_w - 2);
+    int gap_x1 = 1 + four_rooms_rand(env, room_w - 2);
     env->grid[room_h * size + gap_x1] = EMPTY;
-    
+
     // Gap in horizontal wall (right half)
-    int gap_x2 = room_w + 1 + rand() % (room_w - 2);
+    int gap_x2 = room_w + 1 + four_rooms_rand(env, room_w - 2);
     env->grid[room_h * size + gap_x2] = EMPTY;
 }
 
 void c_reset(FourRooms* env) {
 
     create_four_rooms_grid(env);
-    
+
     // Place agent randomly in valid position
     do {
-        env->agent_x = 1 + rand() % (env->size - 2);
-        env->agent_y = 1 + rand() % (env->size - 2);
+        env->agent_x = 1 + four_rooms_rand(env, env->size - 2);
+        env->agent_y = 1 + four_rooms_rand(env, env->size - 2);
     } while (env->grid[env->agent_y * env->size + env->agent_x] != EMPTY);
-    
+
     // Place goal randomly in valid position (different from agent)
     do {
-        env->goal_x = 1 + rand() % (env->size - 2);
-        env->goal_y = 1 + rand() % (env->size - 2);
+        env->goal_x = 1 + four_rooms_rand(env, env->size - 2);
+        env->goal_y = 1 + four_rooms_rand(env, env->size - 2);
     } while (env->grid[env->goal_y * env->size + env->goal_x] != EMPTY ||
              (env->goal_x == env->agent_x && env->goal_y == env->agent_y));
-    
+
     // Set agent and goal on grid
     env->grid[env->agent_y * env->size + env->agent_x] = AGENT;
     env->grid[env->goal_y * env->size + env->goal_x] = GOAL;
-    
+
     // Random initial direction
-    env->agent_dir = rand() % 4;
+    env->agent_dir = four_rooms_rand(env, 4);
     env->tick = 0;
-    
+
     generate_observation(env);
 }
 
 void c_step(FourRooms* env) {
     env->tick += 1;
-    
-    int action = env->actions[0];
+
+    int action = (int)env->actions[0];
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
-    
+
     // Clear agent from current position
     env->grid[env->agent_y * env->size + env->agent_x] = EMPTY;
-    
+
     int new_x = env->agent_x;
     int new_y = env->agent_y;
     int new_dir = env->agent_dir;
-    
+
     if (action == LEFT) {
         new_dir = (env->agent_dir + 3) % 4;
     } else if (action == RIGHT) {
@@ -289,9 +296,9 @@ void c_step(FourRooms* env) {
             env->agent_y = new_y;
         }
     }
-    
+
     env->agent_dir = new_dir;
-    
+
     // Check if agent reached goal
     if (env->agent_x == env->goal_x && env->agent_y == env->goal_y) {
         env->terminals[0] = 1;
@@ -300,10 +307,10 @@ void c_step(FourRooms* env) {
         c_reset(env);
         return;
     }
-    
+
     // Place agent back on grid
     env->grid[env->agent_y * env->size + env->agent_x] = AGENT;
-    
+
     // Check timeout
     if (env->tick >= 4 * env->size) {
         env->terminals[0] = 1;
@@ -312,7 +319,7 @@ void c_step(FourRooms* env) {
         c_reset(env);
         return;
     }
-    
+
     generate_observation(env);
 }
 
@@ -321,6 +328,7 @@ void c_render(FourRooms* env) {
         InitWindow(32*env->size, 32*env->size, "PufferLib FourRooms");
         SetTargetFPS(10);
         env->puffers = LoadTexture("resources/shared/puffers_128.png");
+        env->texture_loaded = 1;
     }
 
     if (IsKeyDown(KEY_ESCAPE)) {
@@ -331,13 +339,13 @@ void c_render(FourRooms* env) {
     ClearBackground(PUFF_BACKGROUND);
 
     int px = 32;
-    
+
     // Draw the main grid
     for (int y = 0; y < env->size; y++) {
         for (int x = 0; x < env->size; x++) {
             int cell = env->grid[y * env->size + x];
             Color color = PUFF_BACKGROUND;
-            
+
             if (cell == WALL) color = PUFF_BACKGROUND2;
             else if (cell == GOAL) color = PUFF_RED;
 
@@ -346,28 +354,28 @@ void c_render(FourRooms* env) {
             }
         }
     }
-    
+
     // Draw agent's 7x7 observation window
     int view_size = 7;
     int half_view = view_size / 2;
-    
+
     // Calculate the center of the view based on agent's direction
     int center_x = env->agent_x;
     int center_y = env->agent_y;
-    
+
     // Shift center forward in the direction the agent is facing
     if (env->agent_dir == 0) center_x += half_view; // East
     else if (env->agent_dir == 1) center_y += half_view; // South
     else if (env->agent_dir == 2) center_x -= half_view; // West
     else if (env->agent_dir == 3) center_y -= half_view; // North
-    
+
     // Draw semi-transparent overlay for observation window
     Color obs_overlay = (Color){180, 180, 180, 80};
     for (int i = 0; i < view_size; i++) {
         for (int j = 0; j < view_size; j++) {
             int world_x = center_x - half_view + j;
             int world_y = center_y - half_view + i;
-            
+
             // Only draw overlay for cells within grid bounds and visible to agent
             if (world_x >= 0 && world_x < env->size && world_y >= 0 && world_y < env->size &&
                 can_see_cell(env, env->agent_x, env->agent_y, world_x, world_y)) {
@@ -375,7 +383,7 @@ void c_render(FourRooms* env) {
             }
         }
     }
-    
+
     // Draw agent
     int starting_sprite_x = 0;
     int rotation = 90 * env->agent_dir; // 0=East(0°), 1=South(90°), 2=West(180°), 3=North(270°)
@@ -383,7 +391,7 @@ void c_render(FourRooms* env) {
         starting_sprite_x = 128; // Use flipped sprite for 180° rotation
         rotation = 0;
     }
-    
+
     DrawTexturePro(
         env->puffers,
         (Rectangle){starting_sprite_x, 0, 128, 128},
@@ -402,9 +410,10 @@ void c_render(FourRooms* env) {
 }
 
 void c_close(FourRooms* env) {
-    if (IsWindowReady()) {
+    if (env->texture_loaded) {
         UnloadTexture(env->puffers);
         CloseWindow();
+        env->texture_loaded = 0;
     }
     if (env->grid) {
         free(env->grid);
