@@ -531,7 +531,7 @@ static void td_add_spawn(TowerDefence* env, int type, int count, float interval,
     spawn->count = count;
     spawn->emitted = 0;
     spawn->interval = interval;
-    spawn->next_time = env->wave_elapsed + 0.01f * env->active_spawns;
+    spawn->next_time = env->wave_elapsed + 0.01f * (env->active_spawns - 1);
     spawn->camo = camo;
     spawn->fortified = fortified;
     spawn->regrow = regrow;
