@@ -27,8 +27,8 @@
 #define TD_OBS_V2_FEATURE_OFFSET TD_BASE_OBS_SIZE
 #define TD_OBS_V2_ACTION_MASK_OFFSET (TD_OBS_V2_FEATURE_OFFSET + TD_NUM_OBSERVATION_V2_FEATURES)
 #define TD_OBS_V2_SIZE (TD_OBS_V2_ACTION_MASK_OFFSET + TD_NUM_ACTIONS)
-#define TD_OBS_V1_ACTION_MASK_OFFSET TD_BASE_OBS_SIZE
-#define TD_OBS_V1_SIZE (TD_OBS_V1_ACTION_MASK_OFFSET + TD_NUM_ACTIONS)
+#define TD_OBS_ACTION_MASK_OFFSET TD_OBS_V2_ACTION_MASK_OFFSET
+#define TD_OBS_SIZE TD_OBS_V2_SIZE
 #define TD_FACTOR_NUM_ATNS 3
 #define TD_FACTOR_VERB_COUNT 5
 #define TD_MAX_ENEMIES 256
@@ -40,18 +40,6 @@
 
 #ifndef TD_USE_FACTORED_ACTIONS
 #define TD_USE_FACTORED_ACTIONS 1
-#endif
-
-#ifndef TD_NATIVE_OBSERVATION_RAW_V2
-#define TD_NATIVE_OBSERVATION_RAW_V2 1
-#endif
-
-#if TD_NATIVE_OBSERVATION_RAW_V2
-#define TD_OBS_ACTION_MASK_OFFSET TD_OBS_V2_ACTION_MASK_OFFSET
-#define TD_OBS_SIZE TD_OBS_V2_SIZE
-#else
-#define TD_OBS_ACTION_MASK_OFFSET TD_OBS_V1_ACTION_MASK_OFFSET
-#define TD_OBS_SIZE TD_OBS_V1_SIZE
 #endif
 
 enum TdActionId {
@@ -163,7 +151,6 @@ typedef struct {
 
     int max_episode_steps;
     int base_seed;
-    int raw_observation_scalars;
     int episode_index;
     int step_count;
     int invalid_action_count;
@@ -384,7 +371,6 @@ static void td_init(TowerDefence* env) {
     env->num_agents = 1;
     env->max_episode_steps = TD_DEFAULT_MAX_EPISODE_STEPS;
     env->base_seed = TD_DEFAULT_BASE_SEED;
-    env->raw_observation_scalars = 1;
     env->invalid_action_reward = TD_DEFAULT_INVALID_ACTION_REWARD;
     env->hover_slot = -1;
 }
@@ -404,25 +390,21 @@ static void free_allocated(TowerDefence* env) {
     free(env->terminals);
 }
 
-static float td_obs_scalar(TowerDefence* env, float value, float divisor) {
-    return env->raw_observation_scalars ? value : value / divisor;
-}
-
 static void td_write_observation(TowerDefence* env) {
     memset(env->observations, 0, TD_OBS_SIZE * sizeof(float));
-    env->observations[0] = td_obs_scalar(env, env->time, 400.0f);
-    env->observations[1] = td_obs_scalar(env, (float)env->round, 20.0f);
+    env->observations[0] = env->time;
+    env->observations[1] = (float)env->round;
     if (env->status_code >= 0 && env->status_code <= TD_STATUS_COMPLETE) {
         env->observations[2 + env->status_code] = 1.0f;
     }
-    env->observations[8] = td_obs_scalar(env, env->lives, 100.0f);
-    env->observations[9] = td_obs_scalar(env, env->cash, 650.0f);
-    env->observations[10] = td_obs_scalar(env, env->intermission_remaining, 2.0f);
-    env->observations[11] = td_obs_scalar(env, (float)env->round, 20.0f);
-    env->observations[12] = td_obs_scalar(env, env->wave_elapsed, 15.0f);
-    env->observations[13] = td_obs_scalar(env, (float)td_enemy_count(env), 20.0f);
-    env->observations[14] = td_obs_scalar(env, (float)td_tower_count(env), 20.0f);
-    env->observations[15] = td_obs_scalar(env, env->time - env->last_shot_time < 0.35f ? 1.0f : 0.0f, 1.0f);
+    env->observations[8] = env->lives;
+    env->observations[9] = env->cash;
+    env->observations[10] = env->intermission_remaining;
+    env->observations[11] = (float)env->round;
+    env->observations[12] = env->wave_elapsed;
+    env->observations[13] = (float)td_enemy_count(env);
+    env->observations[14] = (float)td_tower_count(env);
+    env->observations[15] = env->time - env->last_shot_time < 0.35f ? 1.0f : 0.0f;
 
     int idx = TD_SCALAR_OBS_SIZE;
     for (int slot = 0; slot < TD_NUM_PLACEMENT_SLOTS; slot++) {
@@ -465,7 +447,6 @@ static void td_write_observation(TowerDefence* env) {
     for (int i = 0; i < TD_NUM_ENEMY_PROGRESS_BINS; i++) env->observations[idx++] = td_squash(count_bins[i], 3.0f);
     for (int i = 0; i < TD_NUM_ENEMY_PROGRESS_BINS; i++) env->observations[idx++] = td_squash(hp_bins[i], 3.0f);
 
-#if TD_NATIVE_OBSERVATION_RAW_V2
     idx = TD_OBS_V2_FEATURE_OFFSET;
     for (int i = 0; i < 10; i++) env->observations[idx++] = td_squash(type_mass[i], 12.0f);
     for (int i = 0; i < 8; i++) env->observations[idx++] = td_squash(prop_mass[i], 12.0f);
@@ -502,7 +483,6 @@ static void td_write_observation(TowerDefence* env) {
     env->observations[idx++] = td_squash(comp[7], 8.0f);
     env->observations[idx++] = td_squash(comp[8], 4.0f);
     env->observations[idx++] = td_squash(comp[9], 8000.0f);
-#endif
 
     td_update_masks(env);
     for (int action = 0; action < TD_NUM_ACTIONS; action++) {

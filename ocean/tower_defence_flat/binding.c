@@ -31,7 +31,6 @@ void my_init(Env* env, Dict* kwargs) {
     env->max_episode_steps = td_get_int(
         kwargs, "max_episode_steps", TD_DEFAULT_MAX_EPISODE_STEPS);
     env->base_seed = td_get_int(kwargs, "base_seed", TD_DEFAULT_BASE_SEED);
-    env->raw_observation_scalars = td_get_int(kwargs, "raw_observation_scalars", 1);
     env->episode_index = 0;
     env->step_count = 0;
     env->invalid_action_count = 0;
