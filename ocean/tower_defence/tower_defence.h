@@ -404,7 +404,9 @@ static void td_write_observation(TowerDefence* env) {
     env->observations[12] = env->wave_elapsed;
     env->observations[13] = (float)td_enemy_count(env);
     env->observations[14] = (float)td_tower_count(env);
-    env->observations[15] = env->time - env->last_shot_time < 0.35f ? 1.0f : 0.0f;
+    // Raw-v2 scalar slot 15 is projectile count in the JS/native contract.
+    // The native env resolves shots immediately, so the count is always zero.
+    env->observations[15] = 0.0f;
 
     int idx = TD_SCALAR_OBS_SIZE;
     for (int slot = 0; slot < TD_NUM_PLACEMENT_SLOTS; slot++) {
@@ -442,7 +444,8 @@ static void td_write_observation(TowerDefence* env) {
         band_mass[band][1] += hp;
         band_mass[band][2] += leak;
         band_mass[band][3] += (enemy->camo || TD_ENEMY_SHARP_IMMUNE[enemy->type] ||
-            TD_ENEMY_EXPLOSIVE_IMMUNE[enemy->type]) ? leak : 0.0f;
+            TD_ENEMY_EXPLOSIVE_IMMUNE[enemy->type] || TD_ENEMY_BURN_IMMUNE[enemy->type] ||
+            TD_ENEMY_SLOW_IMMUNE[enemy->type]) ? leak : 0.0f;
     }
     for (int i = 0; i < TD_NUM_ENEMY_PROGRESS_BINS; i++) env->observations[idx++] = td_squash(count_bins[i], 3.0f);
     for (int i = 0; i < TD_NUM_ENEMY_PROGRESS_BINS; i++) env->observations[idx++] = td_squash(hp_bins[i], 3.0f);
