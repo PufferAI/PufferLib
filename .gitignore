@@ -12,6 +12,7 @@ ocean/dogfight/test_flight_dynamics
 ocean/dogfight/tests/test_*
 !ocean/dogfight/tests/test_*.c
 !ocean/dogfight/tests/test_*.h
+!ocean/dogfight/tests/test_*.py
 
 # hipified cuda extensions dir [HIP/ROCM]
 pufferlib/extensions/hip/

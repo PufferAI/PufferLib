@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 #
-# run_all.sh - Compile and run all dogfight C regression tests.
+# run_all.sh - Compile and run all dogfight regression tests (C + Python).
 #
 # Usage (from the repo root):
 #   bash ocean/dogfight/tests/run_all.sh
 #
-# Exits 0 if every test binary exits 0, non-zero otherwise. Stdout is
-# terse; per-file output (including failed-assertion lines on stderr)
+# Exits 0 if every test binary/script exits 0, non-zero otherwise. Stdout
+# is terse; per-file output (including failed-assertion lines on stderr)
 # is preserved so CI logs show which test and which line failed.
+#
+# Picks up:
+#   test_*.c   compiled with raylib + libm and executed
+#   test_*.py  executed with .venv/bin/python (skipped if missing)
 
 set -u
 
@@ -56,9 +60,31 @@ for src in "${SCRIPT_DIR}"/test_*.c; do
     fi
 done
 
+# Python tests
+PY="${REPO_ROOT}/.venv/bin/python"
+if [[ ! -x "${PY}" ]]; then
+    PY="$(command -v python3 || command -v python || true)"
+fi
+for src in "${SCRIPT_DIR}"/test_*.py; do
+    name="$(basename "${src}" .py)"
+    n_total=$((n_total + 1))
+    if [[ -z "${PY}" ]]; then
+        echo "[${name}] SKIPPED (no python interpreter found)"
+        n_fail=$((n_fail + 1))
+        failing+=("${name}")
+        continue
+    fi
+    if "${PY}" "${src}"; then
+        n_pass=$((n_pass + 1))
+    else
+        n_fail=$((n_fail + 1))
+        failing+=("${name}")
+    fi
+done
+
 echo
 echo "=========================================="
-echo "  Dogfight C regression tests"
+echo "  Dogfight regression tests (C + Python)"
 echo "=========================================="
 echo "  total:  ${n_total}"
 echo "  passed: ${n_pass}"
