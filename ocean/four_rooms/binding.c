@@ -5,8 +5,27 @@
 #define ACT_SIZES {7}
 #define OBS_TENSOR_T ByteTensor
 
+#define MY_VEC_STEP four_rooms_vec_step
+#define MY_VEC_STEP_RANGE four_rooms_vec_step_range
 #define Env FourRooms
 #include "vecenv.h"
+
+void four_rooms_vec_step(StaticVec* vec) {
+    memset(vec->rewards, 0, vec->total_agents * sizeof(float));
+    memset(vec->terminals, 0, vec->total_agents * sizeof(float));
+    FourRooms* envs = (FourRooms*)vec->envs;
+    for (int i = 0; i < vec->size; i++) {
+        c_step(&envs[i]);
+    }
+}
+
+void four_rooms_vec_step_range(StaticVec* vec, int env_start, int env_count, int num_workers) {
+    (void)num_workers;
+    FourRooms* envs = (FourRooms*)vec->envs;
+    for (int i = env_start; i < env_start + env_count; i++) {
+        c_step(&envs[i]);
+    }
+}
 
 void my_init(Env* env, Dict* kwargs) {
     env->num_agents = 1;

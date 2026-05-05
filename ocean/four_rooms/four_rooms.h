@@ -55,6 +55,7 @@ typedef struct {
     int num_agents;
     int size; // default 19
     int tick;
+    float episode_return;
     int agent_x, agent_y;
     int agent_dir; // 0=East, 1=South, 2=West, 3=North
     int goal_x, goal_y;
@@ -70,10 +71,10 @@ static inline int four_rooms_rand(FourRooms* env, int n) {
 }
 
 void add_log(FourRooms* env) {
-    env->log.perf += (env->rewards[0] > 0) ? 1.0 : 0.0;
+    env->log.perf += (env->rewards[0] > 0) ? 1.0f : 0.0f;
     env->log.score += env->rewards[0];
     env->log.episode_length += env->tick;
-    env->log.episode_return += env->rewards[0];
+    env->log.episode_return += env->episode_return;
     env->log.n++;
 }
 
@@ -261,6 +262,7 @@ void c_reset(FourRooms* env) {
     // Random initial direction
     env->agent_dir = four_rooms_rand(env, 4);
     env->tick = 0;
+    env->episode_return = 0.0f;
 
     generate_observation(env);
 }
@@ -302,7 +304,8 @@ void c_step(FourRooms* env) {
     // Check if agent reached goal
     if (env->agent_x == env->goal_x && env->agent_y == env->goal_y) {
         env->terminals[0] = 1;
-        env->rewards[0] = 1.0;
+        env->rewards[0] = 1.0f - 0.9f * (float)env->tick / (4.0f * (float)env->size);
+        env->episode_return += env->rewards[0];
         add_log(env);
         c_reset(env);
         return;
@@ -315,11 +318,13 @@ void c_step(FourRooms* env) {
     if (env->tick >= 4 * env->size) {
         env->terminals[0] = 1;
         env->rewards[0] = 0.0;
+        env->episode_return += env->rewards[0];
         add_log(env);
         c_reset(env);
         return;
     }
 
+    env->episode_return += env->rewards[0];
     generate_observation(env);
 }
 
