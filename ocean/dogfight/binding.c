@@ -36,9 +36,34 @@ void my_init(Env* env, Dict* kwargs) {
 }
 
 void my_log(Log* log, Dict* out) {
+    // Core metrics (vecenv divides every Log float by n before calling my_log,
+    // so each export here is a per-episode mean — perf is kill rate, etc.)
     dict_set(out, "perf", log->perf);
     dict_set(out, "score", log->score);
     dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
     dict_set(out, "n", log->n);
+
+    // Combat
+    dict_set(out, "shots_fired", log->shots_fired);
+    dict_set(out, "accuracy", log->accuracy);
+    dict_set(out, "sp_player_kills", log->sp_player_kills);
+    dict_set(out, "sp_opp_kills", log->sp_opp_kills);
+
+    // Curriculum / stage
+    dict_set(out, "stage", log->stage);
+    dict_set(out, "avg_stage", log->stage_sum);
+    dict_set(out, "avg_stage_weight", log->total_stage_weight);
+
+    // Directional + control health (KEY: surfaces "always banks one direction")
+    dict_set(out, "avg_abs_bias", log->total_abs_bias);
+    dict_set(out, "avg_signed_bias", log->total_signed_bias);
+    dict_set(out, "avg_control_rate", log->total_control_rate);
+
+    // Death-mode diagnostics
+    dict_set(out, "player_ground", log->player_ground_hits);
+    dict_set(out, "opponent_ground", log->opponent_ground_hits);
+    dict_set(out, "clean_fights", log->clean_fights);
+    dict_set(out, "altitude_kills", log->altitude_kills);
+    dict_set(out, "recovery_triggers", log->recovery_triggers);
 }

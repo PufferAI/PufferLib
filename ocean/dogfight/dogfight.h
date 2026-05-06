@@ -159,6 +159,8 @@ typedef struct Log {
     // RAW SUMS - exported to Python, become correct averages after vec_log divides by n
     float total_stage_weight;       // Sum of stage weights (exported as avg_stage_weight)
     float total_abs_bias;           // Sum of |aileron_bias| (exported as avg_abs_bias)
+    float total_signed_bias;        // Sum of signed aileron_bias per episode (exported as avg_signed_bias).
+                                    // Detects collapsed-policy direction lock-in: ~0 if symmetric, ±large if biased.
     float stage_sum;                // Sum of stages (exported as avg_stage)
     float total_control_rate;       // Sum of per-episode mean squared deltas (exported as avg_control_rate)
     float base_stage_kills;         // Kills at int(curriculum_target) - for per-stage gating
@@ -701,6 +703,7 @@ void add_log(Dogfight *env) {
 
     env->log.total_stage_weight += STAGES[env->stage].weight; // coeffs to scale metrics based on difficulty
     env->log.total_abs_bias += fabsf(env->aileron_bias);
+    env->log.total_signed_bias += env->aileron_bias;
     env->log.stage_sum += (float)env->stage;  // Accumulate for avg_stage
     // Mean squared control delta per step this episode (lower = smoother control)
     env->log.total_control_rate += env->episode_control_rate / fmaxf((float)env->tick, 1.0f);

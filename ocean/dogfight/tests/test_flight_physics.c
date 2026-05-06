@@ -23,9 +23,6 @@
 #define P51D_STALL_SPEED  45.0f
 #define P51D_CLIMB_RATE   15.4f
 
-#define DEG (3.14159265f / 180.0f)
-#define RAD (180.0f / 3.14159265f)
-
 /* identity-orientation force_state. */
 static void force_level(Dogfight* env,
                         float px, float py, float pz,
@@ -75,7 +72,7 @@ static int test_max_speed(void) {
         float elev = py_level_flight_pitch_velocity(&t.env.player);
         float a[5] = {1.0f, elev, 0.0f, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
 
         float speed = norm3(t.env.player.vel);
@@ -102,7 +99,7 @@ static int test_acceleration(void) {
         float elev = py_level_flight_pitch_velocity(&t.env.player);
         float a[5] = {1.0f, elev, 0.0f, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
     float v1 = norm3(t.env.player.vel);
@@ -122,7 +119,7 @@ static int test_deceleration(void) {
         float elev = py_level_flight_pitch_velocity(&t.env.player);
         float a[5] = {-1.0f, elev, 0.0f, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
     float v1 = norm3(t.env.player.vel);
@@ -143,7 +140,7 @@ static int test_cruise_speed(void) {
         float elev = py_level_flight_pitch_velocity(&t.env.player);
         float a[5] = {0.0f, elev, 0.0f, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
 
         float speed = norm3(t.env.player.vel);
@@ -192,7 +189,7 @@ static int test_stall_speed(void) {
             vzs[nv++] = t.env.player.vel.z;
             float a[5] = {-1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
             memcpy(t.env.actions, a, sizeof(a));
-            c_step(&t.env);
+            t_step(&t);
             if (t.env.terminals[0]) break;
         }
         int n_avg = (nv >= 50) ? 50 : nv;
@@ -244,7 +241,7 @@ static int test_climb_rate(void) {
         float ail = ap_to_velocity(ap_hold_bank(&t.env.player, 0.0f));
         float a[5] = {1.0f, elev, ail, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
     float avg_vz = nv ? arr_mean(vzs, nv) : 0.0f;
@@ -291,7 +288,7 @@ static int test_glide_ratio(void) {
         float ail = ap_to_velocity(ap_hold_bank(&t.env.player, 0.0f));
         float a[5] = {-1.0f, elev, ail, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
     float avg_vz = nv ? arr_mean(vzs, nv) : 0.0f;
@@ -315,18 +312,13 @@ static int test_sustained_turn(void) {
     float bank = bank_deg * DEG;
     float theory_turn_rate = (9.81f * tanf(bank) / V) * RAD;
 
-    float alpha = 3.0f * DEG;
-    float qp_w = cosf(-alpha / 2.0f);
-    float qp_y = sinf(-alpha / 2.0f);
-    float qr_w = cosf(-bank / 2.0f);
-    float qr_x = sinf(-bank / 2.0f);
-    float ow = qr_w * qp_w;
-    float ox = qr_x * qp_w;
-    float oy = qr_w * qp_y;
-    float oz = qr_x * qp_y;
+    /* Spawn at +30 deg right bank, 3 deg nose-up. attitude_quat fixes the
+     * sign bug that used to make this a left-bank spawn. */
+    Quat q0 = attitude_quat(bank_deg, 3.0f);
+    (void)bank;
 
     TestEnv t; setup_env(&t, 0);
-    force_with_ori(&t.env, 0, 0, 1500, V, 0, 0, ow, ox, oy, oz, 1.0f);
+    force_with_ori(&t.env, 0, 0, 1500, V, 0, 0, q0.w, q0.x, q0.y, q0.z, 1.0f);
 
     float headings[250]; int nh = 0;
     float speeds[250]; int ns = 0;
@@ -356,7 +348,7 @@ static int test_sustained_turn(void) {
         float ail = ap_to_velocity(ail_pos);
         float a[5] = {1.0f, elev, ail, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
 
@@ -384,11 +376,12 @@ static int test_turn_60(void) {
     const float bank_deg = 60.0f;
     const float bank_target = bank_deg * DEG;
     const float V = 100.0f;
-    float ow = cosf(bank_target / 2.0f);
-    float ox = -sinf(bank_target / 2.0f);
+    /* +60 deg right bank, no pitch. */
+    Quat q0 = attitude_quat(bank_deg, 0.0f);
+    (void)bank_target;
 
     TestEnv t; setup_env(&t, 0);
-    force_with_ori(&t.env, 0, 0, 1500, V, 0, 0, ow, ox, 0, 0, 1.0f);
+    force_with_ori(&t.env, 0, 0, 1500, V, 0, 0, q0.w, q0.x, q0.y, q0.z, 1.0f);
 
     /* PID gains as in Python */
     const float coeff = 0.25f;
@@ -432,7 +425,7 @@ static int test_turn_60(void) {
 
         float a[5] = {1.0f, elev_vel, ail_vel, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
 
@@ -520,7 +513,7 @@ static int test_rudder_only_turn(void) {
 
         float a[5] = {1.0f, elev_vel, aileron_vel, rudder_vel, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
 
@@ -563,7 +556,7 @@ static int test_knife_edge_pull(void) {
         float elev_vel = clip_unit(2.0f * (-1.0f) / 0.25f);
         float a[5] = {1.0f, elev_vel, 0.0f, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
 
@@ -593,7 +586,7 @@ static int test_knife_edge_flight(void) {
         float ail_vel = clip_unit(2.0f * 1.0f / 0.25f);
         float a[5] = {1.0f, 0.0f, ail_vel, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
     }
 
     Vec3 up = plane_up(&t.env.player);
@@ -610,7 +603,7 @@ static int test_knife_edge_flight(void) {
         float rud_vel = clip_unit(2.0f * (-1.0f) / 0.25f);
         float a[5] = {1.0f, 0.0f, 0.0f, rud_vel, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
     float alt_end = alts[na - 1];
@@ -761,7 +754,7 @@ static int test_g_level_flight(void) {
         float elev = py_level_flight_pitch_velocity(&t.env.player);
         float a[5] = {0.0f, elev, 0.0f, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (step >= 100) { g_sum += t.env.player.g_force; n++; }
     }
     float avg_g = g_sum / (float)n;
@@ -781,7 +774,7 @@ static int test_g_push_forward(void) {
         for (int step = 0; step < 25; step++) {
             float a[5] = {1.0f, cmd, 0.0f, 0.0f, 0.0f};
             memcpy(t.env.actions, a, sizeof(a));
-            c_step(&t.env);
+            t_step(&t);
             if (t.env.player.g_force < min_g) min_g = t.env.player.g_force;
         }
     }
@@ -801,7 +794,7 @@ static int test_g_pull_back(void) {
         for (int step = 0; step < 25; step++) {
             float a[5] = {1.0f, cmd, 0.0f, 0.0f, 0.0f};
             memcpy(t.env.actions, a, sizeof(a));
-            c_step(&t.env);
+            t_step(&t);
             if (t.env.player.g_force > max_g) max_g = t.env.player.g_force;
         }
     }
@@ -820,7 +813,7 @@ static int test_g_limit_negative(void) {
     for (int step = 0; step < 150; step++) {
         float a[5] = {1.0f, cmd, 0.0f, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.player.g_force < g_min) g_min = t.env.player.g_force;
     }
     /* G_LIMIT_NEG is stored positive, used as -G_LIMIT_NEG. */
@@ -839,7 +832,7 @@ static int test_g_limit_positive(void) {
     for (int step = 0; step < 150; step++) {
         float a[5] = {1.0f, cmd, 0.0f, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.player.g_force > g_max) g_max = t.env.player.g_force;
     }
     int ok = g_max <= G_LIMIT_POS + 0.1f;
@@ -866,7 +859,7 @@ static int test_gentle_pitch_control(void) {
         for (int s = 0; s < 50; s++) {
             float a[5] = {0.4f, cmd, 0.0f, 0.0f, 0.0f};
             memcpy(t.env.actions, a, sizeof(a));
-            c_step(&t.env);
+            t_step(&t);
         }
         Vec3 fwd1 = plane_fwd(&t.env.player);
         float pitch_end = atan2f(fwd1.z, fwd1.x);
@@ -889,19 +882,11 @@ static int test_gentle_pitch_control(void) {
 static int test_high_speed_pitch_oscillation(void) {
     const float speed = 140.0f;
     const float bank_deg = 80.0f;
-    const float bank_rad = bank_deg * DEG;
-    const float alpha_rad = 3.0f * DEG;
-    float qp_w = cosf(-alpha_rad / 2.0f);
-    float qp_y = sinf(-alpha_rad / 2.0f);
-    float qr_w = cosf(-bank_rad / 2.0f);
-    float qr_x = sinf(-bank_rad / 2.0f);
-    float ow = qr_w * qp_w;
-    float ox = qr_x * qp_w;
-    float oy = qr_w * qp_y;
-    float oz = qr_x * qp_y;
+    /* +80 deg right bank, 3 deg nose-up. */
+    Quat q0 = attitude_quat(bank_deg, 3.0f);
 
     TestEnv t; setup_env(&t, 0);
-    force_with_ori(&t.env, 0, 0, 2000, speed, 0, 0, ow, ox, oy, oz, 1.0f);
+    force_with_ori(&t.env, 0, 0, 2000, speed, 0, 0, q0.w, q0.x, q0.y, q0.z, 1.0f);
 
     float pitch_rates[250]; int npr = 0;
 
@@ -912,7 +897,7 @@ static int test_high_speed_pitch_oscillation(void) {
         float ail = ap_to_velocity(ap_hold_bank(p, bank_deg));
         float a[5] = {1.0f, elev_vel, ail, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
 
@@ -954,7 +939,7 @@ static int test_high_speed_roll_oscillation(void) {
         float ail_vel = clip_unit(2.0f * 0.5f / 0.25f);
         float a[5] = {0.0f, 0.0f, ail_vel, 0.0f, 0.0f};
         memcpy(t.env.actions, a, sizeof(a));
-        c_step(&t.env);
+        t_step(&t);
         if (t.env.terminals[0]) break;
     }
 
@@ -994,11 +979,9 @@ static int test_speed_sweep_stability(void) {
     for (int si = 0; si < n_speeds; si++) {
         TestEnv t; setup_env(&t, 0);
         const float bank_deg = 45.0f;
-        const float bank_rad = bank_deg * DEG;
-        float qr_w = cosf(-bank_rad / 2.0f);
-        float qr_x = sinf(-bank_rad / 2.0f);
+        Quat q0 = attitude_quat(bank_deg, 0.0f);
         force_with_ori(&t.env, 0, 0, 2000, (float)speeds[si], 0, 0,
-                       qr_w, qr_x, 0, 0, 1.0f);
+                       q0.w, q0.x, q0.y, q0.z, 1.0f);
 
         float pitch_rates[150]; int npr = 0;
         for (int step = 0; step < 150; step++) {
@@ -1007,7 +990,7 @@ static int test_speed_sweep_stability(void) {
             float ail = ap_to_velocity(ap_hold_bank(&t.env.player, bank_deg));
             float a[5] = {1.0f, elev_vel, ail, 0.0f, 0.0f};
             memcpy(t.env.actions, a, sizeof(a));
-            c_step(&t.env);
+            t_step(&t);
             if (t.env.terminals[0]) break;
         }
         int settle_offset = (npr > 25) ? 25 : 0;
@@ -1027,37 +1010,471 @@ static int test_speed_sweep_stability(void) {
     return 0;
 }
 
-int main(void) {
+/* ============================================================
+ * Attitude-recovery tests
+ *
+ * Each test spawns the plane at a deliberate deviation (off-bank,
+ * off-pitch, descending/climbing, knife-edge) and asks the autopilot to
+ * drive it back to wings-level / vz=0. We measure:
+ *   - recovery time: first tick where bank/pitch error < tolerance
+ *   - max overshoot past target on the opposite side
+ *   - final-50-tick stability (std of bank in degrees)
+ * PASS when recovery_sec is under threshold AND final_std is small.
+ * ============================================================ */
+
+typedef struct {
+    const char* name;
+    float spawn_bank_deg;
+    float spawn_pitch_deg;
+    float V;
+    float pass_sec;       /* recovery threshold (sec) */
+    int   max_steps;      /* sim cap (50 Hz: 250 = 5s) */
+    int   pitch_recovery; /* 0 = bank recovery, 1 = pitch/vz recovery */
+} RecoverySpec;
+
+static int run_recovery_test(const RecoverySpec* s) {
+    const float bank_tol = 5.0f;   /* deg */
+    const float vz_tol = 2.0f;     /* m/s */
+    const float target_bank = 0.0f;
+
+    TestEnv t; setup_env(&t, 0);
+    Quat q0 = attitude_quat(s->spawn_bank_deg, s->spawn_pitch_deg);
+    float pitch_rad = s->spawn_pitch_deg * DEG;
+    float bank_rad  = s->spawn_bank_deg  * DEG;
+    /* Velocity: forward along the spawned attitude.
+     * vx = V*cos(pitch)*cos(bank-component-projection)... we keep it simple:
+     * use V along world-x*cos(pitch) plus world-z*sin(pitch). For bank-only
+     * spawns (pitch=0) this collapses to (V, 0, 0). */
+    float vx = s->V * cosf(pitch_rad) * cosf(bank_rad);
+    float vy = s->V * cosf(pitch_rad) * sinf(bank_rad); (void)vy;
+    float vz = s->V * sinf(pitch_rad);
+    /* Keep it body-aligned with no sideslip — fwd vector in world frame
+     * points along the spawned ori. We use the rotated body-X. */
+    Vec3 fwd_world = quat_rotate(q0, vec3(1.0f, 0.0f, 0.0f));
+    vx = s->V * fwd_world.x;
+    vy = s->V * fwd_world.y;
+    vz = s->V * fwd_world.z;
+
+    force_with_ori(&t.env, 0, 0, 1500, vx, vy, vz,
+                   q0.w, q0.x, q0.y, q0.z, 1.0f);
+
+    int recovery_step = -1;
+    float max_overshoot = 0.0f;
+    float final_banks[60]; int nf = 0;
+    int collect_start = (s->max_steps > 60) ? (s->max_steps - 60) : 0;
+
+    for (int step = 0; step < s->max_steps; step++) {
+        Plane* p = &t.env.player;
+        float bank_now = plane_bank_deg(p);
+        float vz_now = p->vel.z;
+
+        int recovered;
+        if (s->pitch_recovery) {
+            recovered = (fabsf(vz_now) < vz_tol) && (fabsf(bank_now) < bank_tol);
+        } else {
+            recovered = fabsf(bank_now - target_bank) < bank_tol;
+        }
+        if (recovery_step < 0 && recovered) {
+            recovery_step = step;
+        }
+        if (recovery_step >= 0) {
+            /* overshoot = signed crossing past target on the opposite side */
+            float past = (s->spawn_bank_deg < 0.0f) ? bank_now : -bank_now;
+            if (past > max_overshoot) max_overshoot = past;
+        }
+        if (step >= collect_start) {
+            final_banks[nf++] = bank_now;
+        }
+
+        float elev_pos, ail_pos;
+        if (s->pitch_recovery) {
+            ail_pos = ap_hold_bank(p, target_bank);
+            elev_pos = ap_hold_vz(p, 0.0f);
+        } else {
+            ap_hold_bank_and_level(p, target_bank, &elev_pos, &ail_pos);
+        }
+        float elev = ap_to_velocity(elev_pos);
+        float ail = ap_to_velocity(ail_pos);
+        float a[5] = {1.0f, elev, ail, 0.0f, 0.0f};
+        memcpy(t.env.actions, a, sizeof(a));
+
+        recovery_log_row(s->name, step, p, a);
+
+        t_step(&t);
+        if (t.env.terminals[0]) break;
+    }
+
+    float recovery_sec = (recovery_step >= 0) ? recovery_step * 0.02f : -1.0f;
+    float final_std = (nf > 1) ? arr_std(final_banks, nf) : 0.0f;
+    int recovered_in_time = (recovery_step >= 0) && (recovery_sec <= s->pass_sec);
+    int stable = final_std < 5.0f;
+    int ok = recovered_in_time && stable;
+
+    printf("%-22s spawn(b=%+.0f,p=%+.0f) -> recovered=%s, t=%.2fs (lim %.1fs), overshoot=%.1f, final_std=%.2f [%s]\n",
+           s->name,
+           s->spawn_bank_deg, s->spawn_pitch_deg,
+           (recovery_step >= 0) ? "yes" : "NO",
+           (recovery_step >= 0) ? recovery_sec : -1.0f,
+           s->pass_sec, max_overshoot, final_std,
+           ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
+static int test_recovery_bank_left(void) {
+    RecoverySpec s = {"recovery_bank_left:",   -45.0f, 0.0f,   100.0f, 2.0f, 200, 0};
+    return run_recovery_test(&s);
+}
+static int test_recovery_bank_right(void) {
+    RecoverySpec s = {"recovery_bank_right:",  +45.0f, 0.0f,   100.0f, 2.0f, 200, 0};
+    return run_recovery_test(&s);
+}
+static int test_recovery_pitch_dive(void) {
+    RecoverySpec s = {"recovery_pitch_dive:",    0.0f, -20.0f, 100.0f, 3.5f, 300, 1};
+    return run_recovery_test(&s);
+}
+static int test_recovery_pitch_climb(void) {
+    RecoverySpec s = {"recovery_pitch_climb:",   0.0f, +20.0f, 100.0f, 3.5f, 300, 1};
+    return run_recovery_test(&s);
+}
+static int test_recovery_knife_edge_left(void) {
+    RecoverySpec s = {"recovery_knife_edge_l:", -90.0f, 0.0f,  120.0f, 4.0f, 350, 0};
+    return run_recovery_test(&s);
+}
+static int test_recovery_knife_edge_right(void) {
+    RecoverySpec s = {"recovery_knife_edge_r:", +90.0f, 0.0f,  120.0f, 4.0f, 350, 0};
+    return run_recovery_test(&s);
+}
+static int test_recovery_inverted(void) {
+    /* Spawn fully inverted (180 deg roll). AP must roll either way to level. */
+    RecoverySpec s = {"recovery_inverted:    ", 180.0f, 0.0f,  130.0f, 4.0f, 400, 0};
+    return run_recovery_test(&s);
+}
+static int test_recovery_steep_dive(void) {
+    /* -45 deg pitch dive at 130 m/s. AP must pull out. */
+    RecoverySpec s = {"recovery_steep_dive:  ",   0.0f, -45.0f, 130.0f, 4.0f, 400, 1};
+    return run_recovery_test(&s);
+}
+static int test_recovery_steep_climb(void) {
+    /* +45 deg pitch climb at 90 m/s. AP must lower nose to level.
+     * Slow because climb-rate is steep and elevator authority is limited
+     * at low speed; allow 8s. */
+    RecoverySpec s = {"recovery_steep_climb: ",   0.0f, +45.0f,  90.0f, 8.0f, 600, 1};
+    return run_recovery_test(&s);
+}
+
+/* ============================================================
+ * Speed / altitude / heading correction tests
+ * ============================================================ */
+
+/* Forward speed correction: spawn level at start_speed, throttle to drive
+ * speed -> target_speed. PASS when speed within tol of target within max_sec. */
+static int run_speed_recovery(const char* name,
+                              float start_speed, float target_speed,
+                              float pass_sec, int max_steps) {
+    const float tol = 5.0f;  /* m/s */
+    TestEnv t; setup_env(&t, 0);
+    t.env.max_steps = max_steps + 100;  /* avoid env auto-terminate */
+    /* Level spawn, identity orientation, throttle roughly matched to start. */
+    float init_throttle = (start_speed > 100.0f) ? 1.0f : 0.0f;
+    force_with_ori(&t.env, 0, 0, 1500, start_speed, 0, 0,
+                   1.0f, 0.0f, 0.0f, 0.0f, init_throttle);
+
+    int recovery_step = -1;
+    for (int step = 0; step < max_steps; step++) {
+        Plane* p = &t.env.player;
+        float speed = sqrtf(p->vel.x*p->vel.x + p->vel.y*p->vel.y + p->vel.z*p->vel.z);
+        if (recovery_step < 0 && fabsf(speed - target_speed) < tol) {
+            recovery_step = step;
+        }
+        float thr = ap_hold_speed(p, target_speed);
+        float elev = ap_to_velocity(ap_hold_vz(p, 0.0f));
+        float ail = ap_to_velocity(ap_hold_bank(p, 0.0f));
+        float a[5] = {thr, elev, ail, 0.0f, 0.0f};
+        memcpy(t.env.actions, a, sizeof(a));
+        recovery_log_row(name, step, p, a);
+        t_step(&t);
+        if (t.env.terminals[0]) break;
+    }
+    float final_speed = sqrtf(t.env.player.vel.x * t.env.player.vel.x +
+                              t.env.player.vel.y * t.env.player.vel.y +
+                              t.env.player.vel.z * t.env.player.vel.z);
+    float recovery_sec = (recovery_step >= 0) ? recovery_step * 0.02f : -1.0f;
+    int ok = (recovery_step >= 0) && (recovery_sec <= pass_sec);
+    printf("%-22s spawn=%.0f m/s -> target=%.0f, recovered=%s, t=%.2fs (lim %.1fs), final=%.1f [%s]\n",
+           name, start_speed, target_speed,
+           (recovery_step >= 0) ? "yes" : "NO",
+           (recovery_step >= 0) ? recovery_sec : -1.0f,
+           pass_sec, final_speed, ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
+static int test_recovery_speed_low(void) {
+    /* 60 -> 120 m/s with full throttle; physics needs ~40s at low-speed end. */
+    return run_speed_recovery("recovery_speed_low:   ", 60.0f, 120.0f, 45.0f, 2300);
+}
+static int test_recovery_speed_high(void) {
+    /* 150 -> 120 m/s with idle throttle; drag-dominated decel is slow. */
+    return run_speed_recovery("recovery_speed_high:  ", 150.0f, 120.0f, 30.0f, 1500);
+}
+
+/* Altitude correction: spawn level at start_alt, drive to target_alt
+ * via altitude -> vz cascade. PASS when altitude within tol within max_sec. */
+static int run_altitude_recovery(const char* name,
+                                  float start_alt, float target_alt,
+                                  float pass_sec, int max_steps) {
+    const float tol = 50.0f;  /* m */
+    TestEnv t; setup_env(&t, 0);
+    t.env.max_steps = max_steps + 100;
+    force_with_ori(&t.env, 0, 0, start_alt, 100.0f, 0, 0,
+                   1.0f, 0.0f, 0.0f, 0.0f, 0.5f);
+
+    int recovery_step = -1;
+    for (int step = 0; step < max_steps; step++) {
+        Plane* p = &t.env.player;
+        if (recovery_step < 0 && fabsf(p->pos.z - target_alt) < tol) {
+            recovery_step = step;
+        }
+        float target_vz = ap_hold_altitude_vz_target(p, target_alt);
+        float elev = ap_to_velocity(ap_hold_vz(p, target_vz));
+        float ail = ap_to_velocity(ap_hold_bank(p, 0.0f));
+        float thr = ap_hold_speed(p, 100.0f);
+        float a[5] = {thr, elev, ail, 0.0f, 0.0f};
+        memcpy(t.env.actions, a, sizeof(a));
+        recovery_log_row(name, step, p, a);
+        t_step(&t);
+        if (t.env.terminals[0]) break;
+    }
+    float final_alt = t.env.player.pos.z;
+    float recovery_sec = (recovery_step >= 0) ? recovery_step * 0.02f : -1.0f;
+    int ok = (recovery_step >= 0) && (recovery_sec <= pass_sec);
+    printf("%-22s spawn=%.0f m -> target=%.0f, recovered=%s, t=%.2fs (lim %.1fs), final=%.0f [%s]\n",
+           name, start_alt, target_alt,
+           (recovery_step >= 0) ? "yes" : "NO",
+           (recovery_step >= 0) ? recovery_sec : -1.0f,
+           pass_sec, final_alt, ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
+static int test_recovery_altitude_low(void) {
+    /* 1000 m climb at 15 m/s climb rate cap = 67s minimum, allow 90s. */
+    return run_altitude_recovery("recovery_altitude_low:", 500.0f, 1500.0f, 90.0f, 5000);
+}
+static int test_recovery_altitude_high(void) {
+    return run_altitude_recovery("recovery_altitude_hi: ", 2500.0f, 1500.0f, 90.0f, 5000);
+}
+
+/* Heading correction: spawn flying along start_hdg, drive heading -> target_hdg.
+ * Uses heading->bank cascade with ap_hold_bank_and_level. */
+static int run_heading_recovery(const char* name,
+                                 float start_hdg_deg, float target_hdg_deg,
+                                 float pass_sec, int max_steps) {
+    const float tol = 5.0f;  /* deg */
+    TestEnv t; setup_env(&t, 0);
+    t.env.max_steps = max_steps + 100;
+    /* Plane starts level, flying along start_hdg. */
+    float hdg_rad = start_hdg_deg * DEG;
+    float V = 100.0f;
+    float vx = V * cosf(hdg_rad);
+    float vy = V * sinf(hdg_rad);
+    /* Body fwd should match velocity direction — yaw the plane to start_hdg. */
+    Quat q0 = quat_from_axis_angle(vec3(0.0f, 0.0f, 1.0f), hdg_rad);
+    force_with_ori(&t.env, 0, 0, 1500, vx, vy, 0,
+                   q0.w, q0.x, q0.y, q0.z, 0.5f);
+
+    int recovery_step = -1;
+    for (int step = 0; step < max_steps; step++) {
+        Plane* p = &t.env.player;
+        float heading = atan2f(p->vel.y, p->vel.x) * RAD;
+        float err = target_hdg_deg - heading;
+        while (err >  180.0f) err -= 360.0f;
+        while (err < -180.0f) err += 360.0f;
+        if (recovery_step < 0 && fabsf(err) < tol) {
+            recovery_step = step;
+        }
+        float target_bank = ap_hold_heading_bank_target(p, target_hdg_deg);
+        float elev_pos, ail_pos;
+        ap_hold_bank_and_level(p, target_bank, &elev_pos, &ail_pos);
+        float elev = ap_to_velocity(elev_pos);
+        float ail = ap_to_velocity(ail_pos);
+        float thr = ap_hold_speed(p, 100.0f);
+        float a[5] = {thr, elev, ail, 0.0f, 0.0f};
+        memcpy(t.env.actions, a, sizeof(a));
+        recovery_log_row(name, step, p, a);
+        t_step(&t);
+        if (t.env.terminals[0]) break;
+    }
+    float final_hdg = atan2f(t.env.player.vel.y, t.env.player.vel.x) * RAD;
+    float recovery_sec = (recovery_step >= 0) ? recovery_step * 0.02f : -1.0f;
+    int ok = (recovery_step >= 0) && (recovery_sec <= pass_sec);
+    printf("%-22s spawn=%+.0f deg -> target=%+.0f, recovered=%s, t=%.2fs (lim %.1fs), final=%+.0f [%s]\n",
+           name, start_hdg_deg, target_hdg_deg,
+           (recovery_step >= 0) ? "yes" : "NO",
+           (recovery_step >= 0) ? recovery_sec : -1.0f,
+           pass_sec, final_hdg, ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
+static int test_recovery_heading_left(void) {
+    return run_heading_recovery("recovery_heading_left:", -90.0f, 0.0f, 30.0f, 2000);
+}
+static int test_recovery_heading_right(void) {
+    return run_heading_recovery("recovery_heading_right",  90.0f, 0.0f, 30.0f, 2000);
+}
+
+/* Body roll-rate hold: command a target omega.x and check we reach it
+ * within tolerance and stay there. */
+static int run_rate_recovery(const char* name, int axis,
+                              float target_rate_deg_s,
+                              float pass_sec, int max_steps) {
+    /* axis: 0 = roll (omega.x via aileron), 1 = pitch (omega.y via elevator) */
+    const float tol = 10.0f;  /* deg/s */
+    TestEnv t; setup_env(&t, 0);
+    force_with_ori(&t.env, 0, 0, 2000, 120.0f, 0, 0,
+                   1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+
+    int recovery_step = -1;
+    for (int step = 0; step < max_steps; step++) {
+        Plane* p = &t.env.player;
+        float current = (axis == 0 ? p->omega.x : p->omega.y) * RAD;
+        if (recovery_step < 0 && fabsf(current - target_rate_deg_s) < tol) {
+            recovery_step = step;
+        }
+        float ail = (axis == 0) ? ap_hold_roll_rate(p, target_rate_deg_s) : 0.0f;
+        float elev = (axis == 1) ? ap_hold_pitch_rate(p, target_rate_deg_s) : 0.0f;
+        float a[5] = {1.0f, elev, ail, 0.0f, 0.0f};
+        memcpy(t.env.actions, a, sizeof(a));
+        recovery_log_row(name, step, p, a);
+        t_step(&t);
+        if (t.env.terminals[0]) break;
+    }
+    float final_rate = (axis == 0 ? t.env.player.omega.x : t.env.player.omega.y) * RAD;
+    float recovery_sec = (recovery_step >= 0) ? recovery_step * 0.02f : -1.0f;
+    int ok = (recovery_step >= 0) && (recovery_sec <= pass_sec);
+    printf("%-22s axis=%s target=%+.0f deg/s, reached=%s, t=%.2fs (lim %.1fs), final=%+.1f [%s]\n",
+           name, (axis == 0 ? "roll" : "pitch"), target_rate_deg_s,
+           (recovery_step >= 0) ? "yes" : "NO",
+           (recovery_step >= 0) ? recovery_sec : -1.0f,
+           pass_sec, final_rate, ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
+static int test_recovery_roll_rate(void) {
+    return run_rate_recovery("recovery_roll_rate:   ", 0, +60.0f, 1.5f, 200);
+}
+static int test_recovery_pitch_rate(void) {
+    return run_rate_recovery("recovery_pitch_rate:  ", 1, +15.0f, 1.5f, 200);
+}
+
+typedef struct { const char* name; int (*fn)(void); } TestEntry;
+
+/* Order matches test_flight_physics.py TESTS dict (1:1). */
+static const TestEntry ALL_TESTS[] = {
+    {"max_speed",                    test_max_speed},
+    {"acceleration",                 test_acceleration},
+    {"deceleration",                 test_deceleration},
+    {"cruise_speed",                 test_cruise_speed},
+    {"stall_speed",                  test_stall_speed},
+    {"climb_rate",                   test_climb_rate},
+    {"glide_ratio",                  test_glide_ratio},
+    {"sustained_turn",               test_sustained_turn},
+    {"turn_60",                      test_turn_60},
+    {"pitch_direction",              test_pitch_direction},
+    {"roll_direction",               test_roll_direction},
+    {"rudder_only_turn",             test_rudder_only_turn},
+    {"knife_edge_pull",              test_knife_edge_pull},
+    {"knife_edge_flight",            test_knife_edge_flight},
+    {"mode_weights",                 test_mode_weights},
+    {"autopilot_enum_sync",          test_autopilot_enum_sync},
+    {"autopilot_random_not_hardturn", test_autopilot_random_not_hardturn},
+    {"autopilot_bounds_check",       test_autopilot_bounds_check},
+    {"force_state_pid_reset",        test_force_state_pid_reset},
+    {"g_level_flight",               test_g_level_flight},
+    {"g_push_forward",               test_g_push_forward},
+    {"g_pull_back",                  test_g_pull_back},
+    {"g_limit_negative",             test_g_limit_negative},
+    {"g_limit_positive",             test_g_limit_positive},
+    {"gentle_pitch_control",         test_gentle_pitch_control},
+    {"high_speed_pitch_oscillation", test_high_speed_pitch_oscillation},
+    {"high_speed_roll_oscillation",  test_high_speed_roll_oscillation},
+    {"speed_sweep_stability",        test_speed_sweep_stability},
+    {"recovery_bank_left",           test_recovery_bank_left},
+    {"recovery_bank_right",          test_recovery_bank_right},
+    {"recovery_pitch_dive",          test_recovery_pitch_dive},
+    {"recovery_pitch_climb",         test_recovery_pitch_climb},
+    {"recovery_knife_edge_left",     test_recovery_knife_edge_left},
+    {"recovery_knife_edge_right",    test_recovery_knife_edge_right},
+    {"recovery_inverted",            test_recovery_inverted},
+    {"recovery_steep_dive",          test_recovery_steep_dive},
+    {"recovery_steep_climb",         test_recovery_steep_climb},
+    {"recovery_speed_low",           test_recovery_speed_low},
+    {"recovery_speed_high",          test_recovery_speed_high},
+    {"recovery_altitude_low",        test_recovery_altitude_low},
+    {"recovery_altitude_high",       test_recovery_altitude_high},
+    {"recovery_heading_left",        test_recovery_heading_left},
+    {"recovery_heading_right",       test_recovery_heading_right},
+    {"recovery_roll_rate",           test_recovery_roll_rate},
+    {"recovery_pitch_rate",          test_recovery_pitch_rate},
+};
+static const int N_TESTS = (int)(sizeof(ALL_TESTS) / sizeof(ALL_TESTS[0]));
+
+static void print_usage(const char* prog) {
+    printf("Usage: %s [--render] [--fps N] [--test NAME] [--list]\n\n", prog);
+    printf("  --render        Open a raylib window and render every step.\n");
+    printf("  --fps N         Frame rate when rendering (default 50; try 5-10 for slow-mo).\n");
+    printf("  --test NAME     Run only the named test (otherwise runs all).\n");
+    printf("  --list          List available test names and exit.\n");
+    printf("  --log FILE      Write per-tick CSV telemetry from recovery tests to FILE.\n");
+}
+
+static void print_list(void) {
+    for (int i = 0; i < N_TESTS; i++) printf("%s\n", ALL_TESTS[i].name);
+}
+
+int main(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--render")) {
+            g_visual_render = 1;
+        } else if (!strcmp(argv[i], "--fps") && i + 1 < argc) {
+            g_visual_fps = atoi(argv[++i]);
+            if (g_visual_fps < 1) g_visual_fps = 1;
+        } else if (!strcmp(argv[i], "--test") && i + 1 < argc) {
+            g_visual_only_test = argv[++i];
+        } else if (!strcmp(argv[i], "--log") && i + 1 < argc) {
+            const char* path = argv[++i];
+            g_log_csv = fopen(path, "w");
+            if (!g_log_csv) {
+                fprintf(stderr, "could not open log file %s\n", path);
+                return 1;
+            }
+        } else if (!strcmp(argv[i], "--list") || !strcmp(argv[i], "-l")) {
+            print_list();
+            return 0;
+        } else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+            print_usage(argv[0]);
+            return 0;
+        } else {
+            fprintf(stderr, "unknown arg: %s\n\n", argv[i]);
+            print_usage(argv[0]);
+            return 1;
+        }
+    }
+
     int fails = 0;
-    /* Order matches test_flight_physics.py TESTS dict (1:1). */
-    fails += test_max_speed();
-    fails += test_acceleration();
-    fails += test_deceleration();
-    fails += test_cruise_speed();
-    fails += test_stall_speed();
-    fails += test_climb_rate();
-    fails += test_glide_ratio();
-    fails += test_sustained_turn();
-    fails += test_turn_60();
-    fails += test_pitch_direction();
-    fails += test_roll_direction();
-    fails += test_rudder_only_turn();
-    fails += test_knife_edge_pull();
-    fails += test_knife_edge_flight();
-    fails += test_mode_weights();
-    fails += test_autopilot_enum_sync();
-    fails += test_autopilot_random_not_hardturn();
-    fails += test_autopilot_bounds_check();
-    fails += test_force_state_pid_reset();
-    fails += test_g_level_flight();
-    fails += test_g_push_forward();
-    fails += test_g_pull_back();
-    fails += test_g_limit_negative();
-    fails += test_g_limit_positive();
-    fails += test_gentle_pitch_control();
-    fails += test_high_speed_pitch_oscillation();
-    fails += test_high_speed_roll_oscillation();
-    fails += test_speed_sweep_stability();
+    int ran = 0;
+    for (int i = 0; i < N_TESTS; i++) {
+        if (g_visual_only_test && strcmp(ALL_TESTS[i].name, g_visual_only_test) != 0) continue;
+        fails += ALL_TESTS[i].fn();
+        ran++;
+    }
+
+    if (g_visual_only_test && ran == 0) {
+        fprintf(stderr, "Unknown test: %s\n", g_visual_only_test);
+        fprintf(stderr, "Use --list to see available test names.\n");
+        return 1;
+    }
+
     printf("\n%d hard failures\n", fails);
+    if (g_visual_render) CloseWindow();
+    if (g_log_csv) fclose(g_log_csv);
     return fails;
 }

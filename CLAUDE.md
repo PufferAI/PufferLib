@@ -84,6 +84,23 @@ Do not start phase N+1 until phase N is green.
   - Likely related to pitch stability vs elevator authority at high AoA during zoom climb
   - **TODO**: Write a flight test to reproduce and diagnose the instability
 
+- **Pitch oscillation during steep-dive recovery autopilot (2026-05-06)**:
+  - **Test**: `recovery_steep_dive` in `ocean/dogfight/tests/test_flight_physics.c` (-45° pitch spawn at 130 m/s, AP target vz=0 + wings level)
+  - **Symptom**: human watching the rendered recovery sees pitch "all over the place" — plane pulls hard nose-up, overshoots level, oscillates ~3 cycles around horizon before settling. PASS by recovery-time threshold, but visually unrealistic.
+  - **Reproduce**:
+    ```
+    ./ocean/dogfight/tests/test_flight_physics --render --fps 5 --test recovery_steep_dive
+    ./ocean/dogfight/tests/test_flight_physics --test recovery_steep_dive --log /tmp/dive.csv
+    awk -F',' 'NR==1 || ($2 % 5 == 0 && $2 <= 200)' /tmp/dive.csv  # pitch/vz/elev trace
+    ```
+  - **Diagnosis (needs independent verification)**: `ap_hold_vz` in `tests/test_common.h` is a P-on-vz controller with weak omega damping. With vz_err = +92 m/s at spawn, the proportional term dominates (-KP × 0.6 × 92 = -11) and elevator saturates at -1.0 (full nose-up) for ~1.6s straight. The damping term (-KD × omega.y) is too small to brake the pitch rate before the plane overshoots target pitch. By the time vz crosses zero, the plane is already pitched well past horizon, so it overshoots and oscillates. Worse at higher airspeed because control moments scale with V² but damping only scales with V (per `flightlib.h` comment).
+  - **Suggested fixes** (proposed but NOT applied — flagged for future agent):
+    1. Cascaded autopilot: outer loop maps vz_err to a target_pitch (clipped ±20°), inner loop is `ap_hold_pitch` whose KD term brakes around the commanded pitch. Cleanest, standard real-world approach.
+    2. Gain scheduling: scale `AP_PITCH_KP` by `100/V` so it gets gentler at high speed.
+    3. Bump `AP_PITCH_KD` from 0.1 to ~0.3 so damping dominates earlier.
+    4. Soft saturation: replace clip with `tanh(err × gain)` so controller eases off before fully saturating.
+  - **Action for future agent**: independently verify the diagnosis (run the log + awk above, check if elev=-1 saturates for ~1.6s straight while pitch overshoots), pick a fix, apply it, and re-run all 17 recovery tests + visual confirmation of `recovery_steep_dive` to make sure the oscillation goes away without breaking the other tests.
+
 
 ## Build
 
