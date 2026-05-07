@@ -3,9 +3,13 @@
 int main() {
     FourRooms env = {};
     env.size = 19;
+    env.max_steps = 0;
     env.num_agents = 1;
     env.rng = 0;
-    env.observations = (unsigned char*)calloc(7*7*3, sizeof(unsigned char)); // 7x7x3 for MinGrid encoding
+    env.observations = (unsigned char*)calloc(
+        FOUR_ROOMS_VIEW_SIZE * FOUR_ROOMS_VIEW_SIZE * FOUR_ROOMS_OBS_CHANNELS,
+        sizeof(unsigned char)
+    );
     env.actions = (float*)calloc(1, sizeof(float));
     env.rewards = (float*)calloc(1, sizeof(float));
     env.terminals = (float*)calloc(1, sizeof(float));
