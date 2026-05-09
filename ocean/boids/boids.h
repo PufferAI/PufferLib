@@ -138,6 +138,13 @@ static void compute_observations(Boids *env) {
     }
 }
 
+void apply_action(Boid* boid, float vx, float vy) {
+    boid->velocity.x = flclip(boid->velocity.x + vx, -VELOCITY_CAP, VELOCITY_CAP);
+    boid->velocity.y = flclip(boid->velocity.y + vy, -VELOCITY_CAP, VELOCITY_CAP);
+    boid->x = flclip(boid->x + boid->velocity.x, 0, WIDTH  - BOID_WIDTH);
+    boid->y = flclip(boid->y + boid->velocity.y, 0, HEIGHT - BOID_HEIGHT);
+}
+
 void c_reset(Boids *env) {
     env->log = (Log){0};
     env->tick = 0;
@@ -171,17 +178,12 @@ void c_step(Boids *env) {
     env->log.t_separation_reward = 0;
     env->log.t_alignment_reward = 0;
     for (unsigned current_indx = 0; current_indx < env->num_agents; current_indx++) {
-        // apply action
         current_boid = &env->boids[current_indx];
         if (manual_control) {
-            current_boid->velocity.x = flclip(current_boid->velocity.x + (mouse_x - current_boid->x), -VELOCITY_CAP, VELOCITY_CAP);
-            current_boid->velocity.y = flclip(current_boid->velocity.y + (mouse_y - current_boid->y), -VELOCITY_CAP, VELOCITY_CAP);
+            apply_action(current_boid, (mouse_x - current_boid->x), (mouse_y - current_boid->y));
         } else {
-            current_boid->velocity.x = flclip(current_boid->velocity.x + (env->actions[current_indx*2] - 1.0f), -VELOCITY_CAP, VELOCITY_CAP);
-            current_boid->velocity.y = flclip(current_boid->velocity.y + (env->actions[current_indx*2 + 1] - 1.0f), -VELOCITY_CAP, VELOCITY_CAP);
+            apply_action(current_boid, (env->actions[current_indx*2] - 1.0f), (env->actions[current_indx*2 + 1] - 1.0f));
         }
-        current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH  - BOID_WIDTH);
-        current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT - BOID_HEIGHT);
 
         // reward calculation
         current_boid_reward = 0.0f;
