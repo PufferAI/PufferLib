@@ -40,7 +40,12 @@ typedef struct {
     Velocity velocity;
 } Boid;
 
-typedef struct Client Client;
+typedef struct {
+    float width;
+    float height;
+    Texture2D boid_texture;
+} Client ;
+
 typedef struct {
     // Flat array of shape (num_agents * 8) values:
     // - Each boid has 8 values corresponding to (x, y, vx, vy, dx, dy, dvx, dvy)
@@ -99,11 +104,8 @@ void init(Boids *env) {
     env->log = (Log){0};
     env->tick = 0;
 
-    for (unsigned current_indx = 0; current_indx < env->num_agents; current_indx++) {
-        env->boids[current_indx].x = rndf(LEFT_MARGIN, WIDTH  - RIGHT_MARGIN);
-        env->boids[current_indx].y = rndf(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
-        env->boids[current_indx].velocity.x = 0;
-        env->boids[current_indx].velocity.y = 0;
+    for (unsigned current_idx = 0; current_idx < env->num_agents; current_idx++) {
+        respawn_boid(env, current_idx);
     }
 }
 
@@ -288,13 +290,6 @@ void c_step(Boids *env) {
     if (env->tick == env->report_interval) env->tick = 0;
     compute_observations(env);
 }
-
-typedef struct Client Client;
-struct Client {
-    float width;
-    float height;
-    Texture2D boid_texture;
-};
 
 void c_close_client(Client* client) {
     UnloadTexture(client->boid_texture);
