@@ -335,38 +335,33 @@ void c_render(Boids* env) {
             return;
         }
     }
-
-    if (!WindowShouldClose() && IsWindowReady()) {
-        if (IsKeyDown(KEY_ESCAPE)) {
-            exit(0);
-        }
-
-        BeginDrawing();
-        ClearBackground((Color){6, 24, 24, 255});
-
-        for (unsigned boid_indx = 0; boid_indx < env->num_agents; boid_indx++) {
-            DrawTexturePro(
-                env->client->boid_texture,
-                (Rectangle){
-                    (env->boids[boid_indx].velocity.x > 0) ? 0.0f : 128.0f,
-                    0.0f,
-                    128.0f,
-                    128.0f,
-                },
-                (Rectangle){
-                    env->boids[boid_indx].x,
-                    env->boids[boid_indx].y,
-                    BOID_WIDTH,
-                    BOID_HEIGHT
-                },
-                (Vector2){0.0f, 0.0f},
-                0,
-                WHITE
-            );
-        }
-
-        EndDrawing();
-    } else {
+    if (WindowShouldClose() || !IsWindowReady()) {
         TraceLog(LOG_WARNING, "Window is not ready or should close");
+        return;
     }
+    if (IsKeyDown(KEY_ESCAPE)) exit(0);
+
+    BeginDrawing();
+    ClearBackground((Color){6, 24, 24, 255});
+    for (unsigned boid_indx = 0; boid_indx < env->num_agents; boid_indx++) {
+        DrawTexturePro(
+            env->client->boid_texture,
+            (Rectangle){
+                (env->boids[boid_indx].velocity.x > 0) ? 0.0f : 128.0f,
+                0.0f,
+                128.0f,
+                128.0f,
+            },
+            (Rectangle){
+                env->boids[boid_indx].x,
+                env->boids[boid_indx].y,
+                BOID_WIDTH,
+                BOID_HEIGHT
+            },
+            (Vector2){0.0f, 0.0f},
+            0,
+            WHITE
+        );
+    }
+    EndDrawing();
 }
