@@ -1,8 +1,6 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
-#include <string.h>
-#include <limits.h>
 #include <stdbool.h>
 
 #include "raylib.h"
@@ -19,7 +17,6 @@
 #define WIDTH 1080
 #define HEIGHT 720
 #define BOID_TEXTURE_PATH "./resources/shared/puffers_128.png"
-#define MAX_DIST 2000
 #define EPS 1e-8f // avoids div by zero in angle calc
 
 typedef struct {
@@ -270,7 +267,6 @@ void c_step(Boids *env) {
             normal_vy = (normal_vy / n_mag) * VELOCITY_CAP;
         }
         angle_diff = velocity_angle_diff(normal_vx, normal_vy, current_boid->velocity.x, current_boid->velocity.y);
-        // printf("%f, %f || %f, %f = %f\n", current_boid->velocity.x, current_boid->velocity.y, normal_vx, normal_vy, angle_diff);
 
         // Normalization
         // env->rewards[current_indx] = current_boid_reward / 5.0f;
@@ -290,9 +286,6 @@ void c_step(Boids *env) {
     }
 
     if (env->tick == env->report_interval) env->tick = 0;
-    // printf("===================================================================================\n");
-    // printf("===================================================================================\n");
-    // printf("===================================================================================\n");
     compute_observations(env);
 }
 
