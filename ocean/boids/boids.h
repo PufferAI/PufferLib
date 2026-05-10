@@ -20,7 +20,6 @@
 #define EPS 1e-8f // avoids div by zero in angle calc
 
 typedef struct {
-    float perf;
     float score;
     float n;
     float t_margin_turn_reward;
@@ -72,17 +71,6 @@ static inline float flmax(float a, float b) { return a > b ? a : b; }
 static inline float flmin(float a, float b) { return a > b ? b : a; }
 static inline float flclip(float x,float lo,float hi) { return flmin(hi,flmax(lo,x)); }
 static inline float rndf(float lo,float hi) { return lo + (float)rand()/(float)RAND_MAX*(hi-lo); }
-static inline float velocity_angle_diff(float ref_x, float ref_y, float actual_x, float actual_y) {
-    float ref_mag = sqrtf(ref_x*ref_x + ref_y*ref_y);
-    float actual_mag = sqrtf(actual_x*actual_x + actual_y*actual_y);
-    float denom, cos_theta;
-
-    if (ref_mag <= EPS && actual_mag <= EPS) return 0.0f;
-
-    denom = ref_mag * actual_mag + EPS;
-    cos_theta = flclip((ref_x*actual_x + ref_y*actual_y) / denom, -1.0f, 1.0f);
-    return acosf(cos_theta);
-}
 
 static void spawn_boid(Boids *env, unsigned int i) {
     env->boids[i].x = rndf(LEFT_MARGIN, WIDTH  - RIGHT_MARGIN);
@@ -161,7 +149,6 @@ void c_step(Boids *env) {
     float diff_x, diff_y, dist, current_boid_reward;
     float margin_turn_reward, cohesion_reward, separation_reward, alignment_reward;
     float protected_x_sum, protected_y_sum;
-    float normal_vx, normal_vy, angle_diff;
     float rule_dx, rule_dy, rule_mag;
     unsigned visual_count, protected_count;
     bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
@@ -170,7 +157,6 @@ void c_step(Boids *env) {
 
     env->tick++;
     env->rewards[0] = 0.0;
-    env->log.perf = 0;
     env->log.score = 0;
     env->log.n = 0;
     env->log.t_margin_turn_reward = 0;
@@ -199,8 +185,6 @@ void c_step(Boids *env) {
         vis_y_sum = 0.0f;
         protected_x_sum = 0.0f;
         protected_y_sum = 0.0f;
-        normal_vx = 0.0f;
-        normal_vy = 0.0f;
         for (unsigned observed_indx = 0; observed_indx < env->num_agents; observed_indx++) {
             if (current_indx == observed_indx) continue;
             observed_boid = env->boids[observed_indx];
@@ -220,12 +204,7 @@ void c_step(Boids *env) {
             }
         }
         if (protected_count > 0) {
-            // protected_range_diff = (float)(env->num_agents - protected_count) - protected_count;
-            // current_boid_reward += protected_range_diff * env->seperation_factor;
-
             rule_mag = sqrtf(protected_x_sum*protected_x_sum + protected_y_sum*protected_y_sum) + EPS;
-            normal_vx += (protected_x_sum / rule_mag) * env->separation_factor;
-            normal_vy += (protected_y_sum / rule_mag) * env->separation_factor;
             separation_reward -= rule_mag * env->separation_factor;
         }
         if (visual_count) {
@@ -240,35 +219,20 @@ void c_step(Boids *env) {
             rule_dx = vis_vx_avg - current_boid->velocity.x;
             rule_dy = vis_vy_avg - current_boid->velocity.y;
             rule_mag = sqrtf(rule_dx*rule_dx + rule_dy*rule_dy) + EPS;
-            normal_vx += (rule_dx / rule_mag) * env->alignment_factor;
-            normal_vy += (rule_dy / rule_mag) * env->alignment_factor;
             alignment_reward -= fabsf(vis_vx_avg - current_boid->velocity.x) * env->alignment_factor;
             alignment_reward -= fabsf(vis_vy_avg - current_boid->velocity.y) * env->alignment_factor;
 
             rule_dx = vis_x_avg - current_boid->x;
             rule_dy = vis_y_avg - current_boid->y;
             rule_mag = sqrtf(rule_dx*rule_dx + rule_dy*rule_dy) + EPS;
-            normal_vx += (rule_dx / rule_mag) * env->cohesion_factor;
-            normal_vy += (rule_dy / rule_mag) * env->cohesion_factor;
         }
 
-        margin_turn_reward -= env->margin_turn_factor;
-        if (current_boid->y < TOP_MARGIN || current_boid->x < LEFT_MARGIN) {
-            normal_vy += env->margin_turn_factor;
-        } else if (
-            current_boid->y + BOID_HEIGHT > HEIGHT - BOTTOM_MARGIN
-            || current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN
-        ) {
-            normal_vy -= env->margin_turn_factor;
-        } else { margin_turn_reward += env->margin_turn_factor; }
+        if (current_boid->y < TOP_MARGIN || current_boid->x < LEFT_MARGIN
+            || current_boid->y + BOID_HEIGHT > HEIGHT - BOTTOM_MARGIN
+            || current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN) {
+            margin_turn_reward -= env->margin_turn_factor;
+        }
         current_boid_reward = margin_turn_reward + cohesion_reward + separation_reward + alignment_reward;
-
-        float n_mag = sqrtf(normal_vx*normal_vx + normal_vy*normal_vy);
-        if (n_mag > VELOCITY_CAP) {
-            normal_vx = (normal_vx / n_mag) * VELOCITY_CAP;
-            normal_vy = (normal_vy / n_mag) * VELOCITY_CAP;
-        }
-        angle_diff = velocity_angle_diff(normal_vx, normal_vy, current_boid->velocity.x, current_boid->velocity.y);
 
         // Normalization
         // env->rewards[current_indx] = current_boid_reward / 5.0f;
@@ -277,7 +241,6 @@ void c_step(Boids *env) {
 
         //log updates
         if (env->tick == env->report_interval) {
-            env->log.perf               += angle_diff;
             env->log.score              += env->rewards[current_indx];
             env->log.t_margin_turn_reward += margin_turn_reward;
             env->log.t_cohesion_reward    += cohesion_reward;
