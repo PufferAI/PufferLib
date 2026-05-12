@@ -277,12 +277,14 @@ static float ap_hold_heading_bank_target(const Plane* p, float target_heading_de
     return bank;
 }
 
-/* P-controller for body roll rate (omega.x). Returns aileron action [-1,1]. */
+/* P-controller for body roll rate (omega.x). Returns aileron action [-1,1].
+ * Gain 0.2: saturates at err >= 5 deg/s, so the action stays maxed long
+ * enough to push past CONTROL_SCALE_MIN clamping at high V. */
 __attribute__((unused))
 static float ap_hold_roll_rate(const Plane* p, float target_omega_x_deg_s) {
     float current = p->omega.x * 57.29577951308232f;
     float err = target_omega_x_deg_s - current;
-    return clip_unit(err * 0.05f);
+    return clip_unit(err * 0.2f);
 }
 
 /* P-controller for body pitch rate (omega.y). Returns elevator action [-1,1].
@@ -292,7 +294,7 @@ __attribute__((unused))
 static float ap_hold_pitch_rate(const Plane* p, float target_omega_y_deg_s) {
     float current = p->omega.y * 57.29577951308232f;
     float err = target_omega_y_deg_s - current;
-    return clip_unit(err * 0.05f);
+    return clip_unit(err * 0.2f);
 }
 
 /* CSV telemetry writer for recovery tests. Writes a header once (lazy)

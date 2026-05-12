@@ -179,3 +179,8 @@ pufferlib/ocean/impulse_wars/benchmark/
 resources/drive/data/*
 resources/drive/binaries/*
 
+
+# Test/sweep binaries (build artifacts from gcc, not source)
+ocean/dogfight/tests/sweep_smoothness
+ocean/dogfight/tests/test_smoothness
+ocean/dogfight/tests/test_flight_physics
