@@ -53,6 +53,7 @@ from torch.utils.cpp_extension import (
 # Assume advantage kernel has been built if torch has been compiled with CUDA or HIP support
 # and can find CUDA or HIP in the system
 ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
+ADVANTAGE_MPS = bool(torch.backends.mps.is_available())
 
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
@@ -664,7 +665,8 @@ def compute_puff_advantage(values, rewards, terminals,
     compile the fast version.'''
 
     device = values.device
-    if not ADVANTAGE_CUDA:
+
+    if not ADVANTAGE_CUDA and not ADVANTAGE_MPS:
         values = values.cpu()
         rewards = rewards.cpu()
         terminals = terminals.cpu()
@@ -674,7 +676,7 @@ def compute_puff_advantage(values, rewards, terminals,
     torch.ops.pufferlib.compute_puff_advantage(values, rewards, terminals,
         ratio, advantages, gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip)
 
-    if not ADVANTAGE_CUDA:
+    if not ADVANTAGE_CUDA and not ADVANTAGE_MPS:
         return advantages.to(device)
 
     return advantages
@@ -691,6 +693,12 @@ def abbreviate(num, b2, c2):
         return f'{b2}{num/1e9:.1f}{c2}B'
     else:
         return f'{b2}{num/1e12:.2f}{c2}T'
+
+def get_accelerator(device):
+    if device == 'default':
+        return torch.accelerator.current_accelerator() if torch.accelerator.is_available() else 'cpu'
+    else:
+        return device
 
 def duration(seconds, b2, c2):
     if seconds < 0:
@@ -736,8 +744,8 @@ class Profile:
         if (epoch + 1) % self.frequency != 0:
             return
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        if torch.accelerator.is_available():
+            torch.accelerator.synchronize()
 
         tick = time.time()
         if len(self.stack) != 0 and not nest:
@@ -754,8 +762,8 @@ class Profile:
         profile['elapsed'] += delta * self.frequency
 
     def end(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        if torch.accelerator.is_available():
+            torch.accelerator.synchronize()
 
         end = time.time()
         for i in range(len(self.stack)):
@@ -1004,7 +1012,7 @@ def eval(env_name, args=None, vecenv=None, policy=None):
     ob, info = vecenv.reset()
     driver = vecenv.driver_env
     num_agents = vecenv.observation_space.shape[0]
-    device = args['train']['device']
+    device = get_accelerator(args['train']['device'])
 
     state = {}
     if args['train']['use_rnn']:
@@ -1181,7 +1189,7 @@ def load_policy(args, vecenv, env_name=''):
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
     env_module = importlib.import_module(module_name)
 
-    device = args['train']['device']
+    device = get_accelerator(args['train']['device'])
     policy_cls = getattr(env_module.torch, args['policy_name'])
     policy = policy_cls(vecenv.driver_env, **args['policy'])
 
@@ -1319,6 +1327,7 @@ def process_config(config, parser=None):
 
     args['train']['env'] = args['env_name'] or ''  # for trainer dashboard
     args['train']['use_rnn'] = args['rnn_name'] is not None
+    args['train']['device'] = get_accelerator(args['train']['device'])
     return args
 
 def main():

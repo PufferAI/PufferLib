@@ -164,7 +164,13 @@ def _flattened_tensor_size(native_dtype):
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     """CleanRL's default layer initialization"""
-    torch.nn.init.orthogonal_(layer.weight, std)
+    if layer.weight.device.type == 'mps':
+        # Apple MPS does not support orthogonal
+        layer.weight.to(device='cpu')
+        nn.init.orthogonal_(layer.weight, std)
+        layer.weight.to(device=layer.device)
+    else:
+        nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
