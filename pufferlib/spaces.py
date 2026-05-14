@@ -1,6 +1,11 @@
 import numpy as np
-import gym
 import gymnasium
+
+try:
+    import gym
+except ImportError:
+    # Alias gymnasium as gym when gym is not available
+    gym = gymnasium
 
 Box = (gym.spaces.Box, gymnasium.spaces.Box)
 Dict = (gym.spaces.Dict, gymnasium.spaces.Dict)

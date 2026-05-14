@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pufferlib-core"
+version = "3.0.3"
+description = "Minimal PufferLib core functionality with vectorized environments"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Joseph Suarez", email = "jsuarez@openai.com"},
+]
+keywords = [
+    "reinforcement-learning",
+    "machine-learning",
+    "multi-agent",
+    "vectorized-environments",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "numpy",
+    "gymnasium",
+    "psutil"
+]
+
+[project.urls]
+Homepage = "https://github.com/PufferAI/PufferLib"
+Documentation = "https://puffer.ai"
+Repository = "https://github.com/PufferAI/PufferLib"
+Issues = "https://github.com/PufferAI/PufferLib/issues"
+
+[tool.setuptools.packages.find]
+include = ["pufferlib*"]
+
+[tool.setuptools.package-data]
+pufferlib = ["*.py"]
