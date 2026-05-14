@@ -559,8 +559,8 @@ class Protein:
         self.gp_max_obs = gp_max_obs  # train time bumps after 800?
         self.infer_batch_size = infer_batch_size
 
-        # Probably useful only when downsample=1 and each run is expensive.
-        self.use_success_prob = sweep_config['downsample'] == 1
+        # Probably useful only when downsample is 0 or 1 in a config and each run is expensive.
+        self.use_success_prob = sweep_config['downsample'] in (0, 1)
         self.success_classifier = LogisticRegression(class_weight='balanced')
 
         # This model is conservative. Aggressive early stopping interferes with and hampers GP model learning.

@@ -802,9 +802,9 @@ class Utilization(Thread):
         self.stopped = True
 
 def downsample(data_list, num_points):
-    if not data_list or num_points <= 0:
+    if not data_list or num_points < 0:
         return []
-    if num_points == 1:
+    if num_points <= 1:
         return [data_list[-1]]
     if len(data_list) <= num_points:
         return data_list
