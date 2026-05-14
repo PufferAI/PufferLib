@@ -450,8 +450,8 @@ void setupMap(iwEnv *e, const uint8_t mapIdx) {
     e->mapIdx = mapIdx;
     e->map = maps[mapIdx];
     e->defaultWeapon = weaponInfos[maps[mapIdx]->defaultWeapon];
-    if (e->isTraining && randFloat(&e->randState, 0.0f, 1.0f) < 0.25f) {
-        e->defaultWeapon = weaponInfos[randInt(&e->randState, 0, NUM_WEAPONS - 1)];
+    if (e->isTraining && randFloat(&e->rng, 0.0f, 1.0f) < 0.25f) {
+        e->defaultWeapon = weaponInfos[randInt(&e->rng, 0, NUM_WEAPONS - 1)];
     }
 
     uint16_t cellIdx = 0;
@@ -576,7 +576,13 @@ bool posValidDroneSpawnPoint(const iwEnv *e, const b2Vec2 pos) {
     return true;
 }
 
+bool MAPS_INITIALIZED = false;
+
 void initMaps(iwEnv *e) {
+    if (MAPS_INITIALIZED) {
+        return;
+    }
+
     for (uint8_t i = 0; i < NUM_MAPS; i++) {
         setupMap(e, i);
         mapEntry *map = maps[i];
@@ -631,6 +637,8 @@ void initMaps(iwEnv *e) {
     }
 
     e->mapIdx = -1;
+
+    MAPS_INITIALIZED = true;
 }
 
 void destroyMaps() {

@@ -22,7 +22,7 @@
 
 #version 330 core
 
-noperspective in vec2 fragTexCoord;
+in vec2 fragTexCoord;
 
 uniform sampler2D uTexture;
 uniform vec2 uTexelDir;

@@ -8,7 +8,7 @@
 
 #include "box2d/box2d.h"
 
-#include "include/cc_array.h"
+#include "cc_array.h"
 
 #ifndef NDEBUG
 #define ON_ERROR __builtin_trap()
@@ -109,26 +109,12 @@
         ASSERTF(fabs(vec.y - norm.y) < 0.000001f, "vec: %f, %f norm: %f, %f", vec.x, vec.y, norm.x, norm.y); \
     } while (0)
 
-// use malloc when debugging so the address sanitizer can find issues with
-// heap memory, use dlmalloc in release mode for performance; emscripten
-// uses dlmalloc by default so no need to change anything here; dlmalloc
-// sometimes won't compile on macOS so just use malloc and friends
-#if !defined(NDEBUG) || defined(__EMSCRIPTEN__) || defined(__APPLE__)
 #define fastMalloc(size) malloc(size)
 #define fastMallocFn malloc
 #define fastCalloc(nmemb, size) calloc(nmemb, size)
 #define fastCallocFn calloc
 #define fastFree(ptr) free(ptr)
 #define fastFreeFn free
-#else
-#include "include/dlmalloc.h"
-#define fastMalloc(size) dlmalloc(size)
-#define fastMallocFn dlmalloc
-#define fastCalloc(nmemb, size) dlcalloc(nmemb, size)
-#define fastCallocFn dlcalloc
-#define fastFree(ptr) dlfree(ptr)
-#define fastFreeFn dlfree
-#endif
 
 static inline void create_array(CC_Array **array, size_t initialCap) {
     CC_ArrayConf conf;

@@ -50,20 +50,23 @@ if [ "$ENV" = "all" ]; then
     exit 0
 fi
 
+STANDALONE_LDFLAGS=(-fuse-ld=lld)
+SHARED_LDFLAGS=(-fuse-ld=lld)
+
 # Linux/mac
 PLATFORM="$(uname -s)"
 if [ "$PLATFORM" = "Linux" ]; then
     RAYLIB_NAME='raylib-5.5_linux_amd64'
     OMP_LIB=-lomp5
     SANITIZE_FLAGS=(-fsanitize=address,undefined,bounds,pointer-overflow,leak -fno-omit-frame-pointer)
-    STANDALONE_LDFLAGS=(-lGL)
-    SHARED_LDFLAGS=(-Bsymbolic-functions)
+    STANDALONE_LDFLAGS+=(-lGL)
+    SHARED_LDFLAGS+=(-Bsymbolic-functions)
 else
     RAYLIB_NAME='raylib-5.5_macos'
     OMP_LIB=-lomp
     SANITIZE_FLAGS=()
-    STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
-    SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup)
+    STANDALONE_LDFLAGS+=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
+    SHARED_LDFLAGS+=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup)
 fi
 
 CLANG_WARN=(
@@ -75,6 +78,7 @@ CLANG_WARN=(
     -Wno-incompatible-pointer-types-discards-qualifiers
     -Wno-error=array-parameter
 )
+CLANG_OPT=()
 
 download() {
     local name=$1 url=$2
@@ -108,14 +112,24 @@ elif [ "$ENV" = "trailer" ]; then
     OUTPUT_NAME="trailer/trailer"
 elif [ "$ENV" = "impulse_wars" ]; then
     SRC_DIR="ocean/$ENV"
-    if [ "$MODE" = "web" ]; then BOX2D_NAME='box2d-web'
-    elif [ "$PLATFORM" = "Linux" ]; then BOX2D_NAME='box2d-linux-amd64'
-    else BOX2D_NAME='box2d-macos-arm64'
+    if [ "$MODE" = "web" ]; then
+        BOX2D_NAME='box2d-web'
+    elif [ "$PLATFORM" = "Linux" ]; then
+        BOX2D_NAME='box2d-linux-amd64'
+    else
+        BOX2D_NAME='box2d-macos-arm64'
     fi
+
     BOX2D_URL="https://github.com/capnspacehook/box2d/releases/latest/download"
     download "$BOX2D_NAME" "$BOX2D_URL/$BOX2D_NAME.tar.gz"
     INCLUDES+=(-I./$BOX2D_NAME/include -I./$BOX2D_NAME/src)
-    LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2d.a")
+    
+    if [ -z "$DEBUG" ]; then
+        CLANG_OPT+=(-flto -fno-math-errno -march=native)
+        LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2d.a")
+    else
+        LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2dd.a")
+    fi
 elif [ -d "ocean/$ENV" ]; then
     SRC_DIR="ocean/$ENV"
 else
@@ -126,13 +140,13 @@ OUTPUT_NAME=${OUTPUT_NAME:-$ENV}
 
 # Standalone environment build
 if [ -n "$DEBUG" ] || [ "$MODE" = "local" ]; then
-    CLANG_OPT=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}")
+    CLANG_OPT+=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}")
     NVCC_OPT="-O0 -g"
     LINK_OPT="-g"
 else
-    CLANG_OPT=(-O2 -DNDEBUG "${CLANG_WARN[@]}")
-    NVCC_OPT="-O2 --threads 0"
-    LINK_OPT="-O2"
+    CLANG_OPT+=(-O3 -DNDEBUG "${CLANG_WARN[@]}")
+    NVCC_OPT="-O3 --threads 0"
+    LINK_OPT="-O3"
 fi
 if [ "$MODE" = "local" ] || [ "$MODE" = "fast" ]; then
     FLAGS=(
@@ -242,6 +256,7 @@ echo "Compiling static library for $ENV..."
 ${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
     -I. -Isrc -I$SRC_DIR -Ivendor \
     -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
+    "${INCLUDES[@]}" \
     -DPLATFORM_DESKTOP \
     -fno-semantic-interposition -fvisibility=hidden \
     -fPIC -fopenmp \
@@ -273,7 +288,7 @@ if [ -z "$MODE" ]; then
 
     LINK_CMD=(
         ${CXX:-g++} -shared -fPIC -fopenmp
-        build/bindings.o "$STATIC_LIB" "$RAYLIB_A"
+        build/bindings.o "$STATIC_LIB" "${LINK_ARCHIVES[@]}"
         -L$CUDA_HOME/lib64 $CUDNN_LFLAG $NCCL_LFLAG
         "${WHEEL_RPATH_FLAGS[@]}"
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
@@ -298,7 +313,7 @@ elif [ "$MODE" = "cpu" ]; then
         src/bindings_cpu.cpp -o build/bindings_cpu.o
     LINK_CMD=(
         ${CXX:-g++} -shared -fPIC -fopenmp
-        build/bindings_cpu.o "$STATIC_LIB" "$RAYLIB_A"
+        build/bindings_cpu.o "$STATIC_LIB" "${LINK_ARCHIVES[@]}"
         -lm -lpthread $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
         -o "$OUTPUT"
@@ -317,7 +332,7 @@ elif [ "$MODE" = "profile" ]; then
         $PRECISION \
         -Xcompiler=-fopenmp \
         tests/profile_kernels.cu vendor/ini.c \
-        "$STATIC_LIB" "$RAYLIB_A" \
+        "$STATIC_LIB" "${LINK_ARCHIVES[@]}" \
         -lnccl -lnvidia-ml -lcublas -lcurand -lcudnn \
         -lGL -lm -lpthread $OMP_LIB \
         -o profile

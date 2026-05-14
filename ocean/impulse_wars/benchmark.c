@@ -1,16 +1,16 @@
 #include "env.h"
 
 void randActions(iwEnv *e) {
-    // e->lastRandState = e->randState;
+    // e->lastRandState = e->rng;
     uint8_t actionOffset = 0;
     for (uint8_t i = 0; i < e->numDrones; i++) {
-        e->actions[actionOffset + 0] = randFloat(&e->randState, -1.0f, 1.0f);
-        e->actions[actionOffset + 1] = randFloat(&e->randState, -1.0f, 1.0f);
-        e->actions[actionOffset + 2] = randFloat(&e->randState, -1.0f, 1.0f);
-        e->actions[actionOffset + 3] = randFloat(&e->randState, -1.0f, 1.0f);
-        e->actions[actionOffset + 4] = randFloat(&e->randState, -1.0f, 1.0f);
-        e->actions[actionOffset + 5] = randFloat(&e->randState, -1.0f, 1.0f);
-        e->actions[actionOffset + 6] = randFloat(&e->randState, -1.0f, 1.0f);
+        e->actions[actionOffset + 0] = randFloat(&e->rng, -1.0f, 1.0f);
+        e->actions[actionOffset + 1] = randFloat(&e->rng, -1.0f, 1.0f);
+        e->actions[actionOffset + 2] = randFloat(&e->rng, -1.0f, 1.0f);
+        e->actions[actionOffset + 3] = randFloat(&e->rng, -1.0f, 1.0f);
+        e->actions[actionOffset + 4] = randFloat(&e->rng, -1.0f, 1.0f);
+        e->actions[actionOffset + 5] = randFloat(&e->rng, -1.0f, 1.0f);
+        e->actions[actionOffset + 6] = randFloat(&e->rng, -1.0f, 1.0f);
 
         actionOffset += CONTINUOUS_ACTION_SIZE;
     }

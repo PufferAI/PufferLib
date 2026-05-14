@@ -336,14 +336,14 @@ bool findOpenPos(iwEnv *e, const enum shapeCategory shapeType, b2Vec2 *emptyPos,
 
         uint16_t cellIdx;
         if (quad == -1) {
-            cellIdx = randInt(&e->randState, 0, nCells);
+            cellIdx = randInt(&e->rng, 0, nCells);
         } else {
             const float minX = e->map->spawnQuads[quad].min.x;
             const float minY = e->map->spawnQuads[quad].min.y;
             const float maxX = e->map->spawnQuads[quad].max.x;
             const float maxY = e->map->spawnQuads[quad].max.y;
 
-            b2Vec2 randPos = {.x = randFloat(&e->randState, minX, maxX), .y = randFloat(&e->randState, minY, maxY)};
+            b2Vec2 randPos = {.x = randFloat(&e->rng, minX, maxX), .y = randFloat(&e->rng, minY, maxY)};
             cellIdx = entityPosToCellIdx(e, randPos);
         }
         if (bitTest(checkedCells, cellIdx)) {
@@ -551,7 +551,7 @@ enum weaponType randWeaponPickupType(iwEnv *e) {
         totalWeight += spawnWeights[i - 1];
     }
 
-    const float randPick = randFloat(&e->randState, 0.0f, totalWeight);
+    const float randPick = randFloat(&e->rng, 0.0f, totalWeight);
     float cumulativeWeight = 0.0f;
     enum weaponType type = STANDARD_WEAPON;
     for (uint8_t i = 1; i < NUM_WEAPONS; i++) {
@@ -718,7 +718,7 @@ void createDrone(iwEnv *e, const uint8_t idx) {
         // doing this while training will result in much slower learning
         // due to drones starting much farther apart
         if (e->lastSpawnQuad == -1) {
-            spawnQuad = randInt(&e->randState, 0, 3);
+            spawnQuad = randInt(&e->rng, 0, 3);
         } else if (e->numDrones == 2) {
             spawnQuad = 3 - e->lastSpawnQuad;
         } else {
@@ -787,10 +787,10 @@ void droneAddEnergy(droneEntity *drone, float energy) {
 }
 
 void createDronePiece(iwEnv *e, droneEntity *drone, const bool fromShield) {
-    const float distance = randFloat(&e->randState, DRONE_PIECE_MIN_DISTANCE, DRONE_PIECE_MAX_DISTANCE);
-    const b2Vec2 direction = {.x = randFloat(&e->randState, -1.0f, 1.0f), .y = randFloat(&e->randState, -1.0f, 1.0f)};
+    const float distance = randFloat(&e->rng, DRONE_PIECE_MIN_DISTANCE, DRONE_PIECE_MAX_DISTANCE);
+    const b2Vec2 direction = {.x = randFloat(&e->rng, -1.0f, 1.0f), .y = randFloat(&e->rng, -1.0f, 1.0f)};
     const b2Vec2 pos = b2MulAdd(drone->pos, distance, direction);
-    const b2Rot rot = b2MakeRot(randFloat(&e->randState, -PI, PI));
+    const b2Rot rot = b2MakeRot(randFloat(&e->rng, -PI, PI));
 
     dronePieceEntity *piece = fastCalloc(1, sizeof(dronePieceEntity));
     piece->droneIdx = drone->idx;
@@ -810,9 +810,9 @@ void createDronePiece(iwEnv *e, droneEntity *drone, const bool fromShield) {
     pieceBodyDef.linearDamping = DRONE_PIECE_LINEAR_DAMPING;
     pieceBodyDef.angularDamping = DRONE_PIECE_ANGULAR_DAMPING;
     const float bonus = 1.0f + min(b2Length(drone->velocity) / 15.0f, 5.0f);
-    const float speed = randFloat(&e->randState, DRONE_PIECE_MIN_SPEED, DRONE_PIECE_MAX_SPEED) * bonus;
+    const float speed = randFloat(&e->rng, DRONE_PIECE_MIN_SPEED, DRONE_PIECE_MAX_SPEED) * bonus;
     pieceBodyDef.linearVelocity = b2MulSV(speed, direction);
-    pieceBodyDef.angularVelocity = randFloat(&e->randState, -PI, PI);
+    pieceBodyDef.angularVelocity = randFloat(&e->rng, -PI, PI);
     pieceBodyDef.userData = ent;
     piece->bodyID = b2CreateBody(e->worldID, &pieceBodyDef);
 
@@ -1145,8 +1145,8 @@ void createProjectile(iwEnv *e, droneEntity *drone, const b2Vec2 normAim) {
     b2Vec2 forwardVel = b2MulSV(b2Dot(drone->velocity, normAim), normAim);
     b2Vec2 lateralVel = b2Sub(drone->velocity, forwardVel);
     lateralVel = b2MulSV(projectileShapeDef.density * DRONE_MOVE_AIM_COEF, lateralVel);
-    b2Vec2 aim = weaponAdjustAim(&e->randState, drone->weaponInfo->type, drone->heat, normAim);
-    b2Vec2 fire = b2MulAdd(lateralVel, weaponFire(&e->randState, drone->weaponInfo->type), aim);
+    b2Vec2 aim = weaponAdjustAim(&e->rng, drone->weaponInfo->type, drone->heat, normAim);
+    b2Vec2 fire = b2MulAdd(lateralVel, weaponFire(&e->rng, drone->weaponInfo->type), aim);
     b2Body_ApplyLinearImpulseToCenter(projectileBodyID, fire, true);
 
     projectileEntity *projectile = fastCalloc(1, sizeof(projectileEntity));
@@ -1387,8 +1387,8 @@ bool explodeCallback(b2ShapeId shapeID, void *context) {
     // if the direction is zero, the magnitude cannot be calculated
     // correctly so set the direction randomly
     if (b2VecEqual(direction, b2Vec2_zero)) {
-        direction.x = randFloat(&ctx->e->randState, -1.0f, 1.0f);
-        direction.y = randFloat(&ctx->e->randState, -1.0f, 1.0f);
+        direction.x = randFloat(&ctx->e->rng, -1.0f, 1.0f);
+        direction.y = randFloat(&ctx->e->rng, -1.0f, 1.0f);
         direction = b2Normalize(direction);
     }
 
