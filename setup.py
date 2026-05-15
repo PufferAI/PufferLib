@@ -33,7 +33,15 @@ NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
 
 # Build raylib for your platform
 RAYLIB_URL = 'https://github.com/raysan5/raylib/releases/download/5.5/'
-RAYLIB_NAME = 'raylib-5.5_macos' if platform.system() == "Darwin" else 'raylib-5.5_linux_amd64'
+if platform.system() == "Darwin":
+    RAYLIB_NAME = 'raylib-5.5_macos'
+else:
+    # Detect Linux architecture
+    arch = platform.machine()
+    if arch == 'aarch64' or arch == 'arm64':
+        RAYLIB_NAME = 'raylib-5.5_linux_aarch64'
+    else:
+        RAYLIB_NAME = 'raylib-5.5_linux_amd64'
 RLIGHTS_URL = 'https://raw.githubusercontent.com/raysan5/raylib/refs/heads/master/examples/shaders/rlights.h'
 
 def download_raylib(platform, ext):
@@ -129,6 +137,11 @@ if system == 'Linux':
     extra_link_args += [
         '-Bsymbolic-functions',
     ]
+    arch = platform.machine()
+    if arch == 'aarch64' or arch == 'arm64':
+        download_raylib('raylib-5.5_linux_aarch64', '.tar.gz')
+    else:
+        download_raylib('raylib-5.5_linux_amd64', '.tar.gz')
 elif system == 'Darwin':
     extra_compile_args += [
         '-Wno-error=int-conversion',
