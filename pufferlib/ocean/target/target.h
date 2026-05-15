@@ -64,6 +64,9 @@ void init(Target* env) {
 }
 
 void update_goals(Target* env) {
+    // Track which goals need to be reset
+    int* goals_to_reset = calloc(env->num_goals, sizeof(int));
+    
     for (int a=0; a<env->num_agents; a++) {
         Agent* agent = &env->agents[a];
         for (int g=0; g<env->num_goals; g++) {
@@ -74,8 +77,8 @@ void update_goals(Target* env) {
             if (dist > 32) {
                 continue;
             }
-            goal->x = rand() % env->width;
-            goal->y = rand() % env->height;
+            // Mark this goal for reset instead of resetting immediately
+            goals_to_reset[g] = 1;
             env->rewards[a] = 1.0f;
             env->log.perf += 1.0f;
             env->log.score += 1.0f;
@@ -85,6 +88,16 @@ void update_goals(Target* env) {
             env->log.n++;
         }
     }
+    
+    // Reset goals after all agents have been checked
+    for (int g=0; g<env->num_goals; g++) {
+        if (goals_to_reset[g]) {
+            env->goals[g].x = rand() % env->width;
+            env->goals[g].y = rand() % env->height;
+        }
+    }
+    
+    free(goals_to_reset);
 }
 
 /* Recommended to have an observation function of some kind because
