@@ -39,7 +39,7 @@ void c_step(Template* env) {
     }
     if (env->x == env->goal) {
         c_reset(env);
-        env->rewards[0] = 1;
+        env->rewards[0] = 1;  // Reward must be within -1 to 1, will be automatically clamped internally
         env->terminals[0] = 1;
         env->log.score += 1;
         env->log.n += 1;
