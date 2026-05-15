@@ -134,6 +134,7 @@ MAKE_FUNCTIONS = {
     'drone': 'Drone',
     'nmmo3': 'NMMO3',
     'snake': 'Snake',
+    'cubed': 'Cubed',
     'squared': 'Squared',
     'pysquared': 'PySquared',
     'connect4': 'Connect4',
