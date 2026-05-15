@@ -29,8 +29,15 @@ void demo() {
     
     int logit_sizes[1] = {ACTIONS_SIZE};
     net = make_linearlstm(weights, 1, OBSERVATIONS_SIZE, logit_sizes, 1);
-    Cartpole env = {0};
-    env.continuous = CONTINUOUS;
+    Cartpole env = {
+        .continuous = CONTINUOUS,
+        .cart_mass = 1.0f,
+        .pole_mass = 0.1f,
+        .pole_length = 0.5f,
+        .gravity = 9.8f,
+        .force_mag = 10.0f,
+        .tau = 0.02f,
+    };
     allocate(&env);
     c_reset(&env);
     c_render(&env);
