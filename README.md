@@ -1,3 +1,27 @@
+You have a CPU-based RL environment but python multiproc is worse than nothing. You can fix this by moving data through pinned CPU memory. That is hard to do, but pufferlib will do it for you. If your env is compatible with PettingZoo or Gymnasium then it is compatible with Pufferlib. You basically just do this:
+
+```py
+env = pufferlib.vector.make(
+    pufferlib.emulation.GymnasiumPufferEnv(gymnasium.make("CartPole-v1")),
+    num_envs=8, num_workers=8, batch_size=1,
+)
+try:
+    env.async_reset() # You can also use the synchronous API with Multiprocessing
+    o, r, d, t, i, env_ids, masks = env.recv()
+    actions = env.action_space.sample()
+    env.send(actions)
+    o, r, d, t, i, env_ids, masks = env.recv()
+    print('Observations:', o)
+finally:
+    env.close()
+```
+
+[See](examples/gymnasium_env.py) [the](examples/pettingzoo_env.py) [examples](examples/puffer_env.py) [for](examples/pufferl.py) [more](examples/vectorization.py).
+
+It uses large shared-memory buffers so workers write results in place: no pickling, no copies. If you train on GPU, pin the observation buffer and use non_blocking CUDA copies so env-to-GPU transfer overlaps with compute; keep the buffers persistent to avoid allocation churn.
+
+Extras include a fast PPO trainer (V-trace, prioritized minibatches), native C/Cython Ocean environments, drop-in vector backends for CleanRL/SB3, self-play via policy_pool, configs plus sweeps and autotune, and a Docker image (PufferTank). Use what you need and ignore the rest.
+
 ![figure](https://pufferai.github.io/source/resource/header.png)
 
 [![PyPI version](https://badge.fury.io/py/pufferlib.svg)](https://badge.fury.io/py/pufferlib)
