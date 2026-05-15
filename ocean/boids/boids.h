@@ -200,23 +200,15 @@ void c_step(Boids *env) {
             separation_reward -= rule_mag * env->separation_factor;
         }
         if (visual_count) {
-            vis_x_avg  = vis_x_sum  / visual_count;
-            vis_y_avg  = vis_y_sum  / visual_count;
-            vis_vx_avg = vis_vx_sum / visual_count;
-            vis_vy_avg = vis_vy_sum / visual_count;
-
+            vis_x_avg  = vis_x_sum / visual_count;
+            vis_y_avg  = vis_y_sum / visual_count;
             cohesion_reward -= fabsf(vis_x_avg  - current_boid->x) * env->cohesion_factor;
             cohesion_reward -= fabsf(vis_y_avg  - current_boid->y) * env->cohesion_factor;
-
-            rule_dx = vis_vx_avg - current_boid->velocity.x;
-            rule_dy = vis_vy_avg - current_boid->velocity.y;
-            rule_mag = sqrtf(rule_dx*rule_dx + rule_dy*rule_dy) + EPS;
+    
+            vis_vx_avg = vis_vx_sum / visual_count;
+            vis_vy_avg = vis_vy_sum / visual_count;
             alignment_reward -= fabsf(vis_vx_avg - current_boid->velocity.x) * env->alignment_factor;
             alignment_reward -= fabsf(vis_vy_avg - current_boid->velocity.y) * env->alignment_factor;
-
-            rule_dx = vis_x_avg - current_boid->x;
-            rule_dy = vis_y_avg - current_boid->y;
-            rule_mag = sqrtf(rule_dx*rule_dx + rule_dy*rule_dy) + EPS;
         }
 
         if (current_boid->y < TOP_MARGIN || current_boid->x < LEFT_MARGIN
