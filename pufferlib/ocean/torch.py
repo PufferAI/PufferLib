@@ -18,6 +18,102 @@ Recurrent = pufferlib.models.LSTMWrapper
 from pufferlib.pytorch import layer_init, _nativize_dtype, nativize_tensor
 import numpy as np
 
+class Boxoban(nn.Module):
+    """
+    Observations: always (B, 400) = 4 * (10*10), planes concatenated:
+      [agent_plane(100), target_plane(100), box_plane(100), wall_plane(100)]
+    Each plane is binary/float occupancy. Target+box can co-locate naturally.
+
+    Embedding per cell:
+      cell_vec = pos_embed[cell] + sum_{type present} type_embed[type]
+    """
+
+    def __init__(self, env, hidden_size=128, embed_dim=8):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.embed_dim = embed_dim
+
+        self.is_multidiscrete = isinstance(env.single_action_space, pufferlib.spaces.MultiDiscrete)
+        self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
+
+        # Fixed layout
+        self.num_types = 4
+        self.num_cells = 100
+        self.obs_n = 400
+
+        self.type_embed = nn.Embedding(self.num_types, self.embed_dim)
+        self.pos_embed = nn.Embedding(self.num_cells, self.embed_dim)
+
+        self.encoder = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(self.num_cells * self.embed_dim, 2 * hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(2 * hidden_size, hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.GELU(),
+        )
+
+        if self.is_multidiscrete:
+            self.action_nvec = tuple(env.single_action_space.nvec)
+            num_atns = sum(self.action_nvec)
+            self.decoder = pufferlib.pytorch.layer_init(nn.Linear(hidden_size, num_atns), std=0.01)
+        elif not self.is_continuous:
+            num_atns = env.single_action_space.n
+            self.decoder = pufferlib.pytorch.layer_init(nn.Linear(hidden_size, num_atns), std=0.01)
+        else:
+            self.decoder_mean = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01
+            )
+            self.decoder_logstd = nn.Parameter(torch.zeros(1, env.single_action_space.shape[0]))
+
+        self.value = pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1), std=1.0)
+
+    def forward_eval(self, observations, state=None):
+        hidden = self.encode_observations(observations, state=state)
+        logits, values = self.decode_actions(hidden)
+        return logits, values
+
+    def forward(self, observations, state=None):
+        return self.forward_eval(observations, state)
+
+    def encode_observations(self, observations, state=None):
+        # observations: (B, 400)
+        B = observations.shape[0]
+        x = observations
+        if x.shape[1] != self.obs_n:
+            raise ValueError(f"Expected observations shape (B, {self.obs_n}), got {tuple(x.shape)}")
+        if x.dtype not in (torch.float16, torch.float32, torch.bfloat16):
+            x = x.float()
+
+        # (B, 400) -> (B, 4, 100) -> (B, 100, 4)
+        x = x.view(B, self.num_types, self.num_cells).permute(0, 2, 1).contiguous()
+
+        # Sum entity-type embeddings for present types
+        type_vec = x @ self.type_embed.weight  # (B, 100, embed_dim)
+
+        # Add position embedding
+        pos_vec = self.pos_embed.weight.unsqueeze(0).expand(B, -1, -1)  # (B, 100, embed_dim)
+
+        cell_vec = type_vec + pos_vec
+        flat = cell_vec.view(B, self.num_cells * self.embed_dim)
+        return self.encoder(flat)
+
+    def decode_actions(self, hidden):
+        if self.is_multidiscrete:
+            logits = self.decoder(hidden).split(self.action_nvec, dim=1)
+        elif self.is_continuous:
+            mean = self.decoder_mean(hidden)
+            logstd = self.decoder_logstd.expand_as(mean)
+            std = torch.exp(logstd)
+            logits = torch.distributions.Normal(mean, std)
+        else:
+            logits = self.decoder(hidden)
+
+        values = self.value(hidden)
+        return logits, values
+
+
+
 
 class Boids(nn.Module):
     def __init__(self, env, cnn_channels=32, hidden_size=128, **kwargs):
