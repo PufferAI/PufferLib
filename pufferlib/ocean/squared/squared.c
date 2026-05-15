@@ -1,6 +1,6 @@
 /* Pure C demo file for Squared. Build it with:
- * bash scripts/build_ocean.sh target local (debug)
- * bash scripts/build_ocean.sh target fast
+ * bash scripts/build_ocean.sh squared local (debug)
+ * bash scripts/build_ocean.sh squared fast
  * We suggest building and debugging your env in pure C first. You
  * get faster builds and better error messages. To keep this example
  * simple, it does not include C neural nets. See Target for that.
