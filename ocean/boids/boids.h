@@ -173,18 +173,10 @@ void c_step(Boids *env) {
 
         // reward calculation
         current_boid_reward = 0.0f;
-        margin_turn_reward = 0.0f;
-        cohesion_reward = 0.0f;
-        separation_reward = 0.0f;
-        alignment_reward = 0.0f;
-        protected_count = 0;
-        visual_count = 0;
-        vis_vx_sum = 0.0f;
-        vis_vy_sum = 0.0f;
-        vis_x_sum = 0.0f;
-        vis_y_sum = 0.0f;
-        protected_x_sum = 0.0f;
-        protected_y_sum = 0.0f;
+        margin_turn_reward = 0.0f; cohesion_reward = 0.0f; separation_reward = 0.0f; alignment_reward = 0.0f;
+        protected_count = 0; visual_count = 0;
+        vis_vx_sum = 0.0f; vis_vy_sum = 0.0f; vis_x_sum = 0.0f; vis_y_sum = 0.0f;
+        protected_x_sum = 0.0f; protected_y_sum = 0.0f;
         for (unsigned observed_indx = 0; observed_indx < env->num_agents; observed_indx++) {
             if (current_indx == observed_indx) continue;
             observed_boid = env->boids[observed_indx];
