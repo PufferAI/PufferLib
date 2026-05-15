@@ -155,6 +155,7 @@ MAKE_FUNCTIONS = {
     'tmaze': 'TMaze',
     'checkers': 'Checkers',
     'asteroids': 'Asteroids',
+    'light_thief': 'LightThief',
     'whisker_racer': 'WhiskerRacer',
     'onestateworld': 'World',
     'onlyfish': 'OnlyFish',
