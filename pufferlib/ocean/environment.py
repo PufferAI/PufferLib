@@ -156,6 +156,7 @@ MAKE_FUNCTIONS = {
     'checkers': 'Checkers',
     'asteroids': 'Asteroids',
     'whisker_racer': 'WhiskerRacer',
+    'overcooked': 'Overcooked',
     'onestateworld': 'World',
     'onlyfish': 'OnlyFish',
     'chain_mdp': 'Chain',
