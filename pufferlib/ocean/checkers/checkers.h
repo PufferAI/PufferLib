@@ -658,7 +658,6 @@ void add_log(Checkers *env) {
 // Required function
 void c_reset(Checkers *env) {
   env->tick = 0;
-  env->terminals[0] = 0;
   env->rewards[0] = 0.0f;
 
   int tiles = env->size * env->size;
