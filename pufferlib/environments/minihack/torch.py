@@ -1,4 +1,3 @@
-from pdb import set_trace as T
 
 import pufferlib.pytorch
 from pufferlib.environments.nethack import Policy

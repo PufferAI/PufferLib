@@ -1,11 +1,9 @@
 import sys
-from pdb import set_trace as T
 from typing import Dict, List, Tuple, Union
 
 import numpy as np
 import torch
 from torch import nn
-from torch.distributions import Categorical
 from torch.distributions.utils import logits_to_probs
 
 import pufferlib
@@ -103,23 +101,6 @@ def nativize_tensor(observation: torch.Tensor, native_dtype: NativeDType):
     return _nativize_tensor(observation, native_dtype)
 
 
-# torch.view(dtype) does not compile
-# This is a workaround hack
-# @thatguy - can you figure out a more robust way to handle cast?
-# I think it may screw up for non-uint data... so I put a hard .view
-# fallback that breaks compile
-def compilable_cast(u8, dtype):
-    if dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
-        n = dtype.itemsize
-        bytes = [u8[..., i::n].to(dtype) for i in range(n)]
-        if not LITTLE_BYTE_ORDER:
-            bytes = bytes[::-1]
-
-        bytes = sum(bytes[i] << (i * 8) for i in range(n))
-        return bytes.view(dtype)
-    return u8.view(dtype)  # breaking cast
-
-
 def _nativize_tensor(observation: torch.Tensor, native_dtype: NativeDType):
     if isinstance(native_dtype, tuple):
         dtype, shape, offset, delta = native_dtype
@@ -140,15 +121,6 @@ def _nativize_tensor(observation: torch.Tensor, native_dtype: NativeDType):
             subviews[name] = _nativize_tensor(observation, dtype)
         return subviews
 
-
-def nativize_observation(observation, emulated):
-    # TODO: Any way to check that user has not accidentally cast data to float?
-    # float is natively supported, but only if that is the actual correct type
-    return nativize_tensor(
-        observation,
-        emulated['observation_dtype'],
-        emulated['emulated_observation_dtype'],
-    )
 
 def flattened_tensor_size(native_dtype):
     return _flattened_tensor_size(native_dtype)
@@ -180,10 +152,6 @@ def entropy(logits):
     min_real = torch.finfo(logits.dtype).min
     logits = torch.clamp(logits, min=min_real)
     p_log_p = logits * logits_to_probs(logits)
-    return -p_log_p.sum(-1)
-
-def entropy_probs(logits, probs):
-    p_log_p = logits * probs
     return -p_log_p.sum(-1)
 
 def sample_logits(logits, action=None):

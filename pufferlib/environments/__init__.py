@@ -1,4 +1,3 @@
-from pdb import set_trace as T
 import pufferlib
 
 def try_import(module_path, package_name=None):

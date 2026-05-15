@@ -1,4 +1,3 @@
-from pdb import set_trace as T
 from pettingzoo.utils.conversions import aec_to_parallel_wrapper
 import functools
 

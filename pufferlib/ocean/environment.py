@@ -1,14 +1,6 @@
 import importlib
 import pufferlib.emulation
 
-def lazy_import(module_path, attr):
-    """
-    Returns a callable that, when called with any arguments, will
-    import the module, retrieve the attribute (usually a class or factory)
-    and then call it with the given arguments.
-    """
-    return lambda *args, **kwargs: getattr(__import__(module_path, fromlist=[attr]), attr)(*args, **kwargs)
-
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
     from .grid import grid

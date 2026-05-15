@@ -1,6 +1,5 @@
 # TODO: Check actions passed to envs are right shape? On first call at least
 
-from pdb import set_trace as T
 
 import numpy as np
 import time
