@@ -160,6 +160,7 @@ MAKE_FUNCTIONS = {
     'onlyfish': 'OnlyFish',
     'chain_mdp': 'Chain',
     'spaces': make_spaces,
+    'vision_test': 'VisionTest',
     'multiagent': make_multiagent,
     'slimevolley': 'SlimeVolley',
 }
