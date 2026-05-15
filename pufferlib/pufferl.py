@@ -28,7 +28,6 @@ from torch.distributed.elastic.multiprocessing.errors import record
 import torch.utils.cpp_extension
 
 import pufferlib
-import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
 try:
@@ -1055,10 +1054,16 @@ def sweep(args=None, env_name=None):
     if not args['wandb'] and not args['neptune']:
         raise pufferlib.APIUsageError('Sweeps require either wandb or neptune')
     args['no_model_upload'] = True  # Uploading trained model during sweep crashed wandb
+    try:
+        import pufferlib.sweep as puffer_sweep
+    except ImportError as exc:
+        raise ImportError(
+            'Sweep mode requires optional sweep dependencies such as gpytorch.'
+        ) from exc
 
     method = args['sweep'].pop('method')
     try:
-        sweep_cls = getattr(pufferlib.sweep, method)
+        sweep_cls = getattr(puffer_sweep, method)
     except:
         raise pufferlib.APIUsageError(f'Invalid sweep method {method}. See pufferlib.sweep')
 
