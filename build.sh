@@ -139,7 +139,11 @@ build_raylib_from_source() {
     if [ ! -f "$name/src/libraylib.a" ] || [ ! -f "$name/src/.pufferlib_pic" ]; then
         echo "Building raylib ${RAYLIB_VERSION} $platform..."
         make -C "$name/src" clean >/dev/null 2>&1 || true
-        make -C "$name/src" PLATFORM="$platform" RAYLIB_BUILD_MODE=RELEASE CUSTOM_CFLAGS=-fPIC
+        local custom_cflags="-fPIC"
+        if [ "$platform" = "PLATFORM_MEMORY" ]; then
+            custom_cflags="$custom_cflags -Wno-unused-label -Wno-unused-variable"
+        fi
+        make -C "$name/src" PLATFORM="$platform" RAYLIB_BUILD_MODE=RELEASE CUSTOM_CFLAGS="$custom_cflags"
         touch "$name/src/.pufferlib_pic"
     fi
 }
