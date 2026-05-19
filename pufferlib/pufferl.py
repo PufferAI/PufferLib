@@ -452,7 +452,6 @@ def eval(env_name, args=None, load_path=None):
                         args['gif_path'], _C.screen_width(), _C.screen_height(), args['fps'])
                 _C.pipe_frame_fd(ffmpeg.stdin.fileno())
                 frame_count += 1
-                print(frame_count, args['save_frames'])
                 if frame_count >= args['save_frames']:
                     break
             backend.rollouts(pufferl)

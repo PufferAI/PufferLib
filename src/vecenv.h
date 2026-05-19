@@ -604,8 +604,14 @@ void static_vec_read_profile(StaticVec* vec, float out[NUM_EVAL_PROF]) {
 }
 
 void static_vec_render(StaticVec* vec, int env_id) {
+#if defined(PLATFORM_MEMORY)
+    SetTraceLogLevel(LOG_WARNING);
+#endif
     Env* envs = (Env*)vec->envs;
     c_render(&envs[env_id]);
+#if defined(PLATFORM_MEMORY)
+    SetTargetFPS(0);
+#endif
 }
 
 static int static_vec_write_all(int fd, const void* data, size_t size) {
