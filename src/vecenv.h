@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include "raylib.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -115,6 +116,7 @@ void create_static_threads(StaticVec* vec, int num_threads, int horizon,
 void static_vec_omp_step(StaticVec* vec);
 void static_vec_seq_step(StaticVec* vec);
 void static_vec_render(StaticVec* vec, int env_id);
+void static_vec_export_frame(const char* path);
 void static_vec_read_profile(StaticVec* vec, float out[NUM_EVAL_PROF]);
 
 // Env info
@@ -600,6 +602,17 @@ void static_vec_read_profile(StaticVec* vec, float out[NUM_EVAL_PROF]) {
 void static_vec_render(StaticVec* vec, int env_id) {
     Env* envs = (Env*)vec->envs;
     c_render(&envs[env_id]);
+}
+
+void static_vec_export_frame(const char* path) {
+    static int muted_raylib_info_logs = 0;
+    if (!muted_raylib_info_logs) {
+        SetTraceLogLevel(LOG_WARNING);
+        muted_raylib_info_logs = 1;
+    }
+    Image frame = LoadImageFromScreen();
+    ExportImage(frame, path);
+    UnloadImage(frame);
 }
 
 int get_obs_size(void) { return OBS_SIZE; }

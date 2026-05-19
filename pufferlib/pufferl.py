@@ -398,6 +398,12 @@ def sweep(env_name, args=None, pareto=False):
         train(env_name, exp_args, range(gpu_id, gpu_id + exp_gpus),
             sweep_obj=sweep_obj, result_queue=result_queue)
 
+def _frame_output_dir(path):
+    root, ext = os.path.splitext(path)
+    if ext.lower() == '.gif':
+        return root + '_frames'
+    return path
+
 def eval(env_name, args=None, load_path=None):
     '''Evaluate a trained policy. Supports both native and --slowly torch backends.'''
     args = args or load_config(env_name)
@@ -421,8 +427,21 @@ def eval(env_name, args=None, load_path=None):
         backend.load_weights(pufferl, load_path)
         print(f'Loaded weights from {load_path}')
 
+    frame_count = 0
+    frame_dir = None
+    if args.get('save_frames', 0):
+        frame_dir = _frame_output_dir(args['gif_path'])
+        os.makedirs(frame_dir, exist_ok=True)
+        if not hasattr(_C, 'export_frame'):
+            raise RuntimeError('Current native backend does not expose export_frame; rebuild _C')
+
     while True:
         backend.render(pufferl, 0)
+        if frame_dir is not None:
+            _C.export_frame(os.path.join(frame_dir, f'frame_{frame_count:04d}.png'))
+            frame_count += 1
+            if frame_count >= args['save_frames']:
+                break
         backend.rollouts(pufferl)
 
     backend.close(pufferl)
