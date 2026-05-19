@@ -435,25 +435,30 @@ def eval(env_name, args=None, load_path=None):
 
     frame_count = 0
     ffmpeg = None
-    if args.get('save_frames', 0):
-        for name in ('pipe_frame_fd', 'screen_width', 'screen_height'):
-            if not hasattr(_C, name):
-                raise RuntimeError(f'Current native backend does not expose {name}; rebuild _C')
-        out_dir = os.path.dirname(args['gif_path'])
-        if out_dir:
-            os.makedirs(out_dir, exist_ok=True)
+    save_frames = args.get('save_frames')
+    for name in ('pipe_frame_fd', 'screen_width', 'screen_height'):
+        if not hasattr(_C, name):
+            raise RuntimeError(f'Current native backend does not expose {name}; rebuild _C')
+    out_dir = os.path.dirname(args['gif_path'])
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     try:
         while True:
             backend.render(pufferl, 0)
-            if args.get('save_frames', 0):
-                if ffmpeg is None:
-                    ffmpeg = _start_ffmpeg_gif(
-                        args['gif_path'], _C.screen_width(), _C.screen_height(), args['fps'])
-                _C.pipe_frame_fd(ffmpeg.stdin.fileno())
-                frame_count += 1
-                if frame_count >= args['save_frames']:
-                    break
+            if ffmpeg is None:
+                ffmpeg = _start_ffmpeg_gif(
+                    args['gif_path'], _C.screen_width(), _C.screen_height(), args['fps'])
+            _C.pipe_frame_fd(ffmpeg.stdin.fileno())
+            frame_count += 1
+            if frame_count % 100 == 0:
+                if save_frames is None:
+                    print(f'Recorded {frame_count} frames to {args["gif_path"]}')
+                else:
+                    percent = 100.0 * frame_count / save_frames
+                    print(f'Recorded {frame_count}/{save_frames} frames [{percent:.3f}%] to {args["gif_path"]}')
+            if save_frames is not None and frame_count >= save_frames:
+                break
             backend.rollouts(pufferl)
     finally:
         if ffmpeg is not None:
@@ -474,7 +479,8 @@ def load_config(env_name):
     parser.add_argument('--wandb-group', type=str, default='debug')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
     parser.add_argument('--slowly', action='store_true', help='Use PyTorch training backend')
-    parser.add_argument('--save-frames', type=int, default=0)
+    parser.add_argument('--save-frames', type=int, default=None,
+        help='Number of rendered frames to save to --gif-path with ffmpeg. Omit to record until interrupted.')
     parser.add_argument('--gif-path', type=str, default='eval.gif')
     parser.add_argument('--fps', type=float, default=15)
     parser.description = f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]' \
