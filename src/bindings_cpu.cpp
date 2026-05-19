@@ -12,8 +12,10 @@
 
 namespace py = pybind11;
 
-static void export_frame(const std::string& path) {
-    static_vec_export_frame(path.c_str());
+static void pipe_frame_fd(int fd) {
+    if (!static_vec_pipe_frame_fd(fd)) {
+        throw std::runtime_error("Failed to pipe frame to ffmpeg");
+    }
 }
 
 // Stub out CUDA functions that the static lib references (dead code when gpu=0)
@@ -170,7 +172,9 @@ PYBIND11_MODULE(_C, m) {
     m.attr("gpu") = 0;
 
     m.def("puff_advantage_cpu", &py_puff_advantage_cpu);
-    m.def("export_frame", &export_frame);
+    m.def("pipe_frame_fd", &pipe_frame_fd);
+    m.def("screen_width", &static_vec_screen_width);
+    m.def("screen_height", &static_vec_screen_height);
     m.def("create_vec", &create_vec, py::arg("args"), py::arg("gpu") = 0);
 
     py::class_<VecEnv, std::unique_ptr<VecEnv>>(m, "VecEnv")

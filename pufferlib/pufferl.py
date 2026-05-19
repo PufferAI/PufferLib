@@ -12,6 +12,7 @@ import ast
 import time
 import argparse
 import configparser
+import subprocess
 from collections import defaultdict
 import multiprocessing as mp
 from copy import deepcopy
@@ -398,11 +399,16 @@ def sweep(env_name, args=None, pareto=False):
         train(env_name, exp_args, range(gpu_id, gpu_id + exp_gpus),
             sweep_obj=sweep_obj, result_queue=result_queue)
 
-def _frame_output_dir(path):
-    root, ext = os.path.splitext(path)
-    if ext.lower() == '.gif':
-        return root + '_frames'
-    return path
+def _start_ffmpeg_gif(path, width, height, fps):
+    return subprocess.Popen([
+        'ffmpeg', '-y', '-loglevel', 'warning',
+        '-f', 'rawvideo',
+        '-pix_fmt', 'rgba',
+        '-s', f'{width}x{height}',
+        '-r', str(fps),
+        '-i', '-',
+        path,
+    ], stdin=subprocess.PIPE)
 
 def eval(env_name, args=None, load_path=None):
     '''Evaluate a trained policy. Supports both native and --slowly torch backends.'''
@@ -428,23 +434,33 @@ def eval(env_name, args=None, load_path=None):
         print(f'Loaded weights from {load_path}')
 
     frame_count = 0
-    frame_dir = None
+    ffmpeg = None
     if args.get('save_frames', 0):
-        frame_dir = _frame_output_dir(args['gif_path'])
-        os.makedirs(frame_dir, exist_ok=True)
-        if not hasattr(_C, 'export_frame'):
-            raise RuntimeError('Current native backend does not expose export_frame; rebuild _C')
+        for name in ('pipe_frame_fd', 'screen_width', 'screen_height'):
+            if not hasattr(_C, name):
+                raise RuntimeError(f'Current native backend does not expose {name}; rebuild _C')
+        out_dir = os.path.dirname(args['gif_path'])
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
 
-    while True:
-        backend.render(pufferl, 0)
-        if frame_dir is not None:
-            _C.export_frame(os.path.join(frame_dir, f'frame_{frame_count:04d}.png'))
-            frame_count += 1
-            if frame_count >= args['save_frames']:
-                break
-        backend.rollouts(pufferl)
-
-    backend.close(pufferl)
+    try:
+        while True:
+            backend.render(pufferl, 0)
+            if args.get('save_frames', 0):
+                if ffmpeg is None:
+                    ffmpeg = _start_ffmpeg_gif(
+                        args['gif_path'], _C.screen_width(), _C.screen_height(), args['fps'])
+                _C.pipe_frame_fd(ffmpeg.stdin.fileno())
+                frame_count += 1
+                print(frame_count, args['save_frames'])
+                if frame_count >= args['save_frames']:
+                    break
+            backend.rollouts(pufferl)
+    finally:
+        if ffmpeg is not None:
+            ffmpeg.stdin.close()
+            ffmpeg.wait()
+        backend.close(pufferl)
 
 def load_config(env_name):
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
