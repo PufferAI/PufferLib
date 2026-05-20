@@ -388,24 +388,6 @@ int boxoban_prepare_maps_for_difficulty(const char* difficulty, char* out_path, 
     return 0;
 }
 
-static int boxoban_ensure_incremental_bins(void) {
-    const char* difficulties[BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES] = {
-        "basic",
-        "easy",
-        "medium",
-        "hard",
-    };
-
-    for (int i = 0; i < BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES; i++) {
-        char bin_path[512];
-        if (boxoban_ensure_bin_for_difficulty(difficulties[i], bin_path, sizeof(bin_path)) != 0) {
-            return -1;
-        }
-    }
-
-    return 0;
-}
-
 static int boxoban_load_incremental_bin_slot(int slot, const char* difficulty) {
     char bin_path[512];
     int fd;
@@ -459,6 +441,19 @@ static int boxoban_load_incremental_bins(void) {
     }
 
     return 0;
+}
+
+static void reset_incremental_map_cache(void) {
+    for (int i = 0; i < BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES; i++) {
+        if (INCREMENTAL_MAP_BASES[i] != NULL &&
+                INCREMENTAL_MAP_BASES[i] != MAP_FAILED &&
+                INCREMENTAL_MAP_FILESIZES[i] > 0) {
+            munmap(INCREMENTAL_MAP_BASES[i], INCREMENTAL_MAP_FILESIZES[i]);
+        }
+        INCREMENTAL_MAP_BASES[i] = NULL;
+        INCREMENTAL_MAP_FILESIZES[i] = 0;
+        INCREMENTAL_PUZZLE_COUNTS[i] = 0;
+    }
 }
 
 static void reset_map_cache(void) {

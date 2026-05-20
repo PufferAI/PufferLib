@@ -71,6 +71,15 @@ typedef struct {
 void ensure_map_loaded(void);
 
 static int boxoban_configure_maps_from_env(Boxoban* env) {
+    if (env->difficulty_id == BOXOBAN_DIFFICULTY_INCREMENTAL) {
+        reset_incremental_map_cache();
+        if (boxoban_load_incremental_bins() != 0) {
+            fprintf(stderr, "Failed to load incremental Boxoban map bins\n");
+            return -1;
+        }
+        return 0;
+    }
+
     if (env->difficulty_id == -1) {
         return 0;
     }
@@ -111,8 +120,8 @@ static inline unsigned char get_intermediate_reward_status(Boxoban *env, int x, 
     return env->intermediate_rewards[(y)*env->size + (x)];
 }
 
-static inline const uint32_t get_random_puzzle_idx(const Boxoban *env) {
-    int idx = rand_r(&env->rng) % PUZZLE_COUNT;
+static inline const uint32_t get_random_puzzle_idx(const Boxoban *env, size_t puzzle_count) {
+    int idx = rand_r(&env->rng) % puzzle_count;
     return idx;
 }
 
@@ -134,11 +143,20 @@ void init (Boxoban* env) {
 
 
 void add_log(Boxoban* env) {
-    float denom = (float)env->n_boxes;
-    float num = (float)env->on_target;
-    float perf = (env->win== 1) ? 1.0f : 0.0f;
+    float perf;
+    float score;
+    if (env->curriculum_mode) {
+        score = 0.0f;
+        if (env->largest_solved_difficulty >= 0) {
+            score = (float)(env->largest_solved_difficulty + 1);
+        }
+        perf = score / (float)BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES;
+    } else {
+        perf = (env->win == 1) ? 1.0f : 0.0f;
+        score = perf;
+    }
     env->log.perf += perf;
-    env->log.score += perf;
+    env->log.score += score;
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
     env->log.on_targets += env->on_target;
@@ -153,10 +171,16 @@ bool clear(Boxoban* env, int x, int y) {
     return (get_entity(env, WALLS, x, y) == 0) && (get_entity(env, BOXES, x, y) == 0);
 }
 
-// Required function
-void c_reset(Boxoban* env) {
-    const uint32_t i = get_random_puzzle_idx(env);
-    const uint8_t* puzzle = MAP_BASE + (size_t)i * PUZZLE_SIZE;
+static void load_random_puzzle(Boxoban* env) {
+    const uint8_t* map_base = MAP_BASE;
+    size_t puzzle_count = PUZZLE_COUNT;
+    if (env->curriculum_mode) {
+        map_base = INCREMENTAL_MAP_BASES[env->curriculum_difficulty];
+        puzzle_count = INCREMENTAL_PUZZLE_COUNTS[env->curriculum_difficulty];
+    }
+
+    const uint32_t i = get_random_puzzle_idx(env, puzzle_count);
+    const uint8_t* puzzle = map_base + (size_t)i * PUZZLE_SIZE;
     memcpy(env->observations, puzzle, PUZZLE_OBS_BYTES);
 
     const uint8_t* meta = puzzle + PUZZLE_OBS_BYTES;
@@ -168,10 +192,20 @@ void c_reset(Boxoban* env) {
 
     memcpy(env->intermediate_rewards,
             env->observations + TARGET * env->size * env->size,env->size * env->size);
+}
 
+// Required function
+void c_reset(Boxoban* env) {
     env->tick = 0;
     env->win = 0;
     env->episode_return = 0;
+    if (env->curriculum_mode) {
+        env->curriculum_difficulty = 0;
+        env->largest_solved_difficulty = -1;
+        env->episode_maps_solved = 0;
+    }
+
+    load_random_puzzle(env);
 
     if (!env->initialized) {
         env->tick = rand_r(&env->rng) % env->max_steps;
@@ -264,10 +298,21 @@ void c_step(Boxoban* env) {
 
     //Terminals
     if (env->on_target == env->n_targets) {
-        env->terminals[0] = 1;
         env->rewards[0] += 1.0;
         env->win = 1;
         env->episode_return += env->rewards[0];
+        if (env->curriculum_mode) {
+            if (env->curriculum_difficulty > env->largest_solved_difficulty) {
+                env->largest_solved_difficulty = env->curriculum_difficulty;
+            }
+            env->episode_maps_solved += 1;
+            if (env->curriculum_difficulty < BOXOBAN_INCREMENTAL_MAX_DIFFICULTY) {
+                env->curriculum_difficulty += 1;
+            }
+            load_random_puzzle(env);
+            return;
+        }
+        env->terminals[0] = 1;
         add_log(env);
         c_reset(env);
         return;
