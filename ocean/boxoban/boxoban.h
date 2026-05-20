@@ -148,18 +148,22 @@ void add_log(Boxoban* env) {
     float perf;
     float score;
     float targets_hit = 0.0f;
+    if (env->n_targets > 0) {
+        targets_hit = (float)env->on_target / (float)env->n_targets;
+    }
     if (env->curriculum_mode) {
         score = 0.0f;
         if (env->largest_solved_difficulty >= 0) {
             score = (float)(env->largest_solved_difficulty + 1);
         }
-        perf = score / (float)BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES;
+        if (score >= (float)BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES) {
+            perf = 1.0f;
+        } else {
+            perf = (score + targets_hit) / (float)BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES;
+        }
     } else {
         perf = (env->win == 1) ? 1.0f : 0.0f;
         score = perf;
-    }
-    if (env->n_targets > 0) {
-        targets_hit = (float)env->on_target / (float)env->n_targets;
     }
     env->log.perf += perf;
     env->log.score += score;
