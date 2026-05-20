@@ -17,6 +17,10 @@ void my_init(Env* env, Dict* kwargs) {
     env->max_steps = (int)dict_get(kwargs, "max_steps")->value;
     env->int_r_coeff = (float)dict_get(kwargs, "int_r_coeff")->value;
     env->target_loss_pen_coeff = (float)dict_get(kwargs, "target_loss_pen_coeff")->value;
+    env->curriculum_mode = (env->difficulty_id == 5);
+    env->curriculum_difficulty = 0;
+    env->largest_solved_difficulty = -1;
+    env->episode_maps_solved = 0;
     init(env);
 }
 

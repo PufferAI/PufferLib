@@ -62,6 +62,10 @@ typedef struct {
     Client* client;
     int win;
     float episode_return;
+    int curriculum_mode; // 1 when using incremental difficulty mode
+    int curriculum_difficulty; // current active difficulty in curriculum mode
+    int largest_solved_difficulty; // highest difficulty solved this episode, -1 if none
+    int episode_maps_solved; // number of puzzles solved this episode
 } Boxoban;
 
 void ensure_map_loaded(void);
