@@ -263,8 +263,8 @@ if [ -z "$MODE" ]; then
         -Xcompiler=-DPLATFORM_DESKTOP \
         -std=c++17 \
         -I. -Isrc \
-        -I$PYTHON_INCLUDE -I$PYBIND_INCLUDE -I$NUMPY_INCLUDE \
-        -I$CUDA_HOME/include $CUDNN_IFLAG $NCCL_IFLAG -I$RAYLIB_NAME/include \
+        -I"$PYTHON_INCLUDE" -I"$PYBIND_INCLUDE" -I"$NUMPY_INCLUDE" \
+        -I"$CUDA_HOME/include" $CUDNN_IFLAG $NCCL_IFLAG -I"$RAYLIB_NAME/include" \
         -Xcompiler=-fopenmp \
         -DOBS_TENSOR_T=$OBS_TENSOR_T \
         -DENV_NAME=$ENV \
@@ -291,7 +291,7 @@ elif [ "$MODE" = "cpu" ]; then
         -DPLATFORM_DESKTOP \
         -std=c++17 \
         -I. -Isrc \
-        -I$PYTHON_INCLUDE -I$PYBIND_INCLUDE \
+        -I"$PYTHON_INCLUDE" -I"$PYBIND_INCLUDE" \
         -DOBS_TENSOR_T=$OBS_TENSOR_T \
         -DENV_NAME=$ENV \
         $PRECISION $LINK_OPT \
@@ -310,7 +310,7 @@ elif [ "$MODE" = "profile" ]; then
     echo "Compiling profile binary ($ARCH)..."
     $NVCC $NVCC_OPT -arch=$ARCH -std=c++17 \
         -I. -Isrc -I$SRC_DIR -Ivendor \
-        -I$CUDA_HOME/include $CUDNN_IFLAG $NCCL_IFLAG -I$RAYLIB_NAME/include \
+        -I"$CUDA_HOME/include" $CUDNN_IFLAG $NCCL_IFLAG -I"$RAYLIB_NAME/include" \
         -DOBS_TENSOR_T=$OBS_TENSOR_T \
         -DENV_NAME=$ENV \
         -Xcompiler=-DPLATFORM_DESKTOP \
