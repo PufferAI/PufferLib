@@ -24,6 +24,7 @@ typedef struct {
     float episode_length; // Recommended metric: number of steps of agent episode
     // Any extra fields you add here may be exported to Python in binding.c
     float on_targets; // Number of targets currently boxed
+    float puzzle_ticks; // Steps spent on the final puzzle of the episode
     float n; // Required as the last field 
 } Log;
 
@@ -48,6 +49,7 @@ typedef struct {
     int size;
     int num_agents;
     int tick;
+    int puzzle_tick;
     int max_steps;
     int agent_x;
     int agent_y;
@@ -145,6 +147,7 @@ void init (Boxoban* env) {
 void add_log(Boxoban* env) {
     float perf;
     float score;
+    float targets_hit = 0.0f;
     if (env->curriculum_mode) {
         score = 0.0f;
         if (env->largest_solved_difficulty >= 0) {
@@ -155,11 +158,15 @@ void add_log(Boxoban* env) {
         perf = (env->win == 1) ? 1.0f : 0.0f;
         score = perf;
     }
+    if (env->n_targets > 0) {
+        targets_hit = (float)env->on_target / (float)env->n_targets;
+    }
     env->log.perf += perf;
     env->log.score += score;
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
-    env->log.on_targets += env->on_target;
+    env->log.on_targets += targets_hit;
+    env->log.puzzle_ticks += env->puzzle_tick;
     env->log.n++;
 }
 
@@ -192,11 +199,13 @@ static void load_random_puzzle(Boxoban* env) {
 
     memcpy(env->intermediate_rewards,
             env->observations + TARGET * env->size * env->size,env->size * env->size);
+    env->puzzle_tick = 0;
 }
 
 // Required function
 void c_reset(Boxoban* env) {
     env->tick = 0;
+    env->puzzle_tick = 0;
     env->win = 0;
     env->episode_return = 0;
     if (env->curriculum_mode) {
@@ -209,6 +218,7 @@ void c_reset(Boxoban* env) {
 
     if (!env->initialized) {
         env->tick = rand_r(&env->rng) % env->max_steps;
+        env->puzzle_tick = env->tick;
         env->initialized = true;
     }
 }
@@ -281,6 +291,7 @@ int take_action(Boxoban* env, int action) {
 // Required function
 void c_step(Boxoban* env) {
     env->tick += 1;
+    env->puzzle_tick += 1;
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
        
@@ -318,7 +329,7 @@ void c_step(Boxoban* env) {
         return;
     }
 
-    if (env->tick >= env->max_steps) {
+    if (env->puzzle_tick >= env->max_steps) {
         env->terminals[0] = 1;
         env->rewards[0] -= 1.0; 
         env->episode_return += env->rewards[0];

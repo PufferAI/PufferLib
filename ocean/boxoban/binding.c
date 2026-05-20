@@ -30,4 +30,5 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
     dict_set(out, "targets_hit", log->on_targets);
+    dict_set(out, "final_puzzle_tick", log->puzzle_ticks);
 }
