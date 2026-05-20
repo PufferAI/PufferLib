@@ -156,11 +156,8 @@ void add_log(Boxoban* env) {
         if (env->largest_solved_difficulty >= 0) {
             score = (float)(env->largest_solved_difficulty + 1);
         }
-        if (score >= (float)BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES) {
-            perf = 1.0f;
-        } else {
-            perf = (score + targets_hit) / (float)BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES;
-        }
+        perf = (score + targets_hit) /
+            (float)(BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES + 1);
     } else {
         perf = (env->win == 1) ? 1.0f : 0.0f;
         score = perf;
