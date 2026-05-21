@@ -443,3 +443,31 @@ void create_maze_level(State* s, float difficulty, int seed) {
     int goal_adr = maze_offset(s->height - 2, s->width - 2);
     s->maze[goal_adr] = GOAL;
 }
+
+void create_sparse_maze_level(State* s, float wall_prob, int seed) {
+    unsigned int rng = seed;
+    memset(s->maze, EMPTY, MAX_SIZE*s->height);
+
+    for (int r = 1; r < s->height - 1; r++) {
+        for (int c = 1; c < s->width - 1; c++) {
+            float u = (float)rand_r(&rng) / (float)RAND_MAX;
+            if (u < wall_prob) {
+                s->maze[maze_offset(r, c)] = WALL;
+            }
+        }
+    }
+
+    make_border(s);
+
+    int goal_y = s->height - 2;
+    int goal_x = s->width - 2;
+    for (int c = 1; c <= goal_x; c++) {
+        s->maze[maze_offset(1, c)] = EMPTY;
+    }
+    for (int r = 1; r <= goal_y; r++) {
+        s->maze[maze_offset(r, goal_x)] = EMPTY;
+    }
+
+    spawn_agent(s, 0, 1, 1);
+    s->maze[maze_offset(goal_y, goal_x)] = GOAL;
+}

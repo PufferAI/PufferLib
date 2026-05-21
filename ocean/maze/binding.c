@@ -20,6 +20,8 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int max_size = MAX_SIZE;
     int num_maps = (int)dict_get(env_kwargs, "num_maps")->value;
     int map_size = (int)dict_get(env_kwargs, "map_size")->value;
+    int sparse = (int)dict_get(env_kwargs, "sparse")->value;
+    float wall_prob = (float)dict_get(env_kwargs, "wall_prob")->value;
 
     if (max_size <= 5) {
         *num_envs_out = 0;
@@ -44,8 +46,12 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
         level->width = sz;
         level->height = sz;
 
-        float difficulty = (float)rand_r(&map_rng) / (float)(RAND_MAX);
-        create_maze_level(level, difficulty, i);
+        if (sparse) {
+            create_sparse_maze_level(level, wall_prob, i);
+        } else {
+            float difficulty = (float)rand_r(&map_rng) / (float)(RAND_MAX);
+            create_maze_level(level, difficulty, i);
+        }
     }
 
     // Allocate all environments
