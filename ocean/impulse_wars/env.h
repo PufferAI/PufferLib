@@ -587,9 +587,9 @@ iwEnv *initEnv(iwEnv *e, uint8_t numDrones, uint8_t numAgents, int8_t mapIdx, ui
     for (uint8_t i = 0; i < NUM_MAPS; i++) {
         const mapEntry *map = maps[i];
         pathingInfo *info = &e->mapPathing[i];
-        info->paths = fastMalloc(map->rows * map->columns * map->rows * map->columns * sizeof(uint8_t));
-        memset(info->paths, UINT8_MAX, map->rows * map->columns * map->rows * map->columns * sizeof(uint8_t));
-        info->pathBuffer = fastCalloc(3 * 8 * map->rows * map->columns, sizeof(int8_t));
+        info->paths = fastMalloc((size_t)map->rows * map->columns * map->rows * map->columns * sizeof(uint8_t));
+        memset(info->paths, UINT8_MAX, (size_t)map->rows * map->columns * map->rows * map->columns * sizeof(uint8_t));
+        info->pathBuffer = fastCalloc((size_t)3 * 8 * map->rows * map->columns, sizeof(int8_t));
     }
 
     e->humanInput = false;
