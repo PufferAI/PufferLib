@@ -21,11 +21,11 @@
 
 typedef struct {
     float score;
-    float n;
     float t_margin_turn_reward;
     float t_cohesion_reward;
     float t_separation_reward;
     float t_alignment_reward;
+    float n;
 } Log;
 
 typedef struct {
@@ -145,11 +145,11 @@ void c_reset(Boids *env) {
 void c_step(Boids *env) {
     Boid* current_boid;
     Boid observed_boid;
-    float vis_vx_sum, vis_vy_sum, vis_x_sum, vis_y_sum, vis_x_avg, vis_y_avg, vis_vx_avg, vis_vy_avg;
+    float vis_vx_sum, vis_vy_sum, vis_x_sum, vis_y_sum;
     float diff_x, diff_y, dist, current_boid_reward;
     float margin_turn_reward, cohesion_reward, separation_reward, alignment_reward;
     float protected_x_sum, protected_y_sum;
-    float rule_dx, rule_dy, rule_mag;
+    float rule_mag;
     unsigned visual_count, protected_count;
     bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
     float mouse_x = (float)GetMouseX();
@@ -200,22 +200,23 @@ void c_step(Boids *env) {
             separation_reward -= rule_mag * env->separation_factor;
         }
         if (visual_count) {
-            vis_x_avg  = vis_x_sum / visual_count;
-            vis_y_avg  = vis_y_sum / visual_count;
-            cohesion_reward -= fabsf(vis_x_avg  - current_boid->x) * env->cohesion_factor;
-            cohesion_reward -= fabsf(vis_y_avg  - current_boid->y) * env->cohesion_factor;
+            cohesion_reward -= (
+                fabsf(vis_x_sum/visual_count  - current_boid->x)
+                + fabsf(vis_y_sum/visual_count  - current_boid->y)
+            ) * env->cohesion_factor;
     
-            vis_vx_avg = vis_vx_sum / visual_count;
-            vis_vy_avg = vis_vy_sum / visual_count;
-            alignment_reward -= fabsf(vis_vx_avg - current_boid->velocity.x) * env->alignment_factor;
-            alignment_reward -= fabsf(vis_vy_avg - current_boid->velocity.y) * env->alignment_factor;
+            alignment_reward -= (
+                fabsf(vis_vx_sum/visual_count - current_boid->velocity.x)
+                + fabsf(vis_vy_sum/visual_count - current_boid->velocity.y)
+            ) * env->alignment_factor;
         }
 
-        if (current_boid->y < TOP_MARGIN || current_boid->x < LEFT_MARGIN
+        margin_turn_reward -= (
+            current_boid->y < TOP_MARGIN
+            || current_boid->x < LEFT_MARGIN
             || current_boid->y + BOID_HEIGHT > HEIGHT - BOTTOM_MARGIN
-            || current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN) {
-            margin_turn_reward -= env->margin_turn_factor;
-        }
+            || current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN
+        ) * env->margin_turn_factor;
         current_boid_reward = margin_turn_reward + cohesion_reward + separation_reward + alignment_reward;
 
         // Normalization
