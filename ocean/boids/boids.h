@@ -145,7 +145,7 @@ void c_reset(Boids *env) {
 void c_step(Boids *env) {
     Boid* current_boid;
     Boid observed_boid;
-    float vis_vx_sum, vis_vy_sum, vis_x_sum, vis_y_sum;
+    float visual_vx_sum, visual_vy_sum, visual_x_sum, visual_y_sum;
     float diff_x, diff_y, dist, current_boid_reward;
     float margin_turn_reward, cohesion_reward, separation_reward, alignment_reward;
     float protected_x_sum, protected_y_sum;
@@ -175,7 +175,7 @@ void c_step(Boids *env) {
         current_boid_reward = 0.0f;
         margin_turn_reward = 0.0f; cohesion_reward = 0.0f; separation_reward = 0.0f; alignment_reward = 0.0f;
         protected_count = 0; visual_count = 0;
-        vis_vx_sum = 0.0f; vis_vy_sum = 0.0f; vis_x_sum = 0.0f; vis_y_sum = 0.0f;
+        visual_vx_sum = 0.0f; visual_vy_sum = 0.0f; visual_x_sum = 0.0f; visual_y_sum = 0.0f;
         protected_x_sum = 0.0f; protected_y_sum = 0.0f;
         for (unsigned observed_indx = 0; observed_indx < env->num_agents; observed_indx++) {
             if (current_indx == observed_indx) continue;
@@ -188,35 +188,35 @@ void c_step(Boids *env) {
                 protected_x_sum += diff_x;
                 protected_y_sum += diff_y;
             } else if (dist < VISUAL_RANGE) {
-                vis_x_sum += observed_boid.x;
-                vis_y_sum += observed_boid.y;
-                vis_vx_sum += observed_boid.velocity.x;
-                vis_vy_sum += observed_boid.velocity.y;
+                visual_x_sum += observed_boid.x;
+                visual_y_sum += observed_boid.y;
+                visual_vx_sum += observed_boid.velocity.x;
+                visual_vy_sum += observed_boid.velocity.y;
                 visual_count++;
             }
         }
         if (protected_count > 0) {
             rule_mag = sqrtf(protected_x_sum*protected_x_sum + protected_y_sum*protected_y_sum) + EPS;
-            separation_reward -= rule_mag * env->separation_factor;
+            separation_reward = rule_mag * -env->separation_factor;
         }
         if (visual_count) {
-            cohesion_reward -= (
-                fabsf(vis_x_sum/visual_count  - current_boid->x)
-                + fabsf(vis_y_sum/visual_count  - current_boid->y)
-            ) * env->cohesion_factor;
+            cohesion_reward = (
+                fabsf(visual_x_sum/visual_count  - current_boid->x)
+                + fabsf(visual_y_sum/visual_count  - current_boid->y)
+            ) * -env->cohesion_factor;
     
-            alignment_reward -= (
-                fabsf(vis_vx_sum/visual_count - current_boid->velocity.x)
-                + fabsf(vis_vy_sum/visual_count - current_boid->velocity.y)
-            ) * env->alignment_factor;
+            alignment_reward = (
+                fabsf(visual_vx_sum/visual_count - current_boid->velocity.x)
+                + fabsf(visual_vy_sum/visual_count - current_boid->velocity.y)
+            ) * -env->alignment_factor;
         }
 
-        margin_turn_reward -= (
+        margin_turn_reward = (
             current_boid->y < TOP_MARGIN
             || current_boid->x < LEFT_MARGIN
             || current_boid->y + BOID_HEIGHT > HEIGHT - BOTTOM_MARGIN
             || current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN
-        ) * env->margin_turn_factor;
+        ) * -env->margin_turn_factor;
         current_boid_reward = margin_turn_reward + cohesion_reward + separation_reward + alignment_reward;
 
         // Normalization
