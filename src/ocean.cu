@@ -1,6 +1,10 @@
 // NMMO3 CUDA encoder: multihot, cuDNN conv, embedding, concat, projection
 // Included by pufferlib.cu — requires precision_t, PrecisionTensor, Allocator, puf_mm, etc.
 
+#ifdef USE_ROCM
+static void create_custom_encoder(const std::string&, Encoder*) {}
+#else
+
 #include "cudnn_conv2d.cu"
 
 // ---- NMMO3 constants ----
@@ -588,3 +592,5 @@ static void create_custom_encoder(const std::string& env_name, Encoder* enc) {
         };
     }
 }
+
+#endif

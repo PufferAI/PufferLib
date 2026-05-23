@@ -1,7 +1,11 @@
 #include <cuda_runtime.h>
+#ifndef USE_ROCM
 #include <cuda_profiler_api.h>
 #include <nvtx3/nvToolsExt.h>
 #include <nvml.h>
+#else
+#include <rocm_smi/rocm_smi.h>
+#endif
 #include <nccl.h>
 #include <vector>
 
@@ -45,6 +49,110 @@ typedef struct {
     cudaEvent_t events[NUM_TRAIN_EVENTS];
     float accum[NUM_PROF];
 } ProfileT;
+
+struct GpuUtil {
+    float gpu_percent;
+    float gpu_mem;
+    float vram_used_gb;
+    float vram_total_gb;
+};
+
+#ifndef USE_ROCM
+using PufferGpuDevice = nvmlDevice_t;
+
+inline void gpu_monitor_init(int gpu_id, PufferGpuDevice* device) {
+    nvmlInit();
+    nvmlDeviceGetHandleByIndex(gpu_id, device);
+}
+
+inline void gpu_monitor_shutdown() {
+    nvmlShutdown();
+}
+
+inline GpuUtil gpu_get_utilization(PufferGpuDevice device) {
+    GpuUtil out = {};
+    nvmlUtilization_t util;
+    if (nvmlDeviceGetUtilizationRates(device, &util) == NVML_SUCCESS) {
+        out.gpu_percent = (float)util.gpu;
+    }
+
+    nvmlMemory_t mem;
+    if (nvmlDeviceGetMemoryInfo(device, &mem) == NVML_SUCCESS && mem.total > 0) {
+        out.gpu_mem = 100.0f * (float)mem.used / (float)mem.total;
+    }
+
+    size_t free_bytes = 0, total_bytes = 0;
+    cudaMemGetInfo(&free_bytes, &total_bytes);
+    if (total_bytes > 0) {
+        out.vram_used_gb = (float)(total_bytes - free_bytes) / (1024.0f * 1024.0f * 1024.0f);
+        out.vram_total_gb = (float)total_bytes / (1024.0f * 1024.0f * 1024.0f);
+    }
+    return out;
+}
+
+inline void profile_begin(const char* tag, bool enable) {
+    if (enable) nvtxRangePushA(tag);
+}
+
+inline void profile_end(bool enable) {
+    if (enable) nvtxRangePop();
+}
+
+inline void gpu_profiler_start(bool enable) {
+    if (enable) cudaProfilerStart();
+}
+
+inline void gpu_profiler_stop(bool enable) {
+    if (enable) cudaProfilerStop();
+}
+#else
+using PufferGpuDevice = uint32_t;
+
+inline void gpu_monitor_init(int gpu_id, PufferGpuDevice* device) {
+    *device = (uint32_t)gpu_id;
+    rsmi_init(RSMI_INIT_FLAG_ALL_GPUS);
+}
+
+inline void gpu_monitor_shutdown() {
+    rsmi_shut_down();
+}
+
+inline GpuUtil gpu_get_utilization(PufferGpuDevice device) {
+    GpuUtil out = {};
+    uint32_t busy = 0;
+    if (rsmi_dev_busy_percent_get(device, &busy) == RSMI_STATUS_SUCCESS) {
+        out.gpu_percent = (float)busy;
+    }
+
+    uint64_t used = 0, total = 0;
+    if (rsmi_dev_memory_usage_get(device, RSMI_MEM_TYPE_VRAM, &used) == RSMI_STATUS_SUCCESS &&
+            rsmi_dev_memory_total_get(device, RSMI_MEM_TYPE_VRAM, &total) == RSMI_STATUS_SUCCESS &&
+            total > 0) {
+        out.gpu_mem = 100.0f * (float)used / (float)total;
+    }
+
+    size_t free_bytes = 0, total_bytes = 0;
+    cudaMemGetInfo(&free_bytes, &total_bytes);
+    if (total_bytes > 0) {
+        out.vram_used_gb = (float)(total_bytes - free_bytes) / (1024.0f * 1024.0f * 1024.0f);
+        out.vram_total_gb = (float)total_bytes / (1024.0f * 1024.0f * 1024.0f);
+    }
+    return out;
+}
+
+inline void profile_begin(const char*, bool) {}
+inline void profile_end(bool) {}
+inline void gpu_profiler_start(bool) {}
+inline void gpu_profiler_stop(bool) {}
+#endif
+
+inline cudaError_t puf_graph_instantiate(cudaGraphExec_t* exec, cudaGraph_t graph) {
+#ifdef USE_ROCM
+    return cudaGraphInstantiate(exec, graph, nullptr, nullptr, 0);
+#else
+    return cudaGraphInstantiate(exec, graph, 0);
+#endif
+}
 
 // Data collected by parallel environment workers. Each worker handles
 // a constant subset of agents 
@@ -361,7 +469,7 @@ typedef struct {
     PrecisionTensor grad_puf;
     LongTensor rng_offset_puf;   // (num_buffers+1,) int64 CUDA device counters
     ProfileT profile;
-    nvmlDevice_t nvml_device;
+    PufferGpuDevice gpu_device;
     long epoch;
     long global_step;
     double start_time;
@@ -390,14 +498,6 @@ Dict* log_environments_impl(PuffeRL& pufferl) {
     Dict* out = create_dict(64);
     static_vec_log(pufferl.vec, out);
     return out;
-}
-
-inline void profile_begin(const char* tag, bool enable) {
-    if (enable) nvtxRangePushA(tag);
-}
-
-inline void profile_end(bool enable) {
-    if (enable) nvtxRangePop();
 }
 
 // Thread-local stream for per-buffer threads (set once by thread_init_wrapper)
@@ -691,7 +791,7 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
         cudaGraph_t _graph;
         assert(cudaStreamEndCapture(current_stream, &_graph) == cudaSuccess
                 && "cudaStreamEndCapture failed");
-        assert(cudaGraphInstantiate(&pufferl->fused_rollout_cudagraphs[graph], _graph, 0) == cudaSuccess
+        assert(puf_graph_instantiate(&pufferl->fused_rollout_cudagraphs[graph], _graph) == cudaSuccess
                 && "cudaGraphInstantiate failed");
         assert(cudaGraphDestroy(_graph) == cudaSuccess && "cudaGraphDestroy failed");
         cudaDeviceSynchronize();
@@ -1095,9 +1195,22 @@ void ppo_loss_fwd_bwd(
 }
 
 #define PRIO_WARP_SIZE 32
-#define PRIO_FULL_MASK 0xffffffff
+#ifdef USE_ROCM
+using PufWarpMask = unsigned long long;
+#else
+using PufWarpMask = unsigned int;
+#endif
 #define PRIO_BLOCK_SIZE 256
 #define PRIO_NUM_WARPS (PRIO_BLOCK_SIZE / PRIO_WARP_SIZE)
+
+__device__ __forceinline__ float prio_warp_sum(float val, int width = PRIO_WARP_SIZE) {
+    PufWarpMask mask = (PufWarpMask)__activemask();
+    for (int s = width / 2; s >= 1; s /= 2) {
+        val += __shfl_down_sync(mask, val, s, width);
+    }
+    return val;
+}
+
 __global__ void compute_prio_adv_reduction(
         const precision_t* __restrict__ advantages,
         float* prio_weights, float prio_alpha, int stride) {
@@ -1110,9 +1223,7 @@ __global__ void compute_prio_adv_reduction(
         local_sum += fabsf(to_float(advantages[offset + t]));
     }
 
-    for (int s = PRIO_WARP_SIZE / 2; s >= 1; s /= 2) {
-        local_sum += __shfl_down_sync(PRIO_FULL_MASK, local_sum, s);
-    }
+    local_sum = prio_warp_sum(local_sum);
     if (tx == 0) {
         float pw = __powf(local_sum, prio_alpha);
         if (isnan(pw) || isinf(pw)) {
@@ -1135,9 +1246,7 @@ __global__ void compute_prio_normalize(float* prio_weights, int length) {
     for (int t = tx; t < length; t += blockDim.x) {
         local_sum += prio_weights[t];
     }
-    for (int s = PRIO_WARP_SIZE / 2; s >= 1; s /= 2) {
-        local_sum += __shfl_down_sync(PRIO_FULL_MASK, local_sum, s);
-    }
+    local_sum = prio_warp_sum(local_sum);
     if (lane == 0) {
         shmem[warp_id] = local_sum;
     }
@@ -1145,9 +1254,7 @@ __global__ void compute_prio_normalize(float* prio_weights, int length) {
 
     if (warp_id == 0) {
         float val = (lane < PRIO_NUM_WARPS) ? shmem[lane] : 0.0f;
-        for (int s = PRIO_NUM_WARPS / 2; s >= 1; s /= 2) {
-            val += __shfl_down_sync(PRIO_FULL_MASK, val, s);
-        }
+        val = prio_warp_sum(val, PRIO_NUM_WARPS);
         if (tx == 0) {
             block_sum = val + eps;
         }
@@ -1627,7 +1734,7 @@ void train_impl(PuffeRL& pufferl) {
                 cudaGraph_t _graph;
                 assert(cudaStreamEndCapture(train_stream, &_graph) == cudaSuccess
                         && "cudaStreamEndCapture failed");
-                assert(cudaGraphInstantiate(&pufferl.train_cudagraph, _graph, 0) == cudaSuccess
+                assert(puf_graph_instantiate(&pufferl.train_cudagraph, _graph) == cudaSuccess
                         && "cudaGraphInstantiate failed");
                 assert(cudaGraphDestroy(_graph) == cudaSuccess && "cudaGraphDestroy failed");
                 cudaDeviceSynchronize();
@@ -1962,8 +2069,7 @@ std::unique_ptr<PuffeRL> create_pufferl_impl(HypersT& hypers,
         cudaEventCreate(&pufferl->profile.events[i]);
     }
     memset(pufferl->profile.accum, 0, sizeof(pufferl->profile.accum));
-    nvmlInit();
-    nvmlDeviceGetHandleByIndex(hypers.gpu_id, &pufferl->nvml_device);
+    gpu_monitor_init(hypers.gpu_id, &pufferl->gpu_device);
 
     // Create policy
     int input_size = pufferl->env.obs.shape[1];
@@ -2183,10 +2289,8 @@ std::unique_ptr<PuffeRL> create_pufferl_impl(HypersT& hypers,
         net_callback_wrapper, thread_init_wrapper);
     static_vec_reset(vec);
 
-    if (hypers.profile) {
-        cudaDeviceSynchronize();
-        cudaProfilerStart();
-    }
+    if (hypers.profile) cudaDeviceSynchronize();
+    gpu_profiler_start(hypers.profile);
 
     double now = wall_clock();
     pufferl->start_time = now;
@@ -2198,9 +2302,7 @@ std::unique_ptr<PuffeRL> create_pufferl_impl(HypersT& hypers,
 
 void close_impl(PuffeRL& pufferl) {
     cudaDeviceSynchronize();
-    if (pufferl.hypers.profile) {
-        cudaProfilerStop();
-    }
+    gpu_profiler_stop(pufferl.hypers.profile);
 
     cudaGraphExecDestroy(pufferl.train_cudagraph);
     for (int i = 0; i < pufferl.hypers.horizon * pufferl.hypers.num_buffers; i++) {
@@ -2232,7 +2334,7 @@ void close_impl(PuffeRL& pufferl) {
     for (int i = 0; i < NUM_TRAIN_EVENTS; i++) {
         cudaEventDestroy(pufferl.profile.events[i]);
     }
-    nvmlShutdown();
+    gpu_monitor_shutdown();
 
     static_vec_close(pufferl.vec);
 

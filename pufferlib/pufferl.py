@@ -187,10 +187,49 @@ def _train_worker(args):
 
     backend.close(pufferl)
 
-def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
+def _downsample_logs(all_logs, n, exclude_keys=()):
+    if not all_logs:
+        raise ValueError('Cannot downsample empty logs')
+
+    expected_keys = set(all_logs[0])
+    exclude_keys = set(exclude_keys)
+    metrics = {k: [[]] for k in all_logs[0] if k not in exclude_keys}
+    logged_timesteps = all_logs[-1]['agent_steps']
+    next_bin = logged_timesteps / (n - 1) if n > 1 else np.inf
+    for idx, log in enumerate(all_logs):
+        keys = set(log)
+        missing = expected_keys - keys
+        unexpected = keys - expected_keys
+        if missing or unexpected:
+            raise KeyError(
+                f'Inconsistent log keys at index {idx}: '
+                f'missing={sorted(missing)}, unexpected={sorted(unexpected)}'
+            )
+
+        for k, v in log.items():
+            if k in metrics:
+                metrics[k][-1].append(v)
+
+        if log['agent_steps'] < next_bin:
+            continue
+
+        next_bin += logged_timesteps / (n - 1)
+        for k in metrics:
+            metrics[k][-1] = np.mean(metrics[k][-1])
+            metrics[k].append([])
+
+    for k in metrics:
+        metrics[k][-1] = all_logs[-1][k]
+
+    return metrics
+
+def _train(env_name, args, result_queue=None, verbose=False, sweep_early_stop=None):
     '''Single-GPU training worker. Process target for both DDP ranks and sweep trials.'''
     backend = _resolve_backend(args)
     rank = args['rank']
+    suppress_model_outputs = result_queue is not None or sweep_early_stop is not None
+    if sweep_early_stop is not None:
+        import pufferlib.sweep
     run_id = str(int(1000*time.time()))
     if args['wandb']:
         import wandb
@@ -207,7 +246,7 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 
     # When sweeping, optionally score each trial by winrate vs a fixed enemy
     # checkpoint (match mode) instead of the training-time self-play metric.
-    match_mode = (sweep_obj is not None
+    match_mode = (result_queue is not None
         and bool(args.get('sweep', {}).get('match_enemy_model_path')))
 
     checkpoint_dir = os.path.join(args['checkpoint_dir'], args['env_name'], run_id)
@@ -254,7 +293,7 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 
         # In match-sweep mode we need the final checkpoint to feed into match().
         is_final = epoch == train_epochs - 1
-        should_save = (sweep_obj is None
+        should_save = (not suppress_model_outputs
             and (epoch % args['checkpoint_interval'] == 0 or is_final)
         ) or (match_mode and is_final)
         if should_save:
@@ -267,6 +306,8 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 
         logs = backend.eval_log(pufferl) if epoch >= train_epochs else backend.log(pufferl)
         flat_logs = {**flat_logs, **dict(unroll_nested_dict(logs))}
+        if sweep_early_stop is not None:
+            pufferlib.sweep.apply_early_stop_log_defaults(flat_logs)
 
         if epoch < train_epochs:
             selfplay.step(pufferl, backend, pool_state, flat_logs, epoch)
@@ -283,9 +324,9 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
         if epoch < train_epochs:
             all_logs.append(flat_logs)
 
-            if (sweep_obj is not None
-                    and pufferl.global_step > min(0.20*total_timesteps, 100_000_000) and
-                    sweep_obj.early_stop(logs, target_key)):
+            if (sweep_early_stop is not None
+                    and pufferl.global_step > min(0.20*total_timesteps, 100_000_000)
+                    and sweep_early_stop.early_stop(flat_logs, target_key)):
                 break
         elif flat_logs['env/n'] > args['eval_episodes']:
             break
@@ -326,25 +367,12 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
     # This version has the training perf logs and eval env logs
     all_logs.append(flat_logs)
 
-    # Downsample results
-    n = args['sweep']['downsample']
-    metrics = {k: [[]] for k in all_logs[0]}
-    logged_timesteps = all_logs[-1]['agent_steps']
-    next_bin = logged_timesteps / (n - 1) if n > 1 else np.inf
-    for log in all_logs:
-        for k, v in log.items():
-            metrics[k][-1].append(v)
+    exclude_keys = ()
+    if sweep_early_stop is not None:
+        exclude_keys = pufferlib.sweep.SWEEP_NON_METRIC_LOG_KEYS
 
-        if log['agent_steps'] < next_bin:
-            continue
-
-        next_bin += logged_timesteps / (n - 1)
-        for k in metrics:
-            metrics[k][-1] = np.mean(metrics[k][-1])
-            metrics[k].append([])
-
-    for k in metrics:
-        metrics[k][-1] = all_logs[-1][k]
+    metrics = _downsample_logs(
+        all_logs, args['sweep']['downsample'], exclude_keys=exclude_keys)
 
     # Match-mode: single observation at final-training cost. Protein's curve
     # fit collapses to one point — we only trust the match winrate, not any
@@ -361,7 +389,7 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
         json.dump({**args, 'metrics': metrics}, f)
 
     if args['wandb']:
-        if sweep_obj is None and model_path: # Don't spam uploads during sweeps
+        if not suppress_model_outputs and model_path: # Don't spam uploads during sweeps
             artifact = wandb.Artifact(run_id, type='model')
             artifact.add_file(model_path)
             wandb.run.log_artifact(artifact)
@@ -379,6 +407,9 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 def train(env_name, args=None, gpus=None, **kwargs):
     args = args or load_config(env_name)
     validate_config(args)
+    sweep_obj = kwargs.pop('sweep_obj', None)
+    if sweep_obj is not None and 'sweep_early_stop' not in kwargs:
+        kwargs['sweep_early_stop'] = sweep_obj.early_stop_state()
 
     subprocess = gpus is not None
     gpus = list(gpus or range(args['train']['gpus']))
@@ -395,7 +426,7 @@ def train(env_name, args=None, gpus=None, **kwargs):
         worker_args['rank'] = rank
         worker_args['gpu_id'] = gpu_id
         if rank == 0 and not subprocess:
-            _train(env_name, worker_args, verbose=True)
+            _train(env_name, worker_args, verbose=True, **kwargs)
         else:
             # Protein's GP models live on cuda:0 on non-WSL setups; spawn-pickling
             # them works fine via CUDA IPC. On WSL, sweep.py forces device='cpu'
@@ -407,7 +438,7 @@ def sweep(env_name, args=None, pareto=False):
     '''Train entry point. Handles single-GPU, multi-GPU DDP, and sweeps.'''
     args = args or load_config(env_name)
     exp_gpus = args['train']['gpus']
-    sweep_gpus = args['sweep']['gpus'] or len(os.listdir('/proc/driver/nvidia/gpus'))
+    sweep_gpus = args['sweep']['gpus'] or torch.cuda.device_count()
     args['vec']['num_threads'] //= (sweep_gpus // exp_gpus)
     args['no_model_upload'] = True
 
@@ -430,12 +461,15 @@ def sweep(env_name, args=None, pareto=False):
     active = {}
     completed = 0
     while completed < num_experiments:
-        if len(active) >= sweep_gpus//exp_gpus: # Collect completed runs
+        max_active = sweep_gpus // exp_gpus
+        if active and (len(active) >= max_active or completed + len(active) >= num_experiments):
             gpu_id, scores, costs, timesteps = result_queue.get()
             done_args = active.pop(gpu_id)
 
             if not scores:
                 sweep_obj.observe(done_args, 0, 0, is_failure=True)
+                completed += 1
+                continue
             else:
                 completed += 1
 
@@ -463,7 +497,7 @@ def sweep(env_name, args=None, pareto=False):
         exp_args = deepcopy(args)
         active[gpu_id] = exp_args
         train(env_name, exp_args, range(gpu_id, gpu_id + exp_gpus),
-            sweep_obj=sweep_obj, result_queue=result_queue)
+            result_queue=result_queue, sweep_early_stop=sweep_obj.early_stop_state())
 
 def eval(env_name, args=None, load_path=None):
     '''Evaluate a trained policy. Supports both native and --slowly torch backends.'''

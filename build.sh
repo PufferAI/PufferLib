@@ -10,10 +10,12 @@ set -e
 #   ./build.sh breakout --fast       # Standalone executable (optimized)
 #   ./build.sh breakout --web        # Emscripten web build
 #   ./build.sh breakout --profile    # Kernel profiling binary
+#   ./build.sh breakout --rocm       # HIP/ROCm training backend
+#   ./build.sh breakout --cuda       # CUDA training backend
 #   ./build.sh all                   # Build all envs with default and --float
 
 if [ -z "$1" ]; then
-    echo "Usage: ./build.sh ENV_NAME [--float] [--debug] [--local|--fast|--web|--profile|--cpu|--all]"
+    echo "Usage: ./build.sh ENV_NAME [--float] [--debug] [--cuda|--rocm] [--local|--fast|--web|--profile|--cpu|--all]"
     exit 1
 fi
 ENV=$1
@@ -28,6 +30,8 @@ for arg in "$@"; do
         --web)   MODE=web ;;
         --profile) MODE=profile ;;
         --cpu)   MODE=cpu; PRECISION="-DPRECISION_FLOAT" ;;
+        --cuda)  BACKEND=cuda ;;
+        --rocm)  BACKEND=rocm ;;
         *) echo "Error: unknown argument '$arg'" && exit 1 ;;
     esac
 done
@@ -168,57 +172,9 @@ elif [ "$MODE" = "web" ]; then
     exit 0
 fi
 
-# Find cuDNN path
-CUDA_HOME=${CUDA_HOME:-${CUDA_PATH:-$(dirname "$(dirname "$(which nvcc)")")}}
-CUDNN_IFLAG=""
-CUDNN_LFLAG=""
-for dir in /usr/local/cuda/include /usr/include; do
-    if [ -f "$dir/cudnn.h" ]; then
-        CUDNN_IFLAG="-I$dir"
-        break
-    fi
-done
-for dir in /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu; do
-    if [ -f "$dir/libcudnn.so" ]; then
-        CUDNN_LFLAG="-L$dir"
-        break
-    fi
-done
-if [ -z "$CUDNN_IFLAG" ]; then
-    CUDNN_IFLAG=$(python -c "import nvidia.cudnn, os; print('-I' + os.path.join(nvidia.cudnn.__path__[0], 'include'))" 2>/dev/null || echo "")
-fi
-if [ -z "$CUDNN_LFLAG" ]; then
-    CUDNN_LFLAG=$(python -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
-fi
-
-# NCCL include/lib fallback (mirrors the cuDNN fallback above).
-# Needed when NCCL is provided by the nvidia-nccl-cu12 wheel in the active venv.
-NCCL_IFLAG=""
-NCCL_LFLAG=""
-for dir in /usr/include /usr/local/cuda/include; do
-    if [ -f "$dir/nccl.h" ]; then NCCL_IFLAG="-I$dir"; break; fi
-done
-for dir in /usr/lib/x86_64-linux-gnu /usr/local/cuda/lib64; do
-    if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then NCCL_LFLAG="-L$dir"; break; fi
-done
-if [ -z "$NCCL_IFLAG" ]; then
-    NCCL_IFLAG=$(python -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
-fi
-if [ -z "$NCCL_LFLAG" ]; then
-    NCCL_LFLAG=$(python -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
-fi
-
-WHEEL_RPATH_FLAGS=()
-for lib_flag in "$CUDNN_LFLAG" "$NCCL_LFLAG"; do
-    if [[ "$lib_flag" == -L* ]]; then
-        WHEEL_RPATH_FLAGS+=("-Wl,-rpath,${lib_flag#-L}")
-    fi
-done
-
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
 export CCACHE_BASEDIR="$(pwd)"
 export CCACHE_COMPILERCHECK=content
-NVCC="ccache $CUDA_HOME/bin/nvcc"
 CC="${CC:-$(command -v ccache >/dev/null && echo 'ccache clang' || echo 'clang')}"
 ARCH=${NVCC_ARCH:-native}
 
@@ -238,10 +194,42 @@ if [ ! -f "$BINDING_SRC" ]; then
     exit 1
 fi
 
+if [ -z "$MODE" ]; then
+    if [ -z "$BACKEND" ]; then
+        if python -c "from torch.utils.cpp_extension import IS_HIP_EXTENSION; raise SystemExit(0 if IS_HIP_EXTENSION else 1)" 2>/dev/null && ! command -v nvcc >/dev/null 2>&1; then
+            BACKEND=rocm
+        else
+            BACKEND=cuda
+        fi
+    fi
+elif [ -n "$BACKEND" ]; then
+    echo "Error: --cuda/--rocm only apply to the training backend"
+    exit 1
+fi
+
+if [ "$BACKEND" = "rocm" ] && [ "$ENV" = "nmmo3" ]; then
+    echo "Error: NMMO3 native encoder is CUDA-only in build.sh --rocm"
+    exit 1
+fi
+
+CUDA_HOME=${CUDA_HOME:-${CUDA_PATH:-}}
+CUDA_IFLAG=""
+if [ "$BACKEND" = "cuda" ] || [ "$MODE" = "profile" ]; then
+    if [ -z "$CUDA_HOME" ]; then
+        if command -v nvcc >/dev/null 2>&1; then
+            CUDA_HOME=$(dirname "$(dirname "$(command -v nvcc)")")
+        else
+            echo "Error: nvcc not found. Use --rocm for HIP/ROCm or --cpu for CPU fallback."
+            exit 1
+        fi
+    fi
+    CUDA_IFLAG="-I$CUDA_HOME/include"
+fi
+
 echo "Compiling static library for $ENV..."
 ${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
     -I. -Isrc -I$SRC_DIR -Ivendor \
-    -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
+    -I./$RAYLIB_NAME/include $CUDA_IFLAG \
     -DPLATFORM_DESKTOP \
     -fno-semantic-interposition -fvisibility=hidden \
     -fPIC -fopenmp \
@@ -255,7 +243,59 @@ if [ -z "$OBS_TENSOR_T" ]; then
     exit 1
 fi
 
-if [ -z "$MODE" ]; then
+if [ -z "$MODE" ] && [ "$BACKEND" = "cuda" ]; then
+    # Find cuDNN path
+    CUDNN_IFLAG=""
+    CUDNN_LFLAG=""
+    for dir in /usr/local/cuda/include /usr/include; do
+        if [ -f "$dir/cudnn.h" ]; then
+            CUDNN_IFLAG="-I$dir"
+            break
+        fi
+    done
+    for dir in /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu; do
+        if [ -f "$dir/libcudnn.so" ]; then
+            CUDNN_LFLAG="-L$dir"
+            break
+        fi
+    done
+    if [ -z "$CUDNN_IFLAG" ]; then
+        CUDNN_IFLAG=$(python -c "import nvidia.cudnn, os; print('-I' + os.path.join(nvidia.cudnn.__path__[0], 'include'))" 2>/dev/null || echo "")
+    fi
+    if [ -z "$CUDNN_LFLAG" ]; then
+        CUDNN_LFLAG=$(python -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
+    fi
+
+    # NCCL include/lib fallback (mirrors the cuDNN fallback above).
+    # Needed when NCCL is provided by the nvidia-nccl-cu12 wheel in the active venv.
+    NCCL_IFLAG=""
+    NCCL_LFLAG=""
+    for dir in /usr/include /usr/local/cuda/include; do
+        if [ -f "$dir/nccl.h" ]; then NCCL_IFLAG="-I$dir"; break; fi
+    done
+    for dir in /usr/lib/x86_64-linux-gnu /usr/local/cuda/lib64; do
+        if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then NCCL_LFLAG="-L$dir"; break; fi
+    done
+    if [ -z "$NCCL_IFLAG" ]; then
+        NCCL_IFLAG=$(python -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
+    fi
+    if [ -z "$NCCL_LFLAG" ]; then
+        NCCL_LFLAG=$(python -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
+    fi
+
+    WHEEL_RPATH_FLAGS=()
+    for lib_flag in "$CUDNN_LFLAG" "$NCCL_LFLAG"; do
+        if [[ "$lib_flag" == -L* ]]; then
+            WHEEL_RPATH_FLAGS+=("-Wl,-rpath,${lib_flag#-L}")
+        fi
+    done
+
+    if command -v ccache >/dev/null 2>&1; then
+        NVCC="ccache $CUDA_HOME/bin/nvcc"
+    else
+        NVCC="$CUDA_HOME/bin/nvcc"
+    fi
+
     echo "Compiling CUDA ($ARCH) training backend..."
     $NVCC -c -arch=$ARCH -Xcompiler -fPIC \
         -Xcompiler=-D_GLIBCXX_USE_CXX11_ABI=1 \
@@ -278,6 +318,142 @@ if [ -z "$MODE" ]; then
         "${WHEEL_RPATH_FLAGS[@]}"
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
         $OMP_LIB $LINK_OPT
+        "${SHARED_LDFLAGS[@]}"
+        -o "$OUTPUT"
+    )
+    "${LINK_CMD[@]}"
+    echo "Built: $OUTPUT"
+
+elif [ -z "$MODE" ] && [ "$BACKEND" = "rocm" ]; then
+    mapfile -t ROCM_INFO < <(python - <<'PY'
+import os
+from torch.utils.cpp_extension import ROCM_HOME, library_paths, include_paths
+
+rocm_home = os.environ.get("ROCM_HOME") or ROCM_HOME
+if not rocm_home:
+    raise SystemExit("ROCM_HOME not found. Install/use a ROCm-enabled PyTorch environment.")
+print(rocm_home)
+print(os.environ.get("HIPCC") or os.path.join(rocm_home, "bin", "hipcc"))
+print(os.pathsep.join(include_paths("cuda")))
+print(os.pathsep.join(library_paths("cuda")))
+PY
+)
+    ROCM_HOME=${ROCM_INFO[0]}
+    HIPCC=${ROCM_INFO[1]}
+    ROCM_INCLUDE_PATHS=${ROCM_INFO[2]}
+    ROCM_LIBRARY_PATHS=${ROCM_INFO[3]}
+
+    if [ ! -x "$HIPCC" ]; then
+        if command -v hipcc >/dev/null 2>&1; then
+            HIPCC=$(command -v hipcc)
+        else
+            echo "Error: hipcc not found"
+            exit 1
+        fi
+    fi
+
+    if [ -z "$HIP_CLANG_PATH" ] || [ ! -x "$HIP_CLANG_PATH/clang++" ]; then
+        for dir in "$ROCM_HOME/lib/llvm/bin" /usr/lib/llvm/*/bin; do
+            if [ -x "$dir/clang++" ]; then
+                export HIP_CLANG_PATH="$dir"
+                break
+            fi
+        done
+    fi
+
+    HIPIFY_SRC="build/hip/src"
+    HIPIFY_SRC_ABS="$(pwd)/$HIPIFY_SRC"
+    SRC_ABS="$(pwd)/src"
+    echo "Hipifying CUDA sources into $HIPIFY_SRC..."
+    rm -rf "$HIPIFY_SRC"
+    python - <<PY
+from torch.utils.hipify import hipify_python
+hipify_python.hipify(
+    project_directory="$SRC_ABS",
+    output_directory="$HIPIFY_SRC_ABS",
+    includes=["*"],
+    show_progress=False,
+    show_detailed=False,
+    is_pytorch_extension=True,
+)
+PY
+
+    ROCM_IFLAGS=()
+    IFS=':' read -ra ROCM_INC_ARR <<< "$ROCM_INCLUDE_PATHS"
+    for dir in "${ROCM_INC_ARR[@]}"; do
+        [ -n "$dir" ] && ROCM_IFLAGS+=("-I$dir")
+    done
+    ROCM_LFLAGS=()
+    ROCM_RPATH_FLAGS=()
+    if [ -d /usr/lib64 ]; then
+        ROCM_LFLAGS+=("-L/usr/lib64")
+        ROCM_RPATH_FLAGS+=("-Wl,-rpath,/usr/lib64")
+    fi
+    IFS=':' read -ra ROCM_LIB_ARR <<< "$ROCM_LIBRARY_PATHS"
+    for dir in "${ROCM_LIB_ARR[@]}"; do
+        [ -n "$dir" ] || continue
+        [ "$dir" = "/usr/lib" ] && [ -d /usr/lib64 ] && continue
+        ROCM_LFLAGS+=("-L$dir")
+        ROCM_RPATH_FLAGS+=("-Wl,-rpath,$dir")
+    done
+    ROCM_OMP_LIB=""
+    for dir in /usr/lib64 /usr/lib /usr/local/lib; do
+        if [ -f "$dir/libomp.so" ]; then
+            ROCM_LFLAGS+=("-L$dir")
+            ROCM_RPATH_FLAGS+=("-Wl,-rpath,$dir")
+            ROCM_OMP_LIB="-lomp"
+            break
+        elif [ -f "$dir/libomp5.so" ]; then
+            ROCM_LFLAGS+=("-L$dir")
+            ROCM_RPATH_FLAGS+=("-Wl,-rpath,$dir")
+            ROCM_OMP_LIB="-lomp5"
+            break
+        fi
+    done
+
+    ROCM_ARCH_FLAGS=()
+    if [ -n "$PYTORCH_ROCM_ARCH" ]; then
+        IFS=';' read -ra ROCM_ARCH_ARR <<< "$PYTORCH_ROCM_ARCH"
+        for arch in "${ROCM_ARCH_ARR[@]}"; do
+            [ -n "$arch" ] && ROCM_ARCH_FLAGS+=("--offload-arch=$arch")
+        done
+    fi
+
+    HIPCC_OPT=()
+    if [ -n "$DEBUG" ]; then
+        HIPCC_OPT=(-O0 -g)
+    else
+        HIPCC_OPT=(-O2)
+    fi
+
+    echo "Compiling ROCm/HIP training backend..."
+    "$HIPCC" "${ROCM_ARCH_FLAGS[@]}" -c -fPIC \
+        -D_GLIBCXX_USE_CXX11_ABI=1 \
+        -DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION \
+        -DPLATFORM_DESKTOP \
+        -DUSE_ROCM \
+        -std=c++17 \
+        -I. -I"$HIPIFY_SRC" -I$SRC_DIR -Ivendor -I$RAYLIB_NAME/include \
+        -I$PYTHON_INCLUDE -I$PYBIND_INCLUDE -I$NUMPY_INCLUDE \
+        "${ROCM_IFLAGS[@]}" \
+        -fopenmp \
+        -DOBS_TENSOR_T=$OBS_TENSOR_T \
+        -DENV_NAME=$ENV \
+        $PRECISION "${HIPCC_OPT[@]}" \
+        "$HIPIFY_SRC/bindings.hip" -o build/bindings.o
+
+    "$HIPCC" -c -fPIC -std=c++17 \
+        "${ROCM_IFLAGS[@]}" \
+        src/rocm_cuda_shim.cpp -o build/rocm_cuda_shim.o
+
+    LINK_CMD=(
+        ${CXX:-g++} -shared -fPIC -fopenmp
+        build/bindings.o build/rocm_cuda_shim.o "$STATIC_LIB" "$RAYLIB_A"
+        "${ROCM_LFLAGS[@]}"
+        "${ROCM_RPATH_FLAGS[@]}"
+        -lamdhip64 -lhipblas -lhiprand -lrccl -lrocm_smi64
+        $ROCM_OMP_LIB
+        $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
         -o "$OUTPUT"
     )
