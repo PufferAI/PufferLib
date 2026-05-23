@@ -154,7 +154,7 @@ void c_step(Boids *env) {
     bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
     float mouse_x = (float)GetMouseX();
     float mouse_y = (float)GetMouseY();
-
+    
     env->tick++;
     env->rewards[0] = 0.0;
     env->log.score = 0;
@@ -163,6 +163,7 @@ void c_step(Boids *env) {
     env->log.t_cohesion_reward = 0;
     env->log.t_separation_reward = 0;
     env->log.t_alignment_reward = 0;
+    compute_observations(env);
     for (unsigned current_indx = 0; current_indx < env->num_agents; current_indx++) {
         current_boid = &env->boids[current_indx];
         if (manual_control) {
@@ -241,7 +242,6 @@ void c_step(Boids *env) {
     }
 
     if (env->tick == env->report_interval) env->tick = 0;
-    compute_observations(env);
 }
 
 void c_close_client(Client* client) {
