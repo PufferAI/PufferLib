@@ -171,9 +171,9 @@ void c_step(Boids *env) {
             apply_action(current_boid, (env->actions[current_indx*2] - 1.0f), (env->actions[current_indx*2 + 1] - 1.0f));
         }
 
+        // TODO: consolidate reward calculation with compute_observations()
         // reward calculation
         current_boid_reward = 0.0f;
-        margin_turn_reward = 0.0f; cohesion_reward = 0.0f; separation_reward = 0.0f; alignment_reward = 0.0f;
         protected_count = 0; visual_count = 0;
         visual_vx_sum = 0.0f; visual_vy_sum = 0.0f; visual_x_sum = 0.0f; visual_y_sum = 0.0f;
         protected_x_sum = 0.0f; protected_y_sum = 0.0f;
@@ -217,8 +217,13 @@ void c_step(Boids *env) {
             || current_boid->y + BOID_HEIGHT > HEIGHT - BOTTOM_MARGIN
             || current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN
         ) * -env->margin_turn_factor;
+        // TODO: Normalize:
+        // - Cohesion
+        // - Seperation
+        // - Alignment
         current_boid_reward = margin_turn_reward + cohesion_reward + separation_reward + alignment_reward;
 
+        // TODO: Once done with above TODO, delete rewards normalization section right below here
         // Normalization
         // env->rewards[current_indx] = current_boid_reward / 5.0f;
         // env->rewards[current_indx] = current_boid_reward / 205.0f;
