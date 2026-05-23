@@ -31,12 +31,12 @@ typedef struct {
 typedef struct {
     float x;
     float y;
-} Velocity;
+} Vec2;
 
 typedef struct {
     float x;
     float y;
-    Velocity velocity;
+    Vec2 velocity;
 } Boid;
 
 typedef struct {
