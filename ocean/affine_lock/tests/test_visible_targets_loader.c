@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
     char error[256];
     int rc = affine_lock_visible_targets_load(
         argv[1],
-        AFFINE_LOCK_VISIBLE_TARGET_ODD7_ACTION_SET_HASH,
+        AFFINE_LOCK_VISIBLE_TARGET_8ACTION_V1_HASH,
         &table,
         error,
         sizeof(error));
@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
     EXPECT_EQ_U32(table.record_count, expected_record_count);
     EXPECT_EQ_U64(
         table.action_set_hash,
-        AFFINE_LOCK_VISIBLE_TARGET_ODD7_ACTION_SET_HASH);
+        AFFINE_LOCK_VISIBLE_TARGET_8ACTION_V1_HASH);
 
     const uint32_t expected_depths[4] = {2, 4, 8, 16};
     const uint64_t expected_exact_counts[4] = {

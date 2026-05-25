@@ -39,6 +39,8 @@ typedef struct ActionSet {
     const char* name;
     int num_actions;
     int store_all_d16_by_default;
+    // Stable salt for deterministic sampled-record selection.
+    uint64_t candidate_score_seed;
     const char* default_bin;
     const char* default_json;
     ActionOp ops[MAX_ACTIONS];
@@ -47,11 +49,12 @@ typedef struct ActionSet {
 
 static const ActionSet ACTION_SETS[] = {
     {
-        "odd7_local_perms",
+        "affine_lock_8action_v1",
         8,
         1,
-        "ocean/affine_lock/generated/affine_lock_odd7_visible_targets.bin",
-        "ocean/affine_lock/generated/affine_lock_odd7_visible_targets.json",
+        0x7b7ba09982ec5a9dull,
+        "ocean/affine_lock/generated/affine_lock_8action_visible_targets.bin",
+        "ocean/affine_lock/generated/affine_lock_8action_visible_targets.json",
         {
             ACTION_OP_SHIFT_LEFT,
             ACTION_OP_SHIFT_RIGHT,
@@ -74,11 +77,12 @@ static const ActionSet ACTION_SETS[] = {
         },
     },
     {
-        "mirror4_shift_odd7_adj",
+        "affine_lock_4action_v1",
         4,
         0,
-        "ocean/affine_lock/generated/affine_lock_mirror4_visible_targets.bin",
-        "ocean/affine_lock/generated/affine_lock_mirror4_visible_targets.json",
+        0x8c4d9362024c02b8ull,
+        "ocean/affine_lock/generated/affine_lock_4action_visible_targets.bin",
+        "ocean/affine_lock/generated/affine_lock_4action_visible_targets.json",
         {
             ACTION_OP_SHIFT_RIGHT,
             ACTION_OP_MIRROR,
@@ -439,8 +443,7 @@ static uint64_t candidate_score(
         uint16_t target,
         int depth,
         uint64_t packed_actions) {
-    uint64_t hash = 1469598103934665603ull;
-    hash = mix_bytes(hash, ACTIVE_ACTION_SET->name);
+    uint64_t hash = ACTIVE_ACTION_SET->candidate_score_seed;
     hash = mix_u64(hash, start);
     hash = mix_u64(hash, target);
     hash = mix_u64(hash, (uint64_t)depth);
@@ -1318,12 +1321,12 @@ static int parse_args(int argc, char** argv, Options* options) {
         if (options->packed_output_bin == NULL) {
             options->packed_output_bin =
                 "ocean/affine_lock/generated/"
-                "affine_lock_odd7_visible_targets_packed.bin";
+                "affine_lock_8action_visible_targets_packed.bin";
         }
         if (options->packed_output_json == NULL) {
             options->packed_output_json =
                 "ocean/affine_lock/generated/"
-                "affine_lock_odd7_visible_targets_packed.json";
+                "affine_lock_8action_visible_targets_packed.json";
         }
         int has_explicit_fixed_count = 0;
         for (int i = 0; i < TARGET_DEPTH_COUNT; i++) {

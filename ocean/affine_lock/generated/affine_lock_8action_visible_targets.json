@@ -9,11 +9,11 @@
     "reverse_each_nibble",
     "reverse_each_byte"
   ],
-  "action_set": "odd7_local_perms",
-  "action_set_hash": "0x1ef76c800a2c0686",
-  "binary_path": "ocean/affine_lock/generated/affine_lock_odd7_visible_targets.bin",
+  "action_set": "affine_lock_8action_v1",
+  "action_set_hash": "0x6e11e18fdafc0baa",
+  "binary_path": "ocean/affine_lock/generated/affine_lock_8action_visible_targets.bin",
   "bits": 16,
-  "checksum": "0x3ee1a5dfc6d3bf0a",
+  "checksum": "0x190a8ffaf88641a6",
   "depth_records": [
     {"depth": 2, "exact_pair_count": 2216496, "first_record": 0, "stored_count": 65536},
     {"depth": 4, "exact_pair_count": 34379722, "first_record": 65536, "stored_count": 65536},

@@ -30,7 +30,7 @@
 #define AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR "logs/affine_lock"
 #ifndef AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH
 #define AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH \
-    "ocean/affine_lock/generated/affine_lock_odd7_visible_targets.bin"
+    "ocean/affine_lock/generated/affine_lock_8action_visible_targets.bin"
 #endif
 
 typedef enum AffineLockInitializationMode {
@@ -463,7 +463,7 @@ static int affine_lock_prepare_visible_targets(AffineLockShared* shared) {
     char error[256];
     if (affine_lock_visible_targets_load(
             AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH,
-            AFFINE_LOCK_VISIBLE_TARGET_ODD7_ACTION_SET_HASH,
+            AFFINE_LOCK_VISIBLE_TARGET_8ACTION_V1_HASH,
             &shared->visible_target_table,
             error,
             sizeof(error)) != 0) {

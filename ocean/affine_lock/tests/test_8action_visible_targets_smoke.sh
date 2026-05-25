@@ -2,18 +2,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-SRC="$ROOT/ocean/affine_lock/tools/generate_odd7_visible_targets.c"
-OUT="${TMPDIR:-/tmp}/affine_lock_generate_odd7_visible_targets"
+SRC="$ROOT/ocean/affine_lock/tools/generate_8action_visible_targets.c"
+OUT="${TMPDIR:-/tmp}/affine_lock_generate_8action_visible_targets"
 LOADER_SRC="$ROOT/ocean/affine_lock/tests/test_visible_targets_loader.c"
 LOADER_OUT="${TMPDIR:-/tmp}/affine_lock_test_visible_targets_loader"
-BIN_OUT="${TMPDIR:-/tmp}/affine_lock_odd7_visible_targets.bin"
-JSON_OUT="${TMPDIR:-/tmp}/affine_lock_odd7_visible_targets.json"
-FOUR_BIN_OUT="${TMPDIR:-/tmp}/affine_lock_mirror4_visible_targets.bin"
-FOUR_JSON_OUT="${TMPDIR:-/tmp}/affine_lock_mirror4_visible_targets.json"
+BIN_OUT="${TMPDIR:-/tmp}/affine_lock_8action_visible_targets.bin"
+JSON_OUT="${TMPDIR:-/tmp}/affine_lock_8action_visible_targets.json"
+FOUR_BIN_OUT="${TMPDIR:-/tmp}/affine_lock_4action_visible_targets.bin"
+FOUR_JSON_OUT="${TMPDIR:-/tmp}/affine_lock_4action_visible_targets.json"
 CC_BIN="${CC:-gcc}"
 
 if [ ! -f "$SRC" ]; then
-    echo "missing odd7 visible target generator: $SRC" >&2
+    echo "missing 8-action visible target generator: $SRC" >&2
     exit 1
 fi
 if [ ! -f "$LOADER_SRC" ]; then
@@ -41,7 +41,7 @@ fi
 "$LOADER_OUT" "$BIN_OUT" 100932 128 100548
 
 "$OUT" \
-    --action-set mirror4_shift_odd7_adj \
+    --action-set affine_lock_4action_v1 \
     --sample-per-depth 16 \
     --output-bin "$FOUR_BIN_OUT" \
     --output-json "$FOUR_JSON_OUT"
@@ -58,7 +58,7 @@ four_bin_path = Path(sys.argv[3])
 four_json_path = Path(sys.argv[4])
 manifest = json.loads(json_path.read_text())
 
-assert manifest["action_set"] == "odd7_local_perms"
+assert manifest["action_set"] == "affine_lock_8action_v1"
 assert manifest["action_id_to_name"] == [
     "shift_left",
     "shift_right",
@@ -140,7 +140,7 @@ assert first_depth in {2, 4, 8, 16}
 assert first_packed >= 0
 
 four_manifest = json.loads(four_json_path.read_text())
-assert four_manifest["action_set"] == "mirror4_shift_odd7_adj"
+assert four_manifest["action_set"] == "affine_lock_4action_v1"
 assert four_manifest["action_id_to_name"] == [
     "shift_right",
     "mirror",
