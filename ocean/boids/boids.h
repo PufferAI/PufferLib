@@ -1,7 +1,6 @@
 #include <stdlib.h>
-#include <stdbool.h>
-#include <stdio.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -13,19 +12,19 @@
 #define LEFT_MARGIN 50
 #define RIGHT_MARGIN 50
 #define VELOCITY_CAP 5
-#define VISUAL_RANGE 20
-#define PROTECTED_RANGE 100
+#define VISUAL_RANGE 400
+#define PROTECTED_RANGE 60
 #define WIDTH 1080
 #define HEIGHT 720
-#define BOID_WIDTH 32
-#define BOID_HEIGHT 32
-#define BOID_TEXTURE_PATH "./resources/puffers_128.png"
+#define BOID_WIDTH 32.0f
+#define BOID_HEIGHT 32.0f
+#define BOID_TEXTURE_PATH "./resources/shared/puffers_128.png"
+#define MAX_DIST 2000
+#define EPS 1e-8f // avoids div by zero in angle calc
 
 typedef struct {
     float perf;
     float score;
-    float episode_return;
-    float episode_length;
     float n;
 } Log;
 
@@ -42,47 +41,64 @@ typedef struct {
 
 typedef struct Client Client;
 typedef struct {
-    // an array of shape (num_boids, 4) with the 4 values correspoinding to (x, y, velocity x, velocity y)
+    // Flat array of shape (num_agents * 8) values:
+    // - Each boid has 8 values corresponding to (x, y, vx, vy, dx, dy, dvx, dvy)
+    // - The first 8 values are for the boid itself
+    // - All the other 8 values are for the other boids
     float* observations;
-    // an array of shape (num_boids, 2) with the 2 values correspoinding to (velocity x, velocity y)
-    float* actions;
-    // an array of shape (1) with the summed up reward for all boids
-    float* rewards;
-    unsigned char* terminals; // Not being used but is required by env_binding.h
+    float* actions; // size (num_agents, 2->(dvx, dvy))
+    float* rewards; // size (num_agents) with per-boid rewards
+    float* terminals;
     Boid* boids;
-    unsigned int num_boids;
+    unsigned num_agents;
     float margin_turn_factor;
-    float centering_factor;
-    float avoid_factor;
-    float matching_factor;
+    float cohesion_factor;
+    float separation_factor;
+    float alignment_factor;
     unsigned tick;
     Log log;
-    Log* boid_logs;
     unsigned report_interval;
     Client* client;
-
+    unsigned rng; // unused but required field for vecenv compatibility
 } Boids;
 
 static inline float flmax(float a, float b) { return a > b ? a : b; }
 static inline float flmin(float a, float b) { return a > b ? b : a; }
 static inline float flclip(float x,float lo,float hi) { return flmin(hi,flmax(lo,x)); }
 static inline float rndf(float lo,float hi) { return lo + (float)rand()/(float)RAND_MAX*(hi-lo); }
+static inline float velocity_angle_diff(float ref_x, float ref_y, float actual_x, float actual_y) {
+    float ref_mag = sqrtf(ref_x*ref_x + ref_y*ref_y);
+    float actual_mag = sqrtf(actual_x*actual_x + actual_y*actual_y);
+    float denom, cos_theta;
+
+    if (ref_mag <= EPS && actual_mag <= EPS) return 0.0f;
+
+    denom = ref_mag * actual_mag + EPS;
+    cos_theta = flclip((ref_x*actual_x + ref_y*actual_y) / denom, -1.0f, 1.0f);
+    return acosf(cos_theta);
+}
 
 static void respawn_boid(Boids *env, unsigned int i) {
     env->boids[i].x = rndf(LEFT_MARGIN, WIDTH  - RIGHT_MARGIN);
     env->boids[i].y = rndf(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
     env->boids[i].velocity.x = 0;
     env->boids[i].velocity.y = 0;
-    env->boid_logs[i]       = (Log){0};
 }
 
 void init(Boids *env) {
-    env->boids = (Boid*)calloc(env->num_boids, sizeof(Boid));
-    env->boid_logs = (Log*)calloc(env->num_boids, sizeof(Log));
+    if(env->num_agents < 1) {
+        printf("ERROR: num_agents must be bigger than 0\n");
+        exit(1);
+    }
+    if (env->report_interval < 1) {
+        printf("ERROR: report_interval must be bigger than 0\n");
+        exit(1);
+    }
+    env->boids = (Boid*)calloc(env->num_agents, sizeof(Boid));
     env->log = (Log){0};
     env->tick = 0;
 
-    for (unsigned current_indx = 0; current_indx < env->num_boids; current_indx++) {
+    for (unsigned current_indx = 0; current_indx < env->num_agents; current_indx++) {
         env->boids[current_indx].x = rndf(LEFT_MARGIN, WIDTH  - RIGHT_MARGIN);
         env->boids[current_indx].y = rndf(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
         env->boids[current_indx].velocity.x = 0;
@@ -92,15 +108,31 @@ void init(Boids *env) {
 
 
 static void compute_observations(Boids *env) {
-    unsigned base_indx;
-
     int idx = 0;
-    for (unsigned i=0; i<env->num_boids; i++) {
-        for (unsigned j=0; j<env->num_boids; j++) {
-            env->observations[idx++] = (env->boids[j].x - env->boids[i].x) / WIDTH;
-            env->observations[idx++] = (env->boids[j].y - env->boids[i].y) / HEIGHT;
-            env->observations[idx++] = (env->boids[j].velocity.x - env->boids[i].velocity.x) / VELOCITY_CAP;
-            env->observations[idx++] = (env->boids[j].velocity.y - env->boids[i].velocity.y) / VELOCITY_CAP;
+    float diff_x, diff_y;
+    for (unsigned i=0; i<env->num_agents; i++) {
+        // observations for the current boid
+        env->observations[idx++] = env->boids[i].x / WIDTH;
+        env->observations[idx++] = env->boids[i].y / HEIGHT;
+        env->observations[idx++] = env->boids[i].velocity.x / VELOCITY_CAP;
+        env->observations[idx++] = env->boids[i].velocity.y / VELOCITY_CAP;
+        // zeros for relative observations since comparing to itself will always be 0 (dx, dy, dvx, dvy)
+        for (unsigned j=0; j<4; j++) { env->observations[idx++] = 0; }
+
+        // observations for the other boids compared to the current boid
+        for (unsigned j=0; j<env->num_agents; j++) {
+            if (i == j) continue;
+            diff_x = env->boids[i].x - env->boids[j].x;
+            diff_y = env->boids[i].y - env->boids[j].y;
+
+            env->observations[idx++] = env->boids[j].x / WIDTH;
+            env->observations[idx++] = env->boids[j].y / HEIGHT;
+            env->observations[idx++] = env->boids[j].velocity.x / VELOCITY_CAP;
+            env->observations[idx++] = env->boids[j].velocity.y / VELOCITY_CAP;
+            env->observations[idx++] = diff_x / WIDTH;
+            env->observations[idx++] = diff_y / HEIGHT;
+            env->observations[idx++] = (env->boids[i].velocity.x - env->boids[j].velocity.x) / VELOCITY_CAP;
+            env->observations[idx++] = (env->boids[i].velocity.y - env->boids[j].velocity.y) / VELOCITY_CAP;
         }
     }
 }
@@ -108,7 +140,7 @@ static void compute_observations(Boids *env) {
 void c_reset(Boids *env) {
     env->log = (Log){0};
     env->tick = 0;
-    for (unsigned boid_indx = 0; boid_indx < env->num_boids; boid_indx++) {
+    for (unsigned boid_indx = 0; boid_indx < env->num_agents; boid_indx++) {
         respawn_boid(env, boid_indx);
     }
     compute_observations(env);
@@ -118,40 +150,55 @@ void c_step(Boids *env) {
     Boid* current_boid;
     Boid observed_boid;
     float vis_vx_sum, vis_vy_sum, vis_x_sum, vis_y_sum, vis_x_avg, vis_y_avg, vis_vx_avg, vis_vy_avg;
-    float diff_x, diff_y, dist, protected_dist_sum, current_boid_reward;
+    float diff_x, diff_y, dist, current_boid_reward;
+    float protected_x_sum, protected_y_sum;
+    float normal_vx, normal_vy, angle_diff;
+    float rule_dx, rule_dy, rule_mag;
     unsigned visual_count, protected_count;
     bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
     float mouse_x = (float)GetMouseX();
     float mouse_y = (float)GetMouseY();
 
     env->tick++;
-    env->rewards[0] = 0;
+    env->rewards[0] = 0.0;
+    env->log.perf = 0;
     env->log.score = 0;
-    for (unsigned current_indx = 0; current_indx < env->num_boids; current_indx++) {
+    env->log.n = 0;
+    for (unsigned current_indx = 0; current_indx < env->num_agents; current_indx++) {
         // apply action
         current_boid = &env->boids[current_indx];
         if (manual_control) {
             current_boid->velocity.x = flclip(current_boid->velocity.x + (mouse_x - current_boid->x), -VELOCITY_CAP, VELOCITY_CAP);
             current_boid->velocity.y = flclip(current_boid->velocity.y + (mouse_y - current_boid->y), -VELOCITY_CAP, VELOCITY_CAP);
         } else {
-            current_boid->velocity.x = flclip(current_boid->velocity.x + 2*env->actions[current_indx * 2 + 0], -VELOCITY_CAP, VELOCITY_CAP);
-            current_boid->velocity.y = flclip(current_boid->velocity.y + 2*env->actions[current_indx * 2 + 1], -VELOCITY_CAP, VELOCITY_CAP);
+            current_boid->velocity.x = flclip(current_boid->velocity.x + (env->actions[current_indx*2] - 1.0f), -VELOCITY_CAP, VELOCITY_CAP);
+            current_boid->velocity.y = flclip(current_boid->velocity.y + (env->actions[current_indx*2 + 1] - 1.0f), -VELOCITY_CAP, VELOCITY_CAP);
         }
         current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH  - BOID_WIDTH);
         current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT - BOID_HEIGHT);
 
         // reward calculation
-        current_boid_reward = 0.0f, protected_dist_sum = 0.0f, protected_count = 0.0f;
-        visual_count = 0.0f, vis_vx_sum = 0.0f, vis_vy_sum = 0.0f, vis_x_sum = 0.0f, vis_y_sum = 0.0f;
-        for (unsigned observed_indx = 0; observed_indx < env->num_boids; observed_indx++) {
+        current_boid_reward = 0.0f;
+        protected_count = 0;
+        visual_count = 0;
+        vis_vx_sum = 0.0f;
+        vis_vy_sum = 0.0f;
+        vis_x_sum = 0.0f;
+        vis_y_sum = 0.0f;
+        protected_x_sum = 0.0f;
+        protected_y_sum = 0.0f;
+        normal_vx = 0.0f;
+        normal_vy = 0.0f;
+        for (unsigned observed_indx = 0; observed_indx < env->num_agents; observed_indx++) {
             if (current_indx == observed_indx) continue;
             observed_boid = env->boids[observed_indx];
             diff_x = current_boid->x - observed_boid.x;
             diff_y = current_boid->y - observed_boid.y;
             dist = sqrtf(diff_x*diff_x + diff_y*diff_y);
             if (dist < PROTECTED_RANGE) {
-                protected_dist_sum += (PROTECTED_RANGE - dist);
                 protected_count++;
+                protected_x_sum += diff_x;
+                protected_y_sum += diff_y;
             } else if (dist < VISUAL_RANGE) {
                 vis_x_sum += observed_boid.x;
                 vis_y_sum += observed_boid.y;
@@ -161,8 +208,13 @@ void c_step(Boids *env) {
             }
         }
         if (protected_count > 0) {
-            //current_boid_reward -= fabsf(protected_dist_sum / protected_count) * env->avoid_factor;
-            current_boid_reward -= flclip(protected_count/5.0, 0.0f, 1.0f) * env->avoid_factor;
+            // protected_range_diff = (float)(env->num_agents - protected_count) - protected_count;
+            // current_boid_reward += protected_range_diff * env->seperation_factor;
+
+            rule_mag = sqrtf(protected_x_sum*protected_x_sum + protected_y_sum*protected_y_sum) + EPS;
+            normal_vx += (protected_x_sum / rule_mag) * env->separation_factor;
+            normal_vy += (protected_y_sum / rule_mag) * env->separation_factor;
+            current_boid_reward -= rule_mag * env->separation_factor;
         }
         if (visual_count) {
             vis_x_avg  = vis_x_sum  / visual_count;
@@ -170,38 +222,66 @@ void c_step(Boids *env) {
             vis_vx_avg = vis_vx_sum / visual_count;
             vis_vy_avg = vis_vy_sum / visual_count;
 
-            current_boid_reward -= fabsf(vis_vx_avg - current_boid->velocity.x) * env->matching_factor;
-            current_boid_reward -= fabsf(vis_vy_avg - current_boid->velocity.y) * env->matching_factor;
-            current_boid_reward -= fabsf(vis_x_avg  - current_boid->x) * env->centering_factor;
-            current_boid_reward -= fabsf(vis_y_avg  - current_boid->y) * env->centering_factor;
+            current_boid_reward -= fabsf(vis_x_avg  - current_boid->x) * env->cohesion_factor;
+            current_boid_reward -= fabsf(vis_y_avg  - current_boid->y) * env->cohesion_factor;
+
+            rule_dx = vis_vx_avg - current_boid->velocity.x;
+            rule_dy = vis_vy_avg - current_boid->velocity.y;
+            rule_mag = sqrtf(rule_dx*rule_dx + rule_dy*rule_dy) + EPS;
+            normal_vx += (rule_dx / rule_mag) * env->alignment_factor;
+            normal_vy += (rule_dy / rule_mag) * env->alignment_factor;
+            current_boid_reward -= fabsf(vis_vx_avg - current_boid->velocity.x) * env->alignment_factor;
+            current_boid_reward -= fabsf(vis_vy_avg - current_boid->velocity.y) * env->alignment_factor;
+
+            rule_dx = vis_x_avg - current_boid->x;
+            rule_dy = vis_y_avg - current_boid->y;
+            rule_mag = sqrtf(rule_dx*rule_dx + rule_dy*rule_dy) + EPS;
+            normal_vx += (rule_dx / rule_mag) * env->cohesion_factor;
+            normal_vy += (rule_dy / rule_mag) * env->cohesion_factor;
         }
-        if (current_boid->y < TOP_MARGIN || current_boid->y > HEIGHT - BOTTOM_MARGIN) {
+        if (current_boid->y < TOP_MARGIN
+            || current_boid->y + BOID_HEIGHT > HEIGHT - BOTTOM_MARGIN
+            || current_boid->x < LEFT_MARGIN
+            || current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN
+        ) {
             current_boid_reward -= env->margin_turn_factor;
-        } else {
-            current_boid_reward += env->margin_turn_factor;
         }
-        if (current_boid->x < LEFT_MARGIN || current_boid->x > WIDTH  - RIGHT_MARGIN) {
-            current_boid_reward -= env->margin_turn_factor;
-        } else {
-            current_boid_reward += env->margin_turn_factor;
+
+        if (current_boid->y < TOP_MARGIN) {
+            normal_vy += env->margin_turn_factor;
+        } else if (current_boid->y + BOID_HEIGHT > HEIGHT - BOTTOM_MARGIN) {
+            normal_vy -= env->margin_turn_factor;
+        } else if (current_boid->x < LEFT_MARGIN) {
+            normal_vx += env->margin_turn_factor;
+        } else if (current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN) {
+            normal_vx -= env->margin_turn_factor;
         }
+
+        float n_mag = sqrtf(normal_vx*normal_vx + normal_vy*normal_vy);
+        if (n_mag > VELOCITY_CAP) {
+            normal_vx = (normal_vx / n_mag) * VELOCITY_CAP;
+            normal_vy = (normal_vy / n_mag) * VELOCITY_CAP;
+        }
+        angle_diff = velocity_angle_diff(normal_vx, normal_vy, current_boid->velocity.x, current_boid->velocity.y);
+        // printf("%f, %f || %f, %f = %f\n", current_boid->velocity.x, current_boid->velocity.y, normal_vx, normal_vy, angle_diff);
+
         // Normalization
-        // env->rewards[current_indx] = current_boid_reward / 15.0f;
-        // printf("current_boid_reward: %f\n", current_boid_reward);
-        env->rewards[current_indx] = current_boid_reward / 2.0f;
+        // env->rewards[current_indx] = current_boid_reward / 5.0f;
+        // env->rewards[current_indx] = current_boid_reward / 205.0f;
+        env->rewards[current_indx] = current_boid_reward / 50.0f;
 
         //log updates
         if (env->tick == env->report_interval) {
+            env->log.perf           += angle_diff;
             env->log.score          += env->rewards[current_indx];
             env->log.n              += 1.0f;
-
-            /* clear per-boid log for next episode */
-            // env->boid_logs[boid_indx] = (Log){0};
-            env->tick = 0;
         }
     }
-    //env->log.score /= env->num_boids;
 
+    if (env->tick == env->report_interval) env->tick = 0;
+    // printf("===================================================================================\n");
+    // printf("===================================================================================\n");
+    // printf("===================================================================================\n");
     compute_observations(env);
 }
 
@@ -220,7 +300,6 @@ void c_close_client(Client* client) {
 
 void c_close(Boids* env) {
     free(env->boids);
-    free(env->boid_logs);
     if (env->client != NULL) {
         c_close_client(env->client);
     }
@@ -228,26 +307,26 @@ void c_close(Boids* env) {
 
 Client* make_client(Boids* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
-    
+
     client->width = WIDTH;
     client->height = HEIGHT;
-    
+
     InitWindow(WIDTH, HEIGHT, "PufferLib Boids");
     SetTargetFPS(60);
-    
+
     if (!IsWindowReady()) {
         TraceLog(LOG_ERROR, "Window failed to initialize\n");
         free(client);
         return NULL;
     }
-    
+
     client->boid_texture = LoadTexture(BOID_TEXTURE_PATH);
     if (client->boid_texture.id == 0) {
         TraceLog(LOG_ERROR, "Failed to load texture: %s", BOID_TEXTURE_PATH);
         c_close_client(client);
         return NULL;
     }
-    
+
     return client;
 }
 
@@ -259,7 +338,7 @@ void c_render(Boids* env) {
             return;
         }
     }
-    
+
     if (!WindowShouldClose() && IsWindowReady()) {
         if (IsKeyDown(KEY_ESCAPE)) {
             exit(0);
@@ -268,14 +347,14 @@ void c_render(Boids* env) {
         BeginDrawing();
         ClearBackground((Color){6, 24, 24, 255});
 
-        for (unsigned boid_indx = 0; boid_indx < env->num_boids; boid_indx++) {
+        for (unsigned boid_indx = 0; boid_indx < env->num_agents; boid_indx++) {
             DrawTexturePro(
                 env->client->boid_texture,
                 (Rectangle){
-                    (env->boids[boid_indx].velocity.x > 0) ? 0 : 128,
-                    0,
-                    128,
-                    128,
+                    (env->boids[boid_indx].velocity.x > 0) ? 0.0f : 128.0f,
+                    0.0f,
+                    128.0f,
+                    128.0f,
                 },
                 (Rectangle){
                     env->boids[boid_indx].x,
@@ -283,7 +362,7 @@ void c_render(Boids* env) {
                     BOID_WIDTH,
                     BOID_HEIGHT
                 },
-                (Vector2){0, 0},
+                (Vector2){0.0f, 0.0f},
                 0,
                 WHITE
             );
