@@ -2,7 +2,6 @@
 // Compile using: ./scripts/build.sh boids [local|fast]
 // Run with: ./boids
 
-
 #include <time.h>
 #include "boids.h"
 #include <stdlib.h>
@@ -15,10 +14,17 @@
 
 void generate_dummy_actions(Boids* env) {
     for (unsigned int i = 0; i < env->num_agents; ++i) {
-        float rand_vx = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
-        float rand_vy = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
-        env->actions[i * 2 + 0] = rand_vx * ACTION_SCALE;
-        env->actions[i * 2 + 1] = rand_vy * ACTION_SCALE;
+        env->actions[i * 2] = (float)(rand() % 3);
+        env->actions[i * 2 + 1] = (float)(rand() % 3);
+    }
+}
+
+void apply_manual_actions(Boids* env) {
+    float mouse_x = (float)GetMouseX();
+    float mouse_y = (float)GetMouseY();
+    for (unsigned int i = 0; i < env->num_agents; ++i) {
+        env->actions[i * 2] = mouse_x -  env->boids[i].x;
+        env->actions[i * 2 + 1] = mouse_y - env->boids[i].y;
     }
 }
 
@@ -54,10 +60,14 @@ void demo() {
     c_reset(&env);
     int total_steps = 0;
 
-    printf("Starting Boids demo with %u boids. Press ESC to exit.\n", env.num_agents);
+    printf("Starting Boids demo with %u boids. Press ESC to exit. Hold SHIFT + arrows/WASD to steer.\n", env.num_agents);
 
     while (!WindowShouldClose() && total_steps < MAX_STEPS_DEMO) { // Raylib function to check if ESC is pressed or window closed
-        generate_dummy_actions(&env);
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            apply_manual_actions(&env);
+        } else {
+            generate_dummy_actions(&env);
+        }
         c_step(&env);
         c_render(&env);
         total_steps++;

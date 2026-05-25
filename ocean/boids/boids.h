@@ -54,6 +54,8 @@ typedef struct {
     float* actions; // size (num_agents, 2->(dvx, dvy))
     float* rewards; // size (num_agents) with per-boid rewards
     float* terminals;
+    float** distences; // euclidean distances between boids size (num_agents, num_agents)
+    Vec2** velocities; // velocities between boids size (num_agents, num_agents)
     Boid* boids;
     unsigned num_agents;
     float margin_turn_factor;
@@ -151,10 +153,7 @@ void c_step(Boids *env) {
     float protected_x_sum, protected_y_sum;
     float rule_mag;
     unsigned visual_count, protected_count;
-    bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
-    float mouse_x = (float)GetMouseX();
-    float mouse_y = (float)GetMouseY();
-    
+
     env->tick++;
     env->rewards[0] = 0.0;
     env->log.score = 0;
@@ -166,11 +165,7 @@ void c_step(Boids *env) {
     compute_observations(env);
     for (unsigned current_indx = 0; current_indx < env->num_agents; current_indx++) {
         current_boid = &env->boids[current_indx];
-        if (manual_control) {
-            apply_action(current_boid, (mouse_x - current_boid->x), (mouse_y - current_boid->y));
-        } else {
-            apply_action(current_boid, (env->actions[current_indx*2] - 1.0f), (env->actions[current_indx*2 + 1] - 1.0f));
-        }
+        apply_action(current_boid, (env->actions[current_indx*2] - 1.0f), (env->actions[current_indx*2 + 1] - 1.0f));
 
         // TODO: consolidate reward calculation with compute_observations()
         // reward calculation
