@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "env_name": "affine_lock",
+  "source_project": "affine2",
+  "history_path": "ocean/affine_lock/benchmarks/replay_history.jsonl",
+  "perf_thresholds": [0.05, 0.1, 0.12],
+  "benchmarks": [
+    {
+      "run_id": "hor4bcxf",
+      "profile": "affine_lock_bench_hor4bcxf",
+      "role": "speed_control",
+      "source_config": "wandb/run-20260523_012348-hor4bcxf/files/config.yaml",
+      "baseline": {
+        "n_hist": 106,
+        "final_perf": 0.10091587901115417,
+        "max_perf": 0.10114574432373047,
+        "final_solve_rate": 0.6003319025039673,
+        "final_solved_depth": 2.6896023750305176,
+        "final_depth16_rate": 0.00030734241590835154,
+        "final_max_depth_solve": 0.0,
+        "avg_sps": 2927697.113207547,
+        "final_sps": 2399574.0,
+        "uptime": 68.15091967582703,
+        "agent_steps": 199753728.0
+      },
+      "config": {
+        "env": {"bits": 16, "debug_log_env_id": 0, "debug_log_level": 0, "debug_log_max_episodes": 0, "debug_log_min_depth": 16, "depth_multiplier": 2, "initialization_mode": 4, "max_depth": 16, "start_depth": 2, "step_grace": 0},
+        "vec": {"num_buffers": 2, "num_threads": 16, "total_agents": 8192},
+        "policy": {"expansion_factor": 1, "hidden_size": 128, "num_layers": 2},
+        "torch": {"decoder": "DefaultDecoder", "encoder": "DefaultEncoder", "network": "MinGRU"},
+        "train": {"anneal_lr": 1, "beta1": 0.95, "beta2": 0.999, "clip_coef": 0.2, "ent_coef": 0.001, "eps": 1e-12, "gae_lambda": 0.9, "gamma": 0.995, "gpus": 1, "horizon": 32, "learning_rate": 0.015, "max_grad_norm": 1.5, "min_lr_ratio": 0, "minibatch_size": 8192, "prio_alpha": 0.8, "prio_beta0": 0.2, "replay_ratio": 1, "seed": 42, "total_timesteps": 200000000, "vf_clip_coef": 0.2, "vf_coef": 2, "vtrace_c_clip": 1, "vtrace_rho_clip": 1}
+      }
+    },
+    {
+      "run_id": "qeq3upvw",
+      "profile": "affine_lock_bench_qeq3upvw",
+      "role": "balanced_fast_quality",
+      "source_config": "wandb/run-20260523_025853-qeq3upvw/files/config.yaml",
+      "baseline": {
+        "n_hist": 95,
+        "final_perf": 0.11988793313503265,
+        "max_perf": 0.11991266906261444,
+        "final_solve_rate": 0.6457325220108032,
+        "final_solved_depth": 2.9704205989837646,
+        "final_depth16_rate": 0.00852827075868845,
+        "final_max_depth_solve": 0.00002581716762506403,
+        "avg_sps": 2178628.4210526315,
+        "final_sps": 2085193.0,
+        "uptime": 92.0633716583252,
+        "agent_steps": 199229440.0
+      },
+      "config": {
+        "env": {"bits": 16, "debug_log_env_id": 0, "debug_log_level": 0, "debug_log_max_episodes": 0, "debug_log_min_depth": 16, "depth_multiplier": 2, "initialization_mode": 4, "max_depth": 16, "start_depth": 2, "step_grace": 0},
+        "vec": {"num_buffers": 3.021425936120179, "num_threads": 16, "total_agents": 16384},
+        "policy": {"expansion_factor": 1, "hidden_size": 128, "num_layers": 2.0370766332716053},
+        "torch": {"decoder": "DefaultDecoder", "encoder": "DefaultEncoder", "network": "MinGRU"},
+        "train": {"anneal_lr": 1, "beta1": 0.945560899285088, "beta2": 0.9997218452915493, "clip_coef": 0.6439785632552809, "ent_coef": 0.02294344449610588, "eps": 1e-14, "gae_lambda": 0.9114803334327473, "gamma": 0.9995555033857797, "gpus": 1, "horizon": 128, "learning_rate": 0.0020111791889811425, "max_grad_norm": 1.1958076761642673, "min_lr_ratio": 0, "minibatch_size": 32768, "prio_alpha": 1, "prio_beta0": 1, "replay_ratio": 3.7093450796233114, "seed": 42, "total_timesteps": 199999998.0, "vf_clip_coef": 0.07248133557441705, "vf_coef": 2.7316804077380774, "vtrace_c_clip": 0.9953036722004094, "vtrace_rho_clip": 1.9656835570603546}
+      }
+    },
+    {
+      "run_id": "7l0wz395",
+      "profile": "affine_lock_bench_7l0wz395",
+      "role": "high_quality_mid_speed",
+      "source_config": "wandb/run-20260523_013831-7l0wz395/files/config.yaml",
+      "baseline": {
+        "n_hist": 172,
+        "final_perf": 0.12466670572757721,
+        "max_perf": 0.12475290894508362,
+        "final_solve_rate": 0.6654934287071228,
+        "final_solved_depth": 2.9972758293151855,
+        "final_depth16_rate": 0.00010665528679965064,
+        "final_max_depth_solve": 0.0,
+        "avg_sps": 1929105.1976744186,
+        "final_sps": 1883975.0,
+        "uptime": 116.78402519226074,
+        "agent_steps": 225181696.0
+      },
+      "config": {
+        "env": {"bits": 16, "debug_log_env_id": 0, "debug_log_level": 0, "debug_log_max_episodes": 0, "debug_log_min_depth": 16, "depth_multiplier": 2, "initialization_mode": 4, "max_depth": 16, "start_depth": 2, "step_grace": 0},
+        "vec": {"num_buffers": 3.2126860516145825, "num_threads": 16, "total_agents": 4096},
+        "policy": {"expansion_factor": 1, "hidden_size": 256, "num_layers": 3.388337543234229},
+        "torch": {"decoder": "DefaultDecoder", "encoder": "DefaultEncoder", "network": "MinGRU"},
+        "train": {"anneal_lr": 1, "beta1": 0.8991612035451639, "beta2": 0.9115852194395287, "clip_coef": 0.715205203127116, "ent_coef": 0.12642196906882766, "eps": 2.0956051477581437e-12, "gae_lambda": 0.8817615195428421, "gamma": 0.9080906514714608, "gpus": 1, "horizon": 64, "learning_rate": 0.004863898522591823, "max_grad_norm": 4.382294049765915, "min_lr_ratio": 0, "minibatch_size": 4096, "prio_alpha": 0.47956655733287334, "prio_beta0": 0.8184630628675222, "replay_ratio": 0.5400225459598005, "seed": 42, "total_timesteps": 225431802.0, "vf_clip_coef": 3.5905486386548726, "vf_coef": 3.75580118149519, "vtrace_c_clip": 1.1956067055463793, "vtrace_rho_clip": 2.3990522366017104}
+      }
+    },
+    {
+      "run_id": "3t2wdjxv",
+      "profile": "affine_lock_bench_3t2wdjxv",
+      "role": "high_quality_low_agent_count",
+      "source_config": "wandb/run-20260523_030153-3t2wdjxv/files/config.yaml",
+      "baseline": {
+        "n_hist": 165,
+        "final_perf": 0.1241498738527298,
+        "max_perf": 0.1241498738527298,
+        "final_solve_rate": 0.6640572547912598,
+        "final_solved_depth": 2.991305351257324,
+        "final_depth16_rate": 0.0001062661613104865,
+        "final_max_depth_solve": 0.0,
+        "avg_sps": 1797990.2727272727,
+        "final_sps": 1278077.0,
+        "uptime": 111.13091325759888,
+        "agent_steps": 199753728.0
+      },
+      "config": {
+        "env": {"bits": 16, "debug_log_env_id": 0, "debug_log_level": 0, "debug_log_max_episodes": 0, "debug_log_min_depth": 16, "depth_multiplier": 2, "initialization_mode": 4, "max_depth": 16, "start_depth": 2, "step_grace": 0},
+        "vec": {"num_buffers": 4.802257045328766, "num_threads": 16, "total_agents": 2048},
+        "policy": {"expansion_factor": 1, "hidden_size": 256, "num_layers": 2.777260870401746},
+        "torch": {"decoder": "DefaultDecoder", "encoder": "DefaultEncoder", "network": "MinGRU"},
+        "train": {"anneal_lr": 1, "beta1": 0.8433460519571382, "beta2": 0.9181292855877916, "clip_coef": 0.512572882094055, "ent_coef": 0.20000000000000004, "eps": 3.9323985707589275e-13, "gae_lambda": 0.9426276818555112, "gamma": 0.9004307199831918, "gpus": 1, "horizon": 128, "learning_rate": 0.019315541661589813, "max_grad_norm": 5, "min_lr_ratio": 0, "minibatch_size": 4096, "prio_alpha": 0.31829325004987946, "prio_beta0": 0.9138810365139685, "replay_ratio": 0.25, "seed": 42, "total_timesteps": 199999998.0, "vf_clip_coef": 2.4575624283864093, "vf_coef": 4.643476491946436, "vtrace_c_clip": 0.9998415915939108, "vtrace_rho_clip": 2.4196038507210984}
+      }
+    },
+    {
+      "run_id": "m81cgy1h",
+      "profile": "affine_lock_bench_m81cgy1h",
+      "role": "quality_heavier_train",
+      "source_config": "wandb/run-20260523_021322-m81cgy1h/files/config.yaml",
+      "baseline": {
+        "n_hist": 199,
+        "final_perf": 0.11735261976718903,
+        "max_perf": 0.11755836009979248,
+        "final_solve_rate": 0.6272942423820496,
+        "final_solved_depth": 2.9930899143218994,
+        "final_depth16_rate": 0.006331220269203186,
+        "final_max_depth_solve": 0.0000170652838278329,
+        "avg_sps": 1342570.4522613066,
+        "final_sps": 1318311.0,
+        "uptime": 156.11604833602905,
+        "agent_steps": 208666624.0
+      },
+      "config": {
+        "env": {"bits": 16, "debug_log_env_id": 0, "debug_log_level": 0, "debug_log_max_episodes": 0, "debug_log_min_depth": 16, "depth_multiplier": 2, "initialization_mode": 4, "max_depth": 16, "start_depth": 2, "step_grace": 0},
+        "vec": {"num_buffers": 2.6436298890039325, "num_threads": 16, "total_agents": 8192},
+        "policy": {"expansion_factor": 1, "hidden_size": 256, "num_layers": 2.050260909833014},
+        "torch": {"decoder": "DefaultDecoder", "encoder": "DefaultEncoder", "network": "MinGRU"},
+        "train": {"anneal_lr": 1, "beta1": 0.9407301057786608, "beta2": 0.9999502822261361, "clip_coef": 0.7536038489546627, "ent_coef": 0.006481497779015029, "eps": 1.7930001667000983e-13, "gae_lambda": 0.8585094974547909, "gamma": 0.9989217857295576, "gpus": 1, "horizon": 64, "learning_rate": 0.002088276160692587, "max_grad_norm": 0.15032457197085025, "min_lr_ratio": 0, "minibatch_size": 32768, "prio_alpha": 0.8732696110382676, "prio_beta0": 0.9094459265470505, "replay_ratio": 3.0133061457891017, "seed": 42, "total_timesteps": 208823874.0, "vf_clip_coef": 0.20137061309069396, "vf_coef": 2.4957980621606115, "vtrace_c_clip": 0.2867993798106909, "vtrace_rho_clip": 1.6328596765175465}
+      }
+    },
+    {
+      "run_id": "67g4imdj",
+      "profile": "affine_lock_bench_67g4imdj",
+      "role": "best_quality_near_1m_sps",
+      "source_config": "wandb/run-20260523_053642-67g4imdj/files/config.yaml",
+      "baseline": {
+        "n_hist": 193,
+        "final_perf": 0.12507767975330353,
+        "max_perf": 0.12552018463611603,
+        "final_solve_rate": 0.6619881987571716,
+        "final_solved_depth": 3.0230793952941895,
+        "final_depth16_rate": 0.006480593699961901,
+        "final_max_depth_solve": 0.0,
+        "avg_sps": 959052.6269430051,
+        "final_sps": 927822.0,
+        "uptime": 208.72962284088135,
+        "agent_steps": 199753728.0
+      },
+      "config": {
+        "env": {"bits": 16, "debug_log_env_id": 0, "debug_log_level": 0, "debug_log_max_episodes": 0, "debug_log_min_depth": 16, "depth_multiplier": 2, "initialization_mode": 4, "max_depth": 16, "start_depth": 2, "step_grace": 0},
+        "vec": {"num_buffers": 1.6405354950080473, "num_threads": 16, "total_agents": 4096},
+        "policy": {"expansion_factor": 1, "hidden_size": 256, "num_layers": 2.7743531196191897},
+        "torch": {"decoder": "DefaultDecoder", "encoder": "DefaultEncoder", "network": "MinGRU"},
+        "train": {"anneal_lr": 1, "beta1": 0.8562247566711798, "beta2": 0.9999595860333672, "clip_coef": 0.8099054746532391, "ent_coef": 0.0009017659564854613, "eps": 2.8659551235447866e-11, "gae_lambda": 0.9244132231954485, "gamma": 0.9952115927446116, "gpus": 1, "horizon": 128, "learning_rate": 0.002837780343292602, "max_grad_norm": 0.1, "min_lr_ratio": 0, "minibatch_size": 16384, "prio_alpha": 0.9666361121193041, "prio_beta0": 0.7983654509149234, "replay_ratio": 3.8647213532349367, "seed": 42, "total_timesteps": 199999998.0, "vf_clip_coef": 0.06884478408877186, "vf_coef": 2.795117521304607, "vtrace_c_clip": 0.1, "vtrace_rho_clip": 1.0151138089918017}
+      }
+    }
+  ]
+}
