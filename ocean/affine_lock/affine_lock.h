@@ -6,7 +6,6 @@
 #include <string.h>
 #include <math.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #ifndef AFFINE_LOCK_NO_RENDER
@@ -22,7 +21,7 @@
 #define AFFINE_LOCK_NUM_ATNS 1
 #define AFFINE_LOCK_NUM_ACTIONS 8
 #define AFFINE_LOCK_MAX_SCRAMBLE_DEPTH 16
-#define AFFINE_LOCK_MAX_SOLUTION_DEPTH 64
+#define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16
 #define AFFINE_LOCK_STEP_REWARD (-0.01f)
 #define AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR "logs/affine_lock"
 #ifndef AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH
@@ -79,7 +78,6 @@ typedef struct Log {
 } Log;
 
 typedef struct AffineLockShared {
-    int bits;
     int start_depth;
     int max_depth;
     int depth_multiplier;
@@ -87,7 +85,6 @@ typedef struct AffineLockShared {
     int initialization_mode;
     int num_states;
     uint32_t mask;
-    int inverse_actions[AFFINE_LOCK_NUM_ACTIONS];
     int debug_log_level;
     int debug_log_env_id;
     int debug_log_max_episodes;
@@ -289,7 +286,6 @@ static int affine_lock_init_shared(
         return -1;
     }
 
-    shared->bits = bits;
     shared->start_depth = start_depth;
     shared->max_depth = max_depth;
     shared->depth_multiplier = depth_multiplier;
@@ -312,23 +308,6 @@ static int affine_lock_init_shared(
         fprintf(stderr, "affine_lock: failed to allocate action table\n");
         return -1;
     }
-
-    shared->inverse_actions[AFFINE_LOCK_ACTION_SHIFT_LEFT] =
-        AFFINE_LOCK_ACTION_SHIFT_RIGHT;
-    shared->inverse_actions[AFFINE_LOCK_ACTION_SHIFT_RIGHT] =
-        AFFINE_LOCK_ACTION_SHIFT_LEFT;
-    shared->inverse_actions[AFFINE_LOCK_ACTION_INVERT_RIGHT_7] =
-        AFFINE_LOCK_ACTION_INVERT_RIGHT_7;
-    shared->inverse_actions[AFFINE_LOCK_ACTION_SWAP_ADJACENT_BITS] =
-        AFFINE_LOCK_ACTION_SWAP_ADJACENT_BITS;
-    shared->inverse_actions[AFFINE_LOCK_ACTION_SWAP_ADJACENT_PAIRS] =
-        AFFINE_LOCK_ACTION_SWAP_ADJACENT_PAIRS;
-    shared->inverse_actions[AFFINE_LOCK_ACTION_SWAP_NIBBLES_EACH_BYTE] =
-        AFFINE_LOCK_ACTION_SWAP_NIBBLES_EACH_BYTE;
-    shared->inverse_actions[AFFINE_LOCK_ACTION_REVERSE_EACH_NIBBLE] =
-        AFFINE_LOCK_ACTION_REVERSE_EACH_NIBBLE;
-    shared->inverse_actions[AFFINE_LOCK_ACTION_REVERSE_EACH_BYTE] =
-        AFFINE_LOCK_ACTION_REVERSE_EACH_BYTE;
 
     for (uint32_t state = 0; state < (uint32_t)shared->num_states; state++) {
         for (int action = 0; action < AFFINE_LOCK_NUM_ACTIONS; action++) {

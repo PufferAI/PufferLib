@@ -689,13 +689,23 @@ static void test_count_bits_matches_reference_for_all_states(void) {
 
 static void test_actions_round_trip_for_all_states(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    const int inverse_actions[AFFINE_LOCK_NUM_ACTIONS] = {
+        AFFINE_LOCK_ACTION_SHIFT_RIGHT,
+        AFFINE_LOCK_ACTION_SHIFT_LEFT,
+        AFFINE_LOCK_ACTION_INVERT_RIGHT_7,
+        AFFINE_LOCK_ACTION_SWAP_ADJACENT_BITS,
+        AFFINE_LOCK_ACTION_SWAP_ADJACENT_PAIRS,
+        AFFINE_LOCK_ACTION_SWAP_NIBBLES_EACH_BYTE,
+        AFFINE_LOCK_ACTION_REVERSE_EACH_NIBBLE,
+        AFFINE_LOCK_ACTION_REVERSE_EACH_BYTE,
+    };
     EXPECT_EQ_INT(shared.num_states, 1 << 16);
     EXPECT_EQ_U32(shared.mask, 0xffffu);
 
     for (int action = 0; action < AFFINE_LOCK_NUM_ACTIONS; action++) {
-        int inverse = shared.inverse_actions[action];
+        int inverse = inverse_actions[action];
         EXPECT_TRUE(inverse >= 0 && inverse < AFFINE_LOCK_NUM_ACTIONS);
-        EXPECT_EQ_INT(shared.inverse_actions[inverse], action);
+        EXPECT_EQ_INT(inverse_actions[inverse], action);
 
         for (uint32_t state = 0; state < (uint32_t)shared.num_states; state++) {
             uint32_t next = affine_lock_apply_action(&shared, state, action);
@@ -1668,7 +1678,7 @@ static uint64_t run_mode4_seed_42_golden_sequence(void) {
 
 static void test_mode4_seed_42_golden_checksum(void) {
     uint64_t checksum = run_mode4_seed_42_golden_sequence();
-    EXPECT_EQ_U64(checksum, 0x5f83723922186bc2ull);
+    EXPECT_EQ_U64(checksum, 0xc617dbb2184ef202ull);
 }
 
 static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {

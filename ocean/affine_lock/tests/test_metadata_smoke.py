@@ -153,6 +153,7 @@ def check_config():
 
 def check_binding_text():
     header = (ROOT / "ocean" / "affine_lock" / "affine_lock.h").read_text()
+    assert "#define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16" in header
     assert "AFFINE_LOCK_INIT_EXACT_DISTANCE = 2" in header
     assert "AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 4" in header
     assert "AFFINE_LOCK_INIT_SCRAMBLE" not in header
