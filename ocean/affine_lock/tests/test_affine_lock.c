@@ -89,7 +89,7 @@ static void make_env(
     actions[0] = 0.0f;
     rewards[0] = 0.0f;
     terminals[0] = 0.0f;
-    affine_lock_init_env(env, shared, seed, 0);
+    affine_lock_init_env(env, shared, seed);
     env->observations = observations;
     env->actions = actions;
     env->rewards = rewards;
@@ -319,7 +319,6 @@ static uint64_t reset_snapshot_checksum(const AffineLock* env) {
     hash = mix_u64(hash, (uint64_t)env->scramble_depth);
     hash = mix_u64(hash, (uint64_t)env->curriculum_depth);
     hash = mix_u64(hash, (uint64_t)env->solution_length);
-    hash = mix_u64(hash, (uint64_t)env->known_solution);
     hash = mix_u64(hash, (uint64_t)(env->target_distance + 1));
     hash = mix_float(hash, env->rewards[0]);
     hash = mix_float(hash, env->terminals[0]);
@@ -407,7 +406,7 @@ static void expect_depth_log_delta(
 static void expect_oracle_episode_win(AffineLock* env, int depth) {
     AffineLockShared* shared = env->shared;
     EXPECT_EQ_INT(env->scramble_depth, depth);
-    EXPECT_EQ_INT(env->known_solution, 1);
+    EXPECT_TRUE(env->solution_length > 0);
     expect_solution_reaches_target(shared, env);
 
     Log before = env->log;
@@ -459,7 +458,7 @@ static void expect_oracle_episode_win(AffineLock* env, int depth) {
 static void expect_non_solving_episode_timeout(AffineLock* env, int depth) {
     AffineLockShared* shared = env->shared;
     EXPECT_EQ_INT(env->scramble_depth, depth);
-    EXPECT_EQ_INT(env->known_solution, 1);
+    EXPECT_TRUE(env->solution_length > 0);
     expect_solution_reaches_target(shared, env);
 
     Log before = env->log;
@@ -655,7 +654,6 @@ static void test_exact_distance_initialization_samples_reachable_target(void) {
     EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
     EXPECT_EQ_INT(env.target_distance, shared.start_depth);
     EXPECT_EQ_INT(env.max_steps, env.target_distance);
-    EXPECT_EQ_INT(env.known_solution, 1);
     EXPECT_EQ_INT(env.solution_length, env.target_distance);
     EXPECT_NE_U32(env.state, env.target);
     expect_solution_reaches_target(&shared, &env);
@@ -684,7 +682,6 @@ static void test_exact_distance_initialization_handles_max_requested_depth(void)
     EXPECT_TRUE(env.target_distance > 0);
     EXPECT_EQ_INT(env.target_distance, expected_distance);
     EXPECT_EQ_INT(env.max_steps, env.target_distance);
-    EXPECT_EQ_INT(env.known_solution, 1);
     EXPECT_EQ_INT(env.solution_length, env.target_distance);
     EXPECT_NE_U32(env.state, env.target);
     expect_solution_reaches_target(&shared, &env);
@@ -708,7 +705,6 @@ static void test_visible_target_table_initialization_samples_reachable_target(vo
     EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
     EXPECT_EQ_INT(env.target_distance, shared.start_depth);
     EXPECT_EQ_INT(env.max_steps, env.target_distance);
-    EXPECT_EQ_INT(env.known_solution, 1);
     EXPECT_EQ_INT(env.solution_length, env.target_distance);
     EXPECT_NE_U32(env.state, env.target);
     expect_solution_reaches_target(&shared, &env);
@@ -814,7 +810,6 @@ static void test_distance_generators_match_independent_bfs_over_repeated_resets(
 
             for (int reset = 0; reset < 12; reset++) {
                 c_reset(&env);
-                EXPECT_EQ_INT(env.known_solution, 1);
                 EXPECT_TRUE(env.target_distance > 0);
                 EXPECT_TRUE(env.solution_length > 0);
                 expect_solution_reaches_target(&shared, &env);
@@ -1243,7 +1238,7 @@ static uint64_t run_seed_sequence_checksum(int mode, unsigned int seed) {
         int max_steps = env.max_steps;
         for (int step = 0; step < max_steps + 1; step++) {
             int action = deterministic_stream_action(mode, episode, step);
-            if (env.known_solution && step < env.solution_length) {
+            if (step < env.solution_length) {
                 action = env.solution_actions[step];
             }
             actions[0] = (float)action;
@@ -1285,7 +1280,7 @@ static void test_deterministic_seed_sequences_for_all_initialization_modes(void)
             int max_steps = env_a.max_steps;
             for (int step = 0; step < max_steps + 1; step++) {
                 int action = deterministic_stream_action(mode, episode, step);
-                if (env_a.known_solution && step < env_a.solution_length) {
+                if (step < env_a.solution_length) {
                     action = env_a.solution_actions[step];
                 }
                 atn_a[0] = (float)action;
@@ -1351,7 +1346,7 @@ static uint64_t run_visible_table_seed_42_golden_sequence(void) {
 
 static void test_visible_table_seed_42_golden_checksum(void) {
     uint64_t checksum = run_visible_table_seed_42_golden_sequence();
-    EXPECT_EQ_U64(checksum, 0x191b49f595f121c3ull);
+    EXPECT_EQ_U64(checksum, 0x129c6b7ee4b83567ull);
 }
 
 static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {

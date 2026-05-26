@@ -69,8 +69,7 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
 
     for (int i = 0; i < total_agents; i++) {
         Env* env = &envs[i];
-        affine_lock_init_env(env, shared,
-            affine_lock_env_seed(base_seed, i), i);
+        affine_lock_init_env(env, shared, affine_lock_env_seed(base_seed, i));
 
         buf_agents += env->num_agents;
         buffer_env_counts[buf]++;

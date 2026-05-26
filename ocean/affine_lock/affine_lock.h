@@ -108,7 +108,6 @@ typedef struct AffineLock {
     int curriculum_depth;
     int solution_length;
     int solution_actions[AFFINE_LOCK_MAX_SOLUTION_DEPTH];
-    int known_solution;
     int target_distance;
     float episode_return;
     float last_reward;
@@ -117,8 +116,6 @@ typedef struct AffineLock {
     int hint_visible;
     int hint_action;
     unsigned int rng;
-    int env_id;
-    int episode_id;
     int num_agents;
     AffineLockShared* shared;
     Client* client;
@@ -657,9 +654,7 @@ static void affine_lock_reset_state(AffineLock* env) {
     env->step_count = 0;
     env->episode_return = 0.0f;
     env->target_distance = -1;
-    env->episode_id += 1;
 
-    env->known_solution = 1;
     if (shared->initialization_mode == AFFINE_LOCK_INIT_EXACT_DISTANCE) {
         env->state = affine_lock_random_state_bits(env, shared);
         affine_lock_generate_exact_distance_target(env);
@@ -671,14 +666,12 @@ static void affine_lock_reset_state(AffineLock* env) {
 }
 
 static void affine_lock_init_env(
-        AffineLock* env, AffineLockShared* shared, unsigned int seed, int env_id) {
+        AffineLock* env, AffineLockShared* shared, unsigned int seed) {
     env->shared = shared;
     env->rng = seed;
-    env->env_id = env_id;
     env->num_agents = 1;
     env->curriculum_depth = shared->start_depth;
     env->scramble_depth = shared->start_depth;
-    env->known_solution = 1;
     env->target_distance = -1;
     env->max_steps = shared->start_depth + shared->step_grace;
     env->step_count = 0;

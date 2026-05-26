@@ -148,6 +148,9 @@ def check_binding_text():
     assert "AFFINE_LOCK_INIT_WCA_RANDOM_STATE" not in header
     assert "debug_log" not in header
     assert "short_solve_audit" not in header
+    assert "known_solution" not in header
+    assert "episode_id" not in header
+    assert re.search(r"\bint\s+env_id\s*;", header) is None
     assert header.count("env->target = record->target & shared->mask;") == 1
     assert "(uint32_t)record->target & shared->mask" not in header
 

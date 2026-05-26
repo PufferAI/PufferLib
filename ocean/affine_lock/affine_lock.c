@@ -68,7 +68,7 @@ int main(void) {
         return 1;
     }
 
-    affine_lock_init_env(&env, g_shared, (unsigned int)time(NULL), 0);
+    affine_lock_init_env(&env, g_shared, (unsigned int)time(NULL));
     c_reset(&env);
     c_render(&env);
 
