@@ -46,19 +46,13 @@ typedef struct Log {
     float perf;
     float score;
     float solve_rate;
-    float scramble_depth;
-    float at_max_depth;
     float max_depth_solve;
     float episode_return;
     float episode_length;
     float solve_steps;
     float timeout_rate;
     float invalid_rate;
-    float one_action_target_rate;
-    float two_action_target_rate;
-    float short_solve_rate;
     float solve_efficiency;
-    float reward_state_mismatch;
     float target_distance;
     float solved_target_distance;
     float depth_2_rate;
@@ -117,8 +111,6 @@ typedef struct AffineLock {
     int solution_actions[AFFINE_LOCK_MAX_SOLUTION_DEPTH];
     int known_solution;
     int target_distance;
-    int one_action_target;
-    int two_action_target;
     float episode_return;
     float last_reward;
     int last_terminal;
@@ -386,32 +378,6 @@ static void affine_lock_bfs_visit(
 static uint32_t affine_lock_apply_action(
         const AffineLockShared* shared, uint32_t rel, int action) {
     return shared->next[(rel & shared->mask) * AFFINE_LOCK_NUM_ACTIONS + action];
-}
-
-static int affine_lock_target_reachable_in_one(
-        const AffineLockShared* shared, uint32_t state, uint32_t target) {
-    for (int action = 0; action < AFFINE_LOCK_NUM_ACTIONS; action++) {
-        if (affine_lock_apply_action(shared, state, action) == target) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int affine_lock_target_reachable_in_two(
-        const AffineLockShared* shared, uint32_t state, uint32_t target) {
-    if (affine_lock_target_reachable_in_one(shared, state, target)) {
-        return 1;
-    }
-    for (int first = 0; first < AFFINE_LOCK_NUM_ACTIONS; first++) {
-        uint32_t mid = affine_lock_apply_action(shared, state, first);
-        for (int second = 0; second < AFFINE_LOCK_NUM_ACTIONS; second++) {
-            if (affine_lock_apply_action(shared, mid, second) == target) {
-                return 1;
-            }
-        }
-    }
-    return 0;
 }
 
 static int affine_lock_hint_action(
@@ -686,20 +652,6 @@ static void affine_lock_generate_visible_target_table_target(AffineLock* env) {
     affine_lock_store_visible_solution_path(env, record);
 }
 
-static void affine_lock_finalize_reset(AffineLock* env) {
-    AffineLockShared* shared = env->shared;
-    if (env->target_distance >= 0) {
-        env->one_action_target = env->target_distance == 1;
-        env->two_action_target =
-            env->target_distance == 1 || env->target_distance == 2;
-    } else {
-        env->one_action_target =
-            affine_lock_target_reachable_in_one(shared, env->state, env->target);
-        env->two_action_target =
-            affine_lock_target_reachable_in_two(shared, env->state, env->target);
-    }
-}
-
 static void affine_lock_reset_state(AffineLock* env) {
     AffineLockShared* shared = env->shared;
     env->scramble_depth = env->curriculum_depth;
@@ -718,7 +670,6 @@ static void affine_lock_reset_state(AffineLock* env) {
         affine_lock_generate_visible_target_table_target(env);
         env->max_steps = env->target_distance + shared->step_grace;
     }
-    affine_lock_finalize_reset(env);
 }
 
 static void affine_lock_init_env(
@@ -744,8 +695,7 @@ static void affine_lock_init_env(
 static void affine_lock_add_log(
         AffineLock* env,
         int solved,
-        int invalid,
-        int reward_state_mismatch) {
+        int invalid) {
     AffineLockShared* shared = env->shared;
     int log_depth = affine_lock_log_depth(env);
     int at_max_depth = log_depth == shared->max_depth;
@@ -754,8 +704,6 @@ static void affine_lock_add_log(
     env->log.perf += solve_credit;
     env->log.score += solve_credit;
     env->log.solve_rate += solved ? 1.0f : 0.0f;
-    env->log.scramble_depth += (float)env->scramble_depth;
-    env->log.at_max_depth += at_max_depth ? 1.0f : 0.0f;
     env->log.max_depth_solve +=
         (solved && at_max_depth) ? 1.0f : 0.0f;
     env->log.episode_return += env->episode_return;
@@ -763,12 +711,8 @@ static void affine_lock_add_log(
     env->log.solve_steps += solved ? (float)env->step_count : 0.0f;
     env->log.timeout_rate += (!solved && !invalid) ? 1.0f : 0.0f;
     env->log.invalid_rate += invalid ? 1.0f : 0.0f;
-    env->log.one_action_target_rate += env->one_action_target ? 1.0f : 0.0f;
-    env->log.two_action_target_rate += env->two_action_target ? 1.0f : 0.0f;
-    env->log.short_solve_rate += (solved && env->step_count <= 2) ? 1.0f : 0.0f;
     env->log.solve_efficiency += solved && log_depth > 0 ?
         (float)env->step_count / (float)log_depth : 0.0f;
-    env->log.reward_state_mismatch += reward_state_mismatch ? 1.0f : 0.0f;
     env->log.target_distance += (float)env->target_distance;
     env->log.solved_target_distance +=
         (solved && env->target_distance >= 0) ? (float)env->target_distance : 0.0f;
@@ -835,9 +779,8 @@ static void affine_lock_advance_curriculum(AffineLock* env, int solved) {
 static void affine_lock_finish_episode(
         AffineLock* env,
         int solved,
-        int invalid,
-        int reward_state_mismatch) {
-    affine_lock_add_log(env, solved, invalid, reward_state_mismatch);
+        int invalid) {
+    affine_lock_add_log(env, solved, invalid);
     affine_lock_advance_curriculum(env, solved);
     affine_lock_reset_state(env);
 }
@@ -850,7 +793,6 @@ static void c_step(AffineLock* env) {
     int terminal = 0;
     int solved = 0;
     int invalid = 0;
-    int reward_state_mismatch = 0;
 
     env->terminals[0] = 0.0f;
     env->hint_visible = 0;
@@ -872,8 +814,6 @@ static void c_step(AffineLock* env) {
             terminal = 1;
         }
     }
-    reward_state_mismatch = (reward == 1.0f && env->state != env->target);
-
     env->rewards[0] = reward;
     env->episode_return += reward;
     env->last_reward = reward;
@@ -882,7 +822,7 @@ static void c_step(AffineLock* env) {
         env->terminals[0] = 1.0f;
         env->last_terminal = 1;
         env->last_solved = solved;
-        affine_lock_finish_episode(env, solved, invalid, reward_state_mismatch);
+        affine_lock_finish_episode(env, solved, invalid);
     }
 
     compute_observations(env);

@@ -223,12 +223,10 @@ static void test_log_solve_credit_uses_known_target_distance(void) {
     env.target_distance = 8;
     env.step_count = 8;
 
-    affine_lock_add_log(&env, 1, 0, 0);
+    affine_lock_add_log(&env, 1, 0);
 
     EXPECT_NEAR(env.log.perf, expected_solve_credit(&shared, 8), 0.0f);
     EXPECT_NEAR(env.log.score, expected_solve_credit(&shared, 8), 0.0f);
-    EXPECT_NEAR(env.log.scramble_depth, 16.0f, 0.0f);
-    EXPECT_NEAR(env.log.at_max_depth, 0.0f, 0.0f);
     EXPECT_NEAR(env.log.max_depth_solve, 0.0f, 0.0f);
     EXPECT_NEAR(env.log.solve_efficiency, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.target_distance, 8.0f, 0.0f);
@@ -291,19 +289,13 @@ static uint64_t log_snapshot_checksum(uint64_t hash, const Log* log) {
     hash = mix_float(hash, log->perf);
     hash = mix_float(hash, log->score);
     hash = mix_float(hash, log->solve_rate);
-    hash = mix_float(hash, log->scramble_depth);
-    hash = mix_float(hash, log->at_max_depth);
     hash = mix_float(hash, log->max_depth_solve);
     hash = mix_float(hash, log->episode_return);
     hash = mix_float(hash, log->episode_length);
     hash = mix_float(hash, log->solve_steps);
     hash = mix_float(hash, log->timeout_rate);
     hash = mix_float(hash, log->invalid_rate);
-    hash = mix_float(hash, log->one_action_target_rate);
-    hash = mix_float(hash, log->two_action_target_rate);
-    hash = mix_float(hash, log->short_solve_rate);
     hash = mix_float(hash, log->solve_efficiency);
-    hash = mix_float(hash, log->reward_state_mismatch);
     hash = mix_float(hash, log->target_distance);
     hash = mix_float(hash, log->solved_target_distance);
     hash = mix_float(hash, log->depth_2_rate);
@@ -329,8 +321,6 @@ static uint64_t reset_snapshot_checksum(const AffineLock* env) {
     hash = mix_u64(hash, (uint64_t)env->solution_length);
     hash = mix_u64(hash, (uint64_t)env->known_solution);
     hash = mix_u64(hash, (uint64_t)(env->target_distance + 1));
-    hash = mix_u64(hash, (uint64_t)env->one_action_target);
-    hash = mix_u64(hash, (uint64_t)env->two_action_target);
     hash = mix_float(hash, env->rewards[0]);
     hash = mix_float(hash, env->terminals[0]);
     for (int i = 0; i < AFFINE_LOCK_OBS_SIZE; i++) {
@@ -669,8 +659,6 @@ static void test_exact_distance_initialization_samples_reachable_target(void) {
     EXPECT_EQ_INT(env.solution_length, env.target_distance);
     EXPECT_NE_U32(env.state, env.target);
     expect_solution_reaches_target(&shared, &env);
-    EXPECT_EQ_INT(env.one_action_target, 0);
-    EXPECT_EQ_INT(env.two_action_target, 0);
     expect_observation_matches(&env);
 
     affine_lock_free_shared(&shared);
@@ -727,40 +715,6 @@ static void test_visible_target_table_initialization_samples_reachable_target(vo
     expect_observation_matches(&env);
 
     affine_lock_free_shared(&shared);
-}
-
-static void test_known_distance_initialization_sets_reachability_flags(void) {
-    AffineLockShared depth_one = make_shared(1, 16, 2, 0);
-    affine_lock_configure_initialization(
-        &depth_one, AFFINE_LOCK_INIT_EXACT_DISTANCE);
-
-    AffineLock env_one;
-    float obs_one[AFFINE_LOCK_OBS_SIZE];
-    float atn_one[AFFINE_LOCK_NUM_ATNS];
-    float rew_one[1];
-    float term_one[1];
-    make_env(&env_one, &depth_one, 111, obs_one, atn_one, rew_one, term_one);
-    c_reset(&env_one);
-    EXPECT_EQ_INT(env_one.target_distance, 1);
-    EXPECT_EQ_INT(env_one.one_action_target, 1);
-    EXPECT_EQ_INT(env_one.two_action_target, 1);
-    affine_lock_free_shared(&depth_one);
-
-    AffineLockShared depth_two = make_shared(2, 16, 2, 0);
-    affine_lock_configure_initialization(
-        &depth_two, AFFINE_LOCK_INIT_EXACT_DISTANCE);
-
-    AffineLock env_two;
-    float obs_two[AFFINE_LOCK_OBS_SIZE];
-    float atn_two[AFFINE_LOCK_NUM_ATNS];
-    float rew_two[1];
-    float term_two[1];
-    make_env(&env_two, &depth_two, 112, obs_two, atn_two, rew_two, term_two);
-    c_reset(&env_two);
-    EXPECT_EQ_INT(env_two.target_distance, 2);
-    EXPECT_EQ_INT(env_two.one_action_target, 0);
-    EXPECT_EQ_INT(env_two.two_action_target, 1);
-    affine_lock_free_shared(&depth_two);
 }
 
 static void test_visible_target_table_depths_have_exact_distance_solutions(void) {
@@ -1066,7 +1020,6 @@ static void test_visible_target_table_curriculum_and_logging(void) {
         float prev_n = env.log.n;
         float prev_perf = env.log.perf;
         float prev_max_depth_solve = env.log.max_depth_solve;
-        float prev_reward_mismatch = env.log.reward_state_mismatch;
         float prev_target_distance = env.log.target_distance;
         float prev_solved_target_distance = env.log.solved_target_distance;
         float prev_depth_2 = env.log.depth_2_rate;
@@ -1089,7 +1042,6 @@ static void test_visible_target_table_curriculum_and_logging(void) {
         EXPECT_NEAR(env.log.max_depth_solve,
             prev_max_depth_solve + (metric_depth == shared.max_depth ? 1.0f : 0.0f),
             0.0f);
-        EXPECT_NEAR(env.log.reward_state_mismatch, prev_reward_mismatch, 0.0f);
         EXPECT_NEAR(env.log.target_distance,
             prev_target_distance + (float)target_distance, 0.0f);
         EXPECT_NEAR(env.log.solved_target_distance,
@@ -1119,7 +1071,6 @@ static void test_visible_target_table_curriculum_and_logging(void) {
     float prev_perf = env.log.perf;
     float prev_max_depth_solve = env.log.max_depth_solve;
     float prev_invalid = env.log.invalid_rate;
-    float prev_reward_mismatch = env.log.reward_state_mismatch;
     EXPECT_EQ_INT(env.scramble_depth, shared.max_depth);
     actions[0] = 999.0f;
     c_step(&env);
@@ -1129,7 +1080,6 @@ static void test_visible_target_table_curriculum_and_logging(void) {
     EXPECT_NEAR(env.log.perf, prev_perf, 0.0f);
     EXPECT_NEAR(env.log.max_depth_solve, prev_max_depth_solve, 0.0f);
     EXPECT_NEAR(env.log.invalid_rate, prev_invalid + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.reward_state_mismatch, prev_reward_mismatch, 0.0f);
     EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
 
     affine_lock_free_shared(&shared);
@@ -1401,7 +1351,7 @@ static uint64_t run_mode4_seed_42_golden_sequence(void) {
 
 static void test_mode4_seed_42_golden_checksum(void) {
     uint64_t checksum = run_mode4_seed_42_golden_sequence();
-    EXPECT_EQ_U64(checksum, 0xe96e5d87808520d0ull);
+    EXPECT_EQ_U64(checksum, 0x191b49f595f121c3ull);
 }
 
 static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
@@ -1487,7 +1437,6 @@ int main(void) {
     test_exact_distance_initialization_samples_reachable_target();
     test_exact_distance_initialization_handles_max_requested_depth();
     test_visible_target_table_initialization_samples_reachable_target();
-    test_known_distance_initialization_sets_reachability_flags();
     test_visible_target_table_depths_have_exact_distance_solutions();
     test_visible_target_table_reset_uses_exact_records();
     test_distance_generators_match_independent_bfs_over_repeated_resets();

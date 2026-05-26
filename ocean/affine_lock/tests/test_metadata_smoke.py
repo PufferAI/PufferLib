@@ -195,14 +195,8 @@ def check_binding_text():
     renamed_log_fields = {"target_distance", "solved_target_distance"}
     internal_log_fields = {
         "score",
-        "scramble_depth",
-        "at_max_depth",
         "solve_steps",
-        "one_action_target_rate",
-        "two_action_target_rate",
-        "short_solve_rate",
         "solve_efficiency",
-        "reward_state_mismatch",
         "depth_2_rate",
         "depth_4_rate",
         "depth_8_rate",

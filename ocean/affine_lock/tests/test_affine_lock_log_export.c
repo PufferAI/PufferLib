@@ -261,14 +261,8 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
 
     EXPECT_EQ_INT(out->size, 15);
     EXPECT_TRUE(!dict_has_key(out, "score"));
-    EXPECT_TRUE(!dict_has_key(out, "scramble_depth"));
-    EXPECT_TRUE(!dict_has_key(out, "at_max_depth"));
     EXPECT_TRUE(!dict_has_key(out, "solve_steps"));
-    EXPECT_TRUE(!dict_has_key(out, "one_action_target_rate"));
-    EXPECT_TRUE(!dict_has_key(out, "two_action_target_rate"));
-    EXPECT_TRUE(!dict_has_key(out, "short_solve_rate"));
     EXPECT_TRUE(!dict_has_key(out, "solve_efficiency"));
-    EXPECT_TRUE(!dict_has_key(out, "reward_state_mismatch"));
     EXPECT_TRUE(!dict_has_key(out, "scramble_unique_states"));
     EXPECT_NEAR(dict_value(out, "min_win_moves"), 4.0, 0.0);
     EXPECT_NEAR(dict_value(out, "solved_min_win_moves"), 4.0, 0.0);
