@@ -110,9 +110,6 @@ typedef struct AffineLock {
     int solution_actions[AFFINE_LOCK_MAX_SOLUTION_DEPTH];
     int target_distance;
     float episode_return;
-    float last_reward;
-    int last_terminal;
-    int last_solved;
     int hint_visible;
     int hint_action;
     unsigned int rng;
@@ -674,9 +671,6 @@ static void affine_lock_init_env(
     env->max_steps = shared->start_depth + shared->step_grace;
     env->step_count = 0;
     env->episode_return = 0.0f;
-    env->last_reward = 0.0f;
-    env->last_terminal = 0;
-    env->last_solved = 0;
     env->hint_visible = 0;
     env->hint_action = -1;
 }
@@ -739,9 +733,6 @@ static void compute_observations(AffineLock* env) {
 static void c_reset(AffineLock* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
-    env->last_reward = 0.0f;
-    env->last_terminal = 0;
-    env->last_solved = 0;
     env->hint_visible = 0;
     env->hint_action = -1;
     affine_lock_reset_state(env);
@@ -805,12 +796,9 @@ static void c_step(AffineLock* env) {
     }
     env->rewards[0] = reward;
     env->episode_return += reward;
-    env->last_reward = reward;
 
     if (terminal) {
         env->terminals[0] = 1.0f;
-        env->last_terminal = 1;
-        env->last_solved = solved;
         affine_lock_finish_episode(env, solved, invalid);
     }
 
@@ -873,11 +861,14 @@ static void c_render(AffineLock* env) {
     }
 
     uint32_t rel = (env->state ^ env->target) & env->shared->mask;
+    float display_reward = env->rewards[0];
+    int display_terminal = env->terminals[0] != 0.0f;
+    int display_solved = display_terminal && display_reward > 0.0f;
     const char* status = "running";
     Color status_color = (Color){190, 198, 206, 255};
-    if (env->last_terminal) {
-        status = env->last_solved ? "solved" : "failed";
-        status_color = env->last_solved ?
+    if (display_terminal) {
+        status = display_solved ? "solved" : "failed";
+        status_color = display_solved ?
             (Color){80, 210, 140, 255} : (Color){238, 88, 88, 255};
     }
 
@@ -886,7 +877,7 @@ static void c_render(AffineLock* env) {
     DrawText("Affine Lock", 30, 24, 28, RAYWHITE);
     DrawText(TextFormat("depth %d/%d  step %d/%d  last reward %.2f",
         env->scramble_depth, env->shared->max_depth,
-        env->step_count, env->max_steps, env->last_reward),
+        env->step_count, env->max_steps, display_reward),
         30, 62, 20, (Color){180, 190, 200, 255});
     DrawText(TextFormat("status %s  mismatches 0x%04x",
         status, rel), 30, 90, 20, status_color);
