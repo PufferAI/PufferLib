@@ -35,7 +35,6 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
 
     int start_depth = (int)dict_get(env_kwargs, "start_depth")->value;
     int max_depth = (int)dict_get(env_kwargs, "max_depth")->value;
-    int depth_multiplier = (int)dict_get(env_kwargs, "depth_multiplier")->value;
     int step_grace = (int)dict_get(env_kwargs, "step_grace")->value;
     int initialization_mode =
         (int)dict_get(env_kwargs, "initialization_mode")->value;
@@ -43,7 +42,7 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     AffineLockShared* shared =
         (AffineLockShared*)calloc(1, sizeof(AffineLockShared));
     if (shared == NULL || affine_lock_init_shared(
-            shared, start_depth, max_depth, depth_multiplier, step_grace) != 0) {
+            shared, start_depth, max_depth, step_grace) != 0) {
         fprintf(stderr, "affine_lock: failed to initialize shared state\n");
         free(shared);
         abort();
@@ -116,6 +115,8 @@ void my_log(Log* log, Dict* out) {
         conditional_rate(log->depth_2_solve_rate, log->depth_2_rate);
     float depth_4_solve_rate =
         conditional_rate(log->depth_4_solve_rate, log->depth_4_rate);
+    float depth_6_solve_rate =
+        conditional_rate(log->depth_6_solve_rate, log->depth_6_rate);
     float depth_8_solve_rate =
         conditional_rate(log->depth_8_solve_rate, log->depth_8_rate);
     float depth_16_solve_rate =
@@ -135,6 +136,7 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "conditional_solve_efficiency", conditional_solve_efficiency);
     dict_set(out, "depth_2_solve_rate", depth_2_solve_rate);
     dict_set(out, "depth_4_solve_rate", depth_4_solve_rate);
+    dict_set(out, "depth_6_solve_rate", depth_6_solve_rate);
     dict_set(out, "depth_8_solve_rate", depth_8_solve_rate);
     dict_set(out, "depth_16_solve_rate", depth_16_solve_rate);
 }

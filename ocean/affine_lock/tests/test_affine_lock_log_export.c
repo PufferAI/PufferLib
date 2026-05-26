@@ -75,10 +75,9 @@ static Dict* make_vec_kwargs(void) {
 }
 
 static Dict* make_env_kwargs(int seed) {
-    Dict* env_kwargs = create_dict(6);
+    Dict* env_kwargs = create_dict(5);
     dict_set(env_kwargs, "start_depth", 2);
     dict_set(env_kwargs, "max_depth", 16);
-    dict_set(env_kwargs, "depth_multiplier", 2);
     dict_set(env_kwargs, "step_grace", 0);
     dict_set(env_kwargs, "initialization_mode", 2);
     dict_set(env_kwargs, "seed", seed);
@@ -226,7 +225,7 @@ static void test_vec_init_visible_targets_repeat_across_runs_and_vary_by_env_id(
 
 static void test_free_shared_releases_caller_thread_bfs_scratch(void) {
     AffineLockShared shared = {0};
-    int rc = affine_lock_init_shared(&shared, 2, 16, 2, 0);
+    int rc = affine_lock_init_shared(&shared, 2, 16, 0);
     EXPECT_EQ_INT(rc, 0);
 
     int hint = affine_lock_hint_action(&shared, 0x1234u, 0x5678u);
@@ -248,6 +247,8 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     log.depth_2_solve_rate = 0.125f;
     log.depth_4_rate = 0.5f;
     log.depth_4_solve_rate = 0.375f;
+    log.depth_6_rate = 0.25f;
+    log.depth_6_solve_rate = 0.125f;
     log.depth_8_rate = 0.0f;
     log.depth_8_solve_rate = 0.0f;
     log.depth_16_rate = 0.125f;
@@ -260,7 +261,7 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     Dict* out = create_dict(32);
     my_log(&log, out);
 
-    EXPECT_EQ_INT(out->size, 16);
+    EXPECT_EQ_INT(out->size, 17);
     EXPECT_NEAR(dict_value(out, "score"), 0.75, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "solve_steps"));
     EXPECT_TRUE(!dict_has_key(out, "solve_efficiency"));
@@ -271,6 +272,8 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     EXPECT_NEAR(dict_value(out, "depth_2_solve_rate"), 0.5, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "depth_4_rate"));
     EXPECT_NEAR(dict_value(out, "depth_4_solve_rate"), 0.75, 0.0);
+    EXPECT_TRUE(!dict_has_key(out, "depth_6_rate"));
+    EXPECT_NEAR(dict_value(out, "depth_6_solve_rate"), 0.5, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "depth_8_rate"));
     EXPECT_NEAR(dict_value(out, "depth_8_solve_rate"), 0.0, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "depth_16_rate"));

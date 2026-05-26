@@ -24,6 +24,7 @@ EXPECTED_MY_LOG_KEYS = [
     "conditional_solve_efficiency",
     "depth_2_solve_rate",
     "depth_4_solve_rate",
+    "depth_6_solve_rate",
     "depth_8_solve_rate",
     "depth_16_solve_rate",
 ]
@@ -55,6 +56,7 @@ def check_config():
     assert parse_int(config["env"]["seed"]) == 42
     assert parse_int(config["env"]["start_depth"]) == 2
     assert parse_int(config["env"]["max_depth"]) == 16
+    assert "depth_multiplier" not in config["env"]
     assert parse_int(config["env"]["initialization_mode"]) == 2
     assert "debug_log_level" not in config["env"]
     assert "short_solve_audit_enabled" not in config["env"]
@@ -217,6 +219,7 @@ def check_binding_text():
         "solve_efficiency",
         "depth_2_rate",
         "depth_4_rate",
+        "depth_6_rate",
         "depth_8_rate",
         "depth_16_rate",
     }

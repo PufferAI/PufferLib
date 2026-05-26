@@ -44,7 +44,7 @@ fi
     --output-bin "$BIN_OUT" \
     --output-json "$JSON_OUT"
 
-"$LOADER_OUT" "$BIN_OUT" 100932 128 100548
+"$LOADER_OUT" "$BIN_OUT" 101060 128 100548
 
 "$OUT" \
     --sample-per-depth 8 \
@@ -109,7 +109,7 @@ assert manifest["action_id_to_name"] == [
 ]
 assert manifest["bits"] == 16
 assert manifest["num_actions"] == 8
-assert manifest["depths"] == [2, 4, 8, 16]
+assert manifest["depths"] == [2, 4, 6, 8, 16]
 assert manifest["sample_per_depth"] == 128
 assert manifest["sample_seed"] == 0
 assert manifest["stored_all_depths"] == [16]
@@ -119,12 +119,12 @@ assert manifest["visible_distance_histogram"]["16"] == 100548
 assert manifest["visible_distance_histogram"]["20"] == 4
 
 depth_records = manifest["depth_records"]
-assert [record["depth"] for record in depth_records] == [2, 4, 8, 16]
-for record in depth_records[:3]:
+assert [record["depth"] for record in depth_records] == [2, 4, 6, 8, 16]
+for record in depth_records[:4]:
     assert record["stored_count"] == 128
     assert record["exact_pair_count"] >= record["stored_count"]
-assert depth_records[3]["stored_count"] == 100548
-assert depth_records[3]["exact_pair_count"] == 100548
+assert depth_records[4]["stored_count"] == 100548
+assert depth_records[4]["exact_pair_count"] == 100548
 
 data = bin_path.read_bytes()
 fixed_header = struct.Struct("<8sIIIIIIIQQ")
@@ -147,7 +147,7 @@ assert header_size == manifest["header_size"]
 assert record_size == manifest["record_size"] == 16
 assert bits == 16
 assert num_actions == 8
-assert depth_count == 4
+assert depth_count == 5
 assert record_count == sum(record["stored_count"] for record in depth_records)
 assert checksum == int(manifest["checksum"], 16)
 assert action_set_hash == int(manifest["action_set_hash"], 16)
@@ -175,7 +175,7 @@ assert reserved == 0
 assert first_start <= 0xffff
 assert first_target <= 0xffff
 assert first_length == first_depth
-assert first_depth in {2, 4, 8, 16}
+assert first_depth in {2, 4, 6, 8, 16}
 assert first_packed >= 0
 
 seed_42_manifest = json.loads(seed_42_json_path.read_text())
@@ -202,7 +202,7 @@ def record_span(table_manifest, depth):
     return start, end
 
 sampled_depths_changed = False
-for depth in (2, 4, 8):
+for depth in (2, 4, 6, 8):
     start, end = record_span(seed_42_manifest, depth)
     if seed_42_data[start:end] != seed_69_data[start:end]:
         sampled_depths_changed = True
@@ -221,7 +221,7 @@ assert four_manifest["action_id_to_name"] == [
 ]
 assert four_manifest["bits"] == 16
 assert four_manifest["num_actions"] == 4
-assert four_manifest["depths"] == [2, 4, 8, 16]
+assert four_manifest["depths"] == [2, 4, 6, 8, 16]
 assert four_manifest["sample_per_depth"] == 16
 assert four_manifest["sample_seed"] == 0
 assert four_manifest["stored_all_depths"] == []
@@ -229,6 +229,7 @@ assert four_manifest["max_distance"] == 19
 assert four_manifest["disconnected_starts"] == 0
 assert four_manifest["visible_distance_histogram"]["16"] == 2434606
 assert [record["stored_count"] for record in four_manifest["depth_records"]] == [
+    16,
     16,
     16,
     16,

@@ -29,11 +29,15 @@
 #define AFFINE_LOCK_NUM_ATNS 1
 #define AFFINE_LOCK_NUM_ACTIONS 8
 #define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16
+#define AFFINE_LOCK_CURRICULUM_DEPTH_COUNT 5
 #define AFFINE_LOCK_STEP_REWARD (-0.01f)
 #ifndef AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH
 #define AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH \
     "ocean/affine_lock/generated/affine_lock_8action_visible_targets.bin"
 #endif
+
+static const int AFFINE_LOCK_CURRICULUM_DEPTHS[
+    AFFINE_LOCK_CURRICULUM_DEPTH_COUNT] = {2, 4, 6, 8, 16};
 
 typedef enum AffineLockInitializationMode {
     AFFINE_LOCK_INIT_EXACT_DISTANCE = 1,
@@ -68,6 +72,8 @@ typedef struct Log {
     float depth_2_solve_rate;
     float depth_4_rate;
     float depth_4_solve_rate;
+    float depth_6_rate;
+    float depth_6_solve_rate;
     float depth_8_rate;
     float depth_8_solve_rate;
     float depth_16_rate;
@@ -78,7 +84,6 @@ typedef struct Log {
 typedef struct AffineLockShared {
     int start_depth;
     int max_depth;
-    int depth_multiplier;
     int step_grace;
     int initialization_mode;
     int num_states;
@@ -199,13 +204,11 @@ static int affine_lock_init_shared(
         AffineLockShared* shared,
         int start_depth,
         int max_depth,
-        int depth_multiplier,
         int step_grace) {
     memset(shared, 0, sizeof(*shared));
 
     shared->start_depth = start_depth;
     shared->max_depth = max_depth;
-    shared->depth_multiplier = depth_multiplier;
     shared->step_grace = step_grace;
     shared->initialization_mode = AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE;
     shared->num_states = 1 << AFFINE_LOCK_BITS;
@@ -715,6 +718,9 @@ static void affine_lock_add_log(
     env->log.depth_4_rate += log_depth == 4 ? 1.0f : 0.0f;
     env->log.depth_4_solve_rate +=
         (solved && log_depth == 4) ? 1.0f : 0.0f;
+    env->log.depth_6_rate += log_depth == 6 ? 1.0f : 0.0f;
+    env->log.depth_6_solve_rate +=
+        (solved && log_depth == 6) ? 1.0f : 0.0f;
     env->log.depth_8_rate += log_depth == 8 ? 1.0f : 0.0f;
     env->log.depth_8_solve_rate +=
         (solved && log_depth == 8) ? 1.0f : 0.0f;
@@ -749,6 +755,18 @@ static void c_reset(AffineLock* env) {
     compute_observations(env);
 }
 
+static int affine_lock_next_curriculum_depth(
+        const AffineLockShared* shared,
+        int current_depth) {
+    for (int i = 0; i < AFFINE_LOCK_CURRICULUM_DEPTH_COUNT; i++) {
+        int depth = AFFINE_LOCK_CURRICULUM_DEPTHS[i];
+        if (depth > current_depth) {
+            return depth < shared->max_depth ? depth : shared->max_depth;
+        }
+    }
+    return shared->max_depth;
+}
+
 static void affine_lock_advance_curriculum(AffineLock* env, int solved) {
     AffineLockShared* shared = env->shared;
     if (!solved) {
@@ -756,14 +774,8 @@ static void affine_lock_advance_curriculum(AffineLock* env, int solved) {
         return;
     }
 
-    int next_depth = env->scramble_depth * shared->depth_multiplier;
-    if (next_depth < env->scramble_depth) {
-        next_depth = shared->max_depth;
-    }
-    if (next_depth > shared->max_depth) {
-        next_depth = shared->max_depth;
-    }
-    env->curriculum_depth = next_depth;
+    env->curriculum_depth = affine_lock_next_curriculum_depth(
+        shared, env->scramble_depth);
 }
 
 static void affine_lock_finish_episode(
