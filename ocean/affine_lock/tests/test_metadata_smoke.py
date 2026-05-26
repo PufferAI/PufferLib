@@ -71,6 +71,7 @@ def check_config():
     assert parse_int(config["env"]["start_depth"]) == 2
     assert parse_int(config["env"]["max_depth"]) == 16
     assert parse_int(config["env"]["initialization_mode"]) == 4
+    assert "debug_log_level" not in config["env"]
     assert "short_solve_audit_enabled" not in config["env"]
     assert parse_int(config["train"]["total_timesteps"]) == 200_000_000
     assert parse_int(config["train"]["horizon"]) == 64
@@ -159,6 +160,7 @@ def check_binding_text():
     assert "AFFINE_LOCK_INIT_SCRAMBLE" not in header
     assert "AFFINE_LOCK_INIT_RANDOM" not in header
     assert "AFFINE_LOCK_INIT_WCA_RANDOM_STATE" not in header
+    assert "debug_log" not in header
     assert "short_solve_audit" not in header
 
     env_api_order = [
@@ -189,6 +191,7 @@ def check_binding_text():
     assert "#define MY_THREAD_CLOSE" not in binding
     assert "my_thread_close" not in binding
     assert 'dict_get(env_kwargs, "rank")' not in binding
+    assert "debug_log" not in binding
     assert "short_solve_audit" not in binding
 
     log_keys = re.findall(r'dict_set\(out,\s*"([^"]+)"', binding)

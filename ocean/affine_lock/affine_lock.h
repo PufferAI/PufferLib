@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #ifndef AFFINE_LOCK_NO_RENDER
 #include "raylib.h"
@@ -23,7 +21,6 @@
 #define AFFINE_LOCK_MAX_SCRAMBLE_DEPTH 16
 #define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16
 #define AFFINE_LOCK_STEP_REWARD (-0.01f)
-#define AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR "logs/affine_lock"
 #ifndef AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH
 #define AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH \
     "ocean/affine_lock/generated/affine_lock_8action_visible_targets.bin"
@@ -85,11 +82,6 @@ typedef struct AffineLockShared {
     int initialization_mode;
     int num_states;
     uint32_t mask;
-    int debug_log_level;
-    int debug_log_env_id;
-    int debug_log_max_episodes;
-    int debug_log_min_depth;
-    char debug_log_dir[256];
     uint32_t* next;
     int visible_target_table_loaded;
     AffineLockVisibleTargetTable visible_target_table;
@@ -123,9 +115,6 @@ typedef struct AffineLock {
     int max_steps;
     int scramble_depth;
     int curriculum_depth;
-    int scramble_length;
-    int scramble_actions[AFFINE_LOCK_MAX_SCRAMBLE_DEPTH];
-    uint32_t scramble_states[AFFINE_LOCK_MAX_SCRAMBLE_DEPTH + 1];
     int solution_length;
     int solution_actions[AFFINE_LOCK_MAX_SOLUTION_DEPTH];
     int known_solution;
@@ -142,10 +131,6 @@ typedef struct AffineLock {
     unsigned int rng;
     int env_id;
     int episode_id;
-    int trace_this_episode;
-    int debug_traced_episodes;
-    FILE* debug_log_file;
-    char debug_log_path[256];
     int num_agents;
     AffineLockShared* shared;
     Client* client;
@@ -177,14 +162,6 @@ static const char* affine_lock_action_name(int action) {
     }
 }
 
-static const char* affine_lock_initialization_mode_name(int mode) {
-    switch (mode) {
-        case AFFINE_LOCK_INIT_EXACT_DISTANCE: return "exact_distance";
-        case AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE: return "visible_target_table";
-        default: return "unknown";
-    }
-}
-
 static int affine_lock_count_bits(uint32_t value) {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_popcount(value & ((1u << AFFINE_LOCK_BITS) - 1u));
@@ -195,14 +172,6 @@ static int affine_lock_count_bits(uint32_t value) {
     }
     return count;
 #endif
-}
-
-static void affine_lock_write_bits(FILE* file, uint32_t value) {
-    fputc('"', file);
-    for (int bit = 0; bit < AFFINE_LOCK_BITS; bit++) {
-        fputc((value & (1u << bit)) ? '1' : '0', file);
-    }
-    fputc('"', file);
 }
 
 static void affine_lock_init_observation_bit_patterns(AffineLockShared* shared) {
@@ -293,12 +262,6 @@ static int affine_lock_init_shared(
     shared->initialization_mode = AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE;
     shared->num_states = 1 << AFFINE_LOCK_BITS;
     shared->mask = (1u << AFFINE_LOCK_BITS) - 1u;
-    shared->debug_log_level = 0;
-    shared->debug_log_env_id = 0;
-    shared->debug_log_max_episodes = 0;
-    shared->debug_log_min_depth = 0;
-    snprintf(shared->debug_log_dir, sizeof(shared->debug_log_dir),
-        "%s", AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR);
     affine_lock_init_observation_bit_patterns(shared);
 
     size_t transition_count =
@@ -391,31 +354,7 @@ static int affine_lock_configure_initialization(
     return 0;
 }
 
-static void affine_lock_configure_debug(
-        AffineLockShared* shared,
-        int debug_log_level,
-        int debug_log_env_id,
-        int debug_log_max_episodes,
-        int debug_log_min_depth) {
-    shared->debug_log_level = debug_log_level;
-    shared->debug_log_env_id = debug_log_env_id;
-    shared->debug_log_max_episodes = debug_log_max_episodes;
-    shared->debug_log_min_depth = debug_log_min_depth;
-}
-
 static void affine_lock_cleanup_thread_scratch(void);
-
-#ifdef AFFINE_LOCK_TEST_HOOKS
-static void affine_lock_configure_debug_dir(
-        AffineLockShared* shared,
-        const char* debug_log_dir) {
-    if (debug_log_dir == NULL || debug_log_dir[0] == '\0') {
-        debug_log_dir = AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR;
-    }
-    snprintf(shared->debug_log_dir, sizeof(shared->debug_log_dir),
-        "%s", debug_log_dir);
-}
-#endif
 
 static void affine_lock_free_shared(AffineLockShared* shared) {
     if (shared == NULL) {
@@ -536,43 +475,6 @@ static int affine_lock_target_reachable_in_two(
     return 0;
 }
 
-static int affine_lock_shortest_distance(
-        const AffineLockShared* shared, uint32_t start, uint32_t target) {
-    start &= shared->mask;
-    target &= shared->mask;
-    if (start == target) {
-        return 0;
-    }
-
-    AffineLockBfsScratch* scratch = affine_lock_begin_bfs_scratch(shared);
-    if (scratch == NULL) {
-        return -1;
-    }
-
-    int head = 0;
-    int tail = 0;
-    affine_lock_bfs_visit(scratch, start, 0, start, -1);
-    scratch->queue[tail++] = (uint16_t)start;
-
-    while (head < tail) {
-        uint32_t state = scratch->queue[head++];
-        int next_distance = (int)scratch->distances[state] + 1;
-        for (int action = 0; action < AFFINE_LOCK_NUM_ACTIONS; action++) {
-            uint32_t next = affine_lock_apply_action(shared, state, action);
-            if (affine_lock_bfs_seen(scratch, next)) {
-                continue;
-            }
-            if (next == target) {
-                return next_distance;
-            }
-            affine_lock_bfs_visit(scratch, next, next_distance, state, action);
-            scratch->queue[tail++] = (uint16_t)next;
-        }
-    }
-
-    return -1;
-}
-
 static int affine_lock_hint_action(
         const AffineLockShared* shared, uint32_t start, uint32_t target) {
     start &= shared->mask;
@@ -671,180 +573,8 @@ static int affine_lock_parse_action(float raw_action, int* action_out) {
     return 1;
 }
 
-static int affine_lock_open_debug_log(AffineLock* env) {
-    if (env->debug_log_file != NULL) {
-        return 1;
-    }
-
-    if (strcmp(env->shared->debug_log_dir, AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR) == 0) {
-        mkdir("logs", 0777);
-    }
-    mkdir(env->shared->debug_log_dir, 0777);
-    snprintf(env->debug_log_path, sizeof(env->debug_log_path),
-        "%s/debug_trace_%ld_env%d.jsonl",
-        env->shared->debug_log_dir, (long)getpid(), env->env_id);
-    env->debug_log_file = fopen(env->debug_log_path, "a");
-    return env->debug_log_file != NULL;
-}
-
-static void affine_lock_write_action_id_array(
-        FILE* file, const int* actions, int length) {
-    fputc('[', file);
-    for (int i = 0; i < length; i++) {
-        fprintf(file, "%s%d", i == 0 ? "" : ",", actions[i]);
-    }
-    fputc(']', file);
-}
-
-static void affine_lock_write_action_name_array(
-        FILE* file, const int* actions, int length) {
-    fputc('[', file);
-    for (int i = 0; i < length; i++) {
-        fprintf(file, "%s\"%s\"", i == 0 ? "" : ",",
-            affine_lock_action_name(actions[i]));
-    }
-    fputc(']', file);
-}
-
-static void affine_lock_trace_scramble(AffineLock* env) {
-    AffineLockShared* shared = env->shared;
-    if (!env->trace_this_episode || shared->debug_log_level < 1) {
-        return;
-    }
-    FILE* file = env->debug_log_file;
-    int exact_distance =
-        affine_lock_shortest_distance(shared, env->state, env->target);
-    fprintf(file,
-        "{\"type\":\"reset\",\"env_id\":%d,\"episode\":%d,"
-        "\"initialization_mode\":\"%s\",\"known_solution\":%s,"
-        "\"depth\":%d,\"max_steps\":%d,\"start\":",
-        env->env_id, env->episode_id,
-        affine_lock_initialization_mode_name(shared->initialization_mode),
-        env->known_solution ? "true" : "false",
-        env->scramble_depth, env->max_steps);
-    affine_lock_write_bits(file, env->state);
-    fprintf(file, ",\"target\":");
-    affine_lock_write_bits(file, env->target);
-    fprintf(file,
-        ",\"start_mismatches\":%d,\"min_win_moves\":%d,"
-        "\"one_action_target\":%s,"
-        "\"two_action_target\":%s,\"reachable\":%s,\"exact_distance\":%d,"
-        "\"exact_shortest_distance\":%d,\"solution_length\":%d,"
-        "\"solution_action_ids\":",
-        env->start_mismatches,
-        env->target_distance,
-        env->one_action_target ? "true" : "false",
-        env->two_action_target ? "true" : "false",
-        exact_distance >= 0 ? "true" : "false",
-        exact_distance,
-        exact_distance,
-        env->solution_length);
-    affine_lock_write_action_id_array(file, env->solution_actions, env->solution_length);
-    fprintf(file, ",\"solution_actions\":");
-    affine_lock_write_action_name_array(file, env->solution_actions, env->solution_length);
-    fprintf(file, ",\"scramble_actions\":");
-    affine_lock_write_action_name_array(file, env->scramble_actions, env->scramble_length);
-    fprintf(file, "}\n");
-
-    if (shared->debug_log_level >= 2) {
-        for (int i = 0; i < env->scramble_length; i++) {
-            fprintf(file,
-                "{\"type\":\"scramble_step\",\"env_id\":%d,\"episode\":%d,"
-                "\"step\":%d,\"action\":\"%s\",\"before\":",
-                env->env_id, env->episode_id, i + 1,
-                affine_lock_action_name(env->scramble_actions[i]));
-            affine_lock_write_bits(file, env->scramble_states[i]);
-            fprintf(file, ",\"after\":");
-            affine_lock_write_bits(file, env->scramble_states[i + 1]);
-            fprintf(file, ",\"target\":");
-            affine_lock_write_bits(file, env->target);
-            fprintf(file, "}\n");
-        }
-    }
-    fflush(file);
-}
-
-static void affine_lock_trace_policy_step(
-        AffineLock* env,
-        int step_before,
-        int action,
-        uint32_t before,
-        uint32_t after,
-        float reward,
-        int terminal,
-        int solved,
-        int invalid,
-        int reward_state_mismatch) {
-    AffineLockShared* shared = env->shared;
-    if (!env->trace_this_episode || shared->debug_log_level < 2) {
-        return;
-    }
-    FILE* file = env->debug_log_file;
-    fprintf(file,
-        "{\"type\":\"policy_step\",\"env_id\":%d,\"episode\":%d,"
-        "\"step\":%d,\"action\":%d,\"action_name\":\"%s\","
-        "\"before\":",
-        env->env_id, env->episode_id, step_before + 1,
-        action, affine_lock_action_name(action));
-    affine_lock_write_bits(file, before);
-    fprintf(file, ",\"after\":");
-    affine_lock_write_bits(file, after);
-    fprintf(file, ",\"target\":");
-    affine_lock_write_bits(file, env->target);
-    fprintf(file,
-        ",\"mismatches\":%d,\"timer_before\":%.6f,\"timer_after\":%.6f,"
-        "\"reward\":%.6f,\"terminal\":%s,\"solved\":%s,\"invalid\":%s,"
-        "\"state_equals_target\":%s,\"reward_state_mismatch\":%s}\n",
-        affine_lock_count_bits((after ^ env->target) & shared->mask),
-        env->max_steps > 0 ? (float)step_before / (float)env->max_steps : 0.0f,
-        env->max_steps > 0 ? (float)env->step_count / (float)env->max_steps : 0.0f,
-        reward,
-        terminal ? "true" : "false",
-        solved ? "true" : "false",
-        invalid ? "true" : "false",
-        after == env->target ? "true" : "false",
-        reward_state_mismatch ? "true" : "false");
-    fflush(file);
-}
-
-static void affine_lock_trace_episode_end(
-        AffineLock* env,
-        int solved,
-        int invalid,
-        int reward_state_mismatch) {
-    AffineLockShared* shared = env->shared;
-    if (!env->trace_this_episode || shared->debug_log_level < 1) {
-        return;
-    }
-    FILE* file = env->debug_log_file;
-    fprintf(file,
-        "{\"type\":\"episode_end\",\"env_id\":%d,\"episode\":%d,"
-        "\"solved\":%s,\"invalid\":%s,\"steps\":%d,\"depth\":%d,"
-        "\"episode_return\":%.6f,\"state\":",
-        env->env_id, env->episode_id,
-        solved ? "true" : "false",
-        invalid ? "true" : "false",
-        env->step_count, env->scramble_depth, env->episode_return);
-    affine_lock_write_bits(file, env->state);
-    fprintf(file, ",\"target\":");
-    affine_lock_write_bits(file, env->target);
-    fprintf(file,
-        ",\"final_mismatches\":%d,\"state_equals_target\":%s,"
-        "\"reward_state_mismatch\":%s}\n",
-        affine_lock_count_bits((env->state ^ env->target) & shared->mask),
-        env->state == env->target ? "true" : "false",
-        reward_state_mismatch ? "true" : "false");
-    fflush(file);
-}
-
 static void affine_lock_clear_generated_path(AffineLock* env) {
-    env->scramble_length = 0;
     env->solution_length = 0;
-    env->scramble_states[0] = env->state;
-    for (int i = 0; i < AFFINE_LOCK_MAX_SCRAMBLE_DEPTH; i++) {
-        env->scramble_actions[i] = -1;
-        env->scramble_states[i + 1] = env->state;
-    }
     for (int i = 0; i < AFFINE_LOCK_MAX_SOLUTION_DEPTH; i++) {
         env->solution_actions[i] = -1;
     }
@@ -1031,16 +761,6 @@ static void affine_lock_finalize_reset(AffineLock* env) {
         env->two_action_target =
             affine_lock_target_reachable_in_two(shared, env->state, env->target);
     }
-    env->trace_this_episode = 0;
-    if (shared->debug_log_level > 0 &&
-            env->env_id == shared->debug_log_env_id &&
-            env->debug_traced_episodes < shared->debug_log_max_episodes &&
-            env->scramble_depth >= shared->debug_log_min_depth &&
-            affine_lock_open_debug_log(env)) {
-        env->trace_this_episode = 1;
-        env->debug_traced_episodes += 1;
-        affine_lock_trace_scramble(env);
-    }
 }
 
 static void affine_lock_reset_state(AffineLock* env) {
@@ -1082,8 +802,6 @@ static void affine_lock_init_env(
     env->last_solved = 0;
     env->hint_visible = 0;
     env->hint_action = -1;
-    env->debug_log_file = NULL;
-    env->debug_log_path[0] = '\0';
 }
 
 static void affine_lock_add_log(
@@ -1185,7 +903,6 @@ static void affine_lock_finish_episode(
         int solved,
         int invalid,
         int reward_state_mismatch) {
-    affine_lock_trace_episode_end(env, solved, invalid, reward_state_mismatch);
     affine_lock_add_log(env, solved, invalid, reward_state_mismatch);
     affine_lock_advance_curriculum(env, solved);
     affine_lock_reset_state(env);
@@ -1200,8 +917,6 @@ static void c_step(AffineLock* env) {
     int solved = 0;
     int invalid = 0;
     int reward_state_mismatch = 0;
-    int step_before = env->step_count;
-    uint32_t state_before = env->state;
 
     env->terminals[0] = 0.0f;
     env->hint_visible = 0;
@@ -1228,9 +943,6 @@ static void c_step(AffineLock* env) {
     env->rewards[0] = reward;
     env->episode_return += reward;
     env->last_reward = reward;
-    affine_lock_trace_policy_step(
-        env, step_before, action, state_before, env->state,
-        reward, terminal, solved, invalid, reward_state_mismatch);
 
     if (terminal) {
         env->terminals[0] = 1.0f;
@@ -1243,10 +955,6 @@ static void c_step(AffineLock* env) {
 }
 
 static void c_close(AffineLock* env) {
-    if (env->debug_log_file != NULL) {
-        fclose(env->debug_log_file);
-        env->debug_log_file = NULL;
-    }
     if (env->client == NULL) {
         return;
     }

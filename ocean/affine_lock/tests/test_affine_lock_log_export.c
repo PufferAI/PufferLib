@@ -75,17 +75,13 @@ static Dict* make_vec_kwargs(void) {
 }
 
 static Dict* make_env_kwargs(int seed) {
-    Dict* env_kwargs = create_dict(11);
+    Dict* env_kwargs = create_dict(7);
     dict_set(env_kwargs, "bits", 16);
     dict_set(env_kwargs, "start_depth", 2);
     dict_set(env_kwargs, "max_depth", 16);
     dict_set(env_kwargs, "depth_multiplier", 2);
     dict_set(env_kwargs, "step_grace", 0);
     dict_set(env_kwargs, "initialization_mode", 4);
-    dict_set(env_kwargs, "debug_log_level", 0);
-    dict_set(env_kwargs, "debug_log_env_id", 0);
-    dict_set(env_kwargs, "debug_log_max_episodes", 0);
-    dict_set(env_kwargs, "debug_log_min_depth", 16);
     dict_set(env_kwargs, "seed", seed);
     return env_kwargs;
 }
@@ -235,8 +231,8 @@ static void test_free_shared_releases_caller_thread_bfs_scratch(void) {
     int rc = affine_lock_init_shared(&shared, 16, 2, 16, 2, 0);
     EXPECT_EQ_INT(rc, 0);
 
-    int distance = affine_lock_shortest_distance(&shared, 0x1234u, 0x5678u);
-    EXPECT_TRUE(distance >= 0);
+    int hint = affine_lock_hint_action(&shared, 0x1234u, 0x5678u);
+    EXPECT_TRUE(hint >= 0);
     EXPECT_TRUE(affine_lock_bfs_scratch.seen_generation != NULL);
 
     affine_lock_free_shared(&shared);

@@ -3,10 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #define AFFINE_LOCK_NO_RENDER
-#define AFFINE_LOCK_TEST_HOOKS
 #include "../affine_lock.h"
 
 #define EXPECT_TRUE(cond) do { \
@@ -76,20 +74,6 @@ static AffineLockShared make_shared(
         &shared, bits, start_depth, max_depth, depth_multiplier, step_grace);
     EXPECT_EQ_INT(rc, 0);
     return shared;
-}
-
-static void configure_test_debug_dir(AffineLockShared* shared) {
-    char path[256];
-    snprintf(path, sizeof(path), "%s/affine_lock_test_trace_%ld",
-        getenv("TMPDIR") != NULL ? getenv("TMPDIR") : "/tmp",
-        (long)getpid());
-    mkdir(path, 0777);
-    affine_lock_configure_debug_dir(shared, path);
-}
-
-static void expect_test_debug_path(const char* path) {
-    EXPECT_TRUE(strstr(path, "affine_lock_test_trace_") != NULL);
-    EXPECT_TRUE(strstr(path, AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR) == NULL);
 }
 
 static void make_env(
@@ -214,8 +198,8 @@ static void compute_test_bfs_stats(
 static void test_free_shared_releases_thread_bfs_scratch(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
 
-    int distance = affine_lock_shortest_distance(&shared, 0x1234u, 0x5678u);
-    EXPECT_TRUE(distance >= 0);
+    int hint = affine_lock_hint_action(&shared, 0x1234u, 0x5678u);
+    EXPECT_TRUE(hint >= 0);
     EXPECT_TRUE(affine_lock_bfs_scratch.seen_generation != NULL);
     EXPECT_EQ_INT(affine_lock_bfs_scratch.num_states, shared.num_states);
 
@@ -344,7 +328,6 @@ static uint64_t reset_snapshot_checksum(const AffineLock* env) {
     hash = mix_u64(hash, (uint64_t)env->max_steps);
     hash = mix_u64(hash, (uint64_t)env->scramble_depth);
     hash = mix_u64(hash, (uint64_t)env->curriculum_depth);
-    hash = mix_u64(hash, (uint64_t)env->scramble_length);
     hash = mix_u64(hash, (uint64_t)env->solution_length);
     hash = mix_u64(hash, (uint64_t)env->known_solution);
     hash = mix_u64(hash, (uint64_t)(env->target_distance + 1));
@@ -357,12 +340,6 @@ static uint64_t reset_snapshot_checksum(const AffineLock* env) {
         hash = mix_float(hash, env->observations[i]);
     }
     hash = log_snapshot_checksum(hash, &env->log);
-    for (int i = 0; i < AFFINE_LOCK_MAX_SCRAMBLE_DEPTH; i++) {
-        hash = mix_u64(hash, (uint64_t)(env->scramble_actions[i] + 1));
-    }
-    for (int i = 0; i <= AFFINE_LOCK_MAX_SCRAMBLE_DEPTH; i++) {
-        hash = mix_u64(hash, env->scramble_states[i]);
-    }
     for (int i = 0; i < AFFINE_LOCK_MAX_SOLUTION_DEPTH; i++) {
         hash = mix_u64(hash, (uint64_t)(env->solution_actions[i] + 1));
     }
@@ -380,10 +357,7 @@ static void expect_env_snapshots_equal(
     EXPECT_EQ_U32(a->target, b->target);
     EXPECT_EQ_INT(a->scramble_depth, b->scramble_depth);
     EXPECT_EQ_INT(a->max_steps, b->max_steps);
-    EXPECT_EQ_INT(a->scramble_length, b->scramble_length);
     EXPECT_EQ_INT(a->solution_length, b->solution_length);
-    EXPECT_TRUE(memcmp(a->scramble_actions, b->scramble_actions,
-        sizeof(a->scramble_actions)) == 0);
     EXPECT_TRUE(memcmp(a->solution_actions, b->solution_actions,
         sizeof(a->solution_actions)) == 0);
 }
@@ -547,59 +521,6 @@ static size_t read_text_file(const char* path, char* buffer, size_t capacity) {
     buffer[nread] = '\0';
     fclose(file);
     return nread;
-}
-
-static uint32_t parse_bits_field(const char* text, const char* field) {
-    const char* pos = strstr(text, field);
-    EXPECT_TRUE(pos != NULL);
-    pos += strlen(field);
-    char bits[AFFINE_LOCK_BITS + 1];
-    memcpy(bits, pos, AFFINE_LOCK_BITS);
-    bits[AFFINE_LOCK_BITS] = '\0';
-    return bits_from_text(bits);
-}
-
-static int parse_int_array_field(
-        const char* text,
-        const char* field,
-        int values[AFFINE_LOCK_MAX_SOLUTION_DEPTH]) {
-    const char* pos = strstr(text, field);
-    EXPECT_TRUE(pos != NULL);
-    pos = strchr(pos, '[');
-    EXPECT_TRUE(pos != NULL);
-    pos += 1;
-
-    int count = 0;
-    while (*pos != '\0' && *pos != ']') {
-        while (*pos == ' ' || *pos == '\n' || *pos == '\t' || *pos == ',') {
-            pos += 1;
-        }
-        if (*pos == ']') {
-            break;
-        }
-        char* end = NULL;
-        long value = strtol(pos, &end, 10);
-        EXPECT_TRUE(end != pos);
-        EXPECT_TRUE(count < AFFINE_LOCK_MAX_SOLUTION_DEPTH);
-        values[count++] = (int)value;
-        pos = end;
-    }
-    EXPECT_TRUE(*pos == ']');
-    return count;
-}
-
-static void expect_logged_solution_reaches_target(const char* trace) {
-    uint32_t start = parse_bits_field(trace, "\"start\":\"");
-    uint32_t target = parse_bits_field(trace, "\"target\":\"");
-    int actions[AFFINE_LOCK_MAX_SOLUTION_DEPTH];
-    int length = parse_int_array_field(trace, "\"solution_action_ids\"", actions);
-
-    uint32_t simulated = start;
-    for (int i = 0; i < length; i++) {
-        EXPECT_TRUE(actions[i] >= 0 && actions[i] < AFFINE_LOCK_NUM_ACTIONS);
-        simulated = test_apply_action(simulated, actions[i]);
-    }
-    EXPECT_EQ_U32(simulated, target);
 }
 
 static void test_metadata_contract(void) {
@@ -775,7 +696,6 @@ static void test_exact_distance_initialization_samples_reachable_target(void) {
     EXPECT_EQ_INT(env.target_distance, shared.start_depth);
     EXPECT_EQ_INT(env.max_steps, env.target_distance);
     EXPECT_EQ_INT(env.known_solution, 1);
-    EXPECT_EQ_INT(env.scramble_length, 0);
     EXPECT_EQ_INT(env.solution_length, env.target_distance);
     EXPECT_NE_U32(env.state, env.target);
     expect_solution_reaches_target(&shared, &env);
@@ -831,7 +751,6 @@ static void test_visible_target_table_initialization_samples_reachable_target(vo
     EXPECT_EQ_INT(env.target_distance, shared.start_depth);
     EXPECT_EQ_INT(env.max_steps, env.target_distance);
     EXPECT_EQ_INT(env.known_solution, 1);
-    EXPECT_EQ_INT(env.scramble_length, 0);
     EXPECT_EQ_INT(env.solution_length, env.target_distance);
     EXPECT_NE_U32(env.state, env.target);
     expect_solution_reaches_target(&shared, &env);
@@ -972,7 +891,6 @@ static void test_distance_generators_match_independent_bfs_over_repeated_resets(
             for (int reset = 0; reset < 12; reset++) {
                 c_reset(&env);
                 EXPECT_EQ_INT(env.known_solution, 1);
-                EXPECT_EQ_INT(env.scramble_length, 0);
                 EXPECT_TRUE(env.target_distance > 0);
                 EXPECT_TRUE(env.solution_length > 0);
                 expect_solution_reaches_target(&shared, &env);
@@ -982,171 +900,6 @@ static void test_distance_generators_match_independent_bfs_over_repeated_resets(
             affine_lock_free_shared(&shared);
         }
     }
-}
-
-static void test_debug_trace_default_dir_stays_under_logs_affine_lock(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    EXPECT_TRUE(strcmp(
-        shared.debug_log_dir, AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR) == 0);
-    affine_lock_free_shared(&shared);
-}
-
-static void test_exact_distance_trace_logs_mode_and_distance(void) {
-    AffineLockShared shared = make_shared(16, 4, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
-    configure_test_debug_dir(&shared);
-    affine_lock_configure_debug(&shared, 1, 0, 1, 4);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 5, observations, actions, rewards, terminals);
-    c_reset(&env);
-    EXPECT_TRUE(env.trace_this_episode);
-    EXPECT_TRUE(env.debug_log_file != NULL);
-    EXPECT_TRUE(env.debug_log_path[0] != '\0');
-    expect_test_debug_path(env.debug_log_path);
-
-    char path[sizeof(env.debug_log_path)];
-    strncpy(path, env.debug_log_path, sizeof(path));
-    path[sizeof(path) - 1] = '\0';
-    c_close(&env);
-
-    FILE* file = fopen(path, "r");
-    EXPECT_TRUE(file != NULL);
-    char buffer[4096];
-    size_t nread = fread(buffer, 1, sizeof(buffer) - 1, file);
-    buffer[nread] = '\0';
-    fclose(file);
-    remove(path);
-
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"reset\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"initialization_mode\":\"exact_distance\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"known_solution\":true") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"min_win_moves\":4") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"reachable\":true") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"exact_distance\":4") != NULL);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_visible_target_table_trace_logs_mode_and_distance(void) {
-    AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
-    affine_lock_configure_initialization(
-        &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
-    configure_test_debug_dir(&shared);
-    affine_lock_configure_debug(&shared, 1, 0, 1, 8);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 5, observations, actions, rewards, terminals);
-    c_reset(&env);
-    EXPECT_TRUE(env.trace_this_episode);
-    EXPECT_TRUE(env.debug_log_file != NULL);
-    EXPECT_TRUE(env.debug_log_path[0] != '\0');
-    expect_test_debug_path(env.debug_log_path);
-    EXPECT_EQ_INT(env.target_distance, 8);
-
-    char path[sizeof(env.debug_log_path)];
-    strncpy(path, env.debug_log_path, sizeof(path));
-    path[sizeof(path) - 1] = '\0';
-    c_close(&env);
-
-    char buffer[4096];
-    read_text_file(path, buffer, sizeof(buffer));
-    remove(path);
-
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"reset\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"initialization_mode\":\"visible_target_table\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"known_solution\":true") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"min_win_moves\":8") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"reachable\":true") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"exact_shortest_distance\":8") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_length\":8") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_action_ids\":[") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_actions\":[") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"scramble_actions\":[]") != NULL);
-    expect_logged_solution_reaches_target(buffer);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_debug_trace_level_1_logs_reset_and_end_only_with_solution_proof(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
-    configure_test_debug_dir(&shared);
-    affine_lock_configure_debug(&shared, 1, 0, 1, 2);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 6, observations, actions, rewards, terminals);
-    c_reset(&env);
-    solve_with_stored_solution(&env);
-
-    char path[sizeof(env.debug_log_path)];
-    strncpy(path, env.debug_log_path, sizeof(path));
-    path[sizeof(path) - 1] = '\0';
-    expect_test_debug_path(path);
-    c_close(&env);
-
-    char buffer[8192];
-    read_text_file(path, buffer, sizeof(buffer));
-    remove(path);
-
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"reset\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"episode_end\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"policy_step\"") == NULL);
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"scramble_step\"") == NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_length\":2") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_action_ids\":[") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_actions\":[") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"exact_shortest_distance\":2") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"reward_state_mismatch\":false") != NULL);
-    expect_logged_solution_reaches_target(buffer);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_debug_trace_level_2_logs_policy_steps(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
-    configure_test_debug_dir(&shared);
-    affine_lock_configure_debug(&shared, 2, 0, 1, 2);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 7, observations, actions, rewards, terminals);
-    c_reset(&env);
-    solve_with_stored_solution(&env);
-
-    char path[sizeof(env.debug_log_path)];
-    strncpy(path, env.debug_log_path, sizeof(path));
-    path[sizeof(path) - 1] = '\0';
-    expect_test_debug_path(path);
-    c_close(&env);
-
-    char buffer[8192];
-    read_text_file(path, buffer, sizeof(buffer));
-    remove(path);
-
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"reset\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"policy_step\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"episode_end\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_action_ids\":[") != NULL);
-    expect_logged_solution_reaches_target(buffer);
-
-    affine_lock_free_shared(&shared);
 }
 
 static void test_observation_encoding_is_32_signed_bit_floats_plus_timer(void) {
@@ -1678,7 +1431,7 @@ static uint64_t run_mode4_seed_42_golden_sequence(void) {
 
 static void test_mode4_seed_42_golden_checksum(void) {
     uint64_t checksum = run_mode4_seed_42_golden_sequence();
-    EXPECT_EQ_U64(checksum, 0xc617dbb2184ef202ull);
+    EXPECT_EQ_U64(checksum, 0xdcc0a758a3e31109ull);
 }
 
 static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
@@ -1772,11 +1525,6 @@ int main(void) {
     test_distance_generators_match_independent_bfs_over_repeated_resets();
     test_free_shared_releases_thread_bfs_scratch();
     test_log_solve_credit_uses_known_target_distance();
-    test_debug_trace_default_dir_stays_under_logs_affine_lock();
-    test_exact_distance_trace_logs_mode_and_distance();
-    test_visible_target_table_trace_logs_mode_and_distance();
-    test_debug_trace_level_1_logs_reset_and_end_only_with_solution_proof();
-    test_debug_trace_level_2_logs_policy_steps();
     test_observation_encoding_is_32_signed_bit_floats_plus_timer();
     test_timer_observation_progresses_and_resets_after_timeout();
     test_actions_apply_to_current_state_directly();

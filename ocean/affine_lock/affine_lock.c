@@ -45,6 +45,12 @@ int main(void) {
         demo_cleanup();
         return 1;
     }
+    if (affine_lock_configure_initialization(
+            g_shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE) != 0) {
+        fprintf(stderr, "failed to configure affine_lock demo\n");
+        demo_cleanup();
+        return 1;
+    }
 
     AffineLock env;
     memset(&env, 0, sizeof(env));

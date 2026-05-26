@@ -41,12 +41,6 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int step_grace = (int)dict_get(env_kwargs, "step_grace")->value;
     int initialization_mode =
         (int)dict_get(env_kwargs, "initialization_mode")->value;
-    int debug_log_level = (int)dict_get(env_kwargs, "debug_log_level")->value;
-    int debug_log_env_id = (int)dict_get(env_kwargs, "debug_log_env_id")->value;
-    int debug_log_max_episodes =
-        (int)dict_get(env_kwargs, "debug_log_max_episodes")->value;
-    int debug_log_min_depth =
-        (int)dict_get(env_kwargs, "debug_log_min_depth")->value;
 
     AffineLockShared* shared =
         (AffineLockShared*)calloc(1, sizeof(AffineLockShared));
@@ -61,12 +55,6 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
         free(shared);
         abort();
     }
-    affine_lock_configure_debug(
-        shared,
-        debug_log_level,
-        debug_log_env_id,
-        debug_log_max_episodes,
-        debug_log_min_depth);
 
     Env* envs = (Env*)calloc((size_t)total_agents, sizeof(Env));
     if (envs == NULL) {
