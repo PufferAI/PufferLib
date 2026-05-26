@@ -299,8 +299,6 @@ static uint64_t log_snapshot_checksum(uint64_t hash, const Log* log) {
     hash = mix_float(hash, log->solve_steps);
     hash = mix_float(hash, log->timeout_rate);
     hash = mix_float(hash, log->invalid_rate);
-    hash = mix_float(hash, log->start_mismatches);
-    hash = mix_float(hash, log->final_mismatches);
     hash = mix_float(hash, log->one_action_target_rate);
     hash = mix_float(hash, log->two_action_target_rate);
     hash = mix_float(hash, log->short_solve_rate);
@@ -331,7 +329,6 @@ static uint64_t reset_snapshot_checksum(const AffineLock* env) {
     hash = mix_u64(hash, (uint64_t)env->solution_length);
     hash = mix_u64(hash, (uint64_t)env->known_solution);
     hash = mix_u64(hash, (uint64_t)(env->target_distance + 1));
-    hash = mix_u64(hash, (uint64_t)env->start_mismatches);
     hash = mix_u64(hash, (uint64_t)env->one_action_target);
     hash = mix_u64(hash, (uint64_t)env->two_action_target);
     hash = mix_float(hash, env->rewards[0]);
@@ -579,16 +576,6 @@ static void test_global_action_examples(void) {
     }
 
     affine_lock_free_shared(&shared);
-}
-
-static void test_count_bits_matches_reference_for_all_states(void) {
-    for (uint32_t state = 0; state < (1u << AFFINE_LOCK_BITS); state++) {
-        int expected = 0;
-        for (int bit = 0; bit < AFFINE_LOCK_BITS; bit++) {
-            expected += (state >> bit) & 1u;
-        }
-        EXPECT_EQ_INT(affine_lock_count_bits(state), expected);
-    }
 }
 
 static void test_actions_round_trip_for_all_states(void) {
@@ -1414,7 +1401,7 @@ static uint64_t run_mode4_seed_42_golden_sequence(void) {
 
 static void test_mode4_seed_42_golden_checksum(void) {
     uint64_t checksum = run_mode4_seed_42_golden_sequence();
-    EXPECT_EQ_U64(checksum, 0xdcc0a758a3e31109ull);
+    EXPECT_EQ_U64(checksum, 0xe96e5d87808520d0ull);
 }
 
 static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
@@ -1495,7 +1482,6 @@ int main(void) {
     test_metadata_contract();
     test_config_and_binding_metadata_contract();
     test_global_action_examples();
-    test_count_bits_matches_reference_for_all_states();
     test_actions_round_trip_for_all_states();
     test_reset_randomizes_target_and_current();
     test_exact_distance_initialization_samples_reachable_target();

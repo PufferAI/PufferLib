@@ -198,8 +198,6 @@ def check_binding_text():
         "scramble_depth",
         "at_max_depth",
         "solve_steps",
-        "start_mismatches",
-        "final_mismatches",
         "one_action_target_rate",
         "two_action_target_rate",
         "short_solve_rate",

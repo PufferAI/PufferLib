@@ -54,8 +54,6 @@ typedef struct Log {
     float solve_steps;
     float timeout_rate;
     float invalid_rate;
-    float start_mismatches;
-    float final_mismatches;
     float one_action_target_rate;
     float two_action_target_rate;
     float short_solve_rate;
@@ -119,7 +117,6 @@ typedef struct AffineLock {
     int solution_actions[AFFINE_LOCK_MAX_SOLUTION_DEPTH];
     int known_solution;
     int target_distance;
-    int start_mismatches;
     int one_action_target;
     int two_action_target;
     float episode_return;
@@ -160,18 +157,6 @@ static const char* affine_lock_action_name(int action) {
         case AFFINE_LOCK_ACTION_REVERSE_EACH_BYTE: return "reverse_each_byte";
         default: return "invalid";
     }
-}
-
-static int affine_lock_count_bits(uint32_t value) {
-#if defined(__GNUC__) || defined(__clang__)
-    return __builtin_popcount(value & ((1u << AFFINE_LOCK_BITS) - 1u));
-#else
-    int count = 0;
-    for (int bit = 0; bit < AFFINE_LOCK_BITS; bit++) {
-        count += (value >> bit) & 1u;
-    }
-    return count;
-#endif
 }
 
 static void affine_lock_init_observation_bit_patterns(AffineLockShared* shared) {
@@ -703,8 +688,6 @@ static void affine_lock_generate_visible_target_table_target(AffineLock* env) {
 
 static void affine_lock_finalize_reset(AffineLock* env) {
     AffineLockShared* shared = env->shared;
-    env->start_mismatches =
-        affine_lock_count_bits((env->state ^ env->target) & shared->mask);
     if (env->target_distance >= 0) {
         env->one_action_target = env->target_distance == 1;
         env->two_action_target =
@@ -766,7 +749,6 @@ static void affine_lock_add_log(
     AffineLockShared* shared = env->shared;
     int log_depth = affine_lock_log_depth(env);
     int at_max_depth = log_depth == shared->max_depth;
-    uint32_t final_diff = (env->state ^ env->target) & shared->mask;
     float solve_credit = solved ?
         affine_lock_solve_credit(shared, log_depth) : 0.0f;
     env->log.perf += solve_credit;
@@ -781,8 +763,6 @@ static void affine_lock_add_log(
     env->log.solve_steps += solved ? (float)env->step_count : 0.0f;
     env->log.timeout_rate += (!solved && !invalid) ? 1.0f : 0.0f;
     env->log.invalid_rate += invalid ? 1.0f : 0.0f;
-    env->log.start_mismatches += (float)env->start_mismatches;
-    env->log.final_mismatches += (float)affine_lock_count_bits(final_diff);
     env->log.one_action_target_rate += env->one_action_target ? 1.0f : 0.0f;
     env->log.two_action_target_rate += env->two_action_target ? 1.0f : 0.0f;
     env->log.short_solve_rate += (solved && env->step_count <= 2) ? 1.0f : 0.0f;

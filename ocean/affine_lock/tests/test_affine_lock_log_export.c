@@ -152,7 +152,6 @@ static uint64_t binding_reset_checksum(const Env* env) {
     hash = mix_u64_for_binding_test(hash, env->target);
     hash = mix_u64_for_binding_test(hash, (uint64_t)(env->target_distance + 1));
     hash = mix_u64_for_binding_test(hash, (uint64_t)env->solution_length);
-    hash = mix_u64_for_binding_test(hash, (uint64_t)env->start_mismatches);
     for (int i = 0; i < AFFINE_LOCK_MAX_SOLUTION_DEPTH; i++) {
         hash = mix_u64_for_binding_test(
             hash, (uint64_t)(env->solution_actions[i] + 1));
@@ -265,8 +264,6 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     EXPECT_TRUE(!dict_has_key(out, "scramble_depth"));
     EXPECT_TRUE(!dict_has_key(out, "at_max_depth"));
     EXPECT_TRUE(!dict_has_key(out, "solve_steps"));
-    EXPECT_TRUE(!dict_has_key(out, "start_mismatches"));
-    EXPECT_TRUE(!dict_has_key(out, "final_mismatches"));
     EXPECT_TRUE(!dict_has_key(out, "one_action_target_rate"));
     EXPECT_TRUE(!dict_has_key(out, "two_action_target_rate"));
     EXPECT_TRUE(!dict_has_key(out, "short_solve_rate"));
