@@ -153,6 +153,13 @@ def check_binding_text():
     assert re.search(r"\bint\s+env_id\s*;", header) is None
     assert header.count("env->target = record->target & shared->mask;") == 1
     assert "(uint32_t)record->target & shared->mask" not in header
+    assert "static void affine_lock_cleanup_thread_scratch(void);" not in header
+    scratch_pos = header.index(
+        "static _Thread_local AffineLockBfsScratch affine_lock_bfs_scratch = {0};"
+    )
+    cleanup_pos = header.index("static void affine_lock_cleanup_thread_scratch(void) {")
+    free_shared_pos = header.index("static void affine_lock_free_shared")
+    assert scratch_pos < cleanup_pos < free_shared_pos
 
     env_api_order = [
         "affine_lock_init_env",

@@ -281,18 +281,6 @@ static int affine_lock_configure_initialization(
     return 0;
 }
 
-static void affine_lock_cleanup_thread_scratch(void);
-
-static void affine_lock_free_shared(AffineLockShared* shared) {
-    if (shared == NULL) {
-        return;
-    }
-    free(shared->next);
-    affine_lock_visible_targets_free(&shared->visible_target_table);
-    affine_lock_cleanup_thread_scratch();
-    memset(shared, 0, sizeof(*shared));
-}
-
 static _Thread_local AffineLockBfsScratch affine_lock_bfs_scratch = {0};
 
 static void affine_lock_free_bfs_scratch(AffineLockBfsScratch* scratch) {
@@ -306,6 +294,16 @@ static void affine_lock_free_bfs_scratch(AffineLockBfsScratch* scratch) {
 
 static void affine_lock_cleanup_thread_scratch(void) {
     affine_lock_free_bfs_scratch(&affine_lock_bfs_scratch);
+}
+
+static void affine_lock_free_shared(AffineLockShared* shared) {
+    if (shared == NULL) {
+        return;
+    }
+    free(shared->next);
+    affine_lock_visible_targets_free(&shared->visible_target_table);
+    affine_lock_cleanup_thread_scratch();
+    memset(shared, 0, sizeof(*shared));
 }
 
 static AffineLockBfsScratch* affine_lock_get_bfs_scratch(
