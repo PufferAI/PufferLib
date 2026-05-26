@@ -124,33 +124,18 @@ void my_log(Log* log, Dict* out) {
         conditional_rate(log->depth_16_solve_rate, log->depth_16_rate);
 
     dict_set(out, "perf", log->perf);
-    dict_set(out, "score", log->score);
     dict_set(out, "solve_rate", log->solve_rate);
-    dict_set(out, "scramble_depth", log->scramble_depth);
-    dict_set(out, "at_max_depth", log->at_max_depth);
     dict_set(out, "max_depth_solve", log->max_depth_solve);
     dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
-    dict_set(out, "solve_steps", log->solve_steps);
     dict_set(out, "timeout_rate", log->timeout_rate);
     dict_set(out, "invalid_rate", log->invalid_rate);
-    dict_set(out, "start_mismatches", log->start_mismatches);
-    dict_set(out, "final_mismatches", log->final_mismatches);
-    dict_set(out, "one_action_target_rate", log->one_action_target_rate);
-    dict_set(out, "two_action_target_rate", log->two_action_target_rate);
-    dict_set(out, "short_solve_rate", log->short_solve_rate);
-    dict_set(out, "solve_efficiency", log->solve_efficiency);
-    dict_set(out, "reward_state_mismatch", log->reward_state_mismatch);
     dict_set(out, "min_win_moves", log->target_distance);
     dict_set(out, "solved_min_win_moves", solved_min_win_moves);
     dict_set(out, "conditional_solve_steps", conditional_solve_steps);
     dict_set(out, "conditional_solve_efficiency", conditional_solve_efficiency);
-    dict_set(out, "depth_2_rate", log->depth_2_rate);
     dict_set(out, "depth_2_solve_rate", depth_2_solve_rate);
-    dict_set(out, "depth_4_rate", log->depth_4_rate);
     dict_set(out, "depth_4_solve_rate", depth_4_solve_rate);
-    dict_set(out, "depth_8_rate", log->depth_8_rate);
     dict_set(out, "depth_8_solve_rate", depth_8_solve_rate);
-    dict_set(out, "depth_16_rate", log->depth_16_rate);
     dict_set(out, "depth_16_solve_rate", depth_16_solve_rate);
 }

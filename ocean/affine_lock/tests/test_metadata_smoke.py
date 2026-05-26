@@ -11,34 +11,19 @@ ROOT = Path(__file__).resolve().parents[3]
 
 EXPECTED_MY_LOG_KEYS = [
     "perf",
-    "score",
     "solve_rate",
-    "scramble_depth",
-    "at_max_depth",
     "max_depth_solve",
     "episode_return",
     "episode_length",
-    "solve_steps",
     "timeout_rate",
     "invalid_rate",
-    "start_mismatches",
-    "final_mismatches",
-    "one_action_target_rate",
-    "two_action_target_rate",
-    "short_solve_rate",
-    "solve_efficiency",
-    "reward_state_mismatch",
     "min_win_moves",
     "solved_min_win_moves",
     "conditional_solve_steps",
     "conditional_solve_efficiency",
-    "depth_2_rate",
     "depth_2_solve_rate",
-    "depth_4_rate",
     "depth_4_solve_rate",
-    "depth_8_rate",
     "depth_8_solve_rate",
-    "depth_16_rate",
     "depth_16_solve_rate",
 ]
 
@@ -208,8 +193,28 @@ def check_binding_text():
     }
     framework_log_fields = {"n"}
     renamed_log_fields = {"target_distance", "solved_target_distance"}
+    internal_log_fields = {
+        "score",
+        "scramble_depth",
+        "at_max_depth",
+        "solve_steps",
+        "start_mismatches",
+        "final_mismatches",
+        "one_action_target_rate",
+        "two_action_target_rate",
+        "short_solve_rate",
+        "solve_efficiency",
+        "reward_state_mismatch",
+        "depth_2_rate",
+        "depth_4_rate",
+        "depth_8_rate",
+        "depth_16_rate",
+    }
     assert (
-        set(log_fields) - framework_log_fields - renamed_log_fields
+        set(log_fields)
+        - framework_log_fields
+        - renamed_log_fields
+        - internal_log_fields
         <= set(log_keys) - derived_log_keys
     )
 
