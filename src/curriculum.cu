@@ -125,9 +125,21 @@ void close_state_buffer(StateBuffer* buf) {
 #ifdef PUFFER_CURRICULUM_IMPL
 
 #define PRIO_WARP_SIZE 32
-#define PRIO_FULL_MASK 0xffffffff
+#ifdef USE_ROCM
+using PufWarpMask = unsigned long long;
+#else
+using PufWarpMask = unsigned int;
+#endif
 #define PRIO_BLOCK_SIZE 256
 #define PRIO_NUM_WARPS (PRIO_BLOCK_SIZE / PRIO_WARP_SIZE)
+
+__device__ __forceinline__ float prio_warp_sum(float val, int width = PRIO_WARP_SIZE) {
+    PufWarpMask mask = (PufWarpMask)__activemask();
+    for (int s = width / 2; s >= 1; s /= 2) {
+        val += __shfl_down_sync(mask, val, s, width);
+    }
+    return val;
+}
 
 __device__ __forceinline__ float priority_power(float value, float alpha) {
     if (alpha == 0.0f) {
@@ -163,9 +175,7 @@ __global__ void compute_prio_abs(
         local_sum += fabsf(to_float(advantages[offset + t]));
     }
 
-    for (int s = PRIO_WARP_SIZE / 2; s >= 1; s /= 2) {
-        local_sum += __shfl_down_sync(PRIO_FULL_MASK, local_sum, s);
-    }
+    local_sum = prio_warp_sum(local_sum);
     if (tx == 0) {
         prio_weights[row] = priority_power(local_sum, prio_alpha) + eps;
     }

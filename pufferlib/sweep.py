@@ -22,6 +22,48 @@ from scipy.spatial import KDTree
 from sklearn.linear_model import LogisticRegression
 
 EPSILON = 1e-6
+LOGIT_MIN = -5.0
+LOGIT_MAX = 100.0
+EARLY_STOP_THRESHOLD_FLOOR = LOGIT_MIN
+
+def _has_nan_loss(logs):
+    return any(math.isnan(v) for v in logs.get('loss', {}).values())
+
+def logit_transform(value, epsilon=1e-9):
+    value = np.clip(value, epsilon, 1 - epsilon)
+    return np.clip(np.log(value / (1 - value)), LOGIT_MIN, LOGIT_MAX)
+
+class NanLossEarlyStop:
+    def early_stop(self, logs, target_key):
+        if _has_nan_loss(logs):
+            logs['is_loss_nan'] = True
+            return True
+        return False
+
+class ProteinEarlyStop:
+    def __init__(self, metric_distribution, threshold_model):
+        self.metric_distribution = metric_distribution
+        self.threshold_model = threshold_model
+        self.running_targets = deque(maxlen=30)
+
+    def early_stop(self, logs, target_key):
+        if _has_nan_loss(logs):
+            logs['is_loss_nan'] = True
+            return True
+
+        target_name = target_key.split('/', 1)[1]
+        if 'uptime' not in logs or target_name not in logs.get('env', {}):
+            return False
+
+        metric_val, cost = logs['env'][target_name], logs['uptime']
+        self.running_targets.append(metric_val)
+        score = max(np.mean(self.running_targets), metric_val)
+        if self.metric_distribution == 'percentile':
+            score = logit_transform(score)
+
+        threshold = self.threshold_model.get_threshold(cost)
+        logs['early_stop_threshold'] = max(threshold, EARLY_STOP_THRESHOLD_FLOOR)
+        return score < threshold
 
 def unroll_nested_dict(d):
     if not isinstance(d, dict):
@@ -335,11 +377,8 @@ class Random:
             is_failure=is_failure,
         ))
 
-    def early_stop(self, logs, target_key):
-        if any("loss/" in k and np.isnan(v) for k, v in logs.items()):
-            logs['is_loss_nan'] = True
-            return True
-        return False
+    def early_stop_state(self):
+        return NanLossEarlyStop()
 
 
 class ParetoGenetic:
@@ -392,11 +431,8 @@ class ParetoGenetic:
             is_failure=is_failure,
         ))
 
-    def early_stop(self, logs, target_key):
-        if any("loss/" in k and np.isnan(v) for k, v in logs.items()):
-            logs['is_loss_nan'] = True
-            return True
-        return False
+    def early_stop_state(self):
+        return NanLossEarlyStop()
 
 
 class ExactGPModel(ExactGP):
@@ -902,16 +938,11 @@ class Protein:
         best = suggestions[best_idx]
         return self.hyperparameters.to_dict(best, fill), info
 
-    def logit_transform(self, value, epsilon=1e-9):
-        value = np.clip(value, epsilon, 1 - epsilon)
-        logit = math.log(value / (1 - value))
-        return np.clip(logit, -5, 100)
-
     def observe(self, hypers, score, cost, is_failure=False):
         params = self.hyperparameters.from_dict(hypers)
 
         if self.metric_distribution == 'percentile':
-            score = self.logit_transform(score)
+            score = logit_transform(score)
 
         new_observation = dict(
             input=params,
@@ -948,32 +979,5 @@ class Protein:
             self.top_observations.append(new_observation)
             self.top_observations.sort(key=lambda x: x['output'], reverse=True)
 
-    def get_early_stop_threshold(self, cost):
-        return self.stop_threshold_model.get_threshold(cost)
-
-    def should_stop(self, score, cost):
-        threshold = self.get_early_stop_threshold(cost)
-
-        if self.metric_distribution == 'percentile':
-            score = self.logit_transform(score)
-
-        return score < threshold
-
-    def early_stop(self, logs, target_key):
-        for k, v in logs['loss'].items():
-            if np.isnan(v):
-                logs['is_loss_nan'] = True
-                return True
-
-        if 'uptime' not in logs or target_key not in logs:
-            return False
-
-        metric_val, cost = logs['env'][target_key], logs['uptime']
-        self._running_target_buffer.append(metric_val)
-        target_running_mean = np.mean(self._running_target_buffer)
-        threshold = self.get_early_stop_threshold(cost)
-        logs['early_stop_threshold'] = max(threshold, -5)
-        if self.should_stop(max(target_running_mean, metric_val), cost):
-            logs['is_loss_nan'] = False
-            return True
-        return False
+    def early_stop_state(self):
+        return ProteinEarlyStop(self.metric_distribution, self.stop_threshold_model)

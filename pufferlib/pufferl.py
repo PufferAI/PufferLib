@@ -187,10 +187,11 @@ def _train_worker(args):
 
     backend.close(pufferl)
 
-def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
+def _train(env_name, args, sweep_early_stop=None, result_queue=None, verbose=False):
     '''Single-GPU training worker. Process target for both DDP ranks and sweep trials.'''
     backend = _resolve_backend(args)
     rank = args['rank']
+    is_sweep = sweep_early_stop is not None
     run_id = str(int(1000*time.time()))
     if args['wandb']:
         import wandb
@@ -207,7 +208,7 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 
     # When sweeping, optionally score each trial by winrate vs a fixed enemy
     # checkpoint (match mode) instead of the training-time self-play metric.
-    match_mode = (sweep_obj is not None
+    match_mode = (is_sweep
         and bool(args.get('sweep', {}).get('match_enemy_model_path')))
 
     checkpoint_dir = os.path.join(args['checkpoint_dir'], args['env_name'], run_id)
@@ -254,10 +255,10 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 
         # In match-sweep mode we need the final checkpoint to feed into match().
         is_final = epoch == train_epochs - 1
-        should_save = (sweep_obj is None
-            and (epoch % args['checkpoint_interval'] == 0 or is_final)
-        ) or (match_mode and is_final)
-        if should_save:
+        regular_checkpoint = not is_sweep and (
+            epoch % args['checkpoint_interval'] == 0 or is_final)
+        match_checkpoint = match_mode and is_final
+        if regular_checkpoint or match_checkpoint:
             model_path = os.path.join(checkpoint_dir, f'{pufferl.global_step:016d}.bin')
             backend.save_weights(pufferl, model_path)
 
@@ -266,6 +267,19 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
             continue
 
         logs = backend.eval_log(pufferl) if epoch >= train_epochs else backend.log(pufferl)
+
+        should_early_stop = False
+        logs.setdefault('early_stop_threshold', -0.5)
+        logs.setdefault('is_loss_nan', False)
+
+        # NaN loss is a failed training run for both sweeps and regular train.
+        if any(np.isnan(v) for v in logs.get('loss', {}).values()):
+            logs['is_loss_nan'] = True
+            should_early_stop = True
+        elif (is_sweep and epoch < train_epochs and pufferl.global_step > min(0.20*total_timesteps, 100_000_000)):
+            # side effect: writes `early_stop_threshold` to logs
+            should_early_stop = sweep_early_stop.early_stop(logs, target_key)
+
         flat_logs = {**flat_logs, **dict(unroll_nested_dict(logs))}
 
         if epoch < train_epochs:
@@ -283,9 +297,7 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
         if epoch < train_epochs:
             all_logs.append(flat_logs)
 
-            if (sweep_obj is not None
-                    and pufferl.global_step > min(0.20*total_timesteps, 100_000_000) and
-                    sweep_obj.early_stop(logs, target_key)):
+            if should_early_stop:
                 break
         elif flat_logs['env/n'] > args['eval_episodes']:
             break
@@ -327,13 +339,14 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
     all_logs.append(flat_logs)
 
     # Downsample results
+    metrics = {k: [[]] for k in all_logs[0] if k != 'is_loss_nan'}
     n = args['sweep']['downsample']
-    metrics = {k: [[]] for k in all_logs[0]}
     logged_timesteps = all_logs[-1]['agent_steps']
     next_bin = logged_timesteps / (n - 1) if n > 1 else np.inf
     for log in all_logs:
         for k, v in log.items():
-            metrics[k][-1].append(v)
+            if k != 'is_loss_nan':
+                metrics[k][-1].append(v)
 
         if log['agent_steps'] < next_bin:
             continue
@@ -345,6 +358,8 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 
     for k in metrics:
         metrics[k][-1] = all_logs[-1][k]
+
+    is_loss_nan = any(log.get('is_loss_nan', False) for log in all_logs)
 
     # Match-mode: single observation at final-training cost. Protein's curve
     # fit collapses to one point — we only trust the match winrate, not any
@@ -358,10 +373,10 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
     log_dir = os.path.join(args['log_dir'], args['env_name'])
     os.makedirs(log_dir, exist_ok=True)
     with open(os.path.join(log_dir, run_id + '.json'), 'w') as f:
-        json.dump({**args, 'metrics': metrics}, f)
+        json.dump({**args, 'is_loss_nan': is_loss_nan, 'metrics': metrics}, f)
 
     if args['wandb']:
-        if sweep_obj is None and model_path: # Don't spam uploads during sweeps
+        if not is_sweep and model_path: # Don't spam uploads during sweeps
             artifact = wandb.Artifact(run_id, type='model')
             artifact.add_file(model_path)
             wandb.run.log_artifact(artifact)
@@ -379,6 +394,9 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 def train(env_name, args=None, gpus=None, **kwargs):
     args = args or load_config(env_name)
     validate_config(args)
+    sweep_obj = kwargs.pop('sweep_obj', None)
+    if sweep_obj is not None and 'sweep_early_stop' not in kwargs:
+        kwargs['sweep_early_stop'] = sweep_obj.early_stop_state()
 
     subprocess = gpus is not None
     gpus = list(gpus or range(args['train']['gpus']))
@@ -395,11 +413,8 @@ def train(env_name, args=None, gpus=None, **kwargs):
         worker_args['rank'] = rank
         worker_args['gpu_id'] = gpu_id
         if rank == 0 and not subprocess:
-            _train(env_name, worker_args, verbose=True)
+            _train(env_name, worker_args, verbose=True, **kwargs)
         else:
-            # Protein's GP models live on cuda:0 on non-WSL setups; spawn-pickling
-            # them works fine via CUDA IPC. On WSL, sweep.py forces device='cpu'
-            # at construction so there's nothing to move.
             ctx.Process(target=_train, args=(env_name, worker_args),
                 kwargs=kwargs).start()
 
@@ -407,7 +422,7 @@ def sweep(env_name, args=None, pareto=False):
     '''Train entry point. Handles single-GPU, multi-GPU DDP, and sweeps.'''
     args = args or load_config(env_name)
     exp_gpus = args['train']['gpus']
-    sweep_gpus = args['sweep']['gpus'] or len(os.listdir('/proc/driver/nvidia/gpus'))
+    sweep_gpus = args['sweep']['gpus'] or torch.cuda.device_count()
     args['vec']['num_threads'] //= (sweep_gpus // exp_gpus)
     args['no_model_upload'] = True
 
@@ -463,7 +478,7 @@ def sweep(env_name, args=None, pareto=False):
         exp_args = deepcopy(args)
         active[gpu_id] = exp_args
         train(env_name, exp_args, range(gpu_id, gpu_id + exp_gpus),
-            sweep_obj=sweep_obj, result_queue=result_queue)
+            sweep_early_stop=sweep_obj.early_stop_state(), result_queue=result_queue)
 
 def eval(env_name, args=None, load_path=None):
     '''Evaluate a trained policy. Supports both native and --slowly torch backends.'''

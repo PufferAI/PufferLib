@@ -10,7 +10,11 @@
 #include <assert.h>
 
 #include "tensor.h"
+#ifdef USE_ROCM
+#include <hip/hip_runtime_api.h>
+#else
 #include <cuda_runtime_api.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -252,7 +256,7 @@ static void* static_omp_threadmanager(void* arg) {
 
     Env* envs = vec->envs;
 
-    printf("Num workers: %d\n", num_workers);
+    // printf("Num workers: %d\n", num_workers);
     while (true) {
         while (atomic_load(&buffer_states[buf]) != OMP_RUNNING) {
             if (atomic_load(&threading->shutdown)) {

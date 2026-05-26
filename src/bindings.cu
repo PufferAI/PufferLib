@@ -75,18 +75,11 @@ pybind11::dict puf_log(pybind11::object pufferl_obj) {
 
     // Utilization
     pybind11::dict util_dict;
-    nvmlUtilization_t util;
-    nvmlDeviceGetUtilizationRates(pufferl.nvml_device, &util);
-    util_dict["gpu_percent"] = (float)util.gpu;
-
-    nvmlMemory_t mem;
-    nvmlDeviceGetMemoryInfo(pufferl.nvml_device, &mem);
-    util_dict["gpu_mem"] = 100.0f * (float)mem.used / (float)mem.total;
-
-    size_t cuda_free, cuda_total;
-    cudaMemGetInfo(&cuda_free, &cuda_total);
-    util_dict["vram_used_gb"] = (float)(cuda_total - cuda_free) / (1024.0f * 1024.0f * 1024.0f);
-    util_dict["vram_total_gb"] = (float)cuda_total / (1024.0f * 1024.0f * 1024.0f);
+    GpuUtil util = gpu_get_utilization(pufferl.gpu_device);
+    util_dict["gpu_percent"] = util.gpu_percent;
+    util_dict["gpu_mem"] = util.gpu_mem;
+    util_dict["vram_used_gb"] = util.vram_used_gb;
+    util_dict["vram_total_gb"] = util.vram_total_gb;
 
     long rss_kb = 0;
     FILE* f = fopen("/proc/self/status", "r");
@@ -491,25 +484,15 @@ PYBIND11_MODULE(_C, m) {
     });
     // Standalone utilization monitor (no PuffeRL instance needed)
     m.def("get_utilization", [](int gpu_id) {
-        static bool nvml_inited = false;
-        if (!nvml_inited) { nvmlInit(); nvml_inited = true; }
-
         py::dict util_dict;
-        nvmlDevice_t device;
-        nvmlDeviceGetHandleByIndex(gpu_id, &device);
-
-        nvmlUtilization_t util;
-        nvmlDeviceGetUtilizationRates(device, &util);
-        util_dict["gpu_percent"] = (float)util.gpu;
-
-        nvmlMemory_t mem;
-        nvmlDeviceGetMemoryInfo(device, &mem);
-        util_dict["gpu_mem"] = 100.0f * (float)mem.used / (float)mem.total;
-
-        size_t cuda_free, cuda_total;
-        cudaMemGetInfo(&cuda_free, &cuda_total);
-        util_dict["vram_used_gb"] = (float)(cuda_total - cuda_free) / (1024.0f * 1024.0f * 1024.0f);
-        util_dict["vram_total_gb"] = (float)cuda_total / (1024.0f * 1024.0f * 1024.0f);
+        PufferGpuDevice device;
+        gpu_monitor_init(gpu_id, &device);
+        GpuUtil util = gpu_get_utilization(device);
+        gpu_monitor_shutdown();
+        util_dict["gpu_percent"] = util.gpu_percent;
+        util_dict["gpu_mem"] = util.gpu_mem;
+        util_dict["vram_used_gb"] = util.vram_used_gb;
+        util_dict["vram_total_gb"] = util.vram_total_gb;
 
         long rss_kb = 0;
         FILE* f = fopen("/proc/self/status", "r");
