@@ -154,8 +154,9 @@ def check_binding_text():
     assert header.count("env->target = record->target & shared->mask;") == 1
     assert "(uint32_t)record->target & shared->mask" not in header
     assert "static void affine_lock_cleanup_thread_scratch(void);" not in header
+    assert "#define AFFINE_LOCK_THREAD_LOCAL" in header
     scratch_pos = header.index(
-        "static _Thread_local AffineLockBfsScratch affine_lock_bfs_scratch = {0};"
+        "static AFFINE_LOCK_THREAD_LOCAL AffineLockBfsScratch affine_lock_bfs_scratch = {0};"
     )
     cleanup_pos = header.index("static void affine_lock_cleanup_thread_scratch(void) {")
     free_shared_pos = header.index("static void affine_lock_free_shared")

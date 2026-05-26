@@ -129,9 +129,12 @@ swap_adjacent_bits
 ```
 
 This is generator-only. The committed runtime environment does not train on this
-action set. To make it a runtime environment, update the env action table,
-`AFFINE_LOCK_NUM_ACTIONS`, the visible-table action-set hash/path, generated
-table artifact, and any policy/config expectations that assume eight actions.
+action set. It is kept as a small, explicit alternate because a four-action
+policy can be easier to learn, and this graph has far more unique depth-16
+pairs than the committed 8-action table. To make it a runtime environment,
+update the env action table, `AFFINE_LOCK_NUM_ACTIONS`, the visible-table
+action-set hash/path, generated table artifact, and any policy/config
+expectations that assume eight actions.
 
 The current true visible-pair counts for this generator action set are:
 

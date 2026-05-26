@@ -73,6 +73,9 @@ static const ActionSet ACTION_SETS[] = {
         },
     },
     {
+        // Generator-only alternate for future runtime experiments. Fewer
+        // actions can make policy search easier while producing many more
+        // exact depth-16 pairs than the committed 8-action training set.
         "affine_lock_4action_v1",
         4,
         0,
@@ -356,6 +359,8 @@ static uint64_t candidate_score(
         uint64_t packed_actions,
         int store_all) {
     uint64_t hash = ACTIVE_ACTION_SET->candidate_score_seed;
+    // Store-all depths are complete sets, so keep their ordering stable across
+    // sample seeds and only reseed the sampled pools.
     if (!store_all && ACTIVE_SAMPLE_SEED != 0u) {
         hash = mix_u64(hash, ACTIVE_SAMPLE_SEED);
     }

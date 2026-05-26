@@ -12,6 +12,16 @@
 
 #include "affine_lock_visible_targets.h"
 
+#ifndef AFFINE_LOCK_THREAD_LOCAL
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define AFFINE_LOCK_THREAD_LOCAL _Thread_local
+#elif defined(__GNUC__) || defined(__clang__)
+#define AFFINE_LOCK_THREAD_LOCAL __thread
+#else
+#error "Affine Lock requires C11 _Thread_local or compiler thread-local storage"
+#endif
+#endif
+
 #define AFFINE_LOCK_BITS 16
 #define AFFINE_LOCK_TIMER_INDEX (2 * AFFINE_LOCK_BITS)
 #define AFFINE_LOCK_OBS_SIZE (AFFINE_LOCK_TIMER_INDEX + 1)
@@ -278,7 +288,7 @@ static int affine_lock_configure_initialization(
     return 0;
 }
 
-static _Thread_local AffineLockBfsScratch affine_lock_bfs_scratch = {0};
+static AFFINE_LOCK_THREAD_LOCAL AffineLockBfsScratch affine_lock_bfs_scratch = {0};
 
 static void affine_lock_free_bfs_scratch(AffineLockBfsScratch* scratch) {
     free(scratch->seen_generation);
