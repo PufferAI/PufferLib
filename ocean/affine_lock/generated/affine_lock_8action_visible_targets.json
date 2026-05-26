@@ -29,6 +29,7 @@
   "record_count": 297156,
   "record_size": 16,
   "sample_per_depth": 65536,
+  "sample_seed": 0,
   "stored_all_depths": [16],
   "version": 1,
   "visible_distance_histogram": {

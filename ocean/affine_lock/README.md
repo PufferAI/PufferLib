@@ -53,7 +53,11 @@ The committed table stores sampled visible start/target pairs at depths `2`,
 | `16` | `100,548` | `100,548` |
 
 The table format can store any depth sections, but this generator currently
-targets the fixed depth list `{2, 4, 8, 16}`.
+targets the fixed depth list `{2, 4, 8, 16}`. The runtime `seed` controls the
+episode sequence sampled from a loaded table. The generator's `--sample-seed`
+controls which sampled depth-2/4/8 records are written into a custom table.
+Depth 16 is stored in full for the committed 8-action set, so changing
+`--sample-seed` does not change the depth-16 records.
 
 ## Regenerating the Target Table
 
@@ -70,22 +74,48 @@ gcc -std=c11 -O3 -DNDEBUG -fopenmp \
 ```
 
 The no-argument generator run writes the default `.bin` and `.json` files under
-`ocean/affine_lock/generated/`.
+`ocean/affine_lock/generated/`. The default sample seed is `0`, which preserves
+the committed benchmark table. Changing the committed `.bin` changes the
+training data and can change full-run `perf`, so regenerate and benchmark before
+committing a replacement table.
 
-The same generator can create larger tables for the committed action set without
-changing the runtime environment:
+The same generator can create larger or seed-varied tables for the committed
+action set without changing the runtime environment:
 
 ```bash
 /tmp/affine_lock_generate_visible_targets \
+  --sample-seed 42 \
   --sample-per-depth 131072 \
   --store-all-depth 16 \
-  --output-bin /tmp/affine_lock_8action_visible_targets.bin \
-  --output-json /tmp/affine_lock_8action_visible_targets.json
+  --output-bin /tmp/affine_lock_8action_visible_targets_seed42.bin \
+  --output-json /tmp/affine_lock_8action_visible_targets_seed42.json
 ```
 
 Increasing `--sample-per-depth` raises the number of stored records for sampled
 depths. `--store-all-depth D` stores every exact pair for a supported target
 depth. For the committed 8-action set, depth 16 is stored in full by default.
+Using the same `--sample-seed` and options produces the same table; using a
+different seed produces a different sampled d2/d4/d8 table while leaving
+stored-all depths unchanged.
+
+To generate train/test table variants, keep the same depth/count settings and
+change only `--sample-seed` and the output paths:
+
+```bash
+/tmp/affine_lock_generate_visible_targets \
+  --sample-seed 42 \
+  --sample-per-depth 65536 \
+  --store-all-depth 16 \
+  --output-bin /tmp/affine_lock_train_seed42.bin \
+  --output-json /tmp/affine_lock_train_seed42.json
+
+/tmp/affine_lock_generate_visible_targets \
+  --sample-seed 69 \
+  --sample-per-depth 65536 \
+  --store-all-depth 16 \
+  --output-bin /tmp/affine_lock_test_seed69.bin \
+  --output-json /tmp/affine_lock_test_seed69.json
+```
 
 ## Experimental 4-Action Generator Set
 
@@ -130,3 +160,9 @@ Adding a depth such as `12` is intentionally not part of the committed runtime
 path. The visible-target file format can represent it, but a future change would
 need to update the generator's `TARGET_DEPTHS`, regenerate the table, and teach
 the curriculum/logging code to request and report the new depth.
+
+The same applies to depths such as `6` or `10`: update `TARGET_DEPTHS` in the
+generator, regenerate the `.bin`/`.json`, update the table path/hash if replacing
+the committed artifact, and update the runtime curriculum/config/tests to request
+those depths. The loader does not require a format change for additional depth
+sections.

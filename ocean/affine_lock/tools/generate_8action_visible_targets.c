@@ -128,12 +128,14 @@ typedef struct Options {
     const char* output_json;
     const ActionSet* action_set;
     uint32_t sample_per_depth;
+    uint64_t sample_seed;
     int store_all_depths[TARGET_DEPTH_COUNT];
     int output_bin_explicit;
     int output_json_explicit;
 } Options;
 
 static uint16_t NEXT_STATE[STATE_COUNT][MAX_ACTIONS];
+static uint64_t ACTIVE_SAMPLE_SEED = 0u;
 
 static uint64_t mix_u64(uint64_t hash, uint64_t value) {
     hash ^= value;
@@ -351,8 +353,12 @@ static uint64_t candidate_score(
         uint16_t start,
         uint16_t target,
         int depth,
-        uint64_t packed_actions) {
+        uint64_t packed_actions,
+        int store_all) {
     uint64_t hash = ACTIVE_ACTION_SET->candidate_score_seed;
+    if (!store_all && ACTIVE_SAMPLE_SEED != 0u) {
+        hash = mix_u64(hash, ACTIVE_SAMPLE_SEED);
+    }
     hash = mix_u64(hash, start);
     hash = mix_u64(hash, target);
     hash = mix_u64(hash, (uint64_t)depth);
@@ -479,7 +485,8 @@ static void compute_worker_records(WorkerResult* result) {
                 record.solution_length = next_depth;
                 record.depth = next_depth;
                 record.score = candidate_score(
-                    (uint16_t)start, next, (int)next_depth, packed_actions);
+                    (uint16_t)start, next, (int)next_depth, packed_actions,
+                    sample->store_all);
                 if (add_record(sample, &record) != 0) {
                     fprintf(stderr, "failed to store sampled target record\n");
                     exit(2);
@@ -754,6 +761,8 @@ static int write_json(const char* path, const WorkerResult* result,
     fprintf(file, "  \"record_size\": %d,\n", RECORD_SIZE);
     fprintf(file, "  \"sample_per_depth\": %u,\n",
         options->sample_per_depth);
+    fprintf(file, "  \"sample_seed\": %llu,\n",
+        (unsigned long long)options->sample_seed);
     fprintf(file, "  \"stored_all_depths\": [");
     int wrote_depth = 0;
     for (int i = 0; i < TARGET_DEPTH_COUNT; i++) {
@@ -796,10 +805,24 @@ static int parse_uint32(const char* text, uint32_t* out) {
     return 0;
 }
 
+static int parse_uint64(const char* text, uint64_t* out) {
+    char* end = NULL;
+    errno = 0;
+    if (text[0] == '-') {
+        return -1;
+    }
+    unsigned long long value = strtoull(text, &end, 0);
+    if (errno != 0 || end == text || *end != '\0') {
+        return -1;
+    }
+    *out = (uint64_t)value;
+    return 0;
+}
+
 static void print_usage(const char* program) {
     fprintf(stderr,
         "usage: %s [--action-set NAME] [--sample-per-depth N] "
-        "[--store-all-depth D] "
+        "[--sample-seed N] [--store-all-depth D] "
         "[--output-bin PATH] [--output-json PATH]\n",
         program);
     fprintf(stderr, "available action sets:");
@@ -814,6 +837,7 @@ static int parse_args(int argc, char** argv, Options* options) {
     options->output_bin = NULL;
     options->output_json = NULL;
     options->sample_per_depth = 65536u;
+    options->sample_seed = 0u;
     memset(options->store_all_depths, 0, sizeof(options->store_all_depths));
     options->output_bin_explicit = 0;
     options->output_json_explicit = 0;
@@ -829,6 +853,11 @@ static int parse_args(int argc, char** argv, Options* options) {
         } else if (strcmp(argv[i], "--sample-per-depth") == 0 && i + 1 < argc) {
             if (parse_uint32(argv[++i], &options->sample_per_depth) != 0) {
                 fprintf(stderr, "invalid --sample-per-depth value\n");
+                return -1;
+            }
+        } else if (strcmp(argv[i], "--sample-seed") == 0 && i + 1 < argc) {
+            if (parse_uint64(argv[++i], &options->sample_seed) != 0) {
+                fprintf(stderr, "invalid --sample-seed value\n");
                 return -1;
             }
         } else if (strcmp(argv[i], "--store-all-depth") == 0 && i + 1 < argc) {
@@ -877,6 +906,7 @@ int main(int argc, char** argv) {
     }
 
     ACTIVE_ACTION_SET = options.action_set;
+    ACTIVE_SAMPLE_SEED = options.sample_seed;
     build_next_state();
     int worker_count = 1;
 #ifdef _OPENMP
