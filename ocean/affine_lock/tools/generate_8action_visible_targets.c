@@ -17,10 +17,6 @@
 #define MAX_DISTANCE 64
 #define RECORD_SIZE 16
 #define FORMAT_VERSION 1
-#define PACKED_FORMAT_VERSION 1
-#define PACKED_LAYOUT_FIXED_PER_START 1u
-#define PACKED_LAYOUT_SPARSE 2u
-#define PACKED_SECTION_SIZE 40u
 
 static const int TARGET_DEPTHS[TARGET_DEPTH_COUNT] = {2, 4, 8, 16};
 typedef enum ActionOp {
@@ -128,28 +124,12 @@ typedef struct WorkerResult {
     int max_distance;
 } WorkerResult;
 
-typedef struct PackedFixedDepth {
-    uint32_t choices_per_start;
-    uint16_t* targets;
-    uint64_t* packed_actions;
-    uint16_t* counts;
-} PackedFixedDepth;
-
-typedef struct PackedOutput {
-    const char* output_bin;
-    const char* output_json;
-    PackedFixedDepth fixed[TARGET_DEPTH_COUNT];
-} PackedOutput;
-
 typedef struct Options {
     const char* output_bin;
     const char* output_json;
-    const char* packed_output_bin;
-    const char* packed_output_json;
     const ActionSet* action_set;
     uint32_t sample_per_depth;
     int store_all_depths[TARGET_DEPTH_COUNT];
-    uint32_t packed_choices_per_start[TARGET_DEPTH_COUNT];
     int output_bin_explicit;
     int output_json_explicit;
 } Options;
@@ -368,76 +348,6 @@ static int add_record(DepthSample* sample, const TargetRecord* record) {
     return 0;
 }
 
-static int packed_output_enabled(const Options* options) {
-    return options->packed_output_bin != NULL ||
-        options->packed_output_json != NULL;
-}
-
-static int init_packed_output(PackedOutput* packed, const Options* options) {
-    memset(packed, 0, sizeof(*packed));
-    packed->output_bin = options->packed_output_bin;
-    packed->output_json = options->packed_output_json;
-
-    if (!packed_output_enabled(options)) {
-        return 0;
-    }
-
-    for (int depth_index = 0; depth_index < TARGET_DEPTH_COUNT; depth_index++) {
-        uint32_t choices = options->packed_choices_per_start[depth_index];
-        if (choices == 0) {
-            continue;
-        }
-        PackedFixedDepth* fixed = &packed->fixed[depth_index];
-        fixed->choices_per_start = choices;
-        size_t record_count = (size_t)STATE_COUNT * (size_t)choices;
-        fixed->targets = (uint16_t*)calloc(record_count, sizeof(uint16_t));
-        fixed->packed_actions =
-            (uint64_t*)calloc(record_count, sizeof(uint64_t));
-        fixed->counts = (uint16_t*)calloc(STATE_COUNT, sizeof(uint16_t));
-        if (fixed->targets == NULL || fixed->packed_actions == NULL ||
-                fixed->counts == NULL) {
-            fprintf(stderr, "failed to allocate packed target buffers\n");
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static void free_packed_output(PackedOutput* packed) {
-    for (int depth_index = 0; depth_index < TARGET_DEPTH_COUNT; depth_index++) {
-        PackedFixedDepth* fixed = &packed->fixed[depth_index];
-        free(fixed->targets);
-        free(fixed->packed_actions);
-        free(fixed->counts);
-        memset(fixed, 0, sizeof(*fixed));
-    }
-    packed->output_bin = NULL;
-    packed->output_json = NULL;
-}
-
-static void add_packed_fixed_record(
-        PackedOutput* packed,
-        uint16_t start,
-        uint16_t target,
-        int depth_index,
-        uint64_t packed_actions) {
-    if (packed == NULL) {
-        return;
-    }
-    PackedFixedDepth* fixed = &packed->fixed[depth_index];
-    if (fixed->choices_per_start == 0) {
-        return;
-    }
-    uint16_t slot = fixed->counts[start];
-    if (slot >= fixed->choices_per_start) {
-        return;
-    }
-    size_t index = (size_t)start * (size_t)fixed->choices_per_start + slot;
-    fixed->targets[index] = target;
-    fixed->packed_actions[index] = packed_actions;
-    fixed->counts[start] = (uint16_t)(slot + 1u);
-}
-
 static uint64_t candidate_score(
         uint16_t start,
         uint16_t target,
@@ -506,8 +416,7 @@ static void free_worker_result(WorkerResult* result) {
 
 static void compute_worker_records(
         WorkerResult* result,
-        const Options* options,
-        PackedOutput* packed) {
+        const Options* options) {
     uint32_t* seen = (uint32_t*)calloc(STATE_COUNT, sizeof(uint32_t));
     uint16_t* queue = (uint16_t*)malloc(STATE_COUNT * sizeof(uint16_t));
     uint16_t* parent = (uint16_t*)malloc(STATE_COUNT * sizeof(uint16_t));
@@ -572,12 +481,6 @@ static void compute_worker_records(
                 record.depth = next_depth;
                 record.score = candidate_score(
                     (uint16_t)start, next, (int)next_depth, packed_actions);
-                add_packed_fixed_record(
-                    packed,
-                    (uint16_t)start,
-                    next,
-                    depth_index,
-                    packed_actions);
                 if (add_record(sample, &record) != 0) {
                     fprintf(stderr, "failed to store sampled target record\n");
                     exit(2);
@@ -884,307 +787,6 @@ static int write_json(const char* path, const WorkerResult* result,
     return 0;
 }
 
-typedef struct PackedSection {
-    uint32_t depth;
-    uint32_t layout;
-    uint32_t record_size;
-    uint32_t path_bytes;
-    uint32_t choices_per_start;
-    uint32_t record_count;
-    uint64_t data_offset;
-    uint64_t exact_pair_count;
-} PackedSection;
-
-static uint32_t packed_header_size(void) {
-    return 48u + (uint32_t)TARGET_DEPTH_COUNT * PACKED_SECTION_SIZE;
-}
-
-static uint32_t packed_path_bytes(uint32_t depth) {
-    return (depth * 3u + 7u) / 8u;
-}
-
-static void build_packed_sections(
-        const WorkerResult* result,
-        const PackedOutput* packed,
-        PackedSection sections[TARGET_DEPTH_COUNT]) {
-    uint64_t data_offset = packed_header_size();
-    for (int depth_index = 0; depth_index < TARGET_DEPTH_COUNT; depth_index++) {
-        const DepthSample* sample = &result->depths[depth_index];
-        const PackedFixedDepth* fixed = &packed->fixed[depth_index];
-        PackedSection* section = &sections[depth_index];
-        memset(section, 0, sizeof(*section));
-        section->depth = (uint32_t)sample->depth;
-        section->path_bytes = packed_path_bytes(section->depth);
-        section->exact_pair_count = sample->exact_count;
-        if (fixed->choices_per_start > 0) {
-            section->layout = PACKED_LAYOUT_FIXED_PER_START;
-            section->choices_per_start = fixed->choices_per_start;
-            section->record_size = 2u + section->path_bytes;
-            section->record_count = STATE_COUNT * fixed->choices_per_start;
-        } else {
-            section->layout = PACKED_LAYOUT_SPARSE;
-            section->choices_per_start = 0;
-            section->record_size = 4u + section->path_bytes;
-            section->record_count = sample->count;
-        }
-        section->data_offset = data_offset;
-        data_offset += (uint64_t)section->record_count * section->record_size;
-    }
-}
-
-static int validate_packed_output(const PackedOutput* packed) {
-    for (int depth_index = 0; depth_index < TARGET_DEPTH_COUNT; depth_index++) {
-        const PackedFixedDepth* fixed = &packed->fixed[depth_index];
-        if (fixed->choices_per_start == 0) {
-            continue;
-        }
-        for (uint32_t state = 0; state < STATE_COUNT; state++) {
-            if (fixed->counts[state] < fixed->choices_per_start) {
-                fprintf(stderr,
-                    "packed depth %d has only %u records for start state %u; "
-                    "requested %u\n",
-                    TARGET_DEPTHS[depth_index],
-                    (unsigned int)fixed->counts[state],
-                    (unsigned int)state,
-                    (unsigned int)fixed->choices_per_start);
-                return -1;
-            }
-        }
-    }
-    return 0;
-}
-
-static uint64_t packed_checksum(
-        const WorkerResult* result,
-        const PackedOutput* packed,
-        const PackedSection sections[TARGET_DEPTH_COUNT]) {
-    uint64_t hash = 1469598103934665603ull;
-    hash = mix_u64(hash, action_set_hash());
-    for (int depth_index = 0; depth_index < TARGET_DEPTH_COUNT; depth_index++) {
-        const PackedSection* section = &sections[depth_index];
-        hash = mix_u64(hash, section->depth);
-        hash = mix_u64(hash, section->layout);
-        hash = mix_u64(hash, section->record_size);
-        hash = mix_u64(hash, section->path_bytes);
-        hash = mix_u64(hash, section->choices_per_start);
-        hash = mix_u64(hash, section->record_count);
-        hash = mix_u64(hash, section->data_offset);
-        hash = mix_u64(hash, section->exact_pair_count);
-
-        if (section->layout == PACKED_LAYOUT_FIXED_PER_START) {
-            const PackedFixedDepth* fixed = &packed->fixed[depth_index];
-            for (uint32_t state = 0; state < STATE_COUNT; state++) {
-                for (uint32_t slot = 0; slot < section->choices_per_start;
-                        slot++) {
-                    size_t index =
-                        (size_t)state * section->choices_per_start + slot;
-                    hash = mix_u64(hash, state);
-                    hash = mix_u64(hash, fixed->targets[index]);
-                    hash = mix_u64(hash, fixed->packed_actions[index]);
-                }
-            }
-        } else {
-            const DepthSample* sample = &result->depths[depth_index];
-            for (uint32_t i = 0; i < sample->count; i++) {
-                const TargetRecord* record = &sample->records[i];
-                hash = mix_u64(hash, record->start);
-                hash = mix_u64(hash, record->target);
-                hash = mix_u64(hash, record->packed_actions);
-            }
-        }
-    }
-    return hash;
-}
-
-static int write_path_bytes(
-        FILE* file,
-        uint64_t packed_actions,
-        uint32_t path_bytes) {
-    for (uint32_t i = 0; i < path_bytes; i++) {
-        if (fputc((int)((packed_actions >> (8u * i)) & 0xffu), file) == EOF) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static int write_packed_binary(
-        const char* path,
-        const WorkerResult* result,
-        const PackedOutput* packed,
-        const PackedSection sections[TARGET_DEPTH_COUNT]) {
-    FILE* file = fopen(path, "wb");
-    if (file == NULL) {
-        fprintf(stderr, "failed to open %s: %s\n", path, strerror(errno));
-        return -1;
-    }
-
-    const unsigned char magic[8] = {'A', 'L', '7', 'P', 'K', 'D', '1', '\0'};
-    uint64_t checksum = packed_checksum(result, packed, sections);
-    int rc = 0;
-    rc |= write_bytes(file, magic, sizeof(magic));
-    rc |= write_u32(file, PACKED_FORMAT_VERSION);
-    rc |= write_u32(file, packed_header_size());
-    rc |= write_u32(file, PACKED_SECTION_SIZE);
-    rc |= write_u32(file, BITS);
-    rc |= write_u32(file, (uint32_t)ACTIVE_ACTION_SET->num_actions);
-    rc |= write_u32(file, TARGET_DEPTH_COUNT);
-    rc |= write_u64(file, checksum);
-    rc |= write_u64(file, action_set_hash());
-
-    for (int depth_index = 0; depth_index < TARGET_DEPTH_COUNT; depth_index++) {
-        const PackedSection* section = &sections[depth_index];
-        rc |= write_u32(file, section->depth);
-        rc |= write_u32(file, section->layout);
-        rc |= write_u32(file, section->record_size);
-        rc |= write_u32(file, section->path_bytes);
-        rc |= write_u32(file, section->choices_per_start);
-        rc |= write_u32(file, section->record_count);
-        rc |= write_u64(file, section->data_offset);
-        rc |= write_u64(file, section->exact_pair_count);
-    }
-
-    for (int depth_index = 0; depth_index < TARGET_DEPTH_COUNT; depth_index++) {
-        const PackedSection* section = &sections[depth_index];
-        if (section->layout == PACKED_LAYOUT_FIXED_PER_START) {
-            const PackedFixedDepth* fixed = &packed->fixed[depth_index];
-            for (uint32_t state = 0; state < STATE_COUNT; state++) {
-                for (uint32_t slot = 0; slot < section->choices_per_start;
-                        slot++) {
-                    size_t index =
-                        (size_t)state * section->choices_per_start + slot;
-                    rc |= write_u16(file, fixed->targets[index]);
-                    rc |= write_path_bytes(
-                        file,
-                        fixed->packed_actions[index],
-                        section->path_bytes);
-                }
-            }
-        } else {
-            const DepthSample* sample = &result->depths[depth_index];
-            for (uint32_t i = 0; i < sample->count; i++) {
-                const TargetRecord* record = &sample->records[i];
-                rc |= write_u16(file, record->start);
-                rc |= write_u16(file, record->target);
-                rc |= write_path_bytes(
-                    file,
-                    record->packed_actions,
-                    section->path_bytes);
-            }
-        }
-    }
-
-    if (fclose(file) != 0) {
-        fprintf(stderr, "failed to close %s: %s\n", path, strerror(errno));
-        return -1;
-    }
-    if (rc != 0) {
-        fprintf(stderr, "failed to write %s\n", path);
-        return -1;
-    }
-    return 0;
-}
-
-static uint64_t packed_file_size(
-        const PackedSection sections[TARGET_DEPTH_COUNT]) {
-    const PackedSection* last = &sections[TARGET_DEPTH_COUNT - 1];
-    return last->data_offset + (uint64_t)last->record_count * last->record_size;
-}
-
-static int write_packed_json(
-        const char* path,
-        const WorkerResult* result,
-        const Options* options,
-        const PackedOutput* packed,
-        const PackedSection sections[TARGET_DEPTH_COUNT]) {
-    FILE* file = fopen(path, "w");
-    if (file == NULL) {
-        fprintf(stderr, "failed to open %s: %s\n", path, strerror(errno));
-        return -1;
-    }
-    uint64_t checksum = packed_checksum(result, packed, sections);
-
-    fprintf(file, "{\n");
-    fprintf(file, "  \"action_id_to_name\": [\n");
-    for (int i = 0; i < ACTIVE_ACTION_SET->num_actions; i++) {
-        fprintf(file, "    \"%s\"%s\n", ACTIVE_ACTION_SET->names[i],
-            i == ACTIVE_ACTION_SET->num_actions - 1 ? "" : ",");
-    }
-    fprintf(file, "  ],\n");
-    fprintf(file, "  \"action_set\": \"%s\",\n", ACTIVE_ACTION_SET->name);
-    fprintf(file, "  \"action_set_hash\": \"0x%016llx\",\n",
-        (unsigned long long)action_set_hash());
-    fprintf(file, "  \"binary_path\": \"%s\",\n", options->packed_output_bin);
-    fprintf(file, "  \"bits\": %d,\n", BITS);
-    fprintf(file, "  \"checksum\": \"0x%016llx\",\n",
-        (unsigned long long)checksum);
-    fprintf(file, "  \"depths\": [");
-    for (int i = 0; i < TARGET_DEPTH_COUNT; i++) {
-        fprintf(file, "%s%d", i == 0 ? "" : ", ", TARGET_DEPTHS[i]);
-    }
-    fprintf(file, "],\n");
-    fprintf(file, "  \"disconnected_starts\": %llu,\n",
-        (unsigned long long)result->disconnected_starts);
-    fprintf(file, "  \"file_size_bytes\": %llu,\n",
-        (unsigned long long)packed_file_size(sections));
-    fprintf(file, "  \"fixed_choices_per_start\": {");
-    int wrote_choice = 0;
-    for (int i = 0; i < TARGET_DEPTH_COUNT; i++) {
-        uint32_t choices = packed->fixed[i].choices_per_start;
-        if (choices == 0) {
-            continue;
-        }
-        fprintf(file, "%s\"%d\": %u", wrote_choice ? ", " : "",
-            TARGET_DEPTHS[i], choices);
-        wrote_choice = 1;
-    }
-    fprintf(file, "},\n");
-    fprintf(file, "  \"format\": \"affine_lock_packed_visible_targets_bin\",\n");
-    fprintf(file, "  \"header_size\": %u,\n", packed_header_size());
-    fprintf(file, "  \"max_distance\": %d,\n", result->max_distance);
-    fprintf(file, "  \"num_actions\": %d,\n", ACTIVE_ACTION_SET->num_actions);
-    fprintf(file, "  \"section_size\": %u,\n", PACKED_SECTION_SIZE);
-    fprintf(file, "  \"sections\": [\n");
-    for (int i = 0; i < TARGET_DEPTH_COUNT; i++) {
-        const PackedSection* section = &sections[i];
-        fprintf(file,
-            "    {\"choices_per_start\": %u, \"data_offset\": %llu, "
-            "\"depth\": %u, \"exact_pair_count\": %llu, \"layout\": \"%s\", "
-            "\"path_bytes\": %u, \"record_count\": %u, "
-            "\"record_size\": %u}%s\n",
-            section->choices_per_start,
-            (unsigned long long)section->data_offset,
-            section->depth,
-            (unsigned long long)section->exact_pair_count,
-            section->layout == PACKED_LAYOUT_FIXED_PER_START ?
-                "fixed_per_start" : "sparse",
-            section->path_bytes,
-            section->record_count,
-            section->record_size,
-            i == TARGET_DEPTH_COUNT - 1 ? "" : ",");
-    }
-    fprintf(file, "  ],\n");
-    fprintf(file, "  \"version\": %d,\n", PACKED_FORMAT_VERSION);
-    fprintf(file, "  \"visible_distance_histogram\": {\n");
-    int first = 1;
-    for (int distance = 0; distance <= result->max_distance; distance++) {
-        if (!first) {
-            fprintf(file, ",\n");
-        }
-        fprintf(file, "    \"%d\": %llu", distance,
-            (unsigned long long)result->histogram[distance]);
-        first = 0;
-    }
-    fprintf(file, "\n  }\n");
-    fprintf(file, "}\n");
-
-    if (fclose(file) != 0) {
-        fprintf(stderr, "failed to close %s: %s\n", path, strerror(errno));
-        return -1;
-    }
-    return 0;
-}
-
 static int parse_uint32(const char* text, uint32_t* out) {
     char* end = NULL;
     errno = 0;
@@ -1200,9 +802,7 @@ static void print_usage(const char* program) {
     fprintf(stderr,
         "usage: %s [--action-set NAME] [--sample-per-depth N] "
         "[--store-all-depth D] "
-        "[--output-bin PATH] [--output-json PATH] "
-        "[--packed-depth-count D:N] [--packed-output-bin PATH] "
-        "[--packed-output-json PATH]\n",
+        "[--output-bin PATH] [--output-json PATH]\n",
         program);
     fprintf(stderr, "available action sets:");
     for (int i = 0; i < ACTION_SET_COUNT; i++) {
@@ -1211,35 +811,12 @@ static void print_usage(const char* program) {
     fprintf(stderr, "\n");
 }
 
-static int parse_depth_count(const char* text, uint32_t* depth, uint32_t* count) {
-    const char* colon = strchr(text, ':');
-    if (colon == NULL || colon == text || colon[1] == '\0') {
-        return -1;
-    }
-    char depth_text[16];
-    size_t depth_len = (size_t)(colon - text);
-    if (depth_len >= sizeof(depth_text)) {
-        return -1;
-    }
-    memcpy(depth_text, text, depth_len);
-    depth_text[depth_len] = '\0';
-    if (parse_uint32(depth_text, depth) != 0 ||
-            parse_uint32(colon + 1, count) != 0) {
-        return -1;
-    }
-    return 0;
-}
-
 static int parse_args(int argc, char** argv, Options* options) {
     options->action_set = &ACTION_SETS[0];
     options->output_bin = NULL;
     options->output_json = NULL;
-    options->packed_output_bin = NULL;
-    options->packed_output_json = NULL;
     options->sample_per_depth = 65536u;
     memset(options->store_all_depths, 0, sizeof(options->store_all_depths));
-    memset(options->packed_choices_per_start, 0,
-        sizeof(options->packed_choices_per_start));
     options->output_bin_explicit = 0;
     options->output_json_explicit = 0;
 
@@ -1274,30 +851,6 @@ static int parse_args(int argc, char** argv, Options* options) {
         } else if (strcmp(argv[i], "--output-json") == 0 && i + 1 < argc) {
             options->output_json = argv[++i];
             options->output_json_explicit = 1;
-        } else if (strcmp(argv[i], "--packed-depth-count") == 0 &&
-                i + 1 < argc) {
-            uint32_t depth = 0;
-            uint32_t count = 0;
-            if (parse_depth_count(argv[++i], &depth, &count) != 0) {
-                fprintf(stderr, "invalid --packed-depth-count value\n");
-                return -1;
-            }
-            int depth_index = target_depth_index((int)depth);
-            if (depth_index < 0 || depth == 16) {
-                fprintf(stderr, "unsupported --packed-depth-count %u\n", depth);
-                return -1;
-            }
-            if (count > UINT16_MAX) {
-                fprintf(stderr, "--packed-depth-count is too large\n");
-                return -1;
-            }
-            options->packed_choices_per_start[depth_index] = count;
-        } else if (strcmp(argv[i], "--packed-output-bin") == 0 &&
-                i + 1 < argc) {
-            options->packed_output_bin = argv[++i];
-        } else if (strcmp(argv[i], "--packed-output-json") == 0 &&
-                i + 1 < argc) {
-            options->packed_output_json = argv[++i];
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             exit(0);
@@ -1314,31 +867,6 @@ static int parse_args(int argc, char** argv, Options* options) {
         options->output_json = options->action_set->default_json;
     }
     if (options->action_set->store_all_d16_by_default) {
-        options->store_all_depths[target_depth_index(16)] = 1;
-    }
-
-    if (packed_output_enabled(options)) {
-        if (options->packed_output_bin == NULL) {
-            options->packed_output_bin =
-                "ocean/affine_lock/generated/"
-                "affine_lock_8action_visible_targets_packed.bin";
-        }
-        if (options->packed_output_json == NULL) {
-            options->packed_output_json =
-                "ocean/affine_lock/generated/"
-                "affine_lock_8action_visible_targets_packed.json";
-        }
-        int has_explicit_fixed_count = 0;
-        for (int i = 0; i < TARGET_DEPTH_COUNT; i++) {
-            if (options->packed_choices_per_start[i] > 0) {
-                has_explicit_fixed_count = 1;
-            }
-        }
-        if (!has_explicit_fixed_count) {
-            options->packed_choices_per_start[target_depth_index(2)] = 6;
-            options->packed_choices_per_start[target_depth_index(4)] = 64;
-            options->packed_choices_per_start[target_depth_index(8)] = 64;
-        }
         options->store_all_depths[target_depth_index(16)] = 1;
     }
     return 0;
@@ -1363,12 +891,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    PackedOutput packed;
-    if (init_packed_output(&packed, &options) != 0) {
-        free(workers);
-        return 1;
-    }
-
 #pragma omp parallel
     {
         int worker_index = 0;
@@ -1376,7 +898,7 @@ int main(int argc, char** argv) {
         worker_index = omp_get_thread_num();
 #endif
         init_worker_result(&workers[worker_index], &options);
-        compute_worker_records(&workers[worker_index], &options, &packed);
+        compute_worker_records(&workers[worker_index], &options);
     }
 
     WorkerResult merged;
@@ -1388,30 +910,10 @@ int main(int argc, char** argv) {
     if (write_json(options.output_json, &merged, &options) != 0) {
         rc = 1;
     }
-    if (packed_output_enabled(&options)) {
-        PackedSection sections[TARGET_DEPTH_COUNT];
-        build_packed_sections(&merged, &packed, sections);
-        if (validate_packed_output(&packed) != 0) {
-            rc = 1;
-        } else {
-            if (write_packed_binary(
-                        options.packed_output_bin, &merged, &packed,
-                        sections) != 0) {
-                rc = 1;
-            }
-            if (write_packed_json(
-                        options.packed_output_json, &merged, &options,
-                        &packed, sections) != 0) {
-                rc = 1;
-            }
-        }
-    }
-
     for (int i = 0; i < worker_count; i++) {
         free_worker_result(&workers[i]);
     }
     free(workers);
-    free_packed_output(&packed);
     free_worker_result(&merged);
     return rc == 0 ? 0 : 1;
 }
