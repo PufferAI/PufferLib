@@ -715,17 +715,13 @@ static void affine_lock_add_log(
 }
 
 static void affine_lock_compute_observations(AffineLock* env) {
-    const float* patterns = &env->shared->observation_bit_patterns[0][0];
+    float (*patterns)[8] = env->shared->observation_bit_patterns;
     uint32_t state = env->state;
     uint32_t target = env->target;
-    memcpy(&env->observations[0],
-        patterns + ((state & 0xffu) * 8u), 8 * sizeof(float));
-    memcpy(&env->observations[8],
-        patterns + (((state >> 8) & 0xffu) * 8u), 8 * sizeof(float));
-    memcpy(&env->observations[16],
-        patterns + ((target & 0xffu) * 8u), 8 * sizeof(float));
-    memcpy(&env->observations[24],
-        patterns + (((target >> 8) & 0xffu) * 8u), 8 * sizeof(float));
+    memcpy(&env->observations[0], patterns[state & 0xffu], 8 * sizeof(float));
+    memcpy(&env->observations[8], patterns[(state >> 8) & 0xffu], 8 * sizeof(float));
+    memcpy(&env->observations[16], patterns[target & 0xffu], 8 * sizeof(float));
+    memcpy(&env->observations[24], patterns[(target >> 8) & 0xffu], 8 * sizeof(float));
     env->observations[AFFINE_LOCK_TIMER_INDEX] = env->max_steps > 0 ?
         (float)env->step_count / (float)env->max_steps : 0.0f;
 }
