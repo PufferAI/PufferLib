@@ -18,7 +18,6 @@
 // PufferLib uses one action slot for this single-discrete-action env.
 #define AFFINE_LOCK_NUM_ATNS 1
 #define AFFINE_LOCK_NUM_ACTIONS 8
-#define AFFINE_LOCK_MAX_SCRAMBLE_DEPTH 16
 #define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16
 #define AFFINE_LOCK_STEP_REWARD (-0.01f)
 #ifndef AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH
@@ -645,9 +644,8 @@ static void affine_lock_generate_visible_target_table_target(AffineLock* env) {
     }
 
     env->state = (uint32_t)record->start & shared->mask;
-    env->target = (uint32_t)record->target & shared->mask;
     affine_lock_clear_generated_path(env);
-    env->target = (uint32_t)record->target & shared->mask;
+    env->target = record->target & shared->mask;
     env->target_distance = (int)record->depth;
     affine_lock_store_visible_solution_path(env, record);
 }

@@ -252,6 +252,7 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     log.depth_8_solve_rate = 0.0f;
     log.depth_16_rate = 0.125f;
     log.depth_16_solve_rate = 0.0f;
+    log.score = 0.75f;
     log.target_distance = 4.0f;
     log.solved_target_distance = 2.0f;
     log.solve_rate = 0.5f;
@@ -259,8 +260,8 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     Dict* out = create_dict(32);
     my_log(&log, out);
 
-    EXPECT_EQ_INT(out->size, 15);
-    EXPECT_TRUE(!dict_has_key(out, "score"));
+    EXPECT_EQ_INT(out->size, 16);
+    EXPECT_NEAR(dict_value(out, "score"), 0.75, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "solve_steps"));
     EXPECT_TRUE(!dict_has_key(out, "solve_efficiency"));
     EXPECT_TRUE(!dict_has_key(out, "scramble_unique_states"));

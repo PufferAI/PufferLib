@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 EXPECTED_MY_LOG_KEYS = [
     "perf",
+    "score",
     "solve_rate",
     "max_depth_solve",
     "episode_return",
@@ -139,6 +140,7 @@ def check_config():
 def check_binding_text():
     header = (ROOT / "ocean" / "affine_lock" / "affine_lock.h").read_text()
     assert "#define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16" in header
+    assert "AFFINE_LOCK_MAX_SCRAMBLE_DEPTH" not in header
     assert "AFFINE_LOCK_INIT_EXACT_DISTANCE = 1" in header
     assert "AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 2" in header
     assert "AFFINE_LOCK_INIT_SCRAMBLE" not in header
@@ -146,6 +148,8 @@ def check_binding_text():
     assert "AFFINE_LOCK_INIT_WCA_RANDOM_STATE" not in header
     assert "debug_log" not in header
     assert "short_solve_audit" not in header
+    assert header.count("env->target = record->target & shared->mask;") == 1
+    assert "(uint32_t)record->target & shared->mask" not in header
 
     env_api_order = [
         "affine_lock_init_env",
@@ -172,6 +176,7 @@ def check_binding_text():
     assert "#define OBS_SIZE AFFINE_LOCK_OBS_SIZE" in binding
     assert "#define ACT_SIZES {AFFINE_LOCK_NUM_ACTIONS}" in binding
     assert "#define OBS_TENSOR_T FloatTensor" in binding
+    assert "ENV_WRITES_REWARDS_AND_TERMINALS" not in binding
     assert "#define MY_THREAD_CLOSE" not in binding
     assert "my_thread_close" not in binding
     assert 'dict_get(env_kwargs, "rank")' not in binding
@@ -181,6 +186,9 @@ def check_binding_text():
     log_keys = re.findall(r'dict_set\(out,\s*"([^"]+)"', binding)
     assert log_keys == EXPECTED_MY_LOG_KEYS
     assert len(log_keys) + 1 <= 32  # static_vec_log appends "n".
+
+    c_tests = (ROOT / "ocean" / "affine_lock" / "tests" / "test_affine_lock.c").read_text()
+    assert "mode4" not in c_tests
 
     log_struct = re.search(r"typedef struct Log \{(?P<body>.*?)\} Log;", header, re.S)
     assert log_struct is not None
@@ -194,7 +202,6 @@ def check_binding_text():
     framework_log_fields = {"n"}
     renamed_log_fields = {"target_distance", "solved_target_distance"}
     internal_log_fields = {
-        "score",
         "solve_steps",
         "solve_efficiency",
         "depth_2_rate",

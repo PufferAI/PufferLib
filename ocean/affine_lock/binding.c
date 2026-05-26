@@ -4,7 +4,6 @@
 #define NUM_ATNS AFFINE_LOCK_NUM_ATNS
 #define ACT_SIZES {AFFINE_LOCK_NUM_ACTIONS}
 #define OBS_TENSOR_T FloatTensor
-#define ENV_WRITES_REWARDS_AND_TERMINALS
 
 #define MY_VEC_INIT
 #define MY_VEC_CLOSE
@@ -124,6 +123,7 @@ void my_log(Log* log, Dict* out) {
         conditional_rate(log->depth_16_solve_rate, log->depth_16_rate);
 
     dict_set(out, "perf", log->perf);
+    dict_set(out, "score", log->score);
     dict_set(out, "solve_rate", log->solve_rate);
     dict_set(out, "max_depth_solve", log->max_depth_solve);
     dict_set(out, "episode_return", log->episode_return);

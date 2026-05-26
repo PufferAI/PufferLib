@@ -1313,7 +1313,7 @@ static void test_deterministic_seed_sequences_for_all_initialization_modes(void)
     }
 }
 
-static uint64_t run_mode4_seed_42_golden_sequence(void) {
+static uint64_t run_visible_table_seed_42_golden_sequence(void) {
     AffineLockShared shared = make_shared(2, 16, 2, 0);
     affine_lock_configure_initialization(
         &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
@@ -1349,8 +1349,8 @@ static uint64_t run_mode4_seed_42_golden_sequence(void) {
     return checksum;
 }
 
-static void test_mode4_seed_42_golden_checksum(void) {
-    uint64_t checksum = run_mode4_seed_42_golden_sequence();
+static void test_visible_table_seed_42_golden_checksum(void) {
+    uint64_t checksum = run_visible_table_seed_42_golden_sequence();
     EXPECT_EQ_U64(checksum, 0x191b49f595f121c3ull);
 }
 
@@ -1454,7 +1454,7 @@ int main(void) {
     test_exact_distance_initialization_logs_target_distance();
     test_exact_distance_solve_logs_solved_target_distance();
     test_deterministic_seed_sequences_for_all_initialization_modes();
-    test_mode4_seed_42_golden_checksum();
+    test_visible_table_seed_42_golden_checksum();
     test_deterministic_seed_sequences_and_distinct_env_ids();
     printf("affine_lock tests passed\n");
     return 0;
