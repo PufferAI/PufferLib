@@ -104,7 +104,6 @@ typedef struct TargetRecord {
     uint64_t packed_actions;
     uint8_t solution_length;
     uint8_t depth;
-    uint16_t reserved;
     uint64_t score;
 } TargetRecord;
 
@@ -414,9 +413,7 @@ static void free_worker_result(WorkerResult* result) {
     }
 }
 
-static void compute_worker_records(
-        WorkerResult* result,
-        const Options* options) {
+static void compute_worker_records(WorkerResult* result) {
     uint32_t* seen = (uint32_t*)calloc(STATE_COUNT, sizeof(uint32_t));
     uint16_t* queue = (uint16_t*)malloc(STATE_COUNT * sizeof(uint16_t));
     uint16_t* parent = (uint16_t*)malloc(STATE_COUNT * sizeof(uint16_t));
@@ -428,7 +425,9 @@ static void compute_worker_records(
         exit(2);
     }
 
+#ifdef _OPENMP
     #pragma omp for schedule(dynamic, 64)
+#endif
     for (uint32_t start = 0; start < STATE_COUNT; start++) {
         uint32_t stamp = start + 1u;
         uint32_t head = 0;
@@ -491,7 +490,6 @@ static void compute_worker_records(
         if (tail != STATE_COUNT) {
             result->disconnected_starts += 1u;
         }
-        (void)options;
     }
 
     free(seen);
@@ -891,14 +889,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
     {
         int worker_index = 0;
 #ifdef _OPENMP
         worker_index = omp_get_thread_num();
 #endif
         init_worker_result(&workers[worker_index], &options);
-        compute_worker_records(&workers[worker_index], &options);
+        compute_worker_records(&workers[worker_index]);
     }
 
     WorkerResult merged;
