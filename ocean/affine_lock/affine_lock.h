@@ -14,9 +14,6 @@
 #endif
 
 #include "affine_lock_visible_targets.h"
-#ifdef AFFINE_LOCK_ENABLE_TRANSFORM_TABLE_HELPERS
-#include "generated/affine_lock_transform_table.h"
-#endif
 
 #define AFFINE_LOCK_BITS 16
 #define AFFINE_LOCK_TIMER_INDEX (2 * AFFINE_LOCK_BITS)
@@ -39,8 +36,6 @@ typedef enum AffineLockInitializationMode {
     AFFINE_LOCK_INIT_EXACT_DISTANCE = 2,
     AFFINE_LOCK_INIT_WCA_RANDOM_STATE = 3,
     AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 4,
-    AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM =
-        AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE,
 } AffineLockInitializationMode;
 
 typedef enum AffineLockAction {
@@ -102,9 +97,6 @@ typedef struct AffineLockShared {
     int debug_log_min_depth;
     char debug_log_dir[256];
     uint32_t* next;
-#ifdef AFFINE_LOCK_ENABLE_TRANSFORM_TABLE_HELPERS
-    uint16_t* precomputed_permuted_states;
-#endif
     int visible_target_table_loaded;
     AffineLockVisibleTargetTable visible_target_table;
     float observation_bit_patterns[256][8];
@@ -197,8 +189,7 @@ static const char* affine_lock_initialization_mode_name(int mode) {
         case AFFINE_LOCK_INIT_RANDOM: return "random";
         case AFFINE_LOCK_INIT_EXACT_DISTANCE: return "exact_distance";
         case AFFINE_LOCK_INIT_WCA_RANDOM_STATE: return "wca_random_state";
-        case AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM:
-            return "visible_target_table";
+        case AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE: return "visible_target_table";
         default: return "unknown";
     }
 }
@@ -263,79 +254,6 @@ static uint32_t affine_lock_reverse_each_byte(uint32_t state) {
     return affine_lock_swap_nibbles_each_byte(
         affine_lock_reverse_each_nibble(state));
 }
-
-#ifdef AFFINE_LOCK_ENABLE_TRANSFORM_TABLE_HELPERS
-static uint32_t affine_lock_apply_precomputed_perm(int perm_id, uint32_t state) {
-    uint32_t out = 0u;
-    const uint8_t* perm = AFFINE_LOCK_PRECOMPUTED_TRANSFORM_PERMS[perm_id];
-    for (int out_bit = 0; out_bit < AFFINE_LOCK_BITS; out_bit++) {
-        if ((state & (1u << perm[out_bit])) != 0u) {
-            out |= 1u << out_bit;
-        }
-    }
-    return out;
-}
-
-static int affine_lock_prepare_precomputed_transforms(AffineLockShared* shared) {
-    if (shared->precomputed_permuted_states != NULL) {
-        return 0;
-    }
-    if (AFFINE_LOCK_PRECOMPUTED_TRANSFORM_COUNT != 16384 ||
-            AFFINE_LOCK_PRECOMPUTED_TRANSFORM_PERM_COUNT != 32 ||
-            AFFINE_LOCK_PRECOMPUTED_TRANSFORM_MAX_DISTANCE < 1 ||
-            AFFINE_LOCK_PRECOMPUTED_TRANSFORM_SHELL_OFFSET_COUNT !=
-                AFFINE_LOCK_PRECOMPUTED_TRANSFORM_MAX_DISTANCE + 2 ||
-            AFFINE_LOCK_PRECOMPUTED_TRANSFORM_SHELL_OFFSETS[0] != 0 ||
-            AFFINE_LOCK_PRECOMPUTED_TRANSFORM_SHELL_OFFSETS[
-                AFFINE_LOCK_PRECOMPUTED_TRANSFORM_MAX_DISTANCE + 1] !=
-                    AFFINE_LOCK_PRECOMPUTED_TRANSFORM_COUNT) {
-        fprintf(stderr, "affine_lock: invalid precomputed transform table\n");
-        return -1;
-    }
-
-    size_t table_count =
-        (size_t)AFFINE_LOCK_PRECOMPUTED_TRANSFORM_PERM_COUNT *
-        (size_t)shared->num_states;
-    uint16_t* table = (uint16_t*)malloc(table_count * sizeof(uint16_t));
-    if (table == NULL) {
-        fprintf(stderr,
-            "affine_lock: failed to allocate precomputed transform cache\n");
-        return -1;
-    }
-
-    for (int perm_id = 0;
-            perm_id < AFFINE_LOCK_PRECOMPUTED_TRANSFORM_PERM_COUNT;
-            perm_id++) {
-        uint16_t* perm_table =
-            table + (size_t)perm_id * (size_t)shared->num_states;
-        for (uint32_t state = 0; state < (uint32_t)shared->num_states; state++) {
-            perm_table[state] =
-                (uint16_t)affine_lock_apply_precomputed_perm(perm_id, state);
-        }
-    }
-
-    shared->precomputed_permuted_states = table;
-    return 0;
-}
-
-static uint32_t affine_lock_apply_precomputed_transform(
-        const AffineLockShared* shared,
-        uint32_t state,
-        const AffineLockPrecomputedTransform* transform) {
-    uint32_t permuted;
-    uint32_t masked_state = state & shared->mask;
-    if (shared->precomputed_permuted_states != NULL) {
-        const uint16_t* perm_table =
-            shared->precomputed_permuted_states +
-            (size_t)transform->perm_id * (size_t)shared->num_states;
-        permuted = perm_table[masked_state];
-    } else {
-        permuted =
-            affine_lock_apply_precomputed_perm(transform->perm_id, masked_state);
-    }
-    return (permuted ^ transform->xor_mask) & shared->mask;
-}
-#endif
 
 static int affine_lock_init_shared(
         AffineLockShared* shared,
@@ -489,13 +407,13 @@ static int affine_lock_configure_initialization(
             initialization_mode != AFFINE_LOCK_INIT_RANDOM &&
             initialization_mode != AFFINE_LOCK_INIT_EXACT_DISTANCE &&
             initialization_mode != AFFINE_LOCK_INIT_WCA_RANDOM_STATE &&
-            initialization_mode != AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM) {
+            initialization_mode != AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE) {
         fprintf(stderr,
             "affine_lock: initialization_mode must be 0 (scramble), 1 (random), 2 (exact_distance), 3 (wca_random_state), or 4 (visible_target_table); got %d\n",
             initialization_mode);
         return -1;
     }
-    if (initialization_mode == AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM &&
+    if (initialization_mode == AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE &&
             affine_lock_prepare_visible_targets(shared) != 0) {
         return -1;
     }
@@ -534,9 +452,6 @@ static void affine_lock_free_shared(AffineLockShared* shared) {
         return;
     }
     free(shared->next);
-#ifdef AFFINE_LOCK_ENABLE_TRANSFORM_TABLE_HELPERS
-    free(shared->precomputed_permuted_states);
-#endif
     affine_lock_visible_targets_free(&shared->visible_target_table);
     affine_lock_cleanup_thread_scratch();
     memset(shared, 0, sizeof(*shared));
@@ -1332,7 +1247,7 @@ static void affine_lock_reset_state(AffineLock* env) {
         affine_lock_generate_wca_random_state_target(env);
         env->max_steps = env->target_distance + shared->step_grace;
     } else if (shared->initialization_mode ==
-            AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM) {
+            AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE) {
         env->known_solution = 1;
         affine_lock_generate_visible_target_table_target(env);
         env->max_steps = env->target_distance + shared->step_grace;

@@ -2,7 +2,6 @@
 import argparse
 import configparser
 import ctypes
-import json
 import re
 import sys
 from pathlib import Path
@@ -155,8 +154,6 @@ def check_config():
 def check_binding_text():
     header = (ROOT / "ocean" / "affine_lock" / "affine_lock.h").read_text()
     assert "AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 4" in header
-    assert "AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM =" in header
-    assert '#include "generated/affine_lock_transform_table.h"' in header
     assert "short_solve_audit" not in header
 
     env_api_order = [
@@ -219,24 +216,6 @@ def check_shared_core_text():
     assert "extra_capacity" not in bindings
     assert "MY_THREAD_CLOSE" not in vecenv
     assert "my_thread_close" not in vecenv
-
-
-def check_generated_transform_artifacts():
-    generated_dir = ROOT / "ocean" / "affine_lock" / "generated"
-    header = (generated_dir / "affine_lock_transform_table.h").read_text()
-    manifest = json.loads(
-        (generated_dir / "affine_lock_transform_table.json").read_text()
-    )
-
-    assert manifest["bits"] == 16
-    assert manifest["num_actions"] == 8
-    assert manifest["transform_count"] == 16384
-    assert manifest["perm_count"] == 32
-    assert manifest["max_distance"] == 17
-    assert manifest["distance_histogram"]["16"] == 46
-    assert manifest["distance_histogram"]["17"] == 6
-    assert manifest["shell_offsets"][-1] == manifest["transform_count"]
-    assert manifest["checksum"] in header
 
 
 def float_buffer(ptr, count):
@@ -340,7 +319,6 @@ def main():
     check_config()
     check_binding_text()
     check_shared_core_text()
-    check_generated_transform_artifacts()
     if args.require_backend:
         check_backend_metadata()
 

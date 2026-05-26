@@ -6,9 +6,7 @@ OUT="${TMPDIR:-/tmp}/affine_lock_tests"
 LOG_OUT="${TMPDIR:-/tmp}/affine_lock_log_export_tests"
 CC_BIN="${CC:-clang}"
 
-python3 "$ROOT/ocean/affine_lock/tools/generate_transform_table.py" --check
 python3 "$ROOT/ocean/affine_lock/tests/test_metadata_smoke.py"
-bash "$ROOT/ocean/affine_lock/tests/test_transform_bruteforce_smoke.sh"
 bash "$ROOT/ocean/affine_lock/tests/test_8action_visible_targets_smoke.sh"
 
 "$CC_BIN" \

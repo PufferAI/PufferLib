@@ -620,7 +620,6 @@ static void test_metadata_contract(void) {
     EXPECT_EQ_INT(AFFINE_LOCK_NUM_ATNS, 1);
     EXPECT_EQ_INT(AFFINE_LOCK_NUM_ACTIONS, 8);
     EXPECT_EQ_INT(AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE, 4);
-    EXPECT_EQ_INT(AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM, 4);
 }
 
 static void test_config_and_binding_metadata_contract(void) {
@@ -905,7 +904,7 @@ static void test_wca_random_state_initialization_samples_reachable_target(void) 
 static void test_visible_target_table_initialization_samples_reachable_target(void) {
     AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
     affine_lock_configure_initialization(
-        &shared, AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM);
+        &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
@@ -1070,7 +1069,7 @@ static void test_visible_target_table_depths_have_exact_distance_solutions(void)
         int depth = depths[i];
         AffineLockShared shared = make_shared(16, depth, 16, 2, 0);
         affine_lock_configure_initialization(
-            &shared, AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM);
+            &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
         AffineLock env;
         float observations[AFFINE_LOCK_OBS_SIZE];
@@ -1106,7 +1105,7 @@ static void test_visible_target_table_reset_uses_exact_records(void) {
         int requested_depth = requested_depths[depth_index];
         AffineLockShared shared = make_shared(16, requested_depth, 16, 2, 0);
         affine_lock_configure_initialization(
-            &shared, AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM);
+            &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
         const AffineLockVisibleTargetDepth* table_depth =
             affine_lock_visible_target_depth(&shared, requested_depth);
         EXPECT_TRUE(table_depth != NULL);
@@ -1141,7 +1140,7 @@ static void test_distance_generators_match_independent_bfs_over_repeated_resets(
     const int modes[] = {
         AFFINE_LOCK_INIT_EXACT_DISTANCE,
         AFFINE_LOCK_INIT_WCA_RANDOM_STATE,
-        AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM,
+        AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE,
     };
     const int depths[] = {2, 4, 8, 16};
 
@@ -1463,7 +1462,7 @@ static void test_wca_random_state_trace_logs_mode_and_distance(void) {
 static void test_visible_target_table_trace_logs_mode_and_distance(void) {
     AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
     affine_lock_configure_initialization(
-        &shared, AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM);
+        &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
     configure_test_debug_dir(&shared);
     affine_lock_configure_debug(&shared, 1, 0, 1, 8);
 
@@ -2000,7 +1999,7 @@ static void test_wca_random_state_curriculum_and_logging(void) {
 static void test_visible_target_table_curriculum_and_logging(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
     affine_lock_configure_initialization(
-        &shared, AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM);
+        &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
@@ -2091,7 +2090,7 @@ static void test_visible_target_table_curriculum_and_logging(void) {
 static void test_visible_target_table_oracle_wins_all_curriculum_depths_end_to_end(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
     affine_lock_configure_initialization(
-        &shared, AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM);
+        &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
@@ -2129,7 +2128,7 @@ static void test_visible_target_table_timeouts_at_all_curriculum_depths_end_to_e
         int loss_depth = loss_depths[i];
         AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
         affine_lock_configure_initialization(
-            &shared, AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM);
+            &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
         AffineLock env;
         float observations[AFFINE_LOCK_OBS_SIZE];
@@ -2426,7 +2425,7 @@ static void test_mode3_seed_42_golden_checksum(void) {
 static uint64_t run_mode4_seed_42_golden_sequence(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
     affine_lock_configure_initialization(
-        &shared, AFFINE_LOCK_INIT_PRECOMPUTED_TRANSFORM);
+        &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
