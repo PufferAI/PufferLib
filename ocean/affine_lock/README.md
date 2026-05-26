@@ -32,6 +32,14 @@ manifest identify this exact transform set as `affine_lock_8action_v1`:
 The Puffer binding exposes one discrete action slot with
 `AFFINE_LOCK_NUM_ACTIONS = 8`.
 
+## Reset Modes
+
+The default and intended training path is `initialization_mode = 4`, which loads
+the committed visible-target table. `initialization_mode = 2` remains available
+as a slower exact-distance fallback for local experiments that need targets not
+covered by a generated table. Other prototype reset modes were removed from the
+runtime path.
+
 ## Committed Target Table
 
 The committed table stores sampled visible start/target pairs at depths `2`,

@@ -31,10 +31,7 @@
 #endif
 
 typedef enum AffineLockInitializationMode {
-    AFFINE_LOCK_INIT_SCRAMBLE = 0,
-    AFFINE_LOCK_INIT_RANDOM = 1,
     AFFINE_LOCK_INIT_EXACT_DISTANCE = 2,
-    AFFINE_LOCK_INIT_WCA_RANDOM_STATE = 3,
     AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 4,
 } AffineLockInitializationMode;
 
@@ -185,10 +182,7 @@ static const char* affine_lock_action_name(int action) {
 
 static const char* affine_lock_initialization_mode_name(int mode) {
     switch (mode) {
-        case AFFINE_LOCK_INIT_SCRAMBLE: return "scramble";
-        case AFFINE_LOCK_INIT_RANDOM: return "random";
         case AFFINE_LOCK_INIT_EXACT_DISTANCE: return "exact_distance";
-        case AFFINE_LOCK_INIT_WCA_RANDOM_STATE: return "wca_random_state";
         case AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE: return "visible_target_table";
         default: return "unknown";
     }
@@ -300,7 +294,7 @@ static int affine_lock_init_shared(
     shared->max_depth = max_depth;
     shared->depth_multiplier = depth_multiplier;
     shared->step_grace = step_grace;
-    shared->initialization_mode = AFFINE_LOCK_INIT_SCRAMBLE;
+    shared->initialization_mode = AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE;
     shared->num_states = 1 << AFFINE_LOCK_BITS;
     shared->mask = (1u << AFFINE_LOCK_BITS) - 1u;
     shared->debug_log_level = 0;
@@ -403,13 +397,10 @@ static int affine_lock_prepare_visible_targets(AffineLockShared* shared) {
 static int affine_lock_configure_initialization(
         AffineLockShared* shared,
         int initialization_mode) {
-    if (initialization_mode != AFFINE_LOCK_INIT_SCRAMBLE &&
-            initialization_mode != AFFINE_LOCK_INIT_RANDOM &&
-            initialization_mode != AFFINE_LOCK_INIT_EXACT_DISTANCE &&
-            initialization_mode != AFFINE_LOCK_INIT_WCA_RANDOM_STATE &&
+    if (initialization_mode != AFFINE_LOCK_INIT_EXACT_DISTANCE &&
             initialization_mode != AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE) {
         fprintf(stderr,
-            "affine_lock: initialization_mode must be 0 (scramble), 1 (random), 2 (exact_distance), 3 (wca_random_state), or 4 (visible_target_table); got %d\n",
+            "affine_lock: initialization_mode must be 2 (exact_distance) or 4 (visible_target_table); got %d\n",
             initialization_mode);
         return -1;
     }
@@ -867,68 +858,6 @@ static void affine_lock_trace_episode_end(
     fflush(file);
 }
 
-static int affine_lock_pick_scramble_action(
-        AffineLock* env,
-        uint32_t state,
-        int prev_action) {
-    AffineLockShared* shared = env->shared;
-    for (int attempt = 0; attempt < 256; attempt++) {
-        int action = affine_lock_random_bounded(env, AFFINE_LOCK_NUM_ACTIONS);
-        if (prev_action >= 0 && action == shared->inverse_actions[prev_action]) {
-            continue;
-        }
-        uint32_t next = affine_lock_apply_action(shared, state, action);
-        if (next != state) {
-            return action;
-        }
-    }
-
-    for (int action = 0; action < AFFINE_LOCK_NUM_ACTIONS; action++) {
-        if (prev_action >= 0 && action == shared->inverse_actions[prev_action]) {
-            continue;
-        }
-        uint32_t next = affine_lock_apply_action(shared, state, action);
-        if (next != state) {
-            return action;
-        }
-    }
-
-    return -1;
-}
-
-static void affine_lock_generate_scramble(AffineLock* env) {
-    AffineLockShared* shared = env->shared;
-    uint32_t target = env->state;
-    int prev_action = -1;
-    env->scramble_states[0] = target;
-
-    env->scramble_length = env->scramble_depth;
-    env->solution_length = env->scramble_depth;
-    for (int i = 0; i < AFFINE_LOCK_MAX_SCRAMBLE_DEPTH; i++) {
-        env->scramble_actions[i] = -1;
-    }
-    for (int i = 0; i < AFFINE_LOCK_MAX_SOLUTION_DEPTH; i++) {
-        env->solution_actions[i] = -1;
-    }
-
-    for (int i = 0; i < env->scramble_length; i++) {
-        int action = affine_lock_pick_scramble_action(env, target, prev_action);
-        if (action < 0) {
-            fprintf(stderr, "affine_lock: failed to generate scramble action\n");
-            abort();
-        }
-
-        uint32_t next = affine_lock_apply_action(shared, target, action);
-        env->scramble_actions[i] = action;
-        env->solution_actions[i] = action;
-        target = next;
-        env->scramble_states[i + 1] = target;
-        prev_action = action;
-    }
-
-    env->target = target & shared->mask;
-}
-
 static void affine_lock_clear_generated_path(AffineLock* env) {
     env->scramble_length = 0;
     env->solution_length = 0;
@@ -999,22 +928,6 @@ static void affine_lock_store_visible_solution_path(
     }
 }
 
-static void affine_lock_generate_random_target(AffineLock* env) {
-    AffineLockShared* shared = env->shared;
-
-    affine_lock_clear_generated_path(env);
-    env->target_distance = -1;
-
-    for (int attempt = 0; attempt < 64; attempt++) {
-        env->target = affine_lock_random_state_bits(env, shared);
-        if (env->target != env->state) {
-            return;
-        }
-    }
-
-    env->target = (env->state ^ 1u) & shared->mask;
-}
-
 static void affine_lock_generate_exact_distance_target(AffineLock* env) {
     AffineLockShared* shared = env->shared;
     int desired_distance = env->scramble_depth;
@@ -1077,78 +990,6 @@ static void affine_lock_generate_exact_distance_target(AffineLock* env) {
     if (exact_count > 0) {
         env->target = exact_target & shared->mask;
         env->target_distance = desired_distance;
-    } else {
-        env->target = farthest_target & shared->mask;
-        env->target_distance = farthest_distance;
-    }
-    affine_lock_store_solution_path(
-        env, scratch->parents, scratch->parent_actions, env->target);
-}
-
-static void affine_lock_generate_wca_random_state_target(AffineLock* env) {
-    AffineLockShared* shared = env->shared;
-    int desired_distance = env->scramble_depth;
-    affine_lock_clear_generated_path(env);
-
-    AffineLockBfsScratch* scratch = affine_lock_begin_bfs_scratch(shared);
-    if (scratch == NULL) {
-        fprintf(stderr, "affine_lock: failed to allocate random-state BFS scratch\n");
-        abort();
-    }
-
-    int head = 0;
-    int tail = 0;
-    affine_lock_bfs_visit(scratch, env->state, 0, env->state, -1);
-    scratch->queue[tail++] = (uint16_t)env->state;
-
-    int target_count = 0;
-    uint32_t sampled_target = env->state;
-    int farthest_distance = 0;
-    int farthest_count = 1;
-    uint32_t farthest_target = env->state;
-
-    while (head < tail) {
-        uint32_t state = scratch->queue[head++];
-        int distance = (int)scratch->distances[state];
-        if (target_count > 0 && distance >= desired_distance) {
-            // All states at the requested shell were discovered by expanding
-            // the previous BFS level. Deeper states are only needed for fallback.
-            break;
-        }
-
-        int next_distance = distance + 1;
-        for (int action = 0; action < AFFINE_LOCK_NUM_ACTIONS; action++) {
-            uint32_t next = affine_lock_apply_action(shared, state, action);
-            if (affine_lock_bfs_seen(scratch, next)) {
-                continue;
-            }
-
-            affine_lock_bfs_visit(scratch, next, next_distance, state, action);
-            scratch->queue[tail++] = (uint16_t)next;
-
-            if (next_distance == desired_distance) {
-                target_count += 1;
-                if (affine_lock_random_bounded(env, target_count) == 0) {
-                    sampled_target = next;
-                }
-            }
-
-            if (next_distance > farthest_distance) {
-                farthest_distance = next_distance;
-                farthest_count = 1;
-                farthest_target = next;
-            } else if (next_distance == farthest_distance) {
-                farthest_count += 1;
-                if (affine_lock_random_bounded(env, farthest_count) == 0) {
-                    farthest_target = next;
-                }
-            }
-        }
-    }
-
-    if (target_count > 0) {
-        env->target = sampled_target & shared->mask;
-        env->target_distance = scratch->distances[sampled_target];
     } else {
         env->target = farthest_target & shared->mask;
         env->target_distance = farthest_distance;
@@ -1232,34 +1073,14 @@ static void affine_lock_reset_state(AffineLock* env) {
     env->target_distance = -1;
     env->episode_id += 1;
 
-    if (shared->initialization_mode == AFFINE_LOCK_INIT_RANDOM) {
+    env->known_solution = 1;
+    if (shared->initialization_mode == AFFINE_LOCK_INIT_EXACT_DISTANCE) {
         env->state = affine_lock_random_state_bits(env, shared);
-        env->known_solution = 0;
-        affine_lock_generate_random_target(env);
-    } else if (shared->initialization_mode == AFFINE_LOCK_INIT_EXACT_DISTANCE) {
-        env->state = affine_lock_random_state_bits(env, shared);
-        env->known_solution = 1;
         affine_lock_generate_exact_distance_target(env);
         env->max_steps = env->target_distance + shared->step_grace;
-    } else if (shared->initialization_mode == AFFINE_LOCK_INIT_WCA_RANDOM_STATE) {
-        env->state = affine_lock_random_state_bits(env, shared);
-        env->known_solution = 1;
-        affine_lock_generate_wca_random_state_target(env);
-        env->max_steps = env->target_distance + shared->step_grace;
-    } else if (shared->initialization_mode ==
-            AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE) {
-        env->known_solution = 1;
+    } else {
         affine_lock_generate_visible_target_table_target(env);
         env->max_steps = env->target_distance + shared->step_grace;
-    } else {
-        env->known_solution = 1;
-        for (int attempt = 0; attempt < 32; attempt++) {
-            env->state = affine_lock_random_state_bits(env, shared);
-            affine_lock_generate_scramble(env);
-            if (env->state != env->target) {
-                break;
-            }
-        }
     }
     affine_lock_finalize_reset(env);
 }

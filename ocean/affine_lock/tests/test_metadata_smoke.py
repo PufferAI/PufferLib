@@ -153,7 +153,11 @@ def check_config():
 
 def check_binding_text():
     header = (ROOT / "ocean" / "affine_lock" / "affine_lock.h").read_text()
+    assert "AFFINE_LOCK_INIT_EXACT_DISTANCE = 2" in header
     assert "AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 4" in header
+    assert "AFFINE_LOCK_INIT_SCRAMBLE" not in header
+    assert "AFFINE_LOCK_INIT_RANDOM" not in header
+    assert "AFFINE_LOCK_INIT_WCA_RANDOM_STATE" not in header
     assert "short_solve_audit" not in header
 
     env_api_order = [

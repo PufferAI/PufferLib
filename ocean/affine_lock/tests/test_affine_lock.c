@@ -409,17 +409,6 @@ static void expect_solution_reaches_target(
     EXPECT_EQ_U32(simulated, env->target);
 }
 
-static void solve_with_stored_scramble(AffineLock* env) {
-    int depth = env->scramble_depth;
-    for (int step = 0; step < depth; step++) {
-        env->actions[0] = (float)env->scramble_actions[step];
-        c_step(env);
-        if (env->terminals[0] != 0.0f) {
-            return;
-        }
-    }
-}
-
 static void solve_with_stored_solution(AffineLock* env) {
     int length = env->solution_length;
     for (int step = 0; step < length; step++) {
@@ -619,6 +608,7 @@ static void test_metadata_contract(void) {
     EXPECT_EQ_INT(AFFINE_LOCK_OBS_SIZE, 33);
     EXPECT_EQ_INT(AFFINE_LOCK_NUM_ATNS, 1);
     EXPECT_EQ_INT(AFFINE_LOCK_NUM_ACTIONS, 8);
+    EXPECT_EQ_INT(AFFINE_LOCK_INIT_EXACT_DISTANCE, 2);
     EXPECT_EQ_INT(AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE, 4);
 }
 
@@ -646,6 +636,22 @@ static void test_config_and_binding_metadata_contract(void) {
     EXPECT_TRUE(strstr(binding, "#define OBS_SIZE AFFINE_LOCK_OBS_SIZE") != NULL);
     EXPECT_TRUE(strstr(binding, "#define ACT_SIZES {AFFINE_LOCK_NUM_ACTIONS}") != NULL);
     EXPECT_TRUE(strstr(binding, "#define OBS_TENSOR_T FloatTensor") != NULL);
+}
+
+static void test_initialization_mode_contract(void) {
+    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    EXPECT_EQ_INT(
+        affine_lock_configure_initialization(
+            &shared, AFFINE_LOCK_INIT_EXACT_DISTANCE),
+        0);
+    EXPECT_EQ_INT(
+        affine_lock_configure_initialization(
+            &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE),
+        0);
+    EXPECT_EQ_INT(affine_lock_configure_initialization(&shared, 0), -1);
+    EXPECT_EQ_INT(affine_lock_configure_initialization(&shared, 1), -1);
+    EXPECT_EQ_INT(affine_lock_configure_initialization(&shared, 3), -1);
+    affine_lock_free_shared(&shared);
 }
 
 static void test_global_action_examples(void) {
@@ -743,54 +749,6 @@ static void test_reset_randomizes_target_and_current(void) {
     affine_lock_free_shared(&shared);
 }
 
-static void test_random_initialization_mode_samples_independent_start_and_target(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_RANDOM);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 123, observations, actions, rewards, terminals);
-
-    uint32_t first_target = 0;
-    uint32_t first_state = 0;
-    int target_changed = 0;
-    int state_changed = 0;
-
-    for (int i = 0; i < 16; i++) {
-        c_reset(&env);
-        EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
-        EXPECT_EQ_INT(env.max_steps, shared.start_depth);
-        EXPECT_EQ_INT(env.known_solution, 0);
-        EXPECT_EQ_INT(env.scramble_length, 0);
-        EXPECT_EQ_U32(env.target & ~shared.mask, 0u);
-        EXPECT_EQ_U32(env.state & ~shared.mask, 0u);
-        EXPECT_NE_U32(env.state, env.target);
-        for (int action = 0; action < AFFINE_LOCK_MAX_SCRAMBLE_DEPTH; action++) {
-            EXPECT_EQ_INT(env.scramble_actions[action], -1);
-        }
-        expect_observation_matches(&env);
-
-        if (i == 0) {
-            first_target = env.target;
-            first_state = env.state;
-        } else {
-            if (env.target != first_target) {
-                target_changed = 1;
-            }
-            if (env.state != first_state) {
-                state_changed = 1;
-            }
-        }
-    }
-
-    EXPECT_TRUE(target_changed);
-    EXPECT_TRUE(state_changed);
-    affine_lock_free_shared(&shared);
-}
-
 static void test_exact_distance_initialization_samples_reachable_target(void) {
     AffineLockShared shared = make_shared(16, 4, 16, 2, 0);
     affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
@@ -846,61 +804,6 @@ static void test_exact_distance_initialization_handles_max_requested_depth(void)
     affine_lock_free_shared(&shared);
 }
 
-static void test_scramble_initialization_stores_generated_solution_path(void) {
-    AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 456, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    EXPECT_EQ_INT(env.known_solution, 1);
-    EXPECT_EQ_INT(env.scramble_length, env.scramble_depth);
-    EXPECT_EQ_INT(env.solution_length, env.scramble_length);
-    for (int i = 0; i < env.solution_length; i++) {
-        EXPECT_EQ_INT(env.solution_actions[i], env.scramble_actions[i]);
-    }
-
-    uint32_t simulated = env.state;
-    for (int i = 0; i < env.solution_length; i++) {
-        simulated = test_apply_action(simulated, env.solution_actions[i]);
-    }
-    EXPECT_EQ_U32(simulated, env.target);
-
-    solve_with_stored_solution(&env);
-    EXPECT_NEAR(rewards[0], 1.0f, 0.0f);
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_wca_random_state_initialization_samples_reachable_target(void) {
-    AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 777, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
-    EXPECT_EQ_INT(env.target_distance, shared.start_depth);
-    EXPECT_EQ_INT(env.max_steps, env.target_distance);
-    EXPECT_EQ_INT(env.known_solution, 1);
-    EXPECT_EQ_INT(env.scramble_length, 0);
-    EXPECT_EQ_INT(env.solution_length, env.target_distance);
-    EXPECT_NE_U32(env.state, env.target);
-    expect_solution_reaches_target(&shared, &env);
-    expect_observation_matches(&env);
-
-    affine_lock_free_shared(&shared);
-}
-
 static void test_visible_target_table_initialization_samples_reachable_target(void) {
     AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
     affine_lock_configure_initialization(
@@ -927,46 +830,6 @@ static void test_visible_target_table_initialization_samples_reachable_target(vo
     affine_lock_free_shared(&shared);
 }
 
-static void test_wca_random_state_starts_at_depth_2_and_stored_solution_solves(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 779, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    uint32_t target = env.target;
-    uint32_t simulated = env.state;
-    int solution_length = env.solution_length;
-    EXPECT_EQ_INT(env.scramble_depth, 2);
-    EXPECT_EQ_INT(env.target_distance, 2);
-    EXPECT_EQ_INT(env.max_steps, env.target_distance);
-    EXPECT_EQ_INT(solution_length, env.target_distance);
-
-    for (int i = 0; i < solution_length; i++) {
-        int action = env.solution_actions[i];
-        EXPECT_TRUE(action >= 0 && action < AFFINE_LOCK_NUM_ACTIONS);
-        simulated = affine_lock_apply_action(&shared, simulated, action);
-        actions[0] = (float)action;
-        c_step(&env);
-        if (i + 1 < solution_length) {
-            EXPECT_NE_U32(simulated, target);
-            EXPECT_NEAR(rewards[0], -0.01f, 0.0f);
-            EXPECT_NEAR(terminals[0], 0.0f, 0.0f);
-        }
-    }
-
-    EXPECT_EQ_U32(simulated, target);
-    EXPECT_NEAR(rewards[0], 1.0f, 0.0f);
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-
-    affine_lock_free_shared(&shared);
-}
-
 static void test_known_distance_initialization_sets_reachability_flags(void) {
     AffineLockShared depth_one = make_shared(16, 1, 16, 2, 0);
     affine_lock_configure_initialization(
@@ -986,7 +849,7 @@ static void test_known_distance_initialization_sets_reachability_flags(void) {
 
     AffineLockShared depth_two = make_shared(16, 2, 16, 2, 0);
     affine_lock_configure_initialization(
-        &depth_two, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
+        &depth_two, AFFINE_LOCK_INIT_EXACT_DISTANCE);
 
     AffineLock env_two;
     float obs_two[AFFINE_LOCK_OBS_SIZE];
@@ -999,68 +862,6 @@ static void test_known_distance_initialization_sets_reachability_flags(void) {
     EXPECT_EQ_INT(env_two.one_action_target, 0);
     EXPECT_EQ_INT(env_two.two_action_target, 1);
     affine_lock_free_shared(&depth_two);
-}
-
-static void test_wca_random_state_initialization_handles_max_requested_depth(void) {
-    AffineLockShared shared = make_shared(16, 16, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 778, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
-    TestBfsStats stats;
-    compute_test_bfs_stats(&shared, env.state, env.target, &stats);
-    int expected_distance = shared.start_depth <= stats.farthest_distance ?
-        shared.start_depth : stats.farthest_distance;
-    EXPECT_TRUE(env.target_distance > 0);
-    EXPECT_EQ_INT(env.target_distance, expected_distance);
-    EXPECT_EQ_INT(env.max_steps, env.target_distance);
-    EXPECT_EQ_INT(env.known_solution, 1);
-    EXPECT_EQ_INT(env.scramble_length, 0);
-    EXPECT_EQ_INT(env.solution_length, env.target_distance);
-    EXPECT_NE_U32(env.state, env.target);
-    expect_solution_reaches_target(&shared, &env);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_wca_random_state_depths_have_exact_distance_solutions(void) {
-    const int depths[] = {2, 4, 8, 16};
-    for (int i = 0; i < 4; i++) {
-        int depth = depths[i];
-        AffineLockShared shared = make_shared(16, depth, 16, 2, 0);
-        affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
-
-        AffineLock env;
-        float observations[AFFINE_LOCK_OBS_SIZE];
-        float actions[AFFINE_LOCK_NUM_ATNS];
-        float rewards[1];
-        float terminals[1];
-        make_env(&env, &shared, (unsigned int)(900 + depth), observations,
-            actions, rewards, terminals);
-        c_reset(&env);
-
-        TestBfsStats stats;
-        compute_test_bfs_stats(&shared, env.state, env.target, &stats);
-        int expected_distance = depth <= stats.farthest_distance ?
-            depth : stats.farthest_distance;
-        EXPECT_EQ_INT(env.target_distance, expected_distance);
-        EXPECT_EQ_INT(env.solution_length, expected_distance);
-        EXPECT_EQ_INT(env.max_steps, expected_distance);
-        expect_solution_reaches_target(&shared, &env);
-
-        solve_with_stored_solution(&env);
-        EXPECT_NEAR(rewards[0], 1.0f, 0.0f);
-        EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-
-        affine_lock_free_shared(&shared);
-    }
 }
 
 static void test_visible_target_table_depths_have_exact_distance_solutions(void) {
@@ -1139,12 +940,11 @@ static void test_visible_target_table_reset_uses_exact_records(void) {
 static void test_distance_generators_match_independent_bfs_over_repeated_resets(void) {
     const int modes[] = {
         AFFINE_LOCK_INIT_EXACT_DISTANCE,
-        AFFINE_LOCK_INIT_WCA_RANDOM_STATE,
         AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE,
     };
     const int depths[] = {2, 4, 8, 16};
 
-    for (int mode_index = 0; mode_index < 3; mode_index++) {
+    for (int mode_index = 0; mode_index < 2; mode_index++) {
         for (int depth_index = 0; depth_index < 4; depth_index++) {
             int mode = modes[mode_index];
             int depth = depths[depth_index];
@@ -1174,200 +974,10 @@ static void test_distance_generators_match_independent_bfs_over_repeated_resets(
     }
 }
 
-static void test_scramble_trace_is_state_changing_and_inverse_solves(void) {
-    AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 99, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    EXPECT_EQ_INT(env.scramble_depth, 8);
-    EXPECT_EQ_INT(env.scramble_length, env.scramble_depth);
-
-    uint32_t start = env.state;
-    uint32_t scrambled = env.state;
-    int prev_action = -1;
-    for (int i = 0; i < env.scramble_length; i++) {
-        int action = env.scramble_actions[i];
-        EXPECT_TRUE(action >= 0 && action < AFFINE_LOCK_NUM_ACTIONS);
-        if (prev_action >= 0) {
-            EXPECT_TRUE(action != shared.inverse_actions[prev_action]);
-        }
-
-        uint32_t next = affine_lock_apply_action(&shared, scrambled, action);
-        EXPECT_NE_U32(next, scrambled);
-        scrambled = next;
-        prev_action = action;
-    }
-    EXPECT_EQ_U32(scrambled, env.target);
-    EXPECT_NE_U32(env.state, env.target);
-
-    for (int i = 0; i < env.scramble_length; i++) {
-        env.actions[0] = (float)env.scramble_actions[i];
-        c_step(&env);
-        if (terminals[0] != 0.0f) {
-            EXPECT_NEAR(rewards[0], 1.0f, 0.0f);
-            EXPECT_TRUE(i + 1 <= env.scramble_depth);
-            break;
-        }
-    }
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-    EXPECT_NE_U32(start, env.target);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_max_depth_scramble_generation_does_not_dead_end(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 1, observations, actions, rewards, terminals);
-
-    env.curriculum_depth = shared.max_depth;
-    for (int episode = 0; episode < 256; episode++) {
-        c_reset(&env);
-        EXPECT_EQ_INT(env.scramble_depth, shared.max_depth);
-        EXPECT_NE_U32(env.state, env.target);
-        int prev_action = -1;
-        for (int i = 0; i < env.scramble_length; i++) {
-            int action = env.scramble_actions[i];
-            EXPECT_TRUE(action >= 0 && action < AFFINE_LOCK_NUM_ACTIONS);
-            if (prev_action >= 0) {
-                EXPECT_TRUE(action != shared.inverse_actions[prev_action]);
-            }
-            prev_action = action;
-        }
-        solve_with_stored_scramble(&env);
-        EXPECT_NEAR(rewards[0], 1.0f, 0.0f);
-        EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-        env.curriculum_depth = shared.max_depth;
-    }
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_scramble_depth_16_is_not_collapsed_by_rng_low_bits(void) {
-    AffineLockShared shared = make_shared(16, 16, 16, 2, 0);
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 1, observations, actions, rewards, terminals);
-
-    int found_distance_above_two = 0;
-    for (int episode = 0; episode < 32; episode++) {
-        c_reset(&env);
-        int distance = affine_lock_shortest_distance(&shared, env.state, env.target);
-        EXPECT_TRUE(distance > 0);
-        if (distance > 2) {
-            found_distance_above_two = 1;
-            break;
-        }
-    }
-    EXPECT_TRUE(found_distance_above_two);
-
-    affine_lock_free_shared(&shared);
-}
-
 static void test_debug_trace_default_dir_stays_under_logs_affine_lock(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
     EXPECT_TRUE(strcmp(
         shared.debug_log_dir, AFFINE_LOCK_DEFAULT_DEBUG_LOG_DIR) == 0);
-    affine_lock_free_shared(&shared);
-}
-
-static void test_debug_trace_logs_scramble_policy_steps_and_reward_sanity(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    configure_test_debug_dir(&shared);
-    affine_lock_configure_debug(&shared, 2, 0, 1, 2);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 5, observations, actions, rewards, terminals);
-    c_reset(&env);
-    EXPECT_TRUE(env.trace_this_episode);
-    EXPECT_TRUE(env.debug_log_file != NULL);
-    EXPECT_TRUE(env.debug_log_path[0] != '\0');
-    expect_test_debug_path(env.debug_log_path);
-
-    solve_with_stored_scramble(&env);
-    EXPECT_NEAR(rewards[0], 1.0f, 0.0f);
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-
-    char path[sizeof(env.debug_log_path)];
-    strncpy(path, env.debug_log_path, sizeof(path));
-    path[sizeof(path) - 1] = '\0';
-    c_close(&env);
-
-    FILE* file = fopen(path, "r");
-    EXPECT_TRUE(file != NULL);
-    char buffer[8192];
-    size_t nread = fread(buffer, 1, sizeof(buffer) - 1, file);
-    buffer[nread] = '\0';
-    fclose(file);
-    remove(path);
-
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"reset\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"initialization_mode\":\"scramble\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"known_solution\":true") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"scramble_step\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"policy_step\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"episode_end\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"scramble_actions\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"state_equals_target\":true") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"reward_state_mismatch\":false") != NULL);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_random_debug_trace_logs_mode_and_reachability(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_RANDOM);
-    configure_test_debug_dir(&shared);
-    affine_lock_configure_debug(&shared, 1, 0, 1, 2);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 5, observations, actions, rewards, terminals);
-    c_reset(&env);
-    EXPECT_TRUE(env.trace_this_episode);
-    EXPECT_TRUE(env.debug_log_file != NULL);
-    EXPECT_TRUE(env.debug_log_path[0] != '\0');
-    expect_test_debug_path(env.debug_log_path);
-
-    char path[sizeof(env.debug_log_path)];
-    strncpy(path, env.debug_log_path, sizeof(path));
-    path[sizeof(path) - 1] = '\0';
-    c_close(&env);
-
-    FILE* file = fopen(path, "r");
-    EXPECT_TRUE(file != NULL);
-    char buffer[4096];
-    size_t nread = fread(buffer, 1, sizeof(buffer) - 1, file);
-    buffer[nread] = '\0';
-    fclose(file);
-    remove(path);
-
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"reset\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"initialization_mode\":\"random\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"known_solution\":false") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"exact_distance\":") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"reachable\":") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"scramble_actions\":[]") != NULL);
-
     affine_lock_free_shared(&shared);
 }
 
@@ -1408,53 +1018,6 @@ static void test_exact_distance_trace_logs_mode_and_distance(void) {
     EXPECT_TRUE(strstr(buffer, "\"min_win_moves\":4") != NULL);
     EXPECT_TRUE(strstr(buffer, "\"reachable\":true") != NULL);
     EXPECT_TRUE(strstr(buffer, "\"exact_distance\":4") != NULL);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_wca_random_state_trace_logs_mode_and_distance(void) {
-    AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
-    configure_test_debug_dir(&shared);
-    affine_lock_configure_debug(&shared, 1, 0, 1, 8);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 5, observations, actions, rewards, terminals);
-    c_reset(&env);
-    EXPECT_TRUE(env.trace_this_episode);
-    EXPECT_TRUE(env.debug_log_file != NULL);
-    EXPECT_TRUE(env.debug_log_path[0] != '\0');
-    expect_test_debug_path(env.debug_log_path);
-    EXPECT_EQ_INT(env.target_distance, 8);
-
-    char path[sizeof(env.debug_log_path)];
-    strncpy(path, env.debug_log_path, sizeof(path));
-    path[sizeof(path) - 1] = '\0';
-    c_close(&env);
-
-    FILE* file = fopen(path, "r");
-    EXPECT_TRUE(file != NULL);
-    char buffer[4096];
-    size_t nread = fread(buffer, 1, sizeof(buffer) - 1, file);
-    buffer[nread] = '\0';
-    fclose(file);
-    remove(path);
-
-    EXPECT_TRUE(strstr(buffer, "\"type\":\"reset\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"initialization_mode\":\"wca_random_state\"") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"known_solution\":true") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"min_win_moves\":8") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"reachable\":true") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"exact_shortest_distance\":8") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_length\":8") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_action_ids\":[") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"solution_actions\":[") != NULL);
-    EXPECT_TRUE(strstr(buffer, "\"scramble_actions\":[]") != NULL);
-    expect_logged_solution_reaches_target(buffer);
 
     affine_lock_free_shared(&shared);
 }
@@ -1505,7 +1068,7 @@ static void test_visible_target_table_trace_logs_mode_and_distance(void) {
 
 static void test_debug_trace_level_1_logs_reset_and_end_only_with_solution_proof(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
+    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
     configure_test_debug_dir(&shared);
     affine_lock_configure_debug(&shared, 1, 0, 1, 2);
 
@@ -1544,7 +1107,7 @@ static void test_debug_trace_level_1_logs_reset_and_end_only_with_solution_proof
 
 static void test_debug_trace_level_2_logs_policy_steps(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
+    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
     configure_test_debug_dir(&shared);
     affine_lock_configure_debug(&shared, 2, 0, 1, 2);
 
@@ -1748,254 +1311,6 @@ static void test_action_float_validation_rejects_non_discrete_values(void) {
     affine_lock_free_shared(&shared);
 }
 
-static void test_rewards_logs_and_curriculum(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 17, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    const int expected_depths[] = {2, 4, 8, 16, 16};
-    for (int episode = 0; episode < 5; episode++) {
-        int depth = expected_depths[episode];
-        EXPECT_EQ_INT(env.scramble_depth, depth);
-        EXPECT_EQ_INT(env.max_steps, depth);
-
-        float prev_n = env.log.n;
-        float prev_perf = env.log.perf;
-        float prev_score = env.log.score;
-        float prev_solve_rate = env.log.solve_rate;
-        float prev_return = env.log.episode_return;
-        float prev_length = env.log.episode_length;
-        float prev_depth = env.log.scramble_depth;
-        float prev_at_max = env.log.at_max_depth;
-        float prev_max_solve = env.log.max_depth_solve;
-        float prev_solve_steps = env.log.solve_steps;
-        float prev_timeout = env.log.timeout_rate;
-        float prev_invalid = env.log.invalid_rate;
-        float prev_start_mismatches = env.log.start_mismatches;
-        float prev_final_mismatches = env.log.final_mismatches;
-        float prev_one_action = env.log.one_action_target_rate;
-        float prev_two_action = env.log.two_action_target_rate;
-        float prev_short_solve = env.log.short_solve_rate;
-        float prev_efficiency = env.log.solve_efficiency;
-        float prev_reward_mismatch = env.log.reward_state_mismatch;
-        float prev_solved_target_distance = env.log.solved_target_distance;
-        float prev_depth_2 = env.log.depth_2_rate;
-        float prev_depth_2_solve = env.log.depth_2_solve_rate;
-        float prev_depth_4 = env.log.depth_4_rate;
-        float prev_depth_4_solve = env.log.depth_4_solve_rate;
-        float prev_depth_8 = env.log.depth_8_rate;
-        float prev_depth_8_solve = env.log.depth_8_solve_rate;
-        float prev_depth_16 = env.log.depth_16_rate;
-        float prev_depth_16_solve = env.log.depth_16_solve_rate;
-
-        int solved_step = depth;
-        for (int step = 0; step < depth; step++) {
-            actions[0] = (float)env.scramble_actions[step];
-            c_step(&env);
-            if (terminals[0] != 0.0f) {
-                solved_step = step + 1;
-                break;
-            }
-            if (step + 1 < depth) {
-                EXPECT_NEAR(rewards[0], -0.01f, 0.0f);
-                EXPECT_NEAR(terminals[0], 0.0f, 0.0f);
-                EXPECT_EQ_INT(env.step_count, step + 1);
-            }
-        }
-
-        EXPECT_NEAR(rewards[0], 1.0f, 0.0f);
-        EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-        EXPECT_EQ_INT(env.step_count, 0);
-        EXPECT_NEAR(env.log.n, prev_n + 1.0f, 0.0f);
-        EXPECT_NEAR(env.log.perf,
-            prev_perf + expected_solve_credit(&shared, depth), 0.0f);
-        EXPECT_NEAR(env.log.score,
-            prev_score + expected_solve_credit(&shared, depth), 0.0f);
-        EXPECT_NEAR(env.log.solve_rate, prev_solve_rate + 1.0f, 0.0f);
-        EXPECT_NEAR(env.log.episode_return,
-            prev_return + 1.0f - 0.01f * (float)(solved_step - 1), 0.00001f);
-        EXPECT_NEAR(env.log.episode_length, prev_length + (float)solved_step, 0.0f);
-        EXPECT_NEAR(env.log.scramble_depth, prev_depth + (float)depth, 0.0f);
-        EXPECT_NEAR(env.log.at_max_depth,
-            prev_at_max + (depth == shared.max_depth ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.max_depth_solve,
-            prev_max_solve + (depth == shared.max_depth ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.solve_steps, prev_solve_steps + (float)solved_step, 0.0f);
-        EXPECT_NEAR(env.log.timeout_rate, prev_timeout, 0.0f);
-        EXPECT_NEAR(env.log.invalid_rate, prev_invalid, 0.0f);
-        EXPECT_TRUE(env.log.start_mismatches > prev_start_mismatches);
-        EXPECT_NEAR(env.log.final_mismatches, prev_final_mismatches, 0.0f);
-        EXPECT_TRUE(env.log.one_action_target_rate >= prev_one_action);
-        EXPECT_TRUE(env.log.two_action_target_rate >= prev_two_action);
-        EXPECT_NEAR(env.log.short_solve_rate,
-            prev_short_solve + (solved_step <= 2 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.solve_efficiency,
-            prev_efficiency + (float)solved_step / (float)depth, 0.00001f);
-        EXPECT_NEAR(env.log.reward_state_mismatch, prev_reward_mismatch, 0.0f);
-        EXPECT_NEAR(env.log.solved_target_distance, prev_solved_target_distance, 0.0f);
-        EXPECT_NEAR(env.log.depth_2_rate,
-            prev_depth_2 + (depth == 2 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_2_solve_rate,
-            prev_depth_2_solve + (depth == 2 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_4_rate,
-            prev_depth_4 + (depth == 4 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_4_solve_rate,
-            prev_depth_4_solve + (depth == 4 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_8_rate,
-            prev_depth_8 + (depth == 8 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_8_solve_rate,
-            prev_depth_8_solve + (depth == 8 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_16_rate,
-            prev_depth_16 + (depth == 16 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_16_solve_rate,
-            prev_depth_16_solve + (depth == 16 ? 1.0f : 0.0f), 0.0f);
-
-        int next_depth = expected_depths[episode + 1 < 5 ? episode + 1 : 4];
-        EXPECT_EQ_INT(env.scramble_depth, next_depth);
-        expect_observation_matches(&env);
-    }
-
-    float prev_n = env.log.n;
-    float prev_perf = env.log.perf;
-    float prev_score = env.log.score;
-    float prev_solve_rate = env.log.solve_rate;
-    float prev_invalid = env.log.invalid_rate;
-    float prev_timeout = env.log.timeout_rate;
-    float prev_depth_16 = env.log.depth_16_rate;
-    float prev_depth_16_solve = env.log.depth_16_solve_rate;
-    actions[0] = 999.0f;
-    c_step(&env);
-    EXPECT_NEAR(rewards[0], -1.0f, 0.0f);
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.n, prev_n + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.perf, prev_perf, 0.0f);
-    EXPECT_NEAR(env.log.score, prev_score, 0.0f);
-    EXPECT_NEAR(env.log.solve_rate, prev_solve_rate, 0.0f);
-    EXPECT_NEAR(env.log.invalid_rate, prev_invalid + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.timeout_rate, prev_timeout, 0.0f);
-    EXPECT_NEAR(env.log.depth_16_rate, prev_depth_16 + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_16_solve_rate, prev_depth_16_solve, 0.0f);
-    EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
-
-    c_reset(&env);
-    prev_timeout = env.log.timeout_rate;
-    int observed_nonterminal = 0;
-    for (int i = 0; i < env.max_steps; i++) {
-        int action = find_non_solving_action(&env);
-        EXPECT_TRUE(action >= 0);
-        actions[0] = (float)action;
-        c_step(&env);
-        if (terminals[0] == 0.0f) {
-            EXPECT_NEAR(rewards[0], -0.01f, 0.0f);
-            observed_nonterminal = 1;
-        } else {
-            break;
-        }
-    }
-    EXPECT_TRUE(observed_nonterminal);
-    EXPECT_NEAR(rewards[0], -1.0f, 0.0f);
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.timeout_rate, prev_timeout + 1.0f, 0.0f);
-    EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
-
-    affine_lock_free_shared(&shared);
-}
-
-static void test_wca_random_state_curriculum_and_logging(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 42, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    const int expected_depths[] = {2, 4, 8, 16};
-    for (int episode = 0; episode < 4; episode++) {
-        int depth = expected_depths[episode];
-        EXPECT_EQ_INT(env.scramble_depth, depth);
-        expect_solution_reaches_target(&shared, &env);
-
-        float prev_n = env.log.n;
-        float prev_perf = env.log.perf;
-        float prev_max_depth_solve = env.log.max_depth_solve;
-        float prev_reward_mismatch = env.log.reward_state_mismatch;
-        float prev_target_distance = env.log.target_distance;
-        float prev_solved_target_distance = env.log.solved_target_distance;
-        float prev_depth_2 = env.log.depth_2_rate;
-        float prev_depth_2_solve = env.log.depth_2_solve_rate;
-        float prev_depth_4 = env.log.depth_4_rate;
-        float prev_depth_4_solve = env.log.depth_4_solve_rate;
-        float prev_depth_8 = env.log.depth_8_rate;
-        float prev_depth_8_solve = env.log.depth_8_solve_rate;
-        float prev_depth_16 = env.log.depth_16_rate;
-        float prev_depth_16_solve = env.log.depth_16_solve_rate;
-        int target_distance = env.target_distance;
-        int metric_depth = target_distance > 0 ? target_distance : depth;
-
-        solve_with_stored_solution(&env);
-        EXPECT_NEAR(rewards[0], 1.0f, 0.0f);
-        EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-        EXPECT_NEAR(env.log.n, prev_n + 1.0f, 0.0f);
-        EXPECT_NEAR(env.log.perf,
-            prev_perf + expected_solve_credit(&shared, metric_depth), 0.0f);
-        EXPECT_NEAR(env.log.max_depth_solve,
-            prev_max_depth_solve + (metric_depth == shared.max_depth ? 1.0f : 0.0f),
-            0.0f);
-        EXPECT_NEAR(env.log.reward_state_mismatch, prev_reward_mismatch, 0.0f);
-        EXPECT_NEAR(env.log.target_distance,
-            prev_target_distance + (float)target_distance, 0.0f);
-        EXPECT_NEAR(env.log.solved_target_distance,
-            prev_solved_target_distance + (float)target_distance, 0.0f);
-        EXPECT_NEAR(env.log.depth_2_rate,
-            prev_depth_2 + (metric_depth == 2 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_2_solve_rate,
-            prev_depth_2_solve + (metric_depth == 2 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_4_rate,
-            prev_depth_4 + (metric_depth == 4 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_4_solve_rate,
-            prev_depth_4_solve + (metric_depth == 4 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_8_rate,
-            prev_depth_8 + (metric_depth == 8 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_8_solve_rate,
-            prev_depth_8_solve + (metric_depth == 8 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_16_rate,
-            prev_depth_16 + (metric_depth == 16 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_16_solve_rate,
-            prev_depth_16_solve + (metric_depth == 16 ? 1.0f : 0.0f), 0.0f);
-
-        int next_depth = episode < 3 ? expected_depths[episode + 1] : 16;
-        EXPECT_EQ_INT(env.scramble_depth, next_depth);
-    }
-
-    float prev_n = env.log.n;
-    float prev_perf = env.log.perf;
-    float prev_max_depth_solve = env.log.max_depth_solve;
-    float prev_invalid = env.log.invalid_rate;
-    float prev_reward_mismatch = env.log.reward_state_mismatch;
-    EXPECT_EQ_INT(env.scramble_depth, shared.max_depth);
-    actions[0] = 999.0f;
-    c_step(&env);
-    EXPECT_NEAR(rewards[0], -1.0f, 0.0f);
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.n, prev_n + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.perf, prev_perf, 0.0f);
-    EXPECT_NEAR(env.log.max_depth_solve, prev_max_depth_solve, 0.0f);
-    EXPECT_NEAR(env.log.invalid_rate, prev_invalid + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.reward_state_mismatch, prev_reward_mismatch, 0.0f);
-    EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
-
-    affine_lock_free_shared(&shared);
-}
-
 static void test_visible_target_table_curriculum_and_logging(void) {
     AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
     affine_lock_configure_initialization(
@@ -2153,46 +1468,6 @@ static void test_visible_target_table_timeouts_at_all_curriculum_depths_end_to_e
     }
 }
 
-static void test_random_initialization_timeout_logs_depth_bucket(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_RANDOM);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 17, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    float prev_n = env.log.n;
-    float prev_perf = env.log.perf;
-    float prev_timeout = env.log.timeout_rate;
-    float prev_depth_2 = env.log.depth_2_rate;
-    float prev_depth_2_solve = env.log.depth_2_solve_rate;
-
-    for (int i = 0; i < env.max_steps; i++) {
-        int action = find_non_solving_action(&env);
-        EXPECT_TRUE(action >= 0);
-        actions[0] = (float)action;
-        c_step(&env);
-        if (terminals[0] != 0.0f) {
-            break;
-        }
-    }
-
-    EXPECT_NEAR(rewards[0], -1.0f, 0.0f);
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.n, prev_n + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.perf, prev_perf, 0.0f);
-    EXPECT_NEAR(env.log.timeout_rate, prev_timeout + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_2_rate, prev_depth_2 + 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_2_solve_rate, prev_depth_2_solve, 0.0f);
-    EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
-
-    affine_lock_free_shared(&shared);
-}
-
 static void test_exact_distance_initialization_logs_target_distance(void) {
     AffineLockShared shared = make_shared(16, 4, 16, 2, 0);
     affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
@@ -2263,38 +1538,6 @@ static void test_exact_distance_solve_logs_solved_target_distance(void) {
     affine_lock_free_shared(&shared);
 }
 
-static void test_wca_random_state_initialization_logs_target_distance(void) {
-    AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 29, observations, actions, rewards, terminals);
-    c_reset(&env);
-
-    int target_distance = env.target_distance;
-    float prev_target_distance = env.log.target_distance;
-
-    for (int i = 0; i < env.max_steps; i++) {
-        int action = find_non_solving_action(&env);
-        EXPECT_TRUE(action >= 0);
-        actions[0] = (float)action;
-        c_step(&env);
-        if (terminals[0] != 0.0f) {
-            break;
-        }
-    }
-
-    EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.target_distance,
-        prev_target_distance + (float)target_distance, 0.0f);
-
-    affine_lock_free_shared(&shared);
-}
-
 static int deterministic_stream_action(int mode, int episode, int step) {
     return (mode * 5 + episode * 3 + step * 7) % AFFINE_LOCK_NUM_ACTIONS;
 }
@@ -2334,7 +1577,12 @@ static uint64_t run_seed_sequence_checksum(int mode, unsigned int seed) {
 }
 
 static void test_deterministic_seed_sequences_for_all_initialization_modes(void) {
-    for (int mode = 0; mode <= 4; mode++) {
+    const int modes[] = {
+        AFFINE_LOCK_INIT_EXACT_DISTANCE,
+        AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE,
+    };
+    for (int mode_index = 0; mode_index < 2; mode_index++) {
+        int mode = modes[mode_index];
         AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
         affine_lock_configure_initialization(&shared, mode);
 
@@ -2380,46 +1628,6 @@ static void test_deterministic_seed_sequences_for_all_initialization_modes(void)
         EXPECT_EQ_U64(seed_2, seed_2_repeat);
         EXPECT_TRUE(seed_1 != seed_2);
     }
-}
-
-static uint64_t run_mode3_seed_42_golden_sequence(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_WCA_RANDOM_STATE);
-
-    AffineLock env;
-    float observations[AFFINE_LOCK_OBS_SIZE];
-    float actions[AFFINE_LOCK_NUM_ATNS];
-    float rewards[1];
-    float terminals[1];
-    make_env(&env, &shared, 42, observations, actions, rewards, terminals);
-
-    uint64_t checksum = 1469598103934665603ull;
-    c_reset(&env);
-    checksum = mix_u64(checksum, reset_snapshot_checksum(&env));
-    for (int episode = 0; episode < 4; episode++) {
-        int length = env.solution_length;
-        for (int step = 0; step < length; step++) {
-            actions[0] = (float)env.solution_actions[step];
-            c_step(&env);
-            checksum = mix_u64(checksum, reset_snapshot_checksum(&env));
-            if (terminals[0] != 0.0f) {
-                break;
-            }
-        }
-    }
-    EXPECT_EQ_INT(env.scramble_depth, 16);
-    actions[0] = 999.0f;
-    c_step(&env);
-    checksum = mix_u64(checksum, reset_snapshot_checksum(&env));
-    EXPECT_EQ_INT(env.scramble_depth, 2);
-
-    affine_lock_free_shared(&shared);
-    return checksum;
-}
-
-static void test_mode3_seed_42_golden_checksum(void) {
-    uint64_t checksum = run_mode3_seed_42_golden_sequence();
-    EXPECT_EQ_U64(checksum, 0xe89923654e7900d4ull);
 }
 
 static uint64_t run_mode4_seed_42_golden_sequence(void) {
@@ -2481,13 +1689,13 @@ static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
         EXPECT_EQ_U32(env_a.target, env_b.target);
         EXPECT_EQ_U32(env_a.state, env_b.state);
         EXPECT_EQ_INT(env_a.scramble_depth, env_b.scramble_depth);
-        EXPECT_EQ_INT(env_a.scramble_length, env_b.scramble_length);
-        EXPECT_TRUE(memcmp(env_a.scramble_actions, env_b.scramble_actions,
-            sizeof(env_a.scramble_actions)) == 0);
+        EXPECT_EQ_INT(env_a.solution_length, env_b.solution_length);
+        EXPECT_TRUE(memcmp(env_a.solution_actions, env_b.solution_actions,
+            sizeof(env_a.solution_actions)) == 0);
         EXPECT_TRUE(memcmp(obs_a, obs_b, sizeof(obs_a)) == 0);
 
-        solve_with_stored_scramble(&env_a);
-        solve_with_stored_scramble(&env_b);
+        solve_with_stored_solution(&env_a);
+        solve_with_stored_solution(&env_b);
         EXPECT_EQ_U32(env_a.target, env_b.target);
         EXPECT_EQ_U32(env_a.state, env_b.state);
         EXPECT_NEAR(rew_a[0], rew_b[0], 0.0f);
@@ -2521,14 +1729,14 @@ static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
         EXPECT_EQ_U32(env_1.state, env_1_repeat.state);
         EXPECT_EQ_U32(env_2.target, env_2_repeat.target);
         EXPECT_EQ_U32(env_2.state, env_2_repeat.state);
-        EXPECT_TRUE(memcmp(env_1.scramble_actions, env_1_repeat.scramble_actions,
-            sizeof(env_1.scramble_actions)) == 0);
-        EXPECT_TRUE(memcmp(env_2.scramble_actions, env_2_repeat.scramble_actions,
-            sizeof(env_2.scramble_actions)) == 0);
+        EXPECT_TRUE(memcmp(env_1.solution_actions, env_1_repeat.solution_actions,
+            sizeof(env_1.solution_actions)) == 0);
+        EXPECT_TRUE(memcmp(env_2.solution_actions, env_2_repeat.solution_actions,
+            sizeof(env_2.solution_actions)) == 0);
 
         if (env_1.target != env_2.target || env_1.state != env_2.state ||
-                memcmp(env_1.scramble_actions, env_2.scramble_actions,
-                    sizeof(env_1.scramble_actions)) != 0) {
+                memcmp(env_1.solution_actions, env_2.solution_actions,
+                    sizeof(env_1.solution_actions)) != 0) {
             differs = 1;
         }
     }
@@ -2540,33 +1748,22 @@ static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
 int main(void) {
     test_metadata_contract();
     test_config_and_binding_metadata_contract();
+    test_initialization_mode_contract();
     test_global_action_examples();
     test_count_bits_matches_reference_for_all_states();
     test_actions_round_trip_for_all_states();
     test_reset_randomizes_target_and_current();
-    test_random_initialization_mode_samples_independent_start_and_target();
     test_exact_distance_initialization_samples_reachable_target();
     test_exact_distance_initialization_handles_max_requested_depth();
-    test_scramble_initialization_stores_generated_solution_path();
-    test_wca_random_state_initialization_samples_reachable_target();
     test_visible_target_table_initialization_samples_reachable_target();
-    test_wca_random_state_starts_at_depth_2_and_stored_solution_solves();
     test_known_distance_initialization_sets_reachability_flags();
-    test_wca_random_state_initialization_handles_max_requested_depth();
-    test_wca_random_state_depths_have_exact_distance_solutions();
     test_visible_target_table_depths_have_exact_distance_solutions();
     test_visible_target_table_reset_uses_exact_records();
     test_distance_generators_match_independent_bfs_over_repeated_resets();
     test_free_shared_releases_thread_bfs_scratch();
     test_log_solve_credit_uses_known_target_distance();
-    test_scramble_trace_is_state_changing_and_inverse_solves();
-    test_max_depth_scramble_generation_does_not_dead_end();
-    test_scramble_depth_16_is_not_collapsed_by_rng_low_bits();
     test_debug_trace_default_dir_stays_under_logs_affine_lock();
-    test_debug_trace_logs_scramble_policy_steps_and_reward_sanity();
-    test_random_debug_trace_logs_mode_and_reachability();
     test_exact_distance_trace_logs_mode_and_distance();
-    test_wca_random_state_trace_logs_mode_and_distance();
     test_visible_target_table_trace_logs_mode_and_distance();
     test_debug_trace_level_1_logs_reset_and_end_only_with_solution_proof();
     test_debug_trace_level_2_logs_policy_steps();
@@ -2576,17 +1773,12 @@ int main(void) {
     test_hint_action_uses_live_current_state();
     test_show_hint_does_not_step_or_mutate_puzzle();
     test_action_float_validation_rejects_non_discrete_values();
-    test_rewards_logs_and_curriculum();
-    test_wca_random_state_curriculum_and_logging();
     test_visible_target_table_curriculum_and_logging();
     test_visible_target_table_oracle_wins_all_curriculum_depths_end_to_end();
     test_visible_target_table_timeouts_at_all_curriculum_depths_end_to_end();
-    test_random_initialization_timeout_logs_depth_bucket();
     test_exact_distance_initialization_logs_target_distance();
     test_exact_distance_solve_logs_solved_target_distance();
-    test_wca_random_state_initialization_logs_target_distance();
     test_deterministic_seed_sequences_for_all_initialization_modes();
-    test_mode3_seed_42_golden_checksum();
     test_mode4_seed_42_golden_checksum();
     test_deterministic_seed_sequences_and_distinct_env_ids();
     printf("affine_lock tests passed\n");
