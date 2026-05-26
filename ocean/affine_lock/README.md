@@ -34,8 +34,8 @@ The Puffer binding exposes one discrete action slot with
 
 ## Reset Modes
 
-The default and intended training path is `initialization_mode = 4`, which loads
-the committed visible-target table. `initialization_mode = 2` remains available
+The default and intended training path is `initialization_mode = 2`, which loads
+the committed visible-target table. `initialization_mode = 1` remains available
 as a slower exact-distance fallback for local experiments that need targets not
 covered by a generated table. Other prototype reset modes were removed from the
 runtime path.
@@ -55,11 +55,10 @@ The committed table stores sampled visible start/target pairs at depths `2`,
 The table format can store any depth sections, but this generator currently
 targets the fixed depth list `{2, 4, 8, 16}`.
 
-## Regenerating Larger Tables
+## Regenerating the Target Table
 
-`tools/generate_8action_visible_targets.c` is the provenance tool for the
-committed `.bin` and `.json` files. It can create larger tables for the
-committed action set without changing the runtime environment.
+If the generated binary artifact is omitted from a checkout, regenerate the
+default table from the repo root:
 
 ```bash
 gcc -std=c11 -O3 -DNDEBUG -fopenmp \
@@ -67,6 +66,16 @@ gcc -std=c11 -O3 -DNDEBUG -fopenmp \
   ocean/affine_lock/tools/generate_8action_visible_targets.c \
   -lm -o /tmp/affine_lock_generate_visible_targets
 
+/tmp/affine_lock_generate_visible_targets
+```
+
+The no-argument generator run writes the default `.bin` and `.json` files under
+`ocean/affine_lock/generated/`.
+
+The same generator can create larger tables for the committed action set without
+changing the runtime environment:
+
+```bash
 /tmp/affine_lock_generate_visible_targets \
   --sample-per-depth 131072 \
   --store-all-depth 16 \

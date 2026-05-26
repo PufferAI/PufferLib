@@ -27,8 +27,8 @@
 #endif
 
 typedef enum AffineLockInitializationMode {
-    AFFINE_LOCK_INIT_EXACT_DISTANCE = 2,
-    AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 4,
+    AFFINE_LOCK_INIT_EXACT_DISTANCE = 1,
+    AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 2,
 } AffineLockInitializationMode;
 
 typedef enum AffineLockAction {
@@ -217,43 +217,11 @@ static uint32_t affine_lock_reverse_each_byte(uint32_t state) {
 
 static int affine_lock_init_shared(
         AffineLockShared* shared,
-        int bits,
         int start_depth,
         int max_depth,
         int depth_multiplier,
         int step_grace) {
     memset(shared, 0, sizeof(*shared));
-
-    if (bits != AFFINE_LOCK_BITS) {
-        fprintf(stderr,
-            "affine_lock: bits must be %d; got %d\n",
-            AFFINE_LOCK_BITS, bits);
-        return -1;
-    }
-    if (start_depth < 1 || start_depth > AFFINE_LOCK_MAX_SCRAMBLE_DEPTH) {
-        fprintf(stderr,
-            "affine_lock: start_depth must be in [1, %d]; got %d\n",
-            AFFINE_LOCK_MAX_SCRAMBLE_DEPTH, start_depth);
-        return -1;
-    }
-    if (max_depth < start_depth || max_depth > AFFINE_LOCK_MAX_SCRAMBLE_DEPTH) {
-        fprintf(stderr,
-            "affine_lock: max_depth must be in [%d, %d]; got %d\n",
-            start_depth, AFFINE_LOCK_MAX_SCRAMBLE_DEPTH, max_depth);
-        return -1;
-    }
-    if (depth_multiplier < 1) {
-        fprintf(stderr,
-            "affine_lock: depth_multiplier must be >= 1; got %d\n",
-            depth_multiplier);
-        return -1;
-    }
-    if (step_grace < 0) {
-        fprintf(stderr,
-            "affine_lock: step_grace must be >= 0; got %d\n",
-            step_grace);
-        return -1;
-    }
 
     shared->start_depth = start_depth;
     shared->max_depth = max_depth;
@@ -325,13 +293,6 @@ static int affine_lock_prepare_visible_targets(AffineLockShared* shared) {
         return -1;
     }
 
-    if (shared->visible_target_table.bits != AFFINE_LOCK_BITS ||
-            shared->visible_target_table.num_actions != AFFINE_LOCK_NUM_ACTIONS) {
-        fprintf(stderr, "affine_lock: visible target table shape mismatch\n");
-        affine_lock_visible_targets_free(&shared->visible_target_table);
-        return -1;
-    }
-
     shared->visible_target_table_loaded = 1;
     return 0;
 }
@@ -339,13 +300,6 @@ static int affine_lock_prepare_visible_targets(AffineLockShared* shared) {
 static int affine_lock_configure_initialization(
         AffineLockShared* shared,
         int initialization_mode) {
-    if (initialization_mode != AFFINE_LOCK_INIT_EXACT_DISTANCE &&
-            initialization_mode != AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE) {
-        fprintf(stderr,
-            "affine_lock: initialization_mode must be 2 (exact_distance) or 4 (visible_target_table); got %d\n",
-            initialization_mode);
-        return -1;
-    }
     if (initialization_mode == AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE &&
             affine_lock_prepare_visible_targets(shared) != 0) {
         return -1;

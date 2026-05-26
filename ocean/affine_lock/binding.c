@@ -34,7 +34,6 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int agents_per_buffer = total_agents / num_buffers;
     int base_seed = (int)dict_get(env_kwargs, "seed")->value;
 
-    int bits = (int)dict_get(env_kwargs, "bits")->value;
     int start_depth = (int)dict_get(env_kwargs, "start_depth")->value;
     int max_depth = (int)dict_get(env_kwargs, "max_depth")->value;
     int depth_multiplier = (int)dict_get(env_kwargs, "depth_multiplier")->value;
@@ -45,7 +44,7 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     AffineLockShared* shared =
         (AffineLockShared*)calloc(1, sizeof(AffineLockShared));
     if (shared == NULL || affine_lock_init_shared(
-            shared, bits, start_depth, max_depth, depth_multiplier, step_grace) != 0) {
+            shared, start_depth, max_depth, depth_multiplier, step_grace) != 0) {
         fprintf(stderr, "affine_lock: failed to initialize shared state\n");
         free(shared);
         abort();

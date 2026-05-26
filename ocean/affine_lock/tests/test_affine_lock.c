@@ -66,12 +66,12 @@
 } while (0)
 
 static AffineLockShared make_shared(
-        int bits, int start_depth, int max_depth,
+        int start_depth, int max_depth,
         int depth_multiplier, int step_grace) {
     AffineLockShared shared;
     memset(&shared, 0, sizeof(shared));
     int rc = affine_lock_init_shared(
-        &shared, bits, start_depth, max_depth, depth_multiplier, step_grace);
+        &shared, start_depth, max_depth, depth_multiplier, step_grace);
     EXPECT_EQ_INT(rc, 0);
     return shared;
 }
@@ -196,7 +196,7 @@ static void compute_test_bfs_stats(
 }
 
 static void test_free_shared_releases_thread_bfs_scratch(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
 
     int hint = affine_lock_hint_action(&shared, 0x1234u, 0x5678u);
     EXPECT_TRUE(hint >= 0);
@@ -215,7 +215,7 @@ static void test_free_shared_releases_thread_bfs_scratch(void) {
 static float expected_solve_credit(const AffineLockShared* shared, int depth);
 
 static void test_log_solve_credit_uses_known_target_distance(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     AffineLock env;
     memset(&env, 0, sizeof(env));
     env.shared = &shared;
@@ -529,8 +529,8 @@ static void test_metadata_contract(void) {
     EXPECT_EQ_INT(AFFINE_LOCK_OBS_SIZE, 33);
     EXPECT_EQ_INT(AFFINE_LOCK_NUM_ATNS, 1);
     EXPECT_EQ_INT(AFFINE_LOCK_NUM_ACTIONS, 8);
-    EXPECT_EQ_INT(AFFINE_LOCK_INIT_EXACT_DISTANCE, 2);
-    EXPECT_EQ_INT(AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE, 4);
+    EXPECT_EQ_INT(AFFINE_LOCK_INIT_EXACT_DISTANCE, 1);
+    EXPECT_EQ_INT(AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE, 2);
 }
 
 static void test_config_and_binding_metadata_contract(void) {
@@ -539,10 +539,9 @@ static void test_config_and_binding_metadata_contract(void) {
     EXPECT_TRUE(strstr(config, "[base]") != NULL);
     EXPECT_TRUE(strstr(config, "env_name = affine_lock") != NULL);
     EXPECT_TRUE(strstr(config, "[env]") != NULL);
-    EXPECT_TRUE(strstr(config, "bits = 16") != NULL);
     EXPECT_TRUE(strstr(config, "start_depth = 2") != NULL);
     EXPECT_TRUE(strstr(config, "max_depth = 16") != NULL);
-    EXPECT_TRUE(strstr(config, "initialization_mode = 4") != NULL);
+    EXPECT_TRUE(strstr(config, "initialization_mode = 2") != NULL);
     EXPECT_TRUE(strstr(config, "[sweep]") != NULL);
     EXPECT_TRUE(strstr(config, "metric = perf") != NULL);
     EXPECT_TRUE(strstr(config, "goal = maximize") != NULL);
@@ -559,24 +558,8 @@ static void test_config_and_binding_metadata_contract(void) {
     EXPECT_TRUE(strstr(binding, "#define OBS_TENSOR_T FloatTensor") != NULL);
 }
 
-static void test_initialization_mode_contract(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
-    EXPECT_EQ_INT(
-        affine_lock_configure_initialization(
-            &shared, AFFINE_LOCK_INIT_EXACT_DISTANCE),
-        0);
-    EXPECT_EQ_INT(
-        affine_lock_configure_initialization(
-            &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE),
-        0);
-    EXPECT_EQ_INT(affine_lock_configure_initialization(&shared, 0), -1);
-    EXPECT_EQ_INT(affine_lock_configure_initialization(&shared, 1), -1);
-    EXPECT_EQ_INT(affine_lock_configure_initialization(&shared, 3), -1);
-    affine_lock_free_shared(&shared);
-}
-
 static void test_global_action_examples(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     uint32_t start = bits_from_text("0011011000010111");
 
     const char* expected[AFFINE_LOCK_NUM_ACTIONS] = {
@@ -609,7 +592,7 @@ static void test_count_bits_matches_reference_for_all_states(void) {
 }
 
 static void test_actions_round_trip_for_all_states(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     const int inverse_actions[AFFINE_LOCK_NUM_ACTIONS] = {
         AFFINE_LOCK_ACTION_SHIFT_RIGHT,
         AFFINE_LOCK_ACTION_SHIFT_LEFT,
@@ -640,7 +623,7 @@ static void test_actions_round_trip_for_all_states(void) {
 }
 
 static void test_reset_randomizes_target_and_current(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
     float actions[AFFINE_LOCK_NUM_ATNS];
@@ -681,7 +664,7 @@ static void test_reset_randomizes_target_and_current(void) {
 }
 
 static void test_exact_distance_initialization_samples_reachable_target(void) {
-    AffineLockShared shared = make_shared(16, 4, 16, 2, 0);
+    AffineLockShared shared = make_shared(4, 16, 2, 0);
     affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
 
     AffineLock env;
@@ -707,7 +690,7 @@ static void test_exact_distance_initialization_samples_reachable_target(void) {
 }
 
 static void test_exact_distance_initialization_handles_max_requested_depth(void) {
-    AffineLockShared shared = make_shared(16, 16, 16, 2, 0);
+    AffineLockShared shared = make_shared(16, 16, 2, 0);
     affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
 
     AffineLock env;
@@ -735,7 +718,7 @@ static void test_exact_distance_initialization_handles_max_requested_depth(void)
 }
 
 static void test_visible_target_table_initialization_samples_reachable_target(void) {
-    AffineLockShared shared = make_shared(16, 8, 16, 2, 0);
+    AffineLockShared shared = make_shared(8, 16, 2, 0);
     affine_lock_configure_initialization(
         &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
@@ -760,7 +743,7 @@ static void test_visible_target_table_initialization_samples_reachable_target(vo
 }
 
 static void test_known_distance_initialization_sets_reachability_flags(void) {
-    AffineLockShared depth_one = make_shared(16, 1, 16, 2, 0);
+    AffineLockShared depth_one = make_shared(1, 16, 2, 0);
     affine_lock_configure_initialization(
         &depth_one, AFFINE_LOCK_INIT_EXACT_DISTANCE);
 
@@ -776,7 +759,7 @@ static void test_known_distance_initialization_sets_reachability_flags(void) {
     EXPECT_EQ_INT(env_one.two_action_target, 1);
     affine_lock_free_shared(&depth_one);
 
-    AffineLockShared depth_two = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared depth_two = make_shared(2, 16, 2, 0);
     affine_lock_configure_initialization(
         &depth_two, AFFINE_LOCK_INIT_EXACT_DISTANCE);
 
@@ -797,7 +780,7 @@ static void test_visible_target_table_depths_have_exact_distance_solutions(void)
     const int depths[] = {2, 4, 8, 16};
     for (int i = 0; i < 4; i++) {
         int depth = depths[i];
-        AffineLockShared shared = make_shared(16, depth, 16, 2, 0);
+        AffineLockShared shared = make_shared(depth, 16, 2, 0);
         affine_lock_configure_initialization(
             &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
@@ -833,7 +816,7 @@ static void test_visible_target_table_reset_uses_exact_records(void) {
 
     for (int depth_index = 0; depth_index < 4; depth_index++) {
         int requested_depth = requested_depths[depth_index];
-        AffineLockShared shared = make_shared(16, requested_depth, 16, 2, 0);
+        AffineLockShared shared = make_shared(requested_depth, 16, 2, 0);
         affine_lock_configure_initialization(
             &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
         const AffineLockVisibleTargetDepth* table_depth =
@@ -877,7 +860,7 @@ static void test_distance_generators_match_independent_bfs_over_repeated_resets(
         for (int depth_index = 0; depth_index < 4; depth_index++) {
             int mode = modes[mode_index];
             int depth = depths[depth_index];
-            AffineLockShared shared = make_shared(16, depth, 16, 2, 0);
+            AffineLockShared shared = make_shared(depth, 16, 2, 0);
             affine_lock_configure_initialization(&shared, mode);
 
             AffineLock env;
@@ -903,7 +886,7 @@ static void test_distance_generators_match_independent_bfs_over_repeated_resets(
 }
 
 static void test_observation_encoding_is_32_signed_bit_floats_plus_timer(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
     float actions[AFFINE_LOCK_NUM_ATNS];
@@ -922,7 +905,7 @@ static void test_observation_encoding_is_32_signed_bit_floats_plus_timer(void) {
 }
 
 static void test_timer_observation_progresses_and_resets_after_timeout(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
     float actions[AFFINE_LOCK_NUM_ATNS];
@@ -962,7 +945,7 @@ static void test_timer_observation_progresses_and_resets_after_timeout(void) {
 }
 
 static void test_actions_apply_to_current_state_directly(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
     float actions[AFFINE_LOCK_NUM_ATNS];
@@ -993,7 +976,7 @@ static void test_actions_apply_to_current_state_directly(void) {
 }
 
 static void test_hint_action_uses_live_current_state(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     uint32_t target = 0x67a1u;
     uint32_t start = 0x36a5u;
     int reset_hint = affine_lock_hint_action(&shared, start, target);
@@ -1010,7 +993,7 @@ static void test_hint_action_uses_live_current_state(void) {
 }
 
 static void test_show_hint_does_not_step_or_mutate_puzzle(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
     float actions[AFFINE_LOCK_NUM_ATNS];
@@ -1039,7 +1022,7 @@ static void test_show_hint_does_not_step_or_mutate_puzzle(void) {
 }
 
 static void test_action_float_validation_rejects_non_discrete_values(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];
     float actions[AFFINE_LOCK_NUM_ATNS];
@@ -1075,7 +1058,7 @@ static void test_action_float_validation_rejects_non_discrete_values(void) {
 }
 
 static void test_visible_target_table_curriculum_and_logging(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     affine_lock_configure_initialization(
         &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
@@ -1166,7 +1149,7 @@ static void test_visible_target_table_curriculum_and_logging(void) {
 }
 
 static void test_visible_target_table_oracle_wins_all_curriculum_depths_end_to_end(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     affine_lock_configure_initialization(
         &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
@@ -1204,7 +1187,7 @@ static void test_visible_target_table_timeouts_at_all_curriculum_depths_end_to_e
 
     for (int i = 0; i < 4; i++) {
         int loss_depth = loss_depths[i];
-        AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+        AffineLockShared shared = make_shared(2, 16, 2, 0);
         affine_lock_configure_initialization(
             &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
@@ -1232,7 +1215,7 @@ static void test_visible_target_table_timeouts_at_all_curriculum_depths_end_to_e
 }
 
 static void test_exact_distance_initialization_logs_target_distance(void) {
-    AffineLockShared shared = make_shared(16, 4, 16, 2, 0);
+    AffineLockShared shared = make_shared(4, 16, 2, 0);
     affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
 
     AffineLock env;
@@ -1263,7 +1246,7 @@ static void test_exact_distance_initialization_logs_target_distance(void) {
 }
 
 static void test_exact_distance_solve_logs_solved_target_distance(void) {
-    AffineLockShared shared = make_shared(16, 1, 1, 2, 0);
+    AffineLockShared shared = make_shared(1, 1, 2, 0);
     affine_lock_configure_initialization(&shared, AFFINE_LOCK_INIT_EXACT_DISTANCE);
 
     AffineLock env;
@@ -1306,7 +1289,7 @@ static int deterministic_stream_action(int mode, int episode, int step) {
 }
 
 static uint64_t run_seed_sequence_checksum(int mode, unsigned int seed) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     affine_lock_configure_initialization(&shared, mode);
 
     AffineLock env;
@@ -1346,7 +1329,7 @@ static void test_deterministic_seed_sequences_for_all_initialization_modes(void)
     };
     for (int mode_index = 0; mode_index < 2; mode_index++) {
         int mode = modes[mode_index];
-        AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+        AffineLockShared shared = make_shared(2, 16, 2, 0);
         affine_lock_configure_initialization(&shared, mode);
 
         AffineLock env_a;
@@ -1394,7 +1377,7 @@ static void test_deterministic_seed_sequences_for_all_initialization_modes(void)
 }
 
 static uint64_t run_mode4_seed_42_golden_sequence(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
     affine_lock_configure_initialization(
         &shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE);
 
@@ -1435,7 +1418,7 @@ static void test_mode4_seed_42_golden_checksum(void) {
 }
 
 static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
-    AffineLockShared shared = make_shared(16, 2, 16, 2, 0);
+    AffineLockShared shared = make_shared(2, 16, 2, 0);
 
     AffineLock env_a;
     AffineLock env_b;
@@ -1511,7 +1494,6 @@ static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
 int main(void) {
     test_metadata_contract();
     test_config_and_binding_metadata_contract();
-    test_initialization_mode_contract();
     test_global_action_examples();
     test_count_bits_matches_reference_for_all_states();
     test_actions_round_trip_for_all_states();

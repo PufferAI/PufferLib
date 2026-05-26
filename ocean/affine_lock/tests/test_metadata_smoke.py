@@ -66,11 +66,10 @@ def check_config():
     assert parse_int(config["vec"]["num_threads"]) == 16
     assert parse_int(config["policy"]["hidden_size"]) == 256
     assert parse_int(config["policy"]["num_layers"]) == 3
-    assert parse_int(config["env"]["bits"]) == 16
     assert parse_int(config["env"]["seed"]) == 42
     assert parse_int(config["env"]["start_depth"]) == 2
     assert parse_int(config["env"]["max_depth"]) == 16
-    assert parse_int(config["env"]["initialization_mode"]) == 4
+    assert parse_int(config["env"]["initialization_mode"]) == 2
     assert "debug_log_level" not in config["env"]
     assert "short_solve_audit_enabled" not in config["env"]
     assert parse_int(config["train"]["total_timesteps"]) == 200_000_000
@@ -155,8 +154,8 @@ def check_config():
 def check_binding_text():
     header = (ROOT / "ocean" / "affine_lock" / "affine_lock.h").read_text()
     assert "#define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16" in header
-    assert "AFFINE_LOCK_INIT_EXACT_DISTANCE = 2" in header
-    assert "AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 4" in header
+    assert "AFFINE_LOCK_INIT_EXACT_DISTANCE = 1" in header
+    assert "AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 2" in header
     assert "AFFINE_LOCK_INIT_SCRAMBLE" not in header
     assert "AFFINE_LOCK_INIT_RANDOM" not in header
     assert "AFFINE_LOCK_INIT_WCA_RANDOM_STATE" not in header

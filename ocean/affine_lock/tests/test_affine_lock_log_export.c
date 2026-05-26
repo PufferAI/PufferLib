@@ -75,13 +75,12 @@ static Dict* make_vec_kwargs(void) {
 }
 
 static Dict* make_env_kwargs(int seed) {
-    Dict* env_kwargs = create_dict(7);
-    dict_set(env_kwargs, "bits", 16);
+    Dict* env_kwargs = create_dict(6);
     dict_set(env_kwargs, "start_depth", 2);
     dict_set(env_kwargs, "max_depth", 16);
     dict_set(env_kwargs, "depth_multiplier", 2);
     dict_set(env_kwargs, "step_grace", 0);
-    dict_set(env_kwargs, "initialization_mode", 4);
+    dict_set(env_kwargs, "initialization_mode", 2);
     dict_set(env_kwargs, "seed", seed);
     return env_kwargs;
 }
@@ -228,7 +227,7 @@ static void test_vec_init_visible_targets_repeat_across_runs_and_vary_by_env_id(
 
 static void test_free_shared_releases_caller_thread_bfs_scratch(void) {
     AffineLockShared shared = {0};
-    int rc = affine_lock_init_shared(&shared, 16, 2, 16, 2, 0);
+    int rc = affine_lock_init_shared(&shared, 2, 16, 2, 0);
     EXPECT_EQ_INT(rc, 0);
 
     int hint = affine_lock_hint_action(&shared, 0x1234u, 0x5678u);
