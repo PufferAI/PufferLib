@@ -145,8 +145,11 @@ def _params_from_puffer_sweep(sweep_config, only_include=None):
         only_include = [p.strip() for p in sweep_config['sweep_only'].split(',')]
 
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'metric_distribution', 'goal', 'downsample', 'use_gpu', 'prune_pareto',
-                    'sweep_only', 'max_suggestion_cost', 'early_stop_quantile', 'gpus', 'max_runs'):
+        if name in ('method', 'metric', 'metric_distribution', 'goal',
+                'downsample', 'use_gpu', 'prune_pareto', 'sweep_only',
+                'max_suggestion_cost', 'early_stop_quantile', 'gpus',
+                'max_runs', 'match_enemy_model_path', 'match_num_games',
+                'match_enemy_hidden_size', 'match_enemy_num_layers'):
             continue
 
         assert isinstance(param, dict), f'Param {name} is not a dict'

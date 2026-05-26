@@ -17,6 +17,30 @@ try:
 except:
     pass
 
+def test_match_sweep_metadata_not_hyperparameters():
+    sweep_config = {
+        'method': 'Protein',
+        'metric': 'score',
+        'metric_distribution': 'linear',
+        'goal': 'maximize',
+        'match_enemy_model_path': '',
+        'match_num_games': 1024,
+        'match_enemy_hidden_size': 0,
+        'match_enemy_num_layers': 0,
+        'train': {
+            'total_timesteps': {
+                'distribution': 'log_normal',
+                'min': 1e6,
+                'max': 1e8,
+                'scale': 'time',
+            },
+        },
+    }
+
+    hyperparameters = pufferlib.sweep.Hyperparameters(sweep_config, verbose=False)
+
+    assert list(hyperparameters.flat_spaces) == ['train/total_timesteps']
+
 def synthetic_basic_task(args):
     train_args = args['train']
     learning_rate = train_args['learning_rate']
