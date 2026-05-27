@@ -80,8 +80,10 @@ the committed benchmark table. Changing the committed `.bin` changes the
 training data and can change full-run `perf`, so regenerate and benchmark before
 committing a replacement table.
 
+### Using a Custom 8-Action Table
+
 The same generator can create larger or seed-varied tables for the committed
-action set without changing the runtime environment:
+8-action environment without changing the runtime action set:
 
 ```bash
 /tmp/affine_lock_generate_visible_targets \
@@ -98,6 +100,24 @@ depth. For the committed 8-action set, depth 16 is stored in full by default.
 Using the same `--sample-seed` and options produces the same table; using a
 different seed produces a different sampled d2/d4/d5/d6/d8 table while leaving
 stored-all depths unchanged.
+
+To train against a custom 8-action table, either write it to the default path or
+build with an explicit table path:
+
+```bash
+EXTRA_CFLAGS='-DAFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH="/tmp/affine_lock_8action_visible_targets_seed42.bin"' \
+  ./build.sh affine_lock
+```
+
+The loader checks that the table action-set hash matches the runtime action
+set. For seed-varied or larger 8-action tables, no runtime code changes are
+needed as long as the table contains the curriculum depths requested by the
+runtime.
+
+The generator currently uses one `--sample-per-depth` value for all sampled
+depths. If a future benchmark wants asymmetric budgets such as fewer d2/d4
+records and more d6/d8 records, update the generator sampling options and
+manifest/tests together, then regenerate and benchmark the replacement table.
 
 To generate train/test table variants, keep the same depth/count settings and
 change only `--sample-seed` and the output paths:
@@ -117,6 +137,22 @@ change only `--sample-seed` and the output paths:
   --output-bin /tmp/affine_lock_test_seed69.bin \
   --output-json /tmp/affine_lock_test_seed69.json
 ```
+
+### Dropping the Committed Binary
+
+The `.bin` is committed so the env works immediately and benchmark runs are
+byte-for-byte reproducible. If the binary is removed from a branch, users must
+run the no-argument generator before building/training:
+
+```bash
+/tmp/affine_lock_generate_visible_targets
+./build.sh affine_lock
+python -m pufferlib.pufferl train affine_lock
+```
+
+This recreates the default table at the path expected by the runtime. The
+matching `.json` manifest records the depth counts, checksum, action-set hash,
+and generator options.
 
 ## Experimental 4-Action Generator Set
 
@@ -159,12 +195,43 @@ Example generation command:
   --output-json /tmp/affine_lock_4action_visible_targets.json
 ```
 
+### Making 4-Action a Runtime Env
+
+The 4-action table is not plug-compatible with the committed 8-action runtime.
+To make a real 4-action runtime variant:
+
+1. Change `AFFINE_LOCK_NUM_ACTIONS` to `4`.
+2. Change the runtime action enum/table in `affine_lock.h` to match the
+   generator's `affine_lock_4action_v1` order.
+3. Point `AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH` at a 4-action table.
+4. Update the expected action-set hash in `affine_lock_visible_targets.h` to
+   the 4-action manifest's `action_set_hash`.
+5. Remove runtime helpers and render labels that only exist for the old
+   8-action table.
+6. Update policy/config/test assumptions that expect eight actions. In
+   particular, the old all-actions-have-one-step-inverses test is
+   8-action-specific because `shift_right` no longer has `shift_left` as an
+   action. Replace it with checks that match the new action cycles and refresh
+   the deterministic golden checksum.
+7. Rebuild, run `ocean/affine_lock/tests/run_all.sh`, and rerun a full
+   benchmark train.
+
 ## Adding New Depths Later
 
-Adding another depth such as `10` or `12` is intentionally not part of the
-committed runtime path. The visible-target file format can represent it, but a
-future change would need to update the generator's `TARGET_DEPTHS`, regenerate
-the `.bin`/`.json`, update the table path/hash if replacing the committed
-artifact, and update the runtime curriculum/config/tests to request and report
-the new depth. The loader does not require a format change for additional depth
-sections.
+Adding another depth such as `7`, `10`, or `12` is intentionally not part of the
+committed runtime path, but the file format can represent it. A future change
+would need to:
+
+1. Add the depth to `TARGET_DEPTHS` in
+   `tools/generate_8action_visible_targets.c`.
+2. Regenerate the `.bin` and `.json`.
+3. Add the depth to `AFFINE_LOCK_CURRICULUM_DEPTHS` and update
+   `AFFINE_LOCK_CURRICULUM_DEPTH_COUNT`.
+4. Add matching `Log.depth_D_rate` and `Log.depth_D_solve_rate` fields plus
+   `my_log` exports if the depth should appear in training logs.
+5. Update config/docs/tests to expect the new depth and record count.
+6. Rerun the affine tests and a full training benchmark.
+
+The loader itself does not require a format change for additional depth
+sections. If a new table omits a runtime-requested curriculum depth, reset will
+abort because there is no valid record pool for that depth.
