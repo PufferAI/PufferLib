@@ -29,7 +29,7 @@
 #define AFFINE_LOCK_NUM_ATNS 1
 #define AFFINE_LOCK_NUM_ACTIONS 8
 #define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16
-#define AFFINE_LOCK_CURRICULUM_DEPTH_COUNT 5
+#define AFFINE_LOCK_CURRICULUM_DEPTH_COUNT 6
 #define AFFINE_LOCK_STEP_REWARD (-0.01f)
 #ifndef AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH
 #define AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH \
@@ -37,7 +37,7 @@
 #endif
 
 static const int AFFINE_LOCK_CURRICULUM_DEPTHS[
-    AFFINE_LOCK_CURRICULUM_DEPTH_COUNT] = {2, 4, 6, 8, 16};
+    AFFINE_LOCK_CURRICULUM_DEPTH_COUNT] = {2, 4, 5, 6, 8, 16};
 
 typedef enum AffineLockInitializationMode {
     AFFINE_LOCK_INIT_EXACT_DISTANCE = 1,
@@ -72,6 +72,8 @@ typedef struct Log {
     float depth_2_solve_rate;
     float depth_4_rate;
     float depth_4_solve_rate;
+    float depth_5_rate;
+    float depth_5_solve_rate;
     float depth_6_rate;
     float depth_6_solve_rate;
     float depth_8_rate;
@@ -718,6 +720,9 @@ static void affine_lock_add_log(
     env->log.depth_4_rate += log_depth == 4 ? 1.0f : 0.0f;
     env->log.depth_4_solve_rate +=
         (solved && log_depth == 4) ? 1.0f : 0.0f;
+    env->log.depth_5_rate += log_depth == 5 ? 1.0f : 0.0f;
+    env->log.depth_5_solve_rate +=
+        (solved && log_depth == 5) ? 1.0f : 0.0f;
     env->log.depth_6_rate += log_depth == 6 ? 1.0f : 0.0f;
     env->log.depth_6_solve_rate +=
         (solved && log_depth == 6) ? 1.0f : 0.0f;

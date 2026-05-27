@@ -231,6 +231,8 @@ static void test_log_solve_credit_uses_known_target_distance(void) {
     EXPECT_NEAR(env.log.solve_efficiency, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.target_distance, 8.0f, 0.0f);
     EXPECT_NEAR(env.log.solved_target_distance, 8.0f, 0.0f);
+    EXPECT_NEAR(env.log.depth_5_rate, 0.0f, 0.0f);
+    EXPECT_NEAR(env.log.depth_5_solve_rate, 0.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_6_rate, 0.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_6_solve_rate, 0.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_8_rate, 1.0f, 0.0f);
@@ -304,6 +306,8 @@ static uint64_t log_snapshot_checksum(uint64_t hash, const Log* log) {
     hash = mix_float(hash, log->depth_2_solve_rate);
     hash = mix_float(hash, log->depth_4_rate);
     hash = mix_float(hash, log->depth_4_solve_rate);
+    hash = mix_float(hash, log->depth_5_rate);
+    hash = mix_float(hash, log->depth_5_solve_rate);
     hash = mix_float(hash, log->depth_6_rate);
     hash = mix_float(hash, log->depth_6_solve_rate);
     hash = mix_float(hash, log->depth_8_rate);
@@ -397,6 +401,10 @@ static void expect_depth_log_delta(
         before->depth_4_rate + (depth == 4 ? 1.0f : 0.0f), 0.0f);
     EXPECT_NEAR(after->depth_4_solve_rate,
         before->depth_4_solve_rate + (solved && depth == 4 ? 1.0f : 0.0f), 0.0f);
+    EXPECT_NEAR(after->depth_5_rate,
+        before->depth_5_rate + (depth == 5 ? 1.0f : 0.0f), 0.0f);
+    EXPECT_NEAR(after->depth_5_solve_rate,
+        before->depth_5_solve_rate + (solved && depth == 5 ? 1.0f : 0.0f), 0.0f);
     EXPECT_NEAR(after->depth_6_rate,
         before->depth_6_rate + (depth == 6 ? 1.0f : 0.0f), 0.0f);
     EXPECT_NEAR(after->depth_6_solve_rate,
@@ -540,7 +548,7 @@ static void test_config_and_binding_metadata_contract(void) {
     EXPECT_TRUE(strstr(config, "max = 200_000_000") != NULL);
     EXPECT_TRUE(strstr(config, "[sweep.policy.num_layers]") != NULL);
     EXPECT_TRUE(strstr(config, "max = 131072") != NULL);
-    EXPECT_TRUE(strstr(config, "max = 3.0") != NULL);
+    EXPECT_TRUE(strstr(config, "max = 4.0") != NULL);
 
     char binding[8192];
     read_text_file("ocean/affine_lock/binding.c", binding, sizeof(binding));
@@ -719,8 +727,8 @@ static void test_visible_target_table_initialization_samples_reachable_target(vo
 }
 
 static void test_visible_target_table_depths_have_exact_distance_solutions(void) {
-    const int depths[] = {2, 4, 6, 8, 16};
-    for (int i = 0; i < 5; i++) {
+    const int depths[] = {2, 4, 5, 6, 8, 16};
+    for (int i = 0; i < 6; i++) {
         int depth = depths[i];
         AffineLockShared shared = make_shared(depth, 16, 0);
         affine_lock_configure_initialization(
@@ -753,10 +761,10 @@ static void test_visible_target_table_depths_have_exact_distance_solutions(void)
 }
 
 static void test_visible_target_table_reset_uses_exact_records(void) {
-    const int requested_depths[] = {2, 4, 6, 8, 16};
-    const int expected_pool_sizes[] = {65536, 65536, 65536, 65536, 100548};
+    const int requested_depths[] = {2, 4, 5, 6, 8, 16};
+    const int expected_pool_sizes[] = {65536, 65536, 65536, 65536, 65536, 100548};
 
-    for (int depth_index = 0; depth_index < 5; depth_index++) {
+    for (int depth_index = 0; depth_index < 6; depth_index++) {
         int requested_depth = requested_depths[depth_index];
         AffineLockShared shared = make_shared(requested_depth, 16, 0);
         affine_lock_configure_initialization(
@@ -796,10 +804,10 @@ static void test_distance_generators_match_independent_bfs_over_repeated_resets(
         AFFINE_LOCK_INIT_EXACT_DISTANCE,
         AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE,
     };
-    const int depths[] = {2, 4, 6, 8, 16};
+    const int depths[] = {2, 4, 5, 6, 8, 16};
 
     for (int mode_index = 0; mode_index < 2; mode_index++) {
-        for (int depth_index = 0; depth_index < 5; depth_index++) {
+        for (int depth_index = 0; depth_index < 6; depth_index++) {
             int mode = modes[mode_index];
             int depth = depths[depth_index];
             AffineLockShared shared = make_shared(depth, 16, 0);
@@ -1011,8 +1019,8 @@ static void test_visible_target_table_curriculum_and_logging(void) {
     make_env(&env, &shared, 42, observations, actions, rewards, terminals);
     c_reset(&env);
 
-    const int expected_depths[] = {2, 4, 6, 8, 16};
-    for (int episode = 0; episode < 5; episode++) {
+    const int expected_depths[] = {2, 4, 5, 6, 8, 16};
+    for (int episode = 0; episode < 6; episode++) {
         int depth = expected_depths[episode];
         EXPECT_EQ_INT(env.scramble_depth, depth);
         expect_solution_reaches_target(&shared, &env);
@@ -1026,6 +1034,8 @@ static void test_visible_target_table_curriculum_and_logging(void) {
         float prev_depth_2_solve = env.log.depth_2_solve_rate;
         float prev_depth_4 = env.log.depth_4_rate;
         float prev_depth_4_solve = env.log.depth_4_solve_rate;
+        float prev_depth_5 = env.log.depth_5_rate;
+        float prev_depth_5_solve = env.log.depth_5_solve_rate;
         float prev_depth_6 = env.log.depth_6_rate;
         float prev_depth_6_solve = env.log.depth_6_solve_rate;
         float prev_depth_8 = env.log.depth_8_rate;
@@ -1056,6 +1066,10 @@ static void test_visible_target_table_curriculum_and_logging(void) {
             prev_depth_4 + (metric_depth == 4 ? 1.0f : 0.0f), 0.0f);
         EXPECT_NEAR(env.log.depth_4_solve_rate,
             prev_depth_4_solve + (metric_depth == 4 ? 1.0f : 0.0f), 0.0f);
+        EXPECT_NEAR(env.log.depth_5_rate,
+            prev_depth_5 + (metric_depth == 5 ? 1.0f : 0.0f), 0.0f);
+        EXPECT_NEAR(env.log.depth_5_solve_rate,
+            prev_depth_5_solve + (metric_depth == 5 ? 1.0f : 0.0f), 0.0f);
         EXPECT_NEAR(env.log.depth_6_rate,
             prev_depth_6 + (metric_depth == 6 ? 1.0f : 0.0f), 0.0f);
         EXPECT_NEAR(env.log.depth_6_solve_rate,
@@ -1069,7 +1083,7 @@ static void test_visible_target_table_curriculum_and_logging(void) {
         EXPECT_NEAR(env.log.depth_16_solve_rate,
             prev_depth_16_solve + (metric_depth == 16 ? 1.0f : 0.0f), 0.0f);
 
-        int next_depth = episode < 4 ? expected_depths[episode + 1] : 16;
+        int next_depth = episode < 5 ? expected_depths[episode + 1] : 16;
         EXPECT_EQ_INT(env.scramble_depth, next_depth);
     }
 
@@ -1104,17 +1118,19 @@ static void test_visible_target_table_oracle_wins_all_curriculum_depths_end_to_e
     make_env(&env, &shared, 4242, observations, actions, rewards, terminals);
     c_reset(&env);
 
-    const int depths[] = {2, 4, 6, 8, 16};
-    for (int i = 0; i < 5; i++) {
+    const int depths[] = {2, 4, 5, 6, 8, 16};
+    for (int i = 0; i < 6; i++) {
         expect_oracle_episode_win(&env, depths[i]);
     }
 
     EXPECT_EQ_INT(env.scramble_depth, shared.max_depth);
-    EXPECT_NEAR(env.log.n, 5.0f, 0.0f);
+    EXPECT_NEAR(env.log.n, 6.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_2_rate, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_2_solve_rate, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_4_rate, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_4_solve_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.depth_5_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.depth_5_solve_rate, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_6_rate, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_6_solve_rate, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.depth_8_rate, 1.0f, 0.0f);
@@ -1128,9 +1144,9 @@ static void test_visible_target_table_oracle_wins_all_curriculum_depths_end_to_e
 }
 
 static void test_visible_target_table_timeouts_at_all_curriculum_depths_end_to_end(void) {
-    const int loss_depths[] = {2, 4, 6, 8, 16};
+    const int loss_depths[] = {2, 4, 5, 6, 8, 16};
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         int loss_depth = loss_depths[i];
         AffineLockShared shared = make_shared(2, 16, 0);
         affine_lock_configure_initialization(
@@ -1336,7 +1352,7 @@ static uint64_t run_visible_table_seed_42_golden_sequence(void) {
     uint64_t checksum = 1469598103934665603ull;
     c_reset(&env);
     checksum = mix_u64(checksum, reset_snapshot_checksum(&env));
-    for (int episode = 0; episode < 4; episode++) {
+    for (int episode = 0; episode < 5; episode++) {
         int length = env.solution_length;
         for (int step = 0; step < length; step++) {
             actions[0] = (float)env.solution_actions[step];
@@ -1359,7 +1375,7 @@ static uint64_t run_visible_table_seed_42_golden_sequence(void) {
 
 static void test_visible_table_seed_42_golden_checksum(void) {
     uint64_t checksum = run_visible_table_seed_42_golden_sequence();
-    EXPECT_EQ_U64(checksum, 0x51473139530427bbull);
+    EXPECT_EQ_U64(checksum, 0x1b6d67bf767fd010ull);
 }
 
 static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {

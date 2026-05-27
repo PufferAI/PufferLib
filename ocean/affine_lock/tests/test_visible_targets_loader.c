@@ -68,17 +68,18 @@ int main(int argc, char** argv) {
 
     EXPECT_EQ_U32(table.bits, 16);
     EXPECT_EQ_U32(table.num_actions, 8);
-    EXPECT_EQ_U32(table.depth_count, 5);
+    EXPECT_EQ_U32(table.depth_count, 6);
     EXPECT_EQ_U32(table.record_size, 16);
     EXPECT_EQ_U32(table.record_count, expected_record_count);
     EXPECT_EQ_U64(
         table.action_set_hash,
         AFFINE_LOCK_VISIBLE_TARGET_8ACTION_V1_HASH);
 
-    const uint32_t expected_depths[5] = {2, 4, 6, 8, 16};
-    const uint64_t expected_exact_counts[5] = {
+    const uint32_t expected_depths[6] = {2, 4, 5, 6, 8, 16};
+    const uint64_t expected_exact_counts[6] = {
         2216496ull,
         34379722ull,
+        115388932ull,
         331789220ull,
         1125374770ull,
         100548ull,
@@ -87,7 +88,7 @@ int main(int argc, char** argv) {
     for (uint32_t i = 0; i < table.depth_count; i++) {
         EXPECT_EQ_U32(table.depths[i].depth, expected_depths[i]);
         EXPECT_EQ_U32(table.depths[i].first_record, first_record);
-        uint32_t expected_stored_count = i == 4 ?
+        uint32_t expected_stored_count = i == 5 ?
             (uint32_t)expected_d16_count : (uint32_t)expected_sample_count;
         EXPECT_EQ_U32(table.depths[i].stored_count, expected_stored_count);
         EXPECT_EQ_U64(table.depths[i].exact_pair_count, expected_exact_counts[i]);
@@ -100,6 +101,7 @@ int main(int argc, char** argv) {
         EXPECT_TRUE(
             record->depth == 2 ||
             record->depth == 4 ||
+            record->depth == 5 ||
             record->depth == 6 ||
             record->depth == 8 ||
             record->depth == 16);

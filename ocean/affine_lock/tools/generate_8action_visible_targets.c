@@ -13,12 +13,12 @@
 #define BITS 16
 #define STATE_COUNT (1u << BITS)
 #define MAX_ACTIONS 8
-#define TARGET_DEPTH_COUNT 5
+#define TARGET_DEPTH_COUNT 6
 #define MAX_DISTANCE 64
 #define RECORD_SIZE 16
 #define FORMAT_VERSION 1
 
-static const int TARGET_DEPTHS[TARGET_DEPTH_COUNT] = {2, 4, 6, 8, 16};
+static const int TARGET_DEPTHS[TARGET_DEPTH_COUNT] = {2, 4, 5, 6, 8, 16};
 typedef enum ActionOp {
     ACTION_OP_SHIFT_LEFT = 0,
     ACTION_OP_SHIFT_RIGHT = 1,

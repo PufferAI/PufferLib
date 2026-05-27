@@ -43,22 +43,24 @@ runtime path.
 ## Committed Target Table
 
 The committed table stores sampled visible start/target pairs at depths `2`,
-`4`, `6`, and `8`, plus every known true depth-16 pair for this action set.
+`4`, `5`, `6`, and `8`, plus every known true depth-16 pair for this action
+set.
 
 | Depth | True visible pairs | Stored records |
 | ---: | ---: | ---: |
 | `2` | `2,216,496` | `65,536` |
 | `4` | `34,379,722` | `65,536` |
+| `5` | `115,388,932` | `65,536` |
 | `6` | `331,789,220` | `65,536` |
 | `8` | `1,125,374,770` | `65,536` |
 | `16` | `100,548` | `100,548` |
 
 The table format can store any depth sections, but this generator currently
-targets the fixed depth list `{2, 4, 6, 8, 16}`. The runtime `seed` controls the
-episode sequence sampled from a loaded table. The generator's `--sample-seed`
-controls which sampled depth-2/4/6/8 records are written into a custom table.
-Depth 16 is stored in full for the committed 8-action set, so changing
-`--sample-seed` does not change the depth-16 records.
+targets the fixed depth list `{2, 4, 5, 6, 8, 16}`. The runtime `seed` controls
+the episode sequence sampled from a loaded table. The generator's
+`--sample-seed` controls which sampled depth-2/4/5/6/8 records are written into
+a custom table. Depth 16 is stored in full for the committed 8-action set, so
+changing `--sample-seed` does not change the depth-16 records.
 
 ## Regenerating the Target Table
 
@@ -96,7 +98,7 @@ Increasing `--sample-per-depth` raises the number of stored records for sampled
 depths. `--store-all-depth D` stores every exact pair for a supported target
 depth. For the committed 8-action set, depth 16 is stored in full by default.
 Using the same `--sample-seed` and options produces the same table; using a
-different seed produces a different sampled d2/d4/d6/d8 table while leaving
+different seed produces a different sampled d2/d4/d5/d6/d8 table while leaving
 stored-all depths unchanged.
 
 To generate train/test table variants, keep the same depth/count settings and
@@ -143,6 +145,7 @@ The current true visible-pair counts for this generator action set are:
 | ---: | ---: |
 | `2` | `772,080` |
 | `4` | `6,055,652` |
+| `5` | `16,234,512` |
 | `6` | `42,176,998` |
 | `8` | `234,409,780` |
 | `16` | `2,434,606` |

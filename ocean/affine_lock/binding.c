@@ -115,6 +115,8 @@ void my_log(Log* log, Dict* out) {
         conditional_rate(log->depth_2_solve_rate, log->depth_2_rate);
     float depth_4_solve_rate =
         conditional_rate(log->depth_4_solve_rate, log->depth_4_rate);
+    float depth_5_solve_rate =
+        conditional_rate(log->depth_5_solve_rate, log->depth_5_rate);
     float depth_6_solve_rate =
         conditional_rate(log->depth_6_solve_rate, log->depth_6_rate);
     float depth_8_solve_rate =
@@ -136,6 +138,7 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "conditional_solve_efficiency", conditional_solve_efficiency);
     dict_set(out, "depth_2_solve_rate", depth_2_solve_rate);
     dict_set(out, "depth_4_solve_rate", depth_4_solve_rate);
+    dict_set(out, "depth_5_solve_rate", depth_5_solve_rate);
     dict_set(out, "depth_6_solve_rate", depth_6_solve_rate);
     dict_set(out, "depth_8_solve_rate", depth_8_solve_rate);
     dict_set(out, "depth_16_solve_rate", depth_16_solve_rate);

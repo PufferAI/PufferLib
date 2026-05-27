@@ -247,6 +247,8 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     log.depth_2_solve_rate = 0.125f;
     log.depth_4_rate = 0.5f;
     log.depth_4_solve_rate = 0.375f;
+    log.depth_5_rate = 0.25f;
+    log.depth_5_solve_rate = 0.125f;
     log.depth_6_rate = 0.25f;
     log.depth_6_solve_rate = 0.125f;
     log.depth_8_rate = 0.0f;
@@ -261,7 +263,7 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     Dict* out = create_dict(32);
     my_log(&log, out);
 
-    EXPECT_EQ_INT(out->size, 17);
+    EXPECT_EQ_INT(out->size, 18);
     EXPECT_NEAR(dict_value(out, "score"), 0.75, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "solve_steps"));
     EXPECT_TRUE(!dict_has_key(out, "solve_efficiency"));
@@ -272,6 +274,8 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     EXPECT_NEAR(dict_value(out, "depth_2_solve_rate"), 0.5, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "depth_4_rate"));
     EXPECT_NEAR(dict_value(out, "depth_4_solve_rate"), 0.75, 0.0);
+    EXPECT_TRUE(!dict_has_key(out, "depth_5_rate"));
+    EXPECT_NEAR(dict_value(out, "depth_5_solve_rate"), 0.5, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "depth_6_rate"));
     EXPECT_NEAR(dict_value(out, "depth_6_solve_rate"), 0.5, 0.0);
     EXPECT_TRUE(!dict_has_key(out, "depth_8_rate"));

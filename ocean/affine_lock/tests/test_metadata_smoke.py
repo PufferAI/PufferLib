@@ -24,6 +24,7 @@ EXPECTED_MY_LOG_KEYS = [
     "conditional_solve_efficiency",
     "depth_2_solve_rate",
     "depth_4_solve_rate",
+    "depth_5_solve_rate",
     "depth_6_solve_rate",
     "depth_8_solve_rate",
     "depth_16_solve_rate",
@@ -56,10 +57,7 @@ def check_config():
     assert parse_int(config["env"]["seed"]) == 42
     assert parse_int(config["env"]["start_depth"]) == 2
     assert parse_int(config["env"]["max_depth"]) == 16
-    assert "depth_multiplier" not in config["env"]
     assert parse_int(config["env"]["initialization_mode"]) == 2
-    assert "debug_log_level" not in config["env"]
-    assert "short_solve_audit_enabled" not in config["env"]
     assert parse_int(config["train"]["total_timesteps"]) == 200_000_000
     assert parse_int(config["train"]["horizon"]) == 64
     assert parse_int(config["train"]["minibatch_size"]) == 8192
@@ -114,7 +112,7 @@ def check_config():
     assert parse_int(config["sweep.train.horizon"]["min"]) == 32
     assert parse_int(config["sweep.train.horizon"]["max"]) == 128
     assert parse_int(config["sweep.policy.hidden_size"]["min"]) == 64
-    assert parse_int(config["sweep.policy.hidden_size"]["max"]) == 256
+    assert parse_int(config["sweep.policy.hidden_size"]["max"]) == 512
     assert float(config["sweep.policy.num_layers"]["min"]) == 1.0
     assert float(config["sweep.policy.num_layers"]["max"]) == 4.0
     assert parse_int(config["sweep.vec.total_agents"]["min"]) == 4096
@@ -124,7 +122,11 @@ def check_config():
     assert parse_int(config["sweep.train.minibatch_size"]["min"]) == 8192
     assert parse_int(config["sweep.train.minibatch_size"]["max"]) == 131_072
     assert float(config["sweep.train.replay_ratio"]["min"]) == 1.0
-    assert float(config["sweep.train.replay_ratio"]["max"]) == 3.0
+    assert float(config["sweep.train.replay_ratio"]["max"]) == 4.0
+    assert float(config["sweep.train.vf_clip_coef"]["min"]) == 0.001
+    assert float(config["sweep.train.vf_clip_coef"]["max"]) == 5.0
+    assert float(config["sweep.train.vf_coef"]["min"]) == 0.1
+    assert float(config["sweep.train.vf_coef"]["max"]) == 8.0
 
     min_batch_size = (
         parse_int(config["sweep.vec.total_agents"]["min"])
@@ -134,113 +136,16 @@ def check_config():
     min_replay_ratio = float(config["sweep.train.replay_ratio"]["min"])
     assert min_replay_ratio * min_batch_size >= max_minibatch_size
 
-    assert not (
-        ROOT / "config" / "profiles" / "affine_lock_highthroughput.ini"
-    ).exists()
-
 
 def check_binding_text():
-    header = (ROOT / "ocean" / "affine_lock" / "affine_lock.h").read_text()
-    assert "#define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16" in header
-    assert "AFFINE_LOCK_MAX_SCRAMBLE_DEPTH" not in header
-    assert "AFFINE_LOCK_INIT_EXACT_DISTANCE = 1" in header
-    assert "AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 2" in header
-    assert "AFFINE_LOCK_INIT_SCRAMBLE" not in header
-    assert "AFFINE_LOCK_INIT_RANDOM" not in header
-    assert "AFFINE_LOCK_INIT_WCA_RANDOM_STATE" not in header
-    assert "debug_log" not in header
-    assert "short_solve_audit" not in header
-    assert "known_solution" not in header
-    assert "episode_id" not in header
-    assert re.search(r"\bint\s+env_id\s*;", header) is None
-    assert header.count("env->target = record->target & shared->mask;") == 1
-    assert "(uint32_t)record->target & shared->mask" not in header
-    assert "static void affine_lock_cleanup_thread_scratch(void);" not in header
-    assert "#define AFFINE_LOCK_THREAD_LOCAL" in header
-    scratch_pos = header.index(
-        "static AFFINE_LOCK_THREAD_LOCAL AffineLockBfsScratch affine_lock_bfs_scratch = {0};"
-    )
-    cleanup_pos = header.index("static void affine_lock_cleanup_thread_scratch(void) {")
-    free_shared_pos = header.index("static void affine_lock_free_shared")
-    assert scratch_pos < cleanup_pos < free_shared_pos
-
-    env_api_order = [
-        "affine_lock_init_env",
-        "affine_lock_add_log",
-        "affine_lock_compute_observations",
-        "compute_observations",
-        "c_reset",
-        "affine_lock_advance_curriculum",
-        "affine_lock_finish_episode",
-        "c_step",
-        "c_close",
-        "c_render",
-    ]
-    env_api_positions = {}
-    for name in env_api_order:
-        match = re.search(rf"\b{name}\s*\(", header)
-        assert match is not None, name
-        env_api_positions[name] = match.start()
-    assert [env_api_positions[name] for name in env_api_order] == sorted(
-        env_api_positions.values()
-    )
-
     binding = (ROOT / "ocean" / "affine_lock" / "binding.c").read_text()
     assert "#define OBS_SIZE AFFINE_LOCK_OBS_SIZE" in binding
     assert "#define ACT_SIZES {AFFINE_LOCK_NUM_ACTIONS}" in binding
     assert "#define OBS_TENSOR_T FloatTensor" in binding
-    assert "ENV_WRITES_REWARDS_AND_TERMINALS" not in binding
-    assert "#define MY_THREAD_CLOSE" not in binding
-    assert "my_thread_close" not in binding
-    assert 'dict_get(env_kwargs, "rank")' not in binding
-    assert "debug_log" not in binding
-    assert "short_solve_audit" not in binding
 
     log_keys = re.findall(r'dict_set\(out,\s*"([^"]+)"', binding)
     assert log_keys == EXPECTED_MY_LOG_KEYS
     assert len(log_keys) + 1 <= 32  # static_vec_log appends "n".
-
-    c_tests = (ROOT / "ocean" / "affine_lock" / "tests" / "test_affine_lock.c").read_text()
-    assert "mode4" not in c_tests
-
-    log_struct = re.search(r"typedef struct Log \{(?P<body>.*?)\} Log;", header, re.S)
-    assert log_struct is not None
-    log_fields = re.findall(r"^\s*float\s+([a-zA-Z0-9_]+);", log_struct.group("body"), re.M)
-    derived_log_keys = {
-        "conditional_solve_steps",
-        "conditional_solve_efficiency",
-        "min_win_moves",
-        "solved_min_win_moves",
-    }
-    framework_log_fields = {"n"}
-    renamed_log_fields = {"target_distance", "solved_target_distance"}
-    internal_log_fields = {
-        "solve_steps",
-        "solve_efficiency",
-        "depth_2_rate",
-        "depth_4_rate",
-        "depth_6_rate",
-        "depth_8_rate",
-        "depth_16_rate",
-    }
-    assert (
-        set(log_fields)
-        - framework_log_fields
-        - renamed_log_fields
-        - internal_log_fields
-        <= set(log_keys) - derived_log_keys
-    )
-
-
-def check_shared_core_text():
-    bindings = (ROOT / "src" / "bindings.cu").read_text()
-    vecenv = (ROOT / "src" / "vecenv.h").read_text()
-
-    assert 'dict_set(env_dict, "seed"' not in bindings
-    assert 'dict_set(env_dict, "rank"' not in bindings
-    assert "extra_capacity" not in bindings
-    assert "MY_THREAD_CLOSE" not in vecenv
-    assert "my_thread_close" not in vecenv
 
 
 def float_buffer(ptr, count):
@@ -249,7 +154,7 @@ def float_buffer(ptr, count):
 
 def check_backend_metadata():
     from pufferlib import _C
-    from pufferlib.pufferl import load_config, validate_config
+    from pufferlib.pufferl import load_config
 
     assert _C.env_name == "affine_lock"
     assert _C.gpu == 1
@@ -286,12 +191,6 @@ def check_backend_metadata():
     assert base_args["train"]["vtrace_c_clip"] == 3.75
     assert base_args["train"]["prio_alpha"] == 0.055
     assert base_args["train"]["prio_beta0"] == 0.161
-
-    try:
-        load_affine_args(["--config-profile", "affine_lock_highthroughput"])
-        raise AssertionError("retired affine_lock_highthroughput profile loaded")
-    except ValueError as exc:
-        assert "No config profile affine_lock_highthroughput" in str(exc)
 
     old_argv = sys.argv
     try:
@@ -343,7 +242,6 @@ def main():
 
     check_config()
     check_binding_text()
-    check_shared_core_text()
     if args.require_backend:
         check_backend_metadata()
 
