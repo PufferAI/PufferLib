@@ -12,16 +12,6 @@
 
 #include "affine_lock_visible_targets.h"
 
-#ifndef AFFINE_LOCK_THREAD_LOCAL
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#define AFFINE_LOCK_THREAD_LOCAL _Thread_local
-#elif defined(__GNUC__) || defined(__clang__)
-#define AFFINE_LOCK_THREAD_LOCAL __thread
-#else
-#error "Affine Lock requires C11 _Thread_local or compiler thread-local storage"
-#endif
-#endif
-
 #define AFFINE_LOCK_BITS 16
 #define AFFINE_LOCK_TIMER_INDEX (2 * AFFINE_LOCK_BITS)
 #define AFFINE_LOCK_OBS_SIZE (AFFINE_LOCK_TIMER_INDEX + 1)
@@ -38,11 +28,6 @@
 
 static const int AFFINE_LOCK_CURRICULUM_DEPTHS[
     AFFINE_LOCK_CURRICULUM_DEPTH_COUNT] = {2, 4, 5, 6, 8, 16};
-
-typedef enum AffineLockInitializationMode {
-    AFFINE_LOCK_INIT_EXACT_DISTANCE = 1,
-    AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE = 2,
-} AffineLockInitializationMode;
 
 typedef enum AffineLockAction {
     AFFINE_LOCK_ACTION_SHIFT_LEFT = 0,
@@ -87,7 +72,6 @@ typedef struct AffineLockShared {
     int start_depth;
     int max_depth;
     int step_grace;
-    int initialization_mode;
     int num_states;
     uint32_t mask;
     uint32_t* next;
@@ -95,16 +79,6 @@ typedef struct AffineLockShared {
     AffineLockVisibleTargetTable visible_target_table;
     float observation_bit_patterns[256][8];
 } AffineLockShared;
-
-typedef struct AffineLockBfsScratch {
-    uint16_t* seen_generation;
-    uint8_t* distances;
-    uint16_t* parents;
-    int8_t* parent_actions;
-    uint16_t* queue;
-    uint16_t generation;
-    int num_states;
-} AffineLockBfsScratch;
 
 typedef struct Client {
     int screen_width;
@@ -127,8 +101,6 @@ typedef struct AffineLock {
     int solution_actions[AFFINE_LOCK_MAX_SOLUTION_DEPTH];
     int target_distance;
     float episode_return;
-    int hint_visible;
-    int hint_action;
     unsigned int rng;
     int num_agents;
     AffineLockShared* shared;
@@ -141,24 +113,6 @@ static float affine_lock_solve_credit(const AffineLockShared* shared, int depth)
 
 static int affine_lock_log_depth(const AffineLock* env) {
     return env->target_distance > 0 ? env->target_distance : env->scramble_depth;
-}
-
-static const char* affine_lock_action_name(int action) {
-    switch (action) {
-        case AFFINE_LOCK_ACTION_SHIFT_LEFT: return "shift_left";
-        case AFFINE_LOCK_ACTION_SHIFT_RIGHT: return "shift_right";
-        case AFFINE_LOCK_ACTION_INVERT_RIGHT_7: return "invert_right_7";
-        case AFFINE_LOCK_ACTION_SWAP_ADJACENT_BITS:
-            return "swap_adjacent_bits";
-        case AFFINE_LOCK_ACTION_SWAP_ADJACENT_PAIRS:
-            return "swap_adjacent_pairs";
-        case AFFINE_LOCK_ACTION_SWAP_NIBBLES_EACH_BYTE:
-            return "swap_nibbles_each_byte";
-        case AFFINE_LOCK_ACTION_REVERSE_EACH_NIBBLE:
-            return "reverse_each_nibble";
-        case AFFINE_LOCK_ACTION_REVERSE_EACH_BYTE: return "reverse_each_byte";
-        default: return "invalid";
-    }
 }
 
 static void affine_lock_init_observation_bit_patterns(AffineLockShared* shared) {
@@ -212,7 +166,6 @@ static int affine_lock_init_shared(
     shared->start_depth = start_depth;
     shared->max_depth = max_depth;
     shared->step_grace = step_grace;
-    shared->initialization_mode = AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE;
     shared->num_states = 1 << AFFINE_LOCK_BITS;
     shared->mask = (1u << AFFINE_LOCK_BITS) - 1u;
     affine_lock_init_observation_bit_patterns(shared);
@@ -282,158 +235,18 @@ static int affine_lock_prepare_visible_targets(AffineLockShared* shared) {
     return 0;
 }
 
-static int affine_lock_configure_initialization(
-        AffineLockShared* shared,
-        int initialization_mode) {
-    if (initialization_mode == AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE &&
-            affine_lock_prepare_visible_targets(shared) != 0) {
-        return -1;
-    }
-    shared->initialization_mode = initialization_mode;
-    return 0;
-}
-
-static AFFINE_LOCK_THREAD_LOCAL AffineLockBfsScratch affine_lock_bfs_scratch = {0};
-
-static void affine_lock_free_bfs_scratch(AffineLockBfsScratch* scratch) {
-    free(scratch->seen_generation);
-    free(scratch->distances);
-    free(scratch->parents);
-    free(scratch->parent_actions);
-    free(scratch->queue);
-    memset(scratch, 0, sizeof(*scratch));
-}
-
-static void affine_lock_cleanup_thread_scratch(void) {
-    affine_lock_free_bfs_scratch(&affine_lock_bfs_scratch);
-}
-
 static void affine_lock_free_shared(AffineLockShared* shared) {
     if (shared == NULL) {
         return;
     }
     free(shared->next);
     affine_lock_visible_targets_free(&shared->visible_target_table);
-    affine_lock_cleanup_thread_scratch();
     memset(shared, 0, sizeof(*shared));
-}
-
-static AffineLockBfsScratch* affine_lock_get_bfs_scratch(
-        const AffineLockShared* shared) {
-    AffineLockBfsScratch* scratch = &affine_lock_bfs_scratch;
-    if (scratch->num_states == shared->num_states) {
-        return scratch;
-    }
-
-    affine_lock_free_bfs_scratch(scratch);
-    scratch->num_states = shared->num_states;
-    scratch->seen_generation =
-        (uint16_t*)calloc((size_t)shared->num_states, sizeof(uint16_t));
-    scratch->distances =
-        (uint8_t*)malloc((size_t)shared->num_states * sizeof(uint8_t));
-    scratch->parents =
-        (uint16_t*)malloc((size_t)shared->num_states * sizeof(uint16_t));
-    scratch->parent_actions =
-        (int8_t*)malloc((size_t)shared->num_states * sizeof(int8_t));
-    scratch->queue =
-        (uint16_t*)malloc((size_t)shared->num_states * sizeof(uint16_t));
-
-    if (scratch->seen_generation == NULL || scratch->distances == NULL ||
-            scratch->parents == NULL || scratch->parent_actions == NULL ||
-            scratch->queue == NULL) {
-        affine_lock_free_bfs_scratch(scratch);
-        return NULL;
-    }
-
-    return scratch;
-}
-
-static AffineLockBfsScratch* affine_lock_begin_bfs_scratch(
-        const AffineLockShared* shared) {
-    AffineLockBfsScratch* scratch = affine_lock_get_bfs_scratch(shared);
-    if (scratch == NULL) {
-        return NULL;
-    }
-
-    scratch->generation += 1;
-    if (scratch->generation == 0) {
-        memset(scratch->seen_generation, 0,
-            (size_t)shared->num_states * sizeof(uint16_t));
-        scratch->generation = 1;
-    }
-    return scratch;
-}
-
-static int affine_lock_bfs_seen(
-        const AffineLockBfsScratch* scratch, uint32_t state) {
-    return scratch->seen_generation[state] == scratch->generation;
-}
-
-static void affine_lock_bfs_visit(
-        AffineLockBfsScratch* scratch,
-        uint32_t state,
-        int distance,
-        uint32_t parent,
-        int parent_action) {
-    scratch->seen_generation[state] = scratch->generation;
-    scratch->distances[state] = (uint8_t)distance;
-    scratch->parents[state] = (uint16_t)parent;
-    scratch->parent_actions[state] = (int8_t)parent_action;
 }
 
 static uint32_t affine_lock_apply_action(
         const AffineLockShared* shared, uint32_t rel, int action) {
     return shared->next[(rel & shared->mask) * AFFINE_LOCK_NUM_ACTIONS + action];
-}
-
-static int affine_lock_hint_action(
-        const AffineLockShared* shared, uint32_t start, uint32_t target) {
-    start &= shared->mask;
-    target &= shared->mask;
-    if (start == target) {
-        return -1;
-    }
-
-    AffineLockBfsScratch* scratch = affine_lock_begin_bfs_scratch(shared);
-    if (scratch == NULL) {
-        return -1;
-    }
-
-    int head = 0;
-    int tail = 0;
-    affine_lock_bfs_visit(scratch, start, 0, start, -1);
-    scratch->queue[tail++] = (uint16_t)start;
-
-    while (head < tail) {
-        uint32_t state = scratch->queue[head++];
-        int next_distance = (int)scratch->distances[state] + 1;
-        for (int action = 0; action < AFFINE_LOCK_NUM_ACTIONS; action++) {
-            uint32_t next = affine_lock_apply_action(shared, state, action);
-            if (affine_lock_bfs_seen(scratch, next)) {
-                continue;
-            }
-
-            affine_lock_bfs_visit(scratch, next, next_distance, state, action);
-            if (next == target) {
-                uint32_t cursor = next;
-                int first_action = (int)scratch->parent_actions[cursor];
-                while (scratch->parents[cursor] != start) {
-                    cursor = scratch->parents[cursor];
-                    first_action = (int)scratch->parent_actions[cursor];
-                }
-                return first_action;
-            }
-            scratch->queue[tail++] = (uint16_t)next;
-        }
-    }
-
-    return -1;
-}
-
-static inline void affine_lock_show_hint(AffineLock* env) {
-    env->hint_action = affine_lock_hint_action(
-        env->shared, env->state, env->target);
-    env->hint_visible = 1;
 }
 
 static uint32_t affine_lock_random_u32(AffineLock* env) {
@@ -463,11 +276,6 @@ static int affine_lock_random_bounded(AffineLock* env, int bound) {
     return (int)(value % (uint32_t)bound);
 }
 
-static uint32_t affine_lock_random_state_bits(
-        AffineLock* env, const AffineLockShared* shared) {
-    return affine_lock_random_mixed_u32(env) & shared->mask;
-}
-
 static int affine_lock_parse_action(float raw_action, int* action_out) {
     if (!isfinite(raw_action) ||
             raw_action < 0.0f ||
@@ -488,31 +296,6 @@ static void affine_lock_clear_generated_path(AffineLock* env) {
     env->solution_length = 0;
     for (int i = 0; i < AFFINE_LOCK_MAX_SOLUTION_DEPTH; i++) {
         env->solution_actions[i] = -1;
-    }
-}
-
-static void affine_lock_store_solution_path(
-        AffineLock* env,
-        const uint16_t* parents,
-        const int8_t* parent_actions,
-        uint32_t target) {
-    AffineLockShared* shared = env->shared;
-    int reversed[AFFINE_LOCK_MAX_SOLUTION_DEPTH];
-    int length = 0;
-    uint32_t state = target & shared->mask;
-    while (state != env->state) {
-        if (length >= AFFINE_LOCK_MAX_SOLUTION_DEPTH ||
-                parent_actions[state] < 0) {
-            fprintf(stderr, "affine_lock: failed to reconstruct solution path\n");
-            abort();
-        }
-        reversed[length++] = parent_actions[state];
-        state = parents[state];
-    }
-
-    env->solution_length = length;
-    for (int i = 0; i < length; i++) {
-        env->solution_actions[i] = reversed[length - 1 - i];
     }
 }
 
@@ -546,76 +329,6 @@ static void affine_lock_store_visible_solution_path(
         }
         env->solution_actions[i] = action;
     }
-}
-
-static void affine_lock_generate_exact_distance_target(AffineLock* env) {
-    AffineLockShared* shared = env->shared;
-    int desired_distance = env->scramble_depth;
-    affine_lock_clear_generated_path(env);
-
-    AffineLockBfsScratch* scratch = affine_lock_begin_bfs_scratch(shared);
-    if (scratch == NULL) {
-        fprintf(stderr, "affine_lock: failed to allocate exact-distance BFS scratch\n");
-        abort();
-    }
-
-    int head = 0;
-    int tail = 0;
-    affine_lock_bfs_visit(scratch, env->state, 0, env->state, -1);
-    scratch->queue[tail++] = (uint16_t)env->state;
-
-    int exact_count = 0;
-    uint32_t exact_target = env->state;
-    int farthest_distance = 0;
-    int farthest_count = 1;
-    uint32_t farthest_target = env->state;
-
-    while (head < tail) {
-        uint32_t state = scratch->queue[head++];
-        int distance = (int)scratch->distances[state];
-        if (distance >= desired_distance) {
-            continue;
-        }
-
-        for (int action = 0; action < AFFINE_LOCK_NUM_ACTIONS; action++) {
-            uint32_t next = affine_lock_apply_action(shared, state, action);
-            if (affine_lock_bfs_seen(scratch, next)) {
-                continue;
-            }
-
-            int next_distance = distance + 1;
-            affine_lock_bfs_visit(scratch, next, next_distance, state, action);
-            scratch->queue[tail++] = (uint16_t)next;
-
-            if (next_distance == desired_distance) {
-                exact_count += 1;
-                if (affine_lock_random_bounded(env, exact_count) == 0) {
-                    exact_target = next;
-                }
-            }
-
-            if (next_distance > farthest_distance) {
-                farthest_distance = next_distance;
-                farthest_count = 1;
-                farthest_target = next;
-            } else if (next_distance == farthest_distance) {
-                farthest_count += 1;
-                if (affine_lock_random_bounded(env, farthest_count) == 0) {
-                    farthest_target = next;
-                }
-            }
-        }
-    }
-
-    if (exact_count > 0) {
-        env->target = exact_target & shared->mask;
-        env->target_distance = desired_distance;
-    } else {
-        env->target = farthest_target & shared->mask;
-        env->target_distance = farthest_distance;
-    }
-    affine_lock_store_solution_path(
-        env, scratch->parents, scratch->parent_actions, env->target);
 }
 
 static void affine_lock_generate_visible_target_table_target(AffineLock* env) {
@@ -665,14 +378,8 @@ static void affine_lock_reset_state(AffineLock* env) {
     env->episode_return = 0.0f;
     env->target_distance = -1;
 
-    if (shared->initialization_mode == AFFINE_LOCK_INIT_EXACT_DISTANCE) {
-        env->state = affine_lock_random_state_bits(env, shared);
-        affine_lock_generate_exact_distance_target(env);
-        env->max_steps = env->target_distance + shared->step_grace;
-    } else {
-        affine_lock_generate_visible_target_table_target(env);
-        env->max_steps = env->target_distance + shared->step_grace;
-    }
+    affine_lock_generate_visible_target_table_target(env);
+    env->max_steps = env->target_distance + shared->step_grace;
 }
 
 static void affine_lock_init_env(
@@ -686,8 +393,6 @@ static void affine_lock_init_env(
     env->max_steps = shared->start_depth + shared->step_grace;
     env->step_count = 0;
     env->episode_return = 0.0f;
-    env->hint_visible = 0;
-    env->hint_action = -1;
 }
 
 static void affine_lock_add_log(
@@ -754,8 +459,6 @@ static void compute_observations(AffineLock* env) {
 static void c_reset(AffineLock* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
-    env->hint_visible = 0;
-    env->hint_action = -1;
     affine_lock_reset_state(env);
     compute_observations(env);
 }
@@ -802,8 +505,6 @@ static void c_step(AffineLock* env) {
     int invalid = 0;
 
     env->terminals[0] = 0.0f;
-    env->hint_visible = 0;
-    env->hint_action = -1;
     env->step_count += 1;
 
     if (!valid_action) {
@@ -912,20 +613,9 @@ static void c_render(AffineLock* env) {
     affine_lock_draw_bit_row(env, "current", env->state, 138);
     affine_lock_draw_bit_row(env, "target", env->target, 220);
 
-    if (env->hint_visible) {
-        const char* hint = env->hint_action >= 0 ?
-            TextFormat("Hint: press %d (%s)",
-                env->hint_action + 1,
-                affine_lock_action_name(env->hint_action)) :
-            "Hint: already solved";
-        int hint_width = MeasureText(hint, 18);
-        DrawText(hint, env->client->screen_width - hint_width - 30,
-            274, 18, (Color){245, 205, 92, 255});
-    }
-
     DrawText("1 shiftL  2 shiftR  3 inv7  4 bit-swap  5 pair-swap",
         30, 300, 16, (Color){160, 170, 178, 255});
-    DrawText("6 nib-swap  7 rev-nib  8 rev-byte  R reset  H = Hint",
+    DrawText("6 nib-swap  7 rev-nib  8 rev-byte  R reset",
         30, 322, 16, (Color){160, 170, 178, 255});
     EndDrawing();
 }

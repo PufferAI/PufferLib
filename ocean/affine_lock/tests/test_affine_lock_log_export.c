@@ -75,11 +75,10 @@ static Dict* make_vec_kwargs(void) {
 }
 
 static Dict* make_env_kwargs(int seed) {
-    Dict* env_kwargs = create_dict(5);
+    Dict* env_kwargs = create_dict(4);
     dict_set(env_kwargs, "start_depth", 2);
     dict_set(env_kwargs, "max_depth", 16);
     dict_set(env_kwargs, "step_grace", 0);
-    dict_set(env_kwargs, "initialization_mode", 2);
     dict_set(env_kwargs, "seed", seed);
     return env_kwargs;
 }
@@ -223,24 +222,6 @@ static void test_vec_init_visible_targets_repeat_across_runs_and_vary_by_env_id(
     free_binding_envs(run_b);
 }
 
-static void test_free_shared_releases_caller_thread_bfs_scratch(void) {
-    AffineLockShared shared = {0};
-    int rc = affine_lock_init_shared(&shared, 2, 16, 0);
-    EXPECT_EQ_INT(rc, 0);
-
-    int hint = affine_lock_hint_action(&shared, 0x1234u, 0x5678u);
-    EXPECT_TRUE(hint >= 0);
-    EXPECT_TRUE(affine_lock_bfs_scratch.seen_generation != NULL);
-
-    affine_lock_free_shared(&shared);
-    EXPECT_TRUE(affine_lock_bfs_scratch.seen_generation == NULL);
-    EXPECT_TRUE(affine_lock_bfs_scratch.distances == NULL);
-    EXPECT_TRUE(affine_lock_bfs_scratch.parents == NULL);
-    EXPECT_TRUE(affine_lock_bfs_scratch.parent_actions == NULL);
-    EXPECT_TRUE(affine_lock_bfs_scratch.queue == NULL);
-    EXPECT_EQ_INT(affine_lock_bfs_scratch.num_states, 0);
-}
-
 static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     Log log = {0};
     log.depth_2_rate = 0.25f;
@@ -290,7 +271,6 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
 int main(void) {
     test_vec_init_mixes_base_seed_and_env_id();
     test_vec_init_visible_targets_repeat_across_runs_and_vary_by_env_id();
-    test_free_shared_releases_caller_thread_bfs_scratch();
     test_depth_solve_rates_are_conditional_on_depth_attempts();
     return 0;
 }

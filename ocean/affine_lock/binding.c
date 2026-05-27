@@ -36,8 +36,6 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int start_depth = (int)dict_get(env_kwargs, "start_depth")->value;
     int max_depth = (int)dict_get(env_kwargs, "max_depth")->value;
     int step_grace = (int)dict_get(env_kwargs, "step_grace")->value;
-    int initialization_mode =
-        (int)dict_get(env_kwargs, "initialization_mode")->value;
 
     AffineLockShared* shared =
         (AffineLockShared*)calloc(1, sizeof(AffineLockShared));
@@ -47,7 +45,7 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
         free(shared);
         abort();
     }
-    if (affine_lock_configure_initialization(shared, initialization_mode) != 0) {
+    if (affine_lock_prepare_visible_targets(shared) != 0) {
         affine_lock_free_shared(shared);
         free(shared);
         abort();

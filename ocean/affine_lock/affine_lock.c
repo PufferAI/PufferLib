@@ -45,8 +45,7 @@ int main(void) {
         demo_cleanup();
         return 1;
     }
-    if (affine_lock_configure_initialization(
-            g_shared, AFFINE_LOCK_INIT_VISIBLE_TARGET_TABLE) != 0) {
+    if (affine_lock_prepare_visible_targets(g_shared) != 0) {
         fprintf(stderr, "failed to configure affine_lock demo\n");
         demo_cleanup();
         return 1;
@@ -76,10 +75,6 @@ int main(void) {
         if (IsWindowReady() && IsKeyPressed(KEY_R)) {
             c_reset(&env);
         }
-        if (IsWindowReady() && IsKeyPressed(KEY_H)) {
-            affine_lock_show_hint(&env);
-        }
-
         int action = key_to_action();
 
         if (action >= 0) {

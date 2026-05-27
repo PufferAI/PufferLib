@@ -57,7 +57,6 @@ def check_config():
     assert parse_int(config["env"]["seed"]) == 42
     assert parse_int(config["env"]["start_depth"]) == 2
     assert parse_int(config["env"]["max_depth"]) == 16
-    assert parse_int(config["env"]["initialization_mode"]) == 2
     assert parse_int(config["train"]["total_timesteps"]) == 200_000_000
     assert parse_int(config["train"]["horizon"]) == 64
     assert parse_int(config["train"]["minibatch_size"]) == 8192
