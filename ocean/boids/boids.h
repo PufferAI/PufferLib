@@ -192,9 +192,9 @@ void c_step(Boids *env) {
             }
         }
         if (protected_count > 0) {
-            separation_reward = sqrtf(
-                protected_x_sum*protected_x_sum + protected_y_sum*protected_y_sum
-            )+EPS * -env->separation_factor;
+            separation_reward = (
+                sqrtf(protected_x_sum*protected_x_sum + protected_y_sum*protected_y_sum)+EPS
+            ) * -env->separation_factor;
         }
         if (visual_count) {
             cohesion_reward = (
