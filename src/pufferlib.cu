@@ -4,7 +4,7 @@
 #include <nvtx3/nvToolsExt.h>
 #include <nvml.h>
 #else
-#include <rocm_smi/rocm_smi.h>
+#include <amd_smi/amdsmi.h>
 #endif
 #include <nccl.h>
 #include <vector>
@@ -106,29 +106,73 @@ inline void gpu_profiler_stop(bool enable) {
     if (enable) cudaProfilerStop();
 }
 #else
-using PufferGpuDevice = uint32_t;
+using PufferGpuDevice = amdsmi_processor_handle;
 
 inline void gpu_monitor_init(int gpu_id, PufferGpuDevice* device) {
-    *device = (uint32_t)gpu_id;
-    rsmi_init(RSMI_INIT_FLAG_ALL_GPUS);
+    *device = nullptr;
+    if (amdsmi_init(AMDSMI_INIT_AMD_GPUS) != AMDSMI_STATUS_SUCCESS) {
+        return;
+    }
+
+    uint32_t socket_count = 0;
+    if (amdsmi_get_socket_handles(&socket_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+        return;
+    }
+
+    std::vector<amdsmi_socket_handle> sockets(socket_count);
+    if (socket_count > 0 &&
+            amdsmi_get_socket_handles(&socket_count, sockets.data()) != AMDSMI_STATUS_SUCCESS) {
+        return;
+    }
+
+    uint32_t gpu_count = 0;
+    for (uint32_t i = 0; i < socket_count; i++) {
+        uint32_t processor_count = 0;
+        if (amdsmi_get_processor_handles(sockets[i], &processor_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+            continue;
+        }
+
+        std::vector<amdsmi_processor_handle> processors(processor_count);
+        if (processor_count > 0 &&
+                amdsmi_get_processor_handles(sockets[i], &processor_count, processors.data()) != AMDSMI_STATUS_SUCCESS) {
+            continue;
+        }
+
+        for (uint32_t j = 0; j < processor_count; j++) {
+            processor_type_t processor_type;
+            if (amdsmi_get_processor_type(processors[j], &processor_type) != AMDSMI_STATUS_SUCCESS ||
+                    processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+                continue;
+            }
+
+            if ((int)gpu_count == gpu_id) {
+                *device = processors[j];
+                return;
+            }
+            gpu_count++;
+        }
+    }
 }
 
 inline void gpu_monitor_shutdown() {
-    rsmi_shut_down();
+    amdsmi_shut_down();
 }
 
 inline GpuUtil gpu_get_utilization(PufferGpuDevice device) {
     GpuUtil out = {};
+    if (device == nullptr) {
+        return out;
+    }
+
     uint32_t busy = 0;
-    if (rsmi_dev_busy_percent_get(device, &busy) == RSMI_STATUS_SUCCESS) {
+    if (amdsmi_get_gpu_busy_percent(device, &busy) == AMDSMI_STATUS_SUCCESS) {
         out.gpu_percent = (float)busy;
     }
 
-    uint64_t used = 0, total = 0;
-    if (rsmi_dev_memory_usage_get(device, RSMI_MEM_TYPE_VRAM, &used) == RSMI_STATUS_SUCCESS &&
-            rsmi_dev_memory_total_get(device, RSMI_MEM_TYPE_VRAM, &total) == RSMI_STATUS_SUCCESS &&
-            total > 0) {
-        out.gpu_mem = 100.0f * (float)used / (float)total;
+    amdsmi_vram_usage_t vram = {};
+    if (amdsmi_get_gpu_vram_usage(device, &vram) == AMDSMI_STATUS_SUCCESS &&
+            vram.vram_total > 0) {
+        out.gpu_mem = 100.0f * (float)vram.vram_used / (float)vram.vram_total;
     }
 
     size_t free_bytes = 0, total_bytes = 0;

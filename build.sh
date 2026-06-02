@@ -500,7 +500,7 @@ PY
         build/bindings.o build/rocm_cuda_shim.o "$RAYLIB_A"
         "${ROCM_LFLAGS[@]}"
         "${ROCM_RPATH_FLAGS[@]}"
-        -lamdhip64 -lhipblas -lhiprand -lrccl -lrocm_smi64
+        -lamdhip64 -lhipblas -lhiprand -lrccl -lamd_smi
         $ROCM_OMP_LIB
         $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
