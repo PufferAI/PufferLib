@@ -19,12 +19,12 @@ int main() {
     c_render(&env);
     while (!WindowShouldClose()) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            env.actions[0] = 7; // Invalid action = no-op
+            env.actions[0] = DONE;
             if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) env.actions[0] = FORWARD;
             if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) env.actions[0] = LEFT;
             if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = RIGHT;
         } else {
-            env.actions[0] = four_rooms_rand(&env, 3); // Only use left, right, forward
+            env.actions[0] = four_rooms_rand(&env, 3);
         }
         c_step(&env);
         c_render(&env);

@@ -5,8 +5,8 @@
 #define FOUR_ROOMS_VIEW_SIZE 7
 #define FOUR_ROOMS_OBS_CHANNELS 3
 #define FOUR_ROOMS_NUM_ACTIONS 7
+#define FOUR_ROOMS_TIMEOUT_SCALE 4
 
-// Action space
 enum {
     LEFT = 0,
     RIGHT = 1,
@@ -17,7 +17,6 @@ enum {
     DONE = 6,
 };
 
-// Observation: Objects
 enum {
     UNSEEN = 0,
     EMPTY = 1,
@@ -26,14 +25,12 @@ enum {
     AGENT = 10,
 };
 
-// Observation: Colors
 enum {
     COLOR_BLACK = 0,
     COLOR_GREEN = 1,
     COLOR_GREY = 5,
 };
 
-// PufferLib standard colors for rendering
 static const Color PUFF_RED = (Color){187, 0, 0, 255};
 static const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 static const Color PUFF_BACKGROUND2 = (Color){18, 72, 72, 255};
@@ -61,7 +58,6 @@ typedef struct {
     int agent_dir;
     int goal_x, goal_y;
     unsigned char* grid;
-    int see_through_walls;
     unsigned int rng;
     int texture_loaded;
     Texture2D puffers;
@@ -71,7 +67,7 @@ static inline int four_rooms_rand(FourRooms* env, int n) {
     return rand_r(&env->rng) % n;
 }
 
-static inline int four_rooms_grid_idx(FourRooms* env, int x, int y) {
+static inline int grid_idx(FourRooms* env, int x, int y) {
     return y * env->size + x;
 }
 
@@ -83,7 +79,8 @@ void add_log(FourRooms* env) {
     env->log.n++;
 }
 
-void encode_cell(unsigned char object, unsigned char* object_idx, unsigned char* color_idx, unsigned char* state) {
+static inline void encode_cell(unsigned char object, unsigned char* object_idx,
+        unsigned char* color_idx, unsigned char* state) {
     *state = 0;
     if (object == WALL) {
         *object_idx = WALL;
@@ -97,7 +94,8 @@ void encode_cell(unsigned char object, unsigned char* object_idx, unsigned char*
     }
 }
 
-void observation_to_world(FourRooms* env, int obs_x, int obs_y, int* world_x, int* world_y) {
+static inline void observation_to_world(FourRooms* env, int obs_x, int obs_y,
+        int* world_x, int* world_y) {
     int forward_x = 0;
     int forward_y = 0;
     if (env->agent_dir == 0) forward_x = 1;
@@ -114,7 +112,7 @@ void observation_to_world(FourRooms* env, int obs_x, int obs_y, int* world_x, in
     *world_y = env->agent_y + forward_y * forward_offset + right_y * right_offset;
 }
 
-void compute_visibility(unsigned char view[FOUR_ROOMS_VIEW_SIZE][FOUR_ROOMS_VIEW_SIZE],
+static inline void compute_visibility(unsigned char view[FOUR_ROOMS_VIEW_SIZE][FOUR_ROOMS_VIEW_SIZE],
         unsigned char visible[FOUR_ROOMS_VIEW_SIZE][FOUR_ROOMS_VIEW_SIZE]) {
     memset(visible, 0, FOUR_ROOMS_VIEW_SIZE * FOUR_ROOMS_VIEW_SIZE * sizeof(unsigned char));
     visible[FOUR_ROOMS_VIEW_SIZE - 1][FOUR_ROOMS_VIEW_SIZE / 2] = 1;
@@ -158,16 +156,12 @@ void generate_observation(FourRooms* env) {
             } else if (world_x == env->agent_x && world_y == env->agent_y) {
                 view[y][x] = EMPTY;
             } else {
-                view[y][x] = env->grid[four_rooms_grid_idx(env, world_x, world_y)];
+                view[y][x] = env->grid[grid_idx(env, world_x, world_y)];
             }
         }
     }
 
-    if (env->see_through_walls) {
-        memset(visible, 1, FOUR_ROOMS_VIEW_SIZE * FOUR_ROOMS_VIEW_SIZE * sizeof(unsigned char));
-    } else {
-        compute_visibility(view, visible);
-    }
+    compute_visibility(view, visible);
 
     for (int y = 0; y < FOUR_ROOMS_VIEW_SIZE; y++) {
         for (int x = 0; x < FOUR_ROOMS_VIEW_SIZE; x++) {
@@ -192,73 +186,61 @@ void generate_observation(FourRooms* env) {
 void create_four_rooms_grid(FourRooms* env) {
     int size = env->size;
 
-    // Clear grid
     memset(env->grid, EMPTY, size * size * sizeof(unsigned char));
 
-    // Create outer walls
     for (int i = 0; i < size; i++) {
-        env->grid[0 * size + i] = WALL; // Top
-        env->grid[(size-1) * size + i] = WALL; // Bottom
-        env->grid[i * size + 0] = WALL; // Left
-        env->grid[i * size + (size-1)] = WALL; // Right
+        env->grid[i] = WALL;
+        env->grid[(size - 1) * size + i] = WALL;
+        env->grid[i * size] = WALL;
+        env->grid[i * size + size - 1] = WALL;
     }
 
     int room_w = size / 2;
     int room_h = size / 2;
 
-    // Create vertical separating wall
     for (int y = 0; y < size; y++) {
         env->grid[y * size + room_w] = WALL;
     }
 
-    // Create horizontal separating wall
     for (int x = 0; x < size; x++) {
         env->grid[room_h * size + x] = WALL;
     }
 
-    // Create 4 gaps in the separating walls
-    // Gap in vertical wall (top half)
+    // MiniGrid samples doorway positions from [start + 1, end).
     int gap_y1 = 1 + four_rooms_rand(env, room_h - 1);
     env->grid[gap_y1 * size + room_w] = EMPTY;
 
-    // Gap in vertical wall (bottom half)
     int gap_y2 = room_h + 1 + four_rooms_rand(env, room_h - 1);
     env->grid[gap_y2 * size + room_w] = EMPTY;
 
-    // Gap in horizontal wall (left half)
     int gap_x1 = 1 + four_rooms_rand(env, room_w - 1);
     env->grid[room_h * size + gap_x1] = EMPTY;
 
-    // Gap in horizontal wall (right half)
     int gap_x2 = room_w + 1 + four_rooms_rand(env, room_w - 1);
     env->grid[room_h * size + gap_x2] = EMPTY;
 }
 
 void c_reset(FourRooms* env) {
     if (env->max_steps <= 0) {
-        env->max_steps = 4 * env->size;
+        env->max_steps = FOUR_ROOMS_TIMEOUT_SCALE * env->size;
     }
 
     create_four_rooms_grid(env);
 
-    // Place agent randomly in valid position
     do {
         env->agent_x = 1 + four_rooms_rand(env, env->size - 2);
         env->agent_y = 1 + four_rooms_rand(env, env->size - 2);
-    } while (env->grid[four_rooms_grid_idx(env, env->agent_x, env->agent_y)] != EMPTY);
+    } while (env->grid[grid_idx(env, env->agent_x, env->agent_y)] != EMPTY);
 
-    // Place goal randomly in valid position (different from agent)
     do {
         env->goal_x = 1 + four_rooms_rand(env, env->size - 2);
         env->goal_y = 1 + four_rooms_rand(env, env->size - 2);
-    } while (env->grid[four_rooms_grid_idx(env, env->goal_x, env->goal_y)] != EMPTY ||
+    } while (env->grid[grid_idx(env, env->goal_x, env->goal_y)] != EMPTY ||
              (env->goal_x == env->agent_x && env->goal_y == env->agent_y));
 
-    // Set agent and goal on grid
-    env->grid[four_rooms_grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
-    env->grid[four_rooms_grid_idx(env, env->goal_x, env->goal_y)] = GOAL;
+    env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
+    env->grid[grid_idx(env, env->goal_x, env->goal_y)] = GOAL;
 
-    // Random initial direction
     env->agent_dir = four_rooms_rand(env, 4);
     env->tick = 0;
     env->episode_return = 0.0f;
@@ -273,8 +255,7 @@ void c_step(FourRooms* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
 
-    // Clear agent from current position
-    env->grid[four_rooms_grid_idx(env, env->agent_x, env->agent_y)] = EMPTY;
+    env->grid[grid_idx(env, env->agent_x, env->agent_y)] = EMPTY;
 
     int new_x = env->agent_x;
     int new_y = env->agent_y;
@@ -290,9 +271,8 @@ void c_step(FourRooms* env) {
         else if (env->agent_dir == 2) new_x -= 1;
         else if (env->agent_dir == 3) new_y -= 1;
 
-        // Check if move is valid
         if (new_x >= 0 && new_x < env->size && new_y >= 0 && new_y < env->size &&
-            env->grid[four_rooms_grid_idx(env, new_x, new_y)] != WALL) {
+            env->grid[grid_idx(env, new_x, new_y)] != WALL) {
             env->agent_x = new_x;
             env->agent_y = new_y;
         }
@@ -300,7 +280,6 @@ void c_step(FourRooms* env) {
 
     env->agent_dir = new_dir;
 
-    // Check if agent reached goal
     if (env->agent_x == env->goal_x && env->agent_y == env->goal_y) {
         env->terminals[0] = 1;
         env->rewards[0] = 1.0f - 0.9f * (float)env->tick / (float)env->max_steps;
@@ -310,10 +289,8 @@ void c_step(FourRooms* env) {
         return;
     }
 
-    // Place agent back on grid
-    env->grid[four_rooms_grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
+    env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
 
-    // Check timeout
     if (env->tick >= env->max_steps) {
         env->terminals[0] = 1;
         env->rewards[0] = 0.0;
@@ -344,7 +321,6 @@ void c_render(FourRooms* env) {
 
     int px = 32;
 
-    // Draw the main grid
     for (int y = 0; y < env->size; y++) {
         for (int x = 0; x < env->size; x++) {
             int cell = env->grid[y * env->size + x];
