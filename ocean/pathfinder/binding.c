@@ -14,6 +14,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->loop_prob = (float)dict_get(kwargs, "loop_prob")->value;
     env->extra_entry_prob = (float)dict_get(kwargs, "extra_entry_prob")->value;
     env->min_solution_len = (int)dict_get(kwargs, "min_solution_len")->value;
+    env->max_solution_len = (int)dict_get(kwargs, "max_solution_len")->value;
     env->max_steps = (int)dict_get(kwargs, "max_steps")->value;
     init(env);
 }

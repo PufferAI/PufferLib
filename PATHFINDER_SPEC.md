@@ -110,6 +110,9 @@ Config knobs:
 - `loop_prob`: probability of opening extra internal edges after carving.
 - `extra_entry_prob`: probability each non-`A1` column-1 entrance is open.
 - `min_solution_len`: reject mazes with a shortest solution path below this.
+- `max_solution_len`: reject mazes with a shortest solution path above this.
+  Use a small value for early curriculum so the hidden pawn starts close to
+  `A1`; `0` disables the upper bound.
 - `max_steps`: timeout.
 - `seed`: inherited from vector env config.
 
@@ -165,9 +168,10 @@ Default reward model:
 
 - `+1.0` for reaching the hidden pawn.
 - `-0.001` per step.
-- `-0.01` for hitting a newly discovered wall.
-- `-0.03` for hitting a wall that was already known.
-- `-0.02` for impossible movement, such as attempting to exit through the
+- `0.0` extra penalty for hitting a newly discovered wall; the agent paid the
+  step cost but gained information.
+- `-0.01` for hitting a wall that was already known.
+- `-0.01` for impossible movement, such as attempting to exit through the
   left edge in v1.
 - `0.0` for a successful nonterminal move, except for the step penalty.
 
@@ -270,6 +274,7 @@ Start conservative:
 
 - `vec.total_agents = 8192` or `16384`
 - `vec.num_buffers = 2`
+- `env.max_solution_len = 4` for early closer-target curriculum
 - `train.gpus = 1`
 - `train.total_timesteps = 100M` for real runs, at least `2,097,152` for smoke
   tests with the initial `8192 x 128` rollout geometry.

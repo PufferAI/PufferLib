@@ -20,6 +20,7 @@ int main(void) {
     env.loop_prob = 0.10f;
     env.extra_entry_prob = 0.0f;
     env.min_solution_len = 1;
+    env.max_solution_len = 4;
     env.max_steps = 128;
 
     init(&env);

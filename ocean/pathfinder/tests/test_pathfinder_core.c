@@ -17,6 +17,7 @@ static void setup_env(Pathfinder* env, float* obs, float* actions,
     env->loop_prob = 0.10f;
     env->extra_entry_prob = 0.0f;
     env->min_solution_len = 1;
+    env->max_solution_len = 0;
     env->max_steps = 128;
     env->rng = 7;
     init(env);
@@ -124,6 +125,53 @@ static void test_blocked_edge_reveals_and_stays(void) {
     assert(terminals[0] == 0.0f);
 }
 
+static void test_known_wall_has_only_repeat_penalty(void) {
+    Pathfinder env;
+    float obs[PATHFINDER_OBS_SIZE];
+    float actions[1] = {0};
+    float rewards[1] = {0};
+    float terminals[1] = {0};
+    setup_env(&env, obs, actions, rewards, terminals);
+    c_reset(&env);
+
+    memset(env.state.true_walls, 1, sizeof(env.state.true_walls));
+    for (int i = 0; i < PATHFINDER_NUM_WALLS; i++) {
+        env.state.known_walls[i] = PATHFINDER_UNKNOWN;
+    }
+    env.state.agent_row = 0;
+    env.state.agent_col = 0;
+    env.state.goal_row = 5;
+    env.state.goal_col = 5;
+    int east_wall = pathfinder_wall_between(0, 0, 0, 1);
+    env.state.true_walls[east_wall] = 1;
+    refresh_state(&env);
+
+    actions[0] = PATHFINDER_ACT_EAST;
+    c_step(&env);
+    assert(fabsf(rewards[0] - PATHFINDER_STEP_PENALTY) < 1e-6f);
+
+    c_step(&env);
+    assert(fabsf(rewards[0] -
+        (PATHFINDER_STEP_PENALTY + PATHFINDER_KNOWN_WALL_PENALTY)) < 1e-6f);
+}
+
+static void test_max_solution_len_limits_curriculum_distance(void) {
+    Pathfinder env;
+    float obs[PATHFINDER_OBS_SIZE];
+    float actions[1] = {0};
+    float rewards[1] = {0};
+    float terminals[1] = {0};
+    setup_env(&env, obs, actions, rewards, terminals);
+    env.max_solution_len = 2;
+
+    for (int i = 0; i < 100; i++) {
+        c_reset(&env);
+        assert(pathfinder_has_path_to_goal(&env.state));
+        assert(env.state.shortest_path_len >= 1);
+        assert(env.state.shortest_path_len <= 2);
+    }
+}
+
 static void test_reaching_goal_terminates(void) {
     Pathfinder env;
     float obs[PATHFINDER_OBS_SIZE];
@@ -160,6 +208,8 @@ int main(void) {
     test_generated_mazes_connect_a1_to_goal();
     test_open_edge_reveals_and_moves();
     test_blocked_edge_reveals_and_stays();
+    test_known_wall_has_only_repeat_penalty();
+    test_max_solution_len_limits_curriculum_distance();
     test_reaching_goal_terminates();
     printf("pathfinder core tests passed\n");
     return 0;

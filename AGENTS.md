@@ -179,6 +179,8 @@ it is not the best state-memory reference on this branch.
 - Spawn: `A1`.
 - Hidden pawn: random non-`A1` cell, and generated maze must connect `A1` to
   it.
+- Initial curriculum: `env.max_solution_len = 4` keeps early targets close to
+  `A1`; set it to `0` to disable the upper bound.
 - Actions: four discrete moves.
 - Observation:
   - 84 wall slots as floats:
@@ -188,6 +190,9 @@ it is not the best state-memory reference on this branch.
   - normalized current x
   - normalized current y
   - total `OBS_SIZE = 86`
+- Rewards:
+  - first-time wall discovery has no extra penalty beyond step cost
+  - repeated known-wall hits get a small penalty
 - First implementation should keep `train.state_buffer_size = 0` until
   deterministic state roundtrip tests exist.
 

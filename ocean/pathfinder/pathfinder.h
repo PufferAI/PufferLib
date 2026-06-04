@@ -24,9 +24,9 @@
 #define PATHFINDER_WALL 1.0f
 
 #define PATHFINDER_STEP_PENALTY -0.001f
-#define PATHFINDER_NEW_WALL_PENALTY -0.01f
-#define PATHFINDER_KNOWN_WALL_PENALTY -0.03f
-#define PATHFINDER_IMPOSSIBLE_PENALTY -0.02f
+#define PATHFINDER_NEW_WALL_PENALTY 0.0f
+#define PATHFINDER_KNOWN_WALL_PENALTY -0.01f
+#define PATHFINDER_IMPOSSIBLE_PENALTY -0.01f
 #define PATHFINDER_GOAL_REWARD 1.0f
 
 typedef struct Log {
@@ -72,6 +72,7 @@ typedef struct Pathfinder {
     float loop_prob;
     float extra_entry_prob;
     int min_solution_len;
+    int max_solution_len;
     int max_steps;
     State state;
 } Pathfinder;
@@ -273,6 +274,10 @@ static void pathfinder_open_random_edges(Pathfinder* env) {
 static void pathfinder_generate_maze(Pathfinder* env) {
     State* s = &env->state;
     int min_solution_len = env->min_solution_len < 1 ? 1 : env->min_solution_len;
+    int max_solution_len = env->max_solution_len;
+    if (max_solution_len > 0 && max_solution_len < min_solution_len) {
+        max_solution_len = min_solution_len;
+    }
 
     for (int attempt = 0; attempt < 128; attempt++) {
         pathfinder_init_walls(s);
@@ -285,14 +290,19 @@ static void pathfinder_generate_maze(Pathfinder* env) {
         pathfinder_carve_solution(env);
         pathfinder_open_random_edges(env);
         s->shortest_path_len = pathfinder_shortest_path(s);
-        if (s->shortest_path_len >= min_solution_len) {
+        if (s->shortest_path_len >= min_solution_len &&
+                (max_solution_len <= 0 || s->shortest_path_len <= max_solution_len)) {
             return;
         }
     }
 
     pathfinder_init_walls(s);
     s->goal_row = 0;
-    s->goal_col = min_solution_len < PATHFINDER_COLS ? min_solution_len : PATHFINDER_COLS - 1;
+    int fallback_len = min_solution_len;
+    if (max_solution_len > 0 && fallback_len > max_solution_len) {
+        fallback_len = max_solution_len;
+    }
+    s->goal_col = fallback_len < PATHFINDER_COLS ? fallback_len : PATHFINDER_COLS - 1;
     for (int col = 0; col < s->goal_col; col++) {
         pathfinder_open_edge(s, 0, col, 0, col + 1);
     }
