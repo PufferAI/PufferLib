@@ -44,6 +44,7 @@
 #define PATHFINDER_NEW_WALL_PENALTY 0.0f
 #define PATHFINDER_KNOWN_WALL_PENALTY -0.01f
 #define PATHFINDER_KNOWN_WALL_DEATH_PENALTY -0.05f
+#define PATHFINDER_REPEAT_MOVE_DEATH_PENALTY -1.0f
 #define PATHFINDER_NEW_CELL_REWARD 0.01f
 #define PATHFINDER_REVISIT_PENALTY -0.01f
 #define PATHFINDER_IMPOSSIBLE_PENALTY -0.01f
@@ -58,6 +59,7 @@ typedef struct Log {
     float wall_hits;
     float revisits;
     float known_wall_deaths;
+    float repeat_move_deaths;
     float known_walls;
     float known_open_edges;
     float shortest_path_len;
@@ -78,12 +80,16 @@ typedef struct State {
     int wall_hits;
     int revisit_count;
     int known_wall_death;
+    int repeat_move_death;
     int visited_count;
     int known_wall_count;
     int known_open_count;
     int success;
     float episode_return;
     unsigned char visited[PATHFINDER_ROWS][PATHFINDER_COLS];
+    unsigned char recent_rows[3];
+    unsigned char recent_cols[3];
+    int recent_count;
     unsigned char true_walls[PATHFINDER_NUM_WALLS];
     float known_walls[PATHFINDER_NUM_WALLS];
 } State;
@@ -204,6 +210,43 @@ static inline void pathfinder_mark_visited(State* s, int row, int col) {
     }
     s->visited[row][col] = 1;
     s->visited_count++;
+}
+
+static inline void pathfinder_reset_move_history(State* s) {
+    s->recent_rows[0] = (unsigned char)s->agent_row;
+    s->recent_cols[0] = (unsigned char)s->agent_col;
+    s->recent_count = 1;
+}
+
+static inline void pathfinder_ensure_move_history(State* s) {
+    if (s->recent_count <= 0) {
+        pathfinder_reset_move_history(s);
+    }
+}
+
+static inline bool pathfinder_repeats_two_cell_cycle(
+        const State* s, int next_row, int next_col) {
+    return s->recent_count >= 3 &&
+        s->recent_rows[0] == s->agent_row &&
+        s->recent_cols[0] == s->agent_col &&
+        s->recent_rows[1] == next_row &&
+        s->recent_cols[1] == next_col;
+}
+
+static inline void pathfinder_record_successful_move(State* s) {
+    if (s->recent_count < 3) {
+        int idx = s->recent_count++;
+        s->recent_rows[idx] = (unsigned char)s->agent_row;
+        s->recent_cols[idx] = (unsigned char)s->agent_col;
+        return;
+    }
+
+    s->recent_rows[0] = s->recent_rows[1];
+    s->recent_cols[0] = s->recent_cols[1];
+    s->recent_rows[1] = s->recent_rows[2];
+    s->recent_cols[1] = s->recent_cols[2];
+    s->recent_rows[2] = (unsigned char)s->agent_row;
+    s->recent_cols[2] = (unsigned char)s->agent_col;
 }
 
 static inline void pathfinder_action_delta(int action, int* d_row, int* d_col) {
@@ -449,6 +492,7 @@ void add_log(Pathfinder* env) {
     env->log.wall_hits += (float)s->wall_hits;
     env->log.revisits += (float)s->revisit_count;
     env->log.known_wall_deaths += (float)s->known_wall_death;
+    env->log.repeat_move_deaths += (float)s->repeat_move_death;
     env->log.known_walls += (float)s->known_wall_count;
     env->log.known_open_edges += (float)s->known_open_count;
     env->log.shortest_path_len += (float)s->shortest_path_len;
@@ -487,6 +531,7 @@ void c_reset(Pathfinder* env) {
     s->agent_col = 0;
     pathfinder_generate_maze(env);
     pathfinder_mark_visited(s, s->agent_row, s->agent_col);
+    pathfinder_reset_move_history(s);
     pathfinder_update_observations(env);
 }
 
@@ -499,11 +544,14 @@ static void pathfinder_reset_attempt(Pathfinder* env) {
     s->wall_hits = 0;
     s->revisit_count = 0;
     s->known_wall_death = 0;
+    s->repeat_move_death = 0;
     s->visited_count = 0;
     s->success = 0;
     s->episode_return = 0.0f;
     memset(s->visited, 0, sizeof(s->visited));
+    pathfinder_reset_known(s);
     pathfinder_mark_visited(s, s->agent_row, s->agent_col);
+    pathfinder_reset_move_history(s);
     pathfinder_update_observations(env);
 }
 
@@ -550,21 +598,29 @@ void c_step(Pathfinder* env) {
             } else if (!pathfinder_in_bounds(next_row, next_col)) {
                 reward += PATHFINDER_IMPOSSIBLE_PENALTY;
             } else {
-                bool revisited = s->visited[next_row][next_col] != 0;
-                s->agent_row = next_row;
-                s->agent_col = next_col;
-                s->agent_path_len++;
-                if (revisited) {
-                    s->revisit_count++;
-                    reward += PATHFINDER_REVISIT_PENALTY;
-                } else {
-                    pathfinder_mark_visited(s, next_row, next_col);
-                    reward += PATHFINDER_NEW_CELL_REWARD;
-                }
-                if (s->agent_row == s->goal_row && s->agent_col == s->goal_col) {
-                    s->success = 1;
-                    reward += PATHFINDER_GOAL_REWARD;
+                pathfinder_ensure_move_history(s);
+                if (pathfinder_repeats_two_cell_cycle(s, next_row, next_col)) {
+                    reward += PATHFINDER_REPEAT_MOVE_DEATH_PENALTY;
+                    s->repeat_move_death = 1;
                     env->terminals[0] = 1.0f;
+                } else {
+                    bool revisited = s->visited[next_row][next_col] != 0;
+                    s->agent_row = next_row;
+                    s->agent_col = next_col;
+                    s->agent_path_len++;
+                    pathfinder_record_successful_move(s);
+                    if (revisited) {
+                        s->revisit_count++;
+                        reward += PATHFINDER_REVISIT_PENALTY;
+                    } else {
+                        pathfinder_mark_visited(s, next_row, next_col);
+                        reward += PATHFINDER_NEW_CELL_REWARD;
+                    }
+                    if (s->agent_row == s->goal_row && s->agent_col == s->goal_col) {
+                        s->success = 1;
+                        reward += PATHFINDER_GOAL_REWARD;
+                        env->terminals[0] = 1.0f;
+                    }
                 }
             }
         }
@@ -797,6 +853,9 @@ static void pathfinder_draw_panel(Pathfinder* env) {
     DrawText(TextFormat("Revisits: %i", s->revisit_count), x, y, 18, PATHFINDER_TEXT);
     y += 24;
     DrawText(TextFormat("Known-wall deaths: %.0f", env->log.known_wall_deaths),
+        x, y, 18, PATHFINDER_KNOWN_WALL);
+    y += 24;
+    DrawText(TextFormat("Repeat-move deaths: %.0f", env->log.repeat_move_deaths),
         x, y, 18, PATHFINDER_KNOWN_WALL);
     y += 24;
     DrawText(TextFormat("Shortest path: %i", s->shortest_path_len), x, y, 18, PATHFINDER_TEXT);

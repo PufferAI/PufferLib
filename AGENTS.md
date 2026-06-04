@@ -198,8 +198,11 @@ it is not the best state-memory reference on this branch.
   - repeated known-wall hits terminate the attempt
   - first visits get a small discovery reward
   - revisits get a small penalty
-- Failed attempts reset the agent to `A1` on the same map and keep discovered
-  wall/open knowledge. Solves generate the next map and advance curriculum.
+  - immediate two-cell oscillation like `A1 -> B1 -> A1 -> B1` terminates with
+    a large penalty
+- Failed attempts reset the agent to `A1` on the same true map but clear all
+  discovered wall/open observations back to `-1.0`. Solves generate the next
+  map and advance curriculum.
 - First implementation should keep `train.state_buffer_size = 0` until
   deterministic state roundtrip tests exist.
 

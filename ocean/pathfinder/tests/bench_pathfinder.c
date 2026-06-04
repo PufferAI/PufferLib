@@ -69,10 +69,11 @@ static void bench_steps(Pathfinder* env, long steps) {
     }
     double elapsed = now_seconds() - t0;
     double step_sps = (double)steps / elapsed;
-    printf("step_bench steps=%ld seconds=%.6f step_sps=%.2f episodes=%.0f success=%.6f reward_sum=%.3f curriculum_level=%d curriculum_max_solution_len=%d\n",
+    printf("step_bench steps=%ld seconds=%.6f step_sps=%.2f episodes=%.0f success=%.6f repeat_move_deaths=%.0f reward_sum=%.3f curriculum_level=%d curriculum_max_solution_len=%d\n",
         steps, elapsed, step_sps, env->log.n,
         env->log.n > 0.0f ? env->log.success / env->log.n : 0.0f,
-        reward_sum, env->curriculum_level, pathfinder_curriculum_max_solution_len(env));
+        env->log.repeat_move_deaths, reward_sum, env->curriculum_level,
+        pathfinder_curriculum_max_solution_len(env));
 }
 
 static void bench_reset_components(Pathfinder* env, long iters) {

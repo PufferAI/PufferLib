@@ -29,6 +29,7 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "wall_hits", log->wall_hits);
     dict_set(out, "revisits", log->revisits);
     dict_set(out, "known_wall_deaths", log->known_wall_deaths);
+    dict_set(out, "repeat_move_deaths", log->repeat_move_deaths);
     dict_set(out, "known_walls", log->known_walls);
     dict_set(out, "known_open_edges", log->known_open_edges);
     dict_set(out, "shortest_path_len", log->shortest_path_len);

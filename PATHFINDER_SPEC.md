@@ -114,9 +114,9 @@ Curriculum:
 - Each successful solve increments the next generated puzzle distance by one,
   capped at `PATHFINDER_MAX_SOLUTION_LEN`.
 - Failed attempts do not advance curriculum.
-- Failed attempts restart the agent at `A1` on the same map and preserve
-  discovered wall/open observations, so map generation happens only after a
-  solve or external reset.
+- Failed attempts restart the agent at `A1` on the same true map, but clear
+  discovered wall/open observations back to `-1.0`, so map generation happens
+  only after a solve or external reset.
 
 Config knobs:
 
@@ -188,6 +188,8 @@ Default reward model:
 - `-0.05` extra penalty and terminal attempt reset for hitting a known wall.
 - `-0.01` for revisiting a square that was previously left in the current
   attempt.
+- `-1.0` extra penalty and terminal attempt reset for immediate two-cell
+  oscillation such as `A1 -> B1 -> A1 -> B1`.
 - `-0.01` for impossible movement, such as attempting to exit through the
   left edge in v1.
 
@@ -197,14 +199,17 @@ Termination:
 - Timeout: `tick >= max_steps`.
 - Known-wall death: agent tries to move through a wall that is already observed
   as blocked.
+- Repeat-move death: agent repeats an immediate two-cell oscillation. For
+  example, `A1 -> B1 -> A1` is legal, but the next `A1 -> B1` dies.
 
 Reset after terminal:
 
 - Success logs the episode, advances curriculum by one move when not capped,
   and generates a new map.
-- Timeout and known-wall death log the episode, then reset only the attempt
-  state: position returns to `A1`, tick/path/revisit counters clear, and the
-  same true map plus known wall/open observations remain.
+- Timeout, known-wall death, and repeat-move death log the episode, then reset
+  only the attempt state: position returns to `A1`, tick/path/revisit/move
+  counters clear, the same true map remains, and all wall observations return
+  to `-1.0`.
 
 Logged metrics:
 
@@ -216,6 +221,7 @@ Logged metrics:
 - `wall_hits`
 - `revisits`
 - `known_wall_deaths`
+- `repeat_move_deaths`
 - `known_walls`
 - `known_open_edges`
 - `shortest_path_len`
@@ -280,9 +286,12 @@ Add focused tests before training:
 - Step semantics:
   - Open edge reveals `0.0` and moves.
   - Closed edge reveals `1.0` and does not move.
-  - Repeated known wall hit terminates the attempt and retries the same map
-    with wall memory preserved.
-  - Timeout retries the same map with open/wall memory preserved.
+  - Repeated known wall hit terminates the attempt and retries the same true
+    map with wall observations reset to `-1.0`.
+  - Repeating an immediate two-cell oscillation, such as
+    `A1 -> B1 -> A1 -> B1`, terminates with a large penalty and retries the
+    same true map blind.
+  - Timeout retries the same true map with wall observations reset to `-1.0`.
   - Success advances the next map by one solution step.
   - West move from column 1 through an open left edge reveals the edge but does
     not move in v1.

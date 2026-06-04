@@ -69,6 +69,7 @@ def run_once(label, args, timesteps, eval_epochs_override):
         "episode_length": stats.get("env/episode_length", 0.0),
         "wall_hits": stats.get("env/wall_hits", 0.0),
         "known_wall_deaths": stats.get("env/known_wall_deaths", 0.0),
+        "repeat_move_deaths": stats.get("env/repeat_move_deaths", 0.0),
         "revisits": stats.get("env/revisits", 0.0),
         "shortest_path_len": stats.get("env/shortest_path_len", 0.0),
         "agent_path_len": stats.get("env/agent_path_len", 0.0),
