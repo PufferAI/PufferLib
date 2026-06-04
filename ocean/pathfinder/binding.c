@@ -26,8 +26,12 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "episode_length", log->episode_length);
     dict_set(out, "success", log->success);
     dict_set(out, "wall_hits", log->wall_hits);
+    dict_set(out, "revisits", log->revisits);
+    dict_set(out, "known_wall_deaths", log->known_wall_deaths);
     dict_set(out, "known_walls", log->known_walls);
     dict_set(out, "known_open_edges", log->known_open_edges);
     dict_set(out, "shortest_path_len", log->shortest_path_len);
     dict_set(out, "agent_path_len", log->agent_path_len);
+    dict_set(out, "curriculum_level", log->curriculum_level);
+    dict_set(out, "curriculum_max_solution_len", log->curriculum_max_solution_len);
 }
