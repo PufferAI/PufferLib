@@ -7,6 +7,7 @@ mkdir -p build/pathfinder-tests
 
 ${CC:-clang} -std=c11 -Wall -Wextra -Werror \
     -I. -Iocean/pathfinder -Ivendor -Iraylib-5.5_linux_amd64/include \
+    -DPATHFINDER_NO_RENDER \
     ocean/pathfinder/tests/test_pathfinder_core.c \
     -lm \
     -o build/pathfinder-tests/test_pathfinder_core

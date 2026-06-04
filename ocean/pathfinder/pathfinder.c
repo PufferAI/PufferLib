@@ -1,6 +1,14 @@
 #include <time.h>
 #include "pathfinder.h"
 
+static int read_manual_action(void) {
+    if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W)) return PATHFINDER_ACT_NORTH;
+    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) return PATHFINDER_ACT_EAST;
+    if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S)) return PATHFINDER_ACT_SOUTH;
+    if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) return PATHFINDER_ACT_WEST;
+    return -1;
+}
+
 int main(void) {
     Pathfinder env;
     memset(&env, 0, sizeof(env));
@@ -26,13 +34,24 @@ int main(void) {
     init(&env);
     c_reset(&env);
 
-    for (int i = 0; i < 256; i++) {
-        actions[0] = (float)(pathfinder_rand(&env) % PATHFINDER_NUM_ACTIONS);
-        c_step(&env);
+    c_render(&env);
+    while (!WindowShouldClose()) {
+        if (IsKeyPressed(KEY_R)) {
+            c_reset(&env);
+        }
+
+        int action = read_manual_action();
+        if (action >= 0) {
+            actions[0] = (float)action;
+            c_step(&env);
+        } else if (IsKeyPressed(KEY_SPACE)) {
+            actions[0] = (float)(pathfinder_rand(&env) % PATHFINDER_NUM_ACTIONS);
+            c_step(&env);
+        }
+
+        c_render(&env);
     }
 
-    printf("Pathfinder random smoke: episodes=%0.0f success=%0.3f return=%0.3f\n",
-        env.log.n, env.log.success, env.log.episode_return);
     c_close(&env);
     return 0;
 }

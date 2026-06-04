@@ -6,6 +6,10 @@
 #include <string.h>
 #include <math.h>
 
+#if !defined(PATHFINDER_NO_RENDER) && !defined(PUFFER_PERF_NO_RENDER)
+#include "raylib.h"
+#endif
+
 #define PATHFINDER_ROWS 6
 #define PATHFINDER_COLS 6
 #define PATHFINDER_VERTICAL_WALLS (PATHFINDER_ROWS * (PATHFINDER_COLS + 1))
@@ -13,6 +17,18 @@
 #define PATHFINDER_NUM_WALLS (PATHFINDER_VERTICAL_WALLS + PATHFINDER_HORIZONTAL_WALLS)
 #define PATHFINDER_OBS_SIZE (PATHFINDER_NUM_WALLS + 2)
 #define PATHFINDER_NUM_ACTIONS 4
+
+#define PATHFINDER_RENDER_TILE 72
+#define PATHFINDER_RENDER_MARGIN 40
+#define PATHFINDER_RENDER_BOARD_X PATHFINDER_RENDER_MARGIN
+#define PATHFINDER_RENDER_BOARD_Y 92
+#define PATHFINDER_RENDER_BOARD_SIZE (PATHFINDER_RENDER_TILE * PATHFINDER_COLS)
+#define PATHFINDER_RENDER_PANEL_WIDTH 332
+#define PATHFINDER_RENDER_WIDTH \
+    (PATHFINDER_RENDER_BOARD_X + PATHFINDER_RENDER_BOARD_SIZE + \
+        PATHFINDER_RENDER_PANEL_WIDTH + PATHFINDER_RENDER_MARGIN)
+#define PATHFINDER_RENDER_HEIGHT \
+    (PATHFINDER_RENDER_BOARD_Y + PATHFINDER_RENDER_BOARD_SIZE + PATHFINDER_RENDER_MARGIN)
 
 #define PATHFINDER_ACT_NORTH 0
 #define PATHFINDER_ACT_EAST 1
@@ -60,7 +76,12 @@ typedef struct State {
     float known_walls[PATHFINDER_NUM_WALLS];
 } State;
 
+typedef struct PathfinderClient {
+    bool show_truth;
+} PathfinderClient;
+
 typedef struct Pathfinder {
+    PathfinderClient* client;
     Log log;
     float* observations;
     float* actions;
@@ -429,9 +450,245 @@ void c_step(Pathfinder* env) {
 }
 
 void c_close(Pathfinder* env) {
-    (void)env;
+#if !defined(PATHFINDER_NO_RENDER) && !defined(PUFFER_PERF_NO_RENDER)
+    if (IsWindowReady()) {
+        CloseWindow();
+    }
+#endif
+    free(env->client);
+    env->client = NULL;
 }
 
+#if defined(PATHFINDER_NO_RENDER) || defined(PUFFER_PERF_NO_RENDER)
 void c_render(Pathfinder* env) {
     (void)env;
 }
+#else
+static const Color PATHFINDER_BG = {6, 24, 24, 255};
+static const Color PATHFINDER_CELL_A = {16, 39, 42, 255};
+static const Color PATHFINDER_CELL_B = {19, 46, 49, 255};
+static const Color PATHFINDER_GRID = {54, 84, 86, 255};
+static const Color PATHFINDER_TEXT = {235, 242, 240, 255};
+static const Color PATHFINDER_MUTED = {145, 166, 164, 255};
+static const Color PATHFINDER_TRUE_WALL = {88, 96, 99, 255};
+static const Color PATHFINDER_UNKNOWN_EDGE = {42, 63, 65, 255};
+static const Color PATHFINDER_KNOWN_WALL = {218, 59, 54, 255};
+static const Color PATHFINDER_KNOWN_OPEN = {75, 196, 118, 255};
+static const Color PATHFINDER_AGENT = {0, 187, 187, 255};
+static const Color PATHFINDER_GOAL = {232, 184, 58, 255};
+static const Color PATHFINDER_START = {118, 146, 150, 255};
+
+static PathfinderClient* pathfinder_make_client(void) {
+    PathfinderClient* client = (PathfinderClient*)calloc(1, sizeof(PathfinderClient));
+    client->show_truth = true;
+    InitWindow(PATHFINDER_RENDER_WIDTH, PATHFINDER_RENDER_HEIGHT, "PufferLib Pathfinder");
+    SetTargetFPS(30);
+    return client;
+}
+
+static inline int pathfinder_cell_x(int col) {
+    return PATHFINDER_RENDER_BOARD_X + col * PATHFINDER_RENDER_TILE;
+}
+
+static inline int pathfinder_cell_y(int row) {
+    return PATHFINDER_RENDER_BOARD_Y + row * PATHFINDER_RENDER_TILE;
+}
+
+static inline Vector2 pathfinder_cell_center(int row, int col) {
+    return (Vector2){
+        (float)(pathfinder_cell_x(col) + PATHFINDER_RENDER_TILE / 2),
+        (float)(pathfinder_cell_y(row) + PATHFINDER_RENDER_TILE / 2)
+    };
+}
+
+static const char* pathfinder_action_name(int action) {
+    if (action == PATHFINDER_ACT_NORTH) return "north";
+    if (action == PATHFINDER_ACT_EAST) return "east";
+    if (action == PATHFINDER_ACT_SOUTH) return "south";
+    if (action == PATHFINDER_ACT_WEST) return "west";
+    return "invalid";
+}
+
+static void pathfinder_draw_centered_text(const char* text, int cx, int y,
+        int font_size, Color color) {
+    int width = MeasureText(text, font_size);
+    DrawText(text, cx - width / 2, y, font_size, color);
+}
+
+static void pathfinder_draw_edge(Pathfinder* env, int wall, Vector2 start, Vector2 end) {
+    State* s = &env->state;
+    float known = s->known_walls[wall];
+
+    DrawLineEx(start, end, 2.0f, PATHFINDER_UNKNOWN_EDGE);
+    if (env->client->show_truth && s->true_walls[wall]) {
+        DrawLineEx(start, end, 6.0f, PATHFINDER_TRUE_WALL);
+    }
+
+    if (known == PATHFINDER_WALL) {
+        DrawLineEx(start, end, 8.0f, PATHFINDER_KNOWN_WALL);
+    } else if (known == PATHFINDER_OPEN) {
+        DrawLineEx(start, end, 4.0f, PATHFINDER_KNOWN_OPEN);
+    }
+}
+
+static void pathfinder_draw_board(Pathfinder* env) {
+    State* s = &env->state;
+
+    for (int row = 0; row < PATHFINDER_ROWS; row++) {
+        for (int col = 0; col < PATHFINDER_COLS; col++) {
+            Color cell_color = ((row + col) & 1) ? PATHFINDER_CELL_A : PATHFINDER_CELL_B;
+            DrawRectangle(pathfinder_cell_x(col), pathfinder_cell_y(row),
+                PATHFINDER_RENDER_TILE - 1, PATHFINDER_RENDER_TILE - 1, cell_color);
+        }
+    }
+
+    DrawRectangleLinesEx((Rectangle){
+        (float)PATHFINDER_RENDER_BOARD_X,
+        (float)PATHFINDER_RENDER_BOARD_Y,
+        (float)PATHFINDER_RENDER_BOARD_SIZE,
+        (float)PATHFINDER_RENDER_BOARD_SIZE
+    }, 2.0f, PATHFINDER_GRID);
+
+    for (int col = 0; col < PATHFINDER_COLS; col++) {
+        char label[2] = {(char)('A' + col), '\0'};
+        pathfinder_draw_centered_text(label,
+            pathfinder_cell_x(col) + PATHFINDER_RENDER_TILE / 2,
+            PATHFINDER_RENDER_BOARD_Y - 28, 20, PATHFINDER_TEXT);
+    }
+    for (int row = 0; row < PATHFINDER_ROWS; row++) {
+        DrawText(TextFormat("%i", row + 1),
+            PATHFINDER_RENDER_BOARD_X - 28,
+            pathfinder_cell_y(row) + PATHFINDER_RENDER_TILE / 2 - 10,
+            20, PATHFINDER_TEXT);
+    }
+
+    DrawRectangleLinesEx((Rectangle){
+        (float)pathfinder_cell_x(0) + 4.0f,
+        (float)pathfinder_cell_y(0) + 4.0f,
+        (float)PATHFINDER_RENDER_TILE - 9.0f,
+        (float)PATHFINDER_RENDER_TILE - 9.0f
+    }, 2.0f, PATHFINDER_START);
+    pathfinder_draw_centered_text("A1", pathfinder_cell_x(0) + PATHFINDER_RENDER_TILE / 2,
+        pathfinder_cell_y(0) + PATHFINDER_RENDER_TILE - 24, 16, PATHFINDER_MUTED);
+
+    for (int row = 0; row < PATHFINDER_ROWS; row++) {
+        for (int edge_col = 0; edge_col <= PATHFINDER_COLS; edge_col++) {
+            int wall = pathfinder_v_wall(row, edge_col);
+            float x = (float)(PATHFINDER_RENDER_BOARD_X + edge_col * PATHFINDER_RENDER_TILE);
+            float y0 = (float)(pathfinder_cell_y(row) + 7);
+            float y1 = (float)(pathfinder_cell_y(row + 1) - 7);
+            pathfinder_draw_edge(env, wall, (Vector2){x, y0}, (Vector2){x, y1});
+        }
+    }
+    for (int edge_row = 0; edge_row <= PATHFINDER_ROWS; edge_row++) {
+        for (int col = 0; col < PATHFINDER_COLS; col++) {
+            int wall = pathfinder_h_wall(edge_row, col);
+            float x0 = (float)(pathfinder_cell_x(col) + 7);
+            float x1 = (float)(pathfinder_cell_x(col + 1) - 7);
+            float y = (float)(PATHFINDER_RENDER_BOARD_Y + edge_row * PATHFINDER_RENDER_TILE);
+            pathfinder_draw_edge(env, wall, (Vector2){x0, y}, (Vector2){x1, y});
+        }
+    }
+
+    if (env->client->show_truth) {
+        Vector2 goal = pathfinder_cell_center(s->goal_row, s->goal_col);
+        DrawCircleV(goal, 19.0f, PATHFINDER_GOAL);
+        pathfinder_draw_centered_text("T", (int)goal.x, (int)goal.y - 10, 22, PATHFINDER_BG);
+    }
+
+    Vector2 agent = pathfinder_cell_center(s->agent_row, s->agent_col);
+    DrawCircleV(agent, 21.0f, PATHFINDER_AGENT);
+    DrawCircleLines((int)agent.x, (int)agent.y, 22.0f, PATHFINDER_TEXT);
+    pathfinder_draw_centered_text("P", (int)agent.x, (int)agent.y - 11, 24, PATHFINDER_BG);
+}
+
+static void pathfinder_draw_panel(Pathfinder* env) {
+    State* s = &env->state;
+    int x = PATHFINDER_RENDER_BOARD_X + PATHFINDER_RENDER_BOARD_SIZE + 34;
+    int y = PATHFINDER_RENDER_BOARD_Y;
+    int action = env->actions == NULL ? -1 : (int)env->actions[0];
+    float reward = env->rewards == NULL ? 0.0f : env->rewards[0];
+    float terminal = env->terminals == NULL ? 0.0f : env->terminals[0];
+    int unknown = PATHFINDER_NUM_WALLS - s->known_wall_count - s->known_open_count;
+
+    DrawText("Pathfinder", x, y, 28, PATHFINDER_TEXT);
+    y += 38;
+    DrawText(env->client->show_truth ? "View: truth + observation" : "View: observation only",
+        x, y, 18, env->client->show_truth ? PATHFINDER_GOAL : PATHFINDER_KNOWN_OPEN);
+    y += 34;
+
+    DrawText(TextFormat("Position: %c%i", 'A' + s->agent_col, s->agent_row + 1),
+        x, y, 20, PATHFINDER_TEXT);
+    y += 26;
+    if (env->client->show_truth) {
+        DrawText(TextFormat("Target: %c%i", 'A' + s->goal_col, s->goal_row + 1),
+            x, y, 20, PATHFINDER_GOAL);
+    } else {
+        DrawText("Target: hidden", x, y, 20, PATHFINDER_MUTED);
+    }
+    y += 34;
+
+    DrawText(TextFormat("Tick: %i / %i", s->tick, env->max_steps), x, y, 18, PATHFINDER_TEXT);
+    y += 24;
+    DrawText(TextFormat("Action: %s", pathfinder_action_name(action)), x, y, 18, PATHFINDER_TEXT);
+    y += 24;
+    DrawText(TextFormat("Reward: %.3f", reward), x, y, 18,
+        reward >= 0.0f ? PATHFINDER_KNOWN_OPEN : PATHFINDER_KNOWN_WALL);
+    y += 24;
+    DrawText(TextFormat("Return: %.3f", s->episode_return), x, y, 18, PATHFINDER_TEXT);
+    y += 24;
+    DrawText(TextFormat("Terminal: %.0f", terminal), x, y, 18, PATHFINDER_TEXT);
+    y += 34;
+
+    DrawText(TextFormat("Known walls: %i", s->known_wall_count), x, y, 18, PATHFINDER_KNOWN_WALL);
+    y += 24;
+    DrawText(TextFormat("Known open: %i", s->known_open_count), x, y, 18, PATHFINDER_KNOWN_OPEN);
+    y += 24;
+    DrawText(TextFormat("Unknown edges: %i", unknown), x, y, 18, PATHFINDER_MUTED);
+    y += 34;
+
+    DrawText(TextFormat("Wall hits: %i", s->wall_hits), x, y, 18, PATHFINDER_TEXT);
+    y += 24;
+    DrawText(TextFormat("Shortest path: %i", s->shortest_path_len), x, y, 18, PATHFINDER_TEXT);
+    y += 24;
+    DrawText(TextFormat("Agent path: %i", s->agent_path_len), x, y, 18, PATHFINDER_TEXT);
+    y += 34;
+
+    DrawText(TextFormat("Episodes: %.0f", env->log.n), x, y, 18, PATHFINDER_TEXT);
+    y += 24;
+    DrawText(TextFormat("Avg success: %.3f", env->log.n > 0.0f ?
+        env->log.success / env->log.n : 0.0f), x, y, 18, PATHFINDER_TEXT);
+
+    DrawText("Arrows/WASD move  |  R reset", PATHFINDER_RENDER_BOARD_X,
+        PATHFINDER_RENDER_HEIGHT - 30, 18, PATHFINDER_MUTED);
+    DrawText("TAB view  |  SPACE random  |  ESC quit",
+        PATHFINDER_RENDER_BOARD_X + 310, PATHFINDER_RENDER_HEIGHT - 30,
+        18, PATHFINDER_MUTED);
+}
+
+void c_render(Pathfinder* env) {
+    if (!IsWindowReady()) {
+        env->client = pathfinder_make_client();
+    } else if (env->client == NULL) {
+        env->client = (PathfinderClient*)calloc(1, sizeof(PathfinderClient));
+        env->client->show_truth = true;
+    }
+
+    if (IsKeyDown(KEY_ESCAPE)) {
+        c_close(env);
+        exit(0);
+    }
+    if (IsKeyPressed(KEY_TAB)) {
+        env->client->show_truth = !env->client->show_truth;
+    }
+
+    BeginDrawing();
+    ClearBackground(PATHFINDER_BG);
+    DrawText("Milton Bradley Pathfinder", PATHFINDER_RENDER_BOARD_X, 26, 30, PATHFINDER_TEXT);
+    DrawText("Red = known wall, green = known open, gray = true hidden wall",
+        PATHFINDER_RENDER_BOARD_X, 60, 18, PATHFINDER_MUTED);
+    pathfinder_draw_board(env);
+    pathfinder_draw_panel(env);
+    EndDrawing();
+}
+#endif

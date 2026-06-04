@@ -29,6 +29,8 @@ static void test_constants(void) {
     assert(PATHFINDER_NUM_WALLS == 84);
     assert(PATHFINDER_OBS_SIZE == 86);
     assert(PATHFINDER_NUM_ACTIONS == 4);
+    assert(PATHFINDER_RENDER_WIDTH > PATHFINDER_RENDER_BOARD_X + PATHFINDER_RENDER_BOARD_SIZE);
+    assert(PATHFINDER_RENDER_HEIGHT > PATHFINDER_RENDER_BOARD_Y + PATHFINDER_RENDER_BOARD_SIZE);
 }
 
 static void test_reset_initializes_a1_and_unknown_walls(void) {
