@@ -1,6 +1,6 @@
 # Pathfinder Environment Spec
 
-Status: draft, ready for user review
+Status: implemented baseline; update as behavior changes
 
 Workspace: `/home/claude/pathfinder`
 
@@ -83,9 +83,9 @@ Boundary behavior:
 
 The generator must produce legal, solvable layouts without hand-authored maps.
 
-Episode generation:
+Puzzle generation:
 
-1. Pick a hidden pawn cell. Default: uniform over all non-`A1` cells.
+1. Pick a hidden pawn cell at the current curriculum distance from `A1`.
 2. Initialize all wall slots to blocked.
 3. Open the left entry edge for `A1`.
 4. Carve at least one orthogonal path from `A1` to the hidden pawn.
@@ -98,21 +98,34 @@ Episode generation:
 
 Default generator style:
 
-- Use a randomized depth-first or randomized Prim-style graph carver over the
-  6x6 cell graph.
-- Preserve at least one path from `A1` to the pawn.
-- Add branch density as a difficulty knob rather than trying to exactly copy
-  human barricade layouts.
+- Choose a target with Manhattan distance equal to the current curriculum
+  length.
+- Carve a randomized monotonic path from `A1` to that target.
+- Open additional random internal edges as branch/loop density knobs rather
+  than trying to exactly copy human barricade layouts.
+- Because the target distance is Manhattan distance from `A1`, random extra
+  edges cannot create a shorter path than the curriculum length.
+
+Curriculum:
+
+- `max_solution_len` is the starting curriculum distance. The default training
+  value is `4`.
+- `max_solution_len = 0` starts at the board maximum distance.
+- Each successful solve increments the next generated puzzle distance by one,
+  capped at `PATHFINDER_MAX_SOLUTION_LEN`.
+- Failed attempts do not advance curriculum.
+- Failed attempts restart the agent at `A1` on the same map and preserve
+  discovered wall/open observations, so map generation happens only after a
+  solve or external reset.
 
 Config knobs:
 
 - `branch_prob`: probability of adding false branches from the main route.
 - `loop_prob`: probability of opening extra internal edges after carving.
 - `extra_entry_prob`: probability each non-`A1` column-1 entrance is open.
-- `min_solution_len`: reject mazes with a shortest solution path below this.
-- `max_solution_len`: reject mazes with a shortest solution path above this.
-  Use a small value for early curriculum so the hidden pawn starts close to
-  `A1`; `0` disables the upper bound.
+- `min_solution_len`: reserved for future variants; the current curriculum uses
+  an exact generated distance.
+- `max_solution_len`: starting exact solution distance.
 - `max_steps`: timeout.
 - `seed`: inherited from vector env config.
 
@@ -168,17 +181,30 @@ Default reward model:
 
 - `+1.0` for reaching the hidden pawn.
 - `-0.001` per step.
+- `+0.01` for first entering a cell in the current attempt.
 - `0.0` extra penalty for hitting a newly discovered wall; the agent paid the
   step cost but gained information.
 - `-0.01` for hitting a wall that was already known.
+- `-0.05` extra penalty and terminal attempt reset for hitting a known wall.
+- `-0.01` for revisiting a square that was previously left in the current
+  attempt.
 - `-0.01` for impossible movement, such as attempting to exit through the
   left edge in v1.
-- `0.0` for a successful nonterminal move, except for the step penalty.
 
 Termination:
 
 - Success: agent reaches the hidden pawn.
 - Timeout: `tick >= max_steps`.
+- Known-wall death: agent tries to move through a wall that is already observed
+  as blocked.
+
+Reset after terminal:
+
+- Success logs the episode, advances curriculum by one move when not capped,
+  and generates a new map.
+- Timeout and known-wall death log the episode, then reset only the attempt
+  state: position returns to `A1`, tick/path/revisit counters clear, and the
+  same true map plus known wall/open observations remain.
 
 Logged metrics:
 
@@ -188,10 +214,14 @@ Logged metrics:
 - `episode_length`
 - `success`
 - `wall_hits`
+- `revisits`
+- `known_wall_deaths`
 - `known_walls`
 - `known_open_edges`
 - `shortest_path_len`
 - `agent_path_len`
+- `curriculum_level`
+- `curriculum_max_solution_len`
 - `n`
 
 ## PufferLib Integration
@@ -223,6 +253,7 @@ The env should follow current PufferLib 5 Ocean patterns:
   - `NUM_ATNS 1`
   - `ACT_SIZES {4}`
   - `OBS_TENSOR_T FloatTensor`
+  - `MY_ACTION_MASK PATHFINDER_NUM_ACTIONS`
   - `Env Pathfinder`
   - `puffer_state_refresh(Pathfinder* env)` to rebuild observations from
     restored state.
@@ -249,7 +280,10 @@ Add focused tests before training:
 - Step semantics:
   - Open edge reveals `0.0` and moves.
   - Closed edge reveals `1.0` and does not move.
-  - Repeated known wall hit keeps the same position.
+  - Repeated known wall hit terminates the attempt and retries the same map
+    with wall memory preserved.
+  - Timeout retries the same map with open/wall memory preserved.
+  - Success advances the next map by one solution step.
   - West move from column 1 through an open left edge reveals the edge but does
     not move in v1.
   - Reaching the hidden pawn sets terminal and success log.

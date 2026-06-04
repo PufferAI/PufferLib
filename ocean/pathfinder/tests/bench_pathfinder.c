@@ -234,8 +234,6 @@ int main(int argc, char** argv) {
     memset(&env.log, 0, sizeof(env.log));
     env.curriculum_level = 0;
     env.curriculum_episodes = 0;
-    env.curriculum_window_episodes = 0;
-    env.curriculum_window_successes = 0;
     bench_steps(&env, steps);
     c_close(&env);
     return 0;

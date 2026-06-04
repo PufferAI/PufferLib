@@ -177,10 +177,12 @@ it is not the best state-memory reference on this branch.
 
 - Fixed board size: 6x6.
 - Spawn: `A1`.
-- Hidden pawn: random non-`A1` cell, and generated maze must connect `A1` to
-  it.
-- Initial curriculum: `env.max_solution_len = 4` keeps early targets close to
-  `A1`; set it to `0` to disable the upper bound.
+- Hidden pawn: generated at the current curriculum distance from `A1`, and the
+  maze must connect `A1` to it.
+- Initial curriculum: `env.max_solution_len = 4` starts targets exactly 4 moves
+  from `A1`; each solve advances the next generated puzzle by 1 move, capped at
+  the board maximum. Set `max_solution_len = 0` only when you want to start at
+  the board maximum.
 - Actions: four discrete moves.
 - Observation:
   - 84 wall slots as floats:
@@ -193,6 +195,11 @@ it is not the best state-memory reference on this branch.
 - Rewards:
   - first-time wall discovery has no extra penalty beyond step cost
   - repeated known-wall hits get a small penalty
+  - repeated known-wall hits terminate the attempt
+  - first visits get a small discovery reward
+  - revisits get a small penalty
+- Failed attempts reset the agent to `A1` on the same map and keep discovered
+  wall/open knowledge. Solves generate the next map and advance curriculum.
 - First implementation should keep `train.state_buffer_size = 0` until
   deterministic state roundtrip tests exist.
 

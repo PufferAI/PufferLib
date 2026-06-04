@@ -18,8 +18,6 @@
 #define PATHFINDER_OBS_SIZE (PATHFINDER_NUM_WALLS + 2)
 #define PATHFINDER_NUM_ACTIONS 4
 #define PATHFINDER_MAX_SOLUTION_LEN ((PATHFINDER_ROWS - 1) + (PATHFINDER_COLS - 1))
-#define PATHFINDER_CURRICULUM_WINDOW 32
-#define PATHFINDER_CURRICULUM_SUCCESS_THRESHOLD 24
 
 #define PATHFINDER_RENDER_TILE 72
 #define PATHFINDER_RENDER_MARGIN 40
@@ -112,8 +110,6 @@ typedef struct Pathfinder {
     int max_steps;
     int curriculum_level;
     int curriculum_episodes;
-    int curriculum_window_episodes;
-    int curriculum_window_successes;
     State state;
 } Pathfinder;
 
@@ -137,14 +133,7 @@ static inline int pathfinder_curriculum_max_solution_len(const Pathfinder* env) 
 
 static inline int pathfinder_curriculum_min_solution_len(const Pathfinder* env) {
     int max_len = pathfinder_curriculum_max_solution_len(env);
-    int min_len = env->min_solution_len < 1 ? 1 : env->min_solution_len;
-    if (max_len >= 4) {
-        int staged_min = max_len - 2;
-        if (staged_min > min_len) {
-            min_len = staged_min;
-        }
-    }
-    return pathfinder_clamp_int(min_len, 1, max_len);
+    return pathfinder_clamp_int(max_len, 1, PATHFINDER_MAX_SOLUTION_LEN);
 }
 
 static inline int pathfinder_v_wall(int row, int edge_col) {
@@ -434,21 +423,9 @@ static void pathfinder_generate_maze(Pathfinder* env) {
 
 static void pathfinder_update_curriculum(Pathfinder* env, int success) {
     env->curriculum_episodes++;
-    env->curriculum_window_episodes++;
-    if (success) {
-        env->curriculum_window_successes++;
-    }
-
-    if (env->curriculum_window_episodes < PATHFINDER_CURRICULUM_WINDOW) {
-        return;
-    }
-
-    if (env->curriculum_window_successes >= PATHFINDER_CURRICULUM_SUCCESS_THRESHOLD &&
-            pathfinder_curriculum_max_solution_len(env) < PATHFINDER_MAX_SOLUTION_LEN) {
+    if (success && pathfinder_curriculum_max_solution_len(env) < PATHFINDER_MAX_SOLUTION_LEN) {
         env->curriculum_level++;
     }
-    env->curriculum_window_episodes = 0;
-    env->curriculum_window_successes = 0;
 }
 
 void add_log(Pathfinder* env) {
@@ -509,6 +486,23 @@ void c_reset(Pathfinder* env) {
     s->agent_row = 0;
     s->agent_col = 0;
     pathfinder_generate_maze(env);
+    pathfinder_mark_visited(s, s->agent_row, s->agent_col);
+    pathfinder_update_observations(env);
+}
+
+static void pathfinder_reset_attempt(Pathfinder* env) {
+    State* s = &env->state;
+    s->tick = 0;
+    s->agent_row = 0;
+    s->agent_col = 0;
+    s->agent_path_len = 0;
+    s->wall_hits = 0;
+    s->revisit_count = 0;
+    s->known_wall_death = 0;
+    s->visited_count = 0;
+    s->success = 0;
+    s->episode_return = 0.0f;
+    memset(s->visited, 0, sizeof(s->visited));
     pathfinder_mark_visited(s, s->agent_row, s->agent_col);
     pathfinder_update_observations(env);
 }
@@ -585,8 +579,13 @@ void c_step(Pathfinder* env) {
     pathfinder_update_observations(env);
 
     if (env->terminals[0]) {
+        int solved = s->success;
         add_log(env);
-        c_reset(env);
+        if (solved) {
+            c_reset(env);
+        } else {
+            pathfinder_reset_attempt(env);
+        }
     }
 }
 

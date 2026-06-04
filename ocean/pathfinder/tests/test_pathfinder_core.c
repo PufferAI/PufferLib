@@ -143,6 +143,48 @@ static void test_action_mask_blocks_known_wall_but_forced_hit_still_dies(void) {
     assert(env.log.known_wall_deaths == 1.0f);
 }
 
+static void test_known_wall_death_restarts_same_map_with_wall_memory(void) {
+    Pathfinder env;
+    float obs[PATHFINDER_OBS_SIZE];
+    float actions[1] = {0};
+    float rewards[1] = {0};
+    float terminals[1] = {0};
+    unsigned char action_mask[PATHFINDER_NUM_ACTIONS] = {0};
+    unsigned char true_walls[PATHFINDER_NUM_WALLS];
+    setup_env(&env, obs, actions, rewards, terminals);
+    env.action_mask = action_mask;
+    setup_manual_state(&env, 5, 5);
+    refresh_state(&env);
+
+    int east_wall = pathfinder_wall_between(0, 0, 0, 1);
+    memcpy(true_walls, env.state.true_walls, sizeof(true_walls));
+
+    actions[0] = PATHFINDER_ACT_EAST;
+    c_step(&env);
+
+    assert(terminals[0] == 0.0f);
+    assert(fabsf(obs[east_wall] - PATHFINDER_WALL) < 1e-6f);
+    assert(action_mask[PATHFINDER_ACT_EAST] == 0);
+
+    c_step(&env);
+
+    assert(terminals[0] == 1.0f);
+    assert(env.log.n == 1.0f);
+    assert(env.log.success == 0.0f);
+    assert(env.log.known_wall_deaths == 1.0f);
+    assert(env.state.tick == 0);
+    assert(env.state.agent_row == 0);
+    assert(env.state.agent_col == 0);
+    assert(env.state.goal_row == 5);
+    assert(env.state.goal_col == 5);
+    assert(env.state.visited_count == 1);
+    assert(env.state.visited[0][0] == 1);
+    assert(memcmp(env.state.true_walls, true_walls, sizeof(true_walls)) == 0);
+    assert(fabsf(env.state.known_walls[east_wall] - PATHFINDER_WALL) < 1e-6f);
+    assert(fabsf(obs[east_wall] - PATHFINDER_WALL) < 1e-6f);
+    assert(action_mask[PATHFINDER_ACT_EAST] == 0);
+}
+
 static void test_position_observation_updates_after_move(void) {
     Pathfinder env;
     float obs[PATHFINDER_OBS_SIZE];
@@ -368,12 +410,11 @@ static void test_max_solution_len_limits_curriculum_distance(void) {
     for (int i = 0; i < 100; i++) {
         c_reset(&env);
         assert(pathfinder_has_path_to_goal(&env.state));
-        assert(env.state.shortest_path_len >= 1);
-        assert(env.state.shortest_path_len <= 2);
+        assert(env.state.shortest_path_len == 2);
     }
 }
 
-static void test_curriculum_graduates_to_longer_mazes(void) {
+static void test_success_generates_next_map_one_step_farther(void) {
     Pathfinder env;
     float obs[PATHFINDER_OBS_SIZE];
     float actions[1] = {0};
@@ -382,53 +423,46 @@ static void test_curriculum_graduates_to_longer_mazes(void) {
     setup_env(&env, obs, actions, rewards, terminals);
     env.branch_prob = 0.0f;
     env.loop_prob = 0.0f;
-    env.max_solution_len = 4;
-    c_reset(&env);
+    env.max_solution_len = 1;
+    setup_manual_state(&env, 0, 1);
+    open_manual_edge(&env, 0, 0, 0, 1);
 
-    assert(pathfinder_curriculum_max_solution_len(&env) == 4);
-    for (int i = 0; i < PATHFINDER_CURRICULUM_WINDOW; i++) {
-        env.state.success = 1;
-        env.state.tick = 1;
-        env.state.shortest_path_len = 1;
-        env.state.agent_path_len = 1;
-        add_log(&env);
-    }
-    assert(pathfinder_curriculum_max_solution_len(&env) == 5);
+    actions[0] = PATHFINDER_ACT_EAST;
+    c_step(&env);
 
-    bool saw_longer_than_four = false;
-    for (int i = 0; i < 100; i++) {
-        c_reset(&env);
-        assert(env.state.shortest_path_len >= 3);
-        assert(env.state.shortest_path_len <= 5);
-        if (env.state.shortest_path_len > 4) {
-            saw_longer_than_four = true;
-        }
+    assert(terminals[0] == 1.0f);
+    assert(env.log.success == 1.0f);
+    assert(pathfinder_curriculum_max_solution_len(&env) == 2);
+    assert(env.state.agent_row == 0);
+    assert(env.state.agent_col == 0);
+    assert(env.state.shortest_path_len == 2);
+    assert(env.state.goal_row + env.state.goal_col == 2);
+    for (int i = 0; i < PATHFINDER_NUM_WALLS; i++) {
+        assert(fabsf(env.state.known_walls[i] - PATHFINDER_UNKNOWN) < 1e-6f);
     }
-    assert(saw_longer_than_four);
 }
 
-static void test_curriculum_does_not_graduate_below_success_threshold(void) {
+static void test_failure_retry_does_not_graduate_curriculum(void) {
     Pathfinder env;
     float obs[PATHFINDER_OBS_SIZE];
     float actions[1] = {0};
     float rewards[1] = {0};
     float terminals[1] = {0};
+    unsigned char true_walls[PATHFINDER_NUM_WALLS];
     setup_env(&env, obs, actions, rewards, terminals);
     env.max_solution_len = 4;
-    c_reset(&env);
+    setup_manual_state(&env, 5, 5);
+    refresh_state(&env);
+    memcpy(true_walls, env.state.true_walls, sizeof(true_walls));
 
-    for (int i = 0; i < PATHFINDER_CURRICULUM_WINDOW; i++) {
-        env.state.success = i < PATHFINDER_CURRICULUM_SUCCESS_THRESHOLD - 1;
-        env.state.tick = 1;
-        env.state.shortest_path_len = 1;
-        env.state.agent_path_len = 1;
-        add_log(&env);
-    }
+    actions[0] = PATHFINDER_ACT_EAST;
+    c_step(&env);
+    c_step(&env);
 
+    assert(terminals[0] == 1.0f);
     assert(env.curriculum_level == 0);
     assert(pathfinder_curriculum_max_solution_len(&env) == 4);
-    assert(env.curriculum_window_episodes == 0);
-    assert(env.curriculum_window_successes == 0);
+    assert(memcmp(env.state.true_walls, true_walls, sizeof(true_walls)) == 0);
 }
 
 static void test_curriculum_caps_at_board_max(void) {
@@ -442,7 +476,7 @@ static void test_curriculum_caps_at_board_max(void) {
     env.curriculum_level = PATHFINDER_MAX_SOLUTION_LEN;
 
     assert(pathfinder_curriculum_max_solution_len(&env) == PATHFINDER_MAX_SOLUTION_LEN);
-    assert(pathfinder_curriculum_min_solution_len(&env) == PATHFINDER_MAX_SOLUTION_LEN - 2);
+    assert(pathfinder_curriculum_min_solution_len(&env) == PATHFINDER_MAX_SOLUTION_LEN);
 }
 
 static void test_generation_can_reach_board_max_distance(void) {
@@ -456,28 +490,27 @@ static void test_generation_can_reach_board_max_distance(void) {
     env.loop_prob = 0.0f;
     env.max_solution_len = PATHFINDER_MAX_SOLUTION_LEN;
 
-    bool saw_max = false;
     for (int i = 0; i < 200; i++) {
         c_reset(&env);
-        assert(env.state.shortest_path_len >= PATHFINDER_MAX_SOLUTION_LEN - 2);
-        assert(env.state.shortest_path_len <= PATHFINDER_MAX_SOLUTION_LEN);
-        if (env.state.shortest_path_len == PATHFINDER_MAX_SOLUTION_LEN) {
-            saw_max = true;
-        }
+        assert(env.state.shortest_path_len == PATHFINDER_MAX_SOLUTION_LEN);
     }
-    assert(saw_max);
 }
 
-static void test_max_steps_terminates_and_logs_failure(void) {
+static void test_timeout_restarts_same_map_preserving_known_open_edges(void) {
     Pathfinder env;
     float obs[PATHFINDER_OBS_SIZE];
     float actions[1] = {0};
     float rewards[1] = {0};
     float terminals[1] = {0};
+    unsigned char action_mask[PATHFINDER_NUM_ACTIONS] = {0};
+    unsigned char true_walls[PATHFINDER_NUM_WALLS];
     setup_env(&env, obs, actions, rewards, terminals);
+    env.action_mask = action_mask;
     env.max_steps = 1;
     setup_manual_state(&env, 5, 5);
     open_manual_edge(&env, 0, 0, 0, 1);
+    int east_wall = pathfinder_wall_between(0, 0, 0, 1);
+    memcpy(true_walls, env.state.true_walls, sizeof(true_walls));
 
     actions[0] = PATHFINDER_ACT_EAST;
     c_step(&env);
@@ -488,6 +521,18 @@ static void test_max_steps_terminates_and_logs_failure(void) {
     assert(env.log.n == 1.0f);
     assert(env.log.success == 0.0f);
     assert(env.log.episode_length == 1.0f);
+    assert(env.state.tick == 0);
+    assert(env.state.agent_row == 0);
+    assert(env.state.agent_col == 0);
+    assert(env.state.goal_row == 5);
+    assert(env.state.goal_col == 5);
+    assert(env.state.visited_count == 1);
+    assert(env.state.visited[0][0] == 1);
+    assert(env.state.visited[0][1] == 0);
+    assert(memcmp(env.state.true_walls, true_walls, sizeof(true_walls)) == 0);
+    assert(fabsf(env.state.known_walls[east_wall] - PATHFINDER_OPEN) < 1e-6f);
+    assert(fabsf(obs[east_wall] - PATHFINDER_OPEN) < 1e-6f);
+    assert(action_mask[PATHFINDER_ACT_EAST] == 1);
 }
 
 static void test_reaching_goal_terminates(void) {
@@ -517,6 +562,7 @@ int main(void) {
     test_reset_initializes_a1_and_unknown_walls();
     test_action_mask_allows_unknown_edges_on_reset();
     test_action_mask_blocks_known_wall_but_forced_hit_still_dies();
+    test_known_wall_death_restarts_same_map_with_wall_memory();
     test_position_observation_updates_after_move();
     test_generated_mazes_connect_a1_to_goal();
     test_generated_shortest_path_matches_goal_distance();
@@ -528,11 +574,11 @@ int main(void) {
     test_revisiting_previously_left_square_has_penalty();
     test_known_open_edge_to_new_square_has_no_extra_penalty();
     test_max_solution_len_limits_curriculum_distance();
-    test_curriculum_graduates_to_longer_mazes();
-    test_curriculum_does_not_graduate_below_success_threshold();
+    test_success_generates_next_map_one_step_farther();
+    test_failure_retry_does_not_graduate_curriculum();
     test_curriculum_caps_at_board_max();
     test_generation_can_reach_board_max_distance();
-    test_max_steps_terminates_and_logs_failure();
+    test_timeout_restarts_same_map_preserving_known_open_edges();
     test_reaching_goal_terminates();
     printf("pathfinder core tests passed\n");
     return 0;
