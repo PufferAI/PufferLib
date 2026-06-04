@@ -3,6 +3,7 @@
 #define NUM_ATNS 1
 #define ACT_SIZES {4}
 #define OBS_TENSOR_T FloatTensor
+#define MY_ACTION_MASK PATHFINDER_NUM_ACTIONS
 
 #define Env Pathfinder
 static inline void puffer_state_refresh(Pathfinder* env) { refresh_state(env); }

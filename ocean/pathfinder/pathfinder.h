@@ -45,6 +45,8 @@
 #define PATHFINDER_STEP_PENALTY -0.001f
 #define PATHFINDER_NEW_WALL_PENALTY 0.0f
 #define PATHFINDER_KNOWN_WALL_PENALTY -0.01f
+#define PATHFINDER_KNOWN_WALL_DEATH_PENALTY -0.05f
+#define PATHFINDER_NEW_CELL_REWARD 0.01f
 #define PATHFINDER_REVISIT_PENALTY -0.01f
 #define PATHFINDER_IMPOSSIBLE_PENALTY -0.01f
 #define PATHFINDER_GOAL_REWARD 1.0f
@@ -99,6 +101,7 @@ typedef struct Pathfinder {
     float* actions;
     float* rewards;
     float* terminals;
+    unsigned char* action_mask;
     int num_agents;
     unsigned int rng;
     float branch_prob;
@@ -163,6 +166,24 @@ static inline unsigned int pathfinder_rand(Pathfinder* env) {
 
 static inline float pathfinder_rand_float(Pathfinder* env) {
     return (float)(pathfinder_rand(env) >> 8) / 16777216.0f;
+}
+
+static inline bool pathfinder_rand_chance_u8(Pathfinder* env, int threshold,
+        unsigned int* samples, int* remaining) {
+    if (threshold <= 0) {
+        return false;
+    }
+    if (threshold >= 256) {
+        return true;
+    }
+    if (*remaining == 0) {
+        *samples = pathfinder_rand(env);
+        *remaining = 4;
+    }
+    unsigned int sample = *samples & 0xffu;
+    *samples >>= 8;
+    *remaining -= 1;
+    return (int)sample < threshold;
 }
 
 static inline int pathfinder_wall_between(int row, int col, int next_row, int next_col) {
@@ -267,8 +288,27 @@ static void pathfinder_recount_known(State* s) {
     }
 }
 
+static void pathfinder_update_action_mask(Pathfinder* env) {
+    if (env->action_mask == NULL) {
+        return;
+    }
+
+    for (int action = 0; action < PATHFINDER_NUM_ACTIONS; action++) {
+        int d_row;
+        int d_col;
+        pathfinder_action_delta(action, &d_row, &d_col);
+        int next_row = env->state.agent_row + d_row;
+        int next_col = env->state.agent_col + d_col;
+        int wall = pathfinder_wall_between(
+            env->state.agent_row, env->state.agent_col, next_row, next_col);
+        env->action_mask[action] =
+            (wall >= 0 && env->state.known_walls[wall] == PATHFINDER_WALL) ? 0 : 1;
+    }
+}
+
 static void pathfinder_update_observations(Pathfinder* env) {
     pathfinder_recount_known(&env->state);
+    pathfinder_update_action_mask(env);
     if (env->observations == NULL) {
         return;
     }
@@ -324,23 +364,27 @@ static void pathfinder_open_random_edges(Pathfinder* env) {
     float open_prob = env->branch_prob + env->loop_prob;
     if (open_prob < 0.0f) open_prob = 0.0f;
     if (open_prob > 0.95f) open_prob = 0.95f;
+    int open_threshold = (int)(open_prob * 256.0f);
+    int entry_threshold = (int)(env->extra_entry_prob * 256.0f);
+    unsigned int samples = 0;
+    int remaining = 0;
 
     for (int row = 0; row < PATHFINDER_ROWS; row++) {
         for (int col = 0; col < PATHFINDER_COLS - 1; col++) {
-            if (pathfinder_rand_float(env) < open_prob) {
-                pathfinder_open_edge(s, row, col, row, col + 1);
+            if (pathfinder_rand_chance_u8(env, open_threshold, &samples, &remaining)) {
+                s->true_walls[pathfinder_v_wall(row, col + 1)] = 0;
             }
         }
     }
     for (int row = 0; row < PATHFINDER_ROWS - 1; row++) {
         for (int col = 0; col < PATHFINDER_COLS; col++) {
-            if (pathfinder_rand_float(env) < open_prob) {
-                pathfinder_open_edge(s, row, col, row + 1, col);
+            if (pathfinder_rand_chance_u8(env, open_threshold, &samples, &remaining)) {
+                s->true_walls[pathfinder_h_wall(row + 1, col)] = 0;
             }
         }
     }
     for (int row = 1; row < PATHFINDER_ROWS; row++) {
-        if (pathfinder_rand_float(env) < env->extra_entry_prob) {
+        if (pathfinder_rand_chance_u8(env, entry_threshold, &samples, &remaining)) {
             s->true_walls[pathfinder_v_wall(row, 0)] = 0;
         }
     }
@@ -374,50 +418,18 @@ static void pathfinder_choose_goal_at_distance(Pathfinder* env, int distance) {
     s->goal_col = cell % PATHFINDER_COLS;
 }
 
-static void pathfinder_build_fallback_path(State* s, int solution_len) {
-    pathfinder_init_walls(s);
-    solution_len = pathfinder_clamp_int(solution_len, 1, PATHFINDER_MAX_SOLUTION_LEN);
-
-    int row = 0;
-    int col = 0;
-    int remaining = solution_len;
-    while (remaining > 0 && col < PATHFINDER_COLS - 1) {
-        pathfinder_open_edge(s, row, col, row, col + 1);
-        col++;
-        remaining--;
-    }
-    while (remaining > 0 && row < PATHFINDER_ROWS - 1) {
-        pathfinder_open_edge(s, row, col, row + 1, col);
-        row++;
-        remaining--;
-    }
-
-    s->goal_row = row;
-    s->goal_col = col;
-    s->shortest_path_len = pathfinder_shortest_path(s);
-}
-
 static void pathfinder_generate_maze(Pathfinder* env) {
     State* s = &env->state;
     int min_solution_len = pathfinder_curriculum_min_solution_len(env);
     int max_solution_len = pathfinder_curriculum_max_solution_len(env);
+    int span = max_solution_len - min_solution_len + 1;
+    int target_len = min_solution_len + (int)(pathfinder_rand(env) % (unsigned int)span);
 
-    for (int attempt = 0; attempt < 128; attempt++) {
-        pathfinder_init_walls(s);
-
-        int span = max_solution_len - min_solution_len + 1;
-        int target_len = min_solution_len + (int)(pathfinder_rand(env) % (unsigned int)span);
-        pathfinder_choose_goal_at_distance(env, target_len);
-
-        pathfinder_carve_solution(env);
-        pathfinder_open_random_edges(env);
-        s->shortest_path_len = pathfinder_shortest_path(s);
-        if (s->shortest_path_len >= min_solution_len && s->shortest_path_len <= max_solution_len) {
-            return;
-        }
-    }
-
-    pathfinder_build_fallback_path(s, max_solution_len);
+    pathfinder_init_walls(s);
+    pathfinder_choose_goal_at_distance(env, target_len);
+    pathfinder_carve_solution(env);
+    pathfinder_open_random_edges(env);
+    s->shortest_path_len = s->goal_row + s->goal_col;
 }
 
 static void pathfinder_update_curriculum(Pathfinder* env, int success) {
@@ -537,6 +549,7 @@ void c_step(Pathfinder* env) {
                 s->wall_hits++;
                 reward += was_known ? PATHFINDER_KNOWN_WALL_PENALTY : PATHFINDER_NEW_WALL_PENALTY;
                 if (was_known) {
+                    reward += PATHFINDER_KNOWN_WALL_DEATH_PENALTY;
                     s->known_wall_death = 1;
                     env->terminals[0] = 1.0f;
                 }
@@ -552,6 +565,7 @@ void c_step(Pathfinder* env) {
                     reward += PATHFINDER_REVISIT_PENALTY;
                 } else {
                     pathfinder_mark_visited(s, next_row, next_col);
+                    reward += PATHFINDER_NEW_CELL_REWARD;
                 }
                 if (s->agent_row == s->goal_row && s->agent_col == s->goal_col) {
                     s->success = 1;
