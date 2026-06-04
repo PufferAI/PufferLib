@@ -252,6 +252,22 @@ for lib_flag in "$CUDNN_LFLAG" "$NCCL_LFLAG"; do
     fi
 done
 
+resolve_lib_arg() {
+    local lib_flag=$1 lib_name=$2
+    local default_arg="-l$lib_name"
+    [[ "$lib_flag" == -L* ]] || { echo "$default_arg"; return; }
+    local lib_dir="${lib_flag#-L}"
+    [ -f "$lib_dir/lib$lib_name.so" ] && { echo "$default_arg"; return; }
+    local candidate
+    for candidate in "$lib_dir/lib$lib_name.so".*; do
+        [ -f "$candidate" ] && { echo "$candidate"; return; }
+    done
+    echo "$default_arg"
+}
+
+CUDNN_LIB_ARG="$(resolve_lib_arg "$CUDNN_LFLAG" cudnn)"
+NCCL_LIB_ARG="$(resolve_lib_arg "$NCCL_LFLAG" nccl)"
+
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
 export CCACHE_BASEDIR="$(pwd)"
 export CCACHE_COMPILERCHECK=content
@@ -312,7 +328,7 @@ if [ -z "$MODE" ]; then
         build/bindings.o "$RAYLIB_A"
         -L$CUDA_HOME/lib64 $CUDNN_LFLAG $NCCL_LFLAG
         "${WHEEL_RPATH_FLAGS[@]}"
-        -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
+        -lcudart "$NCCL_LIB_ARG" -lnvidia-ml -lcublas -lcusolver -lcurand "$CUDNN_LIB_ARG"
         $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
         -o "$OUTPUT"
@@ -355,7 +371,7 @@ elif [ "$MODE" = "profile" ]; then
         -Xcompiler=-fopenmp \
         tests/profile_kernels.cu vendor/ini.c \
         "$RAYLIB_A" \
-        -lnccl -lnvidia-ml -lcublas -lcurand -lcudnn \
+        "$NCCL_LIB_ARG" -lnvidia-ml -lcublas -lcurand "$CUDNN_LIB_ARG" \
         -lGL -lm -lpthread $OMP_LIB \
         -o profile
     echo "Built: ./profile"
