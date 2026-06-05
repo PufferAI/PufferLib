@@ -53,8 +53,6 @@ typedef struct Log {
     float revisits;
     float known_wall_deaths;
     float repeat_move_deaths;
-    float known_walls;
-    float known_open_edges;
     float shortest_path_len;
     float agent_path_len;
     float curriculum_level;
@@ -78,8 +76,6 @@ typedef struct State {
     int known_wall_death;
     int repeat_move_death;
     int visited_count;
-    int known_wall_count;
-    int known_open_count;
     int success;
     float episode_return;
     unsigned char visited[PATHFINDER_ROWS][PATHFINDER_COLS];
@@ -118,51 +114,18 @@ typedef struct Pathfinder {
     float goal_reward;
     int min_solution_len;
     int max_solution_len;
+    int curriculum_min_solution_len;
     int max_steps;
     int curriculum_level;
     int curriculum_episodes;
     State state;
 } Pathfinder;
 
-static inline int pathfinder_clamp_int(int value, int min_value, int max_value) {
-    if (value < min_value) return min_value;
-    if (value > max_value) return max_value;
-    return value;
-}
-
-static inline int curriculum_base_solution_len(const Pathfinder* env) {
-    if (env->max_solution_len <= 0) {
-        return PATHFINDER_MAX_SOLUTION_LEN;
-    }
-    return pathfinder_clamp_int(env->max_solution_len, 1, PATHFINDER_MAX_SOLUTION_LEN);
-}
-
-static inline int curriculum_max_solution_len(const Pathfinder* env) {
-    int max_len = curriculum_base_solution_len(env) + env->curriculum_level;
-    return pathfinder_clamp_int(max_len, 1, PATHFINDER_MAX_SOLUTION_LEN);
-}
-
-static inline int curriculum_min_solution_len(const Pathfinder* env) {
-    int base_max_solution_len = curriculum_base_solution_len(env);
-    int base_min_solution_len = pathfinder_clamp_int(
-        env->min_solution_len <= 0 ? 1 : env->min_solution_len,
-        1,
-        base_max_solution_len
-    );
-    int max_solution_len = pathfinder_clamp_int(
-        base_max_solution_len + env->curriculum_level,
-        1,
-        PATHFINDER_MAX_SOLUTION_LEN
-    );
-    int min_solution_len = base_min_solution_len + env->curriculum_level;
-    return pathfinder_clamp_int(min_solution_len, 1, max_solution_len);
-}
-
-static inline int v_wall(int row, int edge_col) {
+static inline int v_wall_idx(int row, int edge_col) {
     return row * (PATHFINDER_COLS + 1) + edge_col;
 }
 
-static inline int h_wall(int edge_row, int col) {
+static inline int h_wall_idx(int edge_row, int col) {
     return PATHFINDER_VERTICAL_WALLS + edge_row * PATHFINDER_COLS + col;
 }
 
@@ -197,31 +160,31 @@ static inline bool rand_chance_u8(Pathfinder* env, int threshold,
     return (int)sample < threshold;
 }
 
-static inline int wall_between(int row, int col, int next_row, int next_col) {
+static inline int wall_idx_between(int row, int col, int next_row, int next_col) {
     if (next_row == row && next_col == col + 1) {
-        return v_wall(row, col + 1);
+        return v_wall_idx(row, col + 1);
     }
     if (next_row == row && next_col == col - 1) {
-        return v_wall(row, col);
+        return v_wall_idx(row, col);
     }
     if (next_col == col && next_row == row + 1) {
-        return h_wall(row + 1, col);
+        return h_wall_idx(row + 1, col);
     }
     if (next_col == col && next_row == row - 1) {
-        return h_wall(row, col);
+        return h_wall_idx(row, col);
     }
     return -1;
 }
 
 static inline void open_edge(State* s, int row, int col, int next_row, int next_col) {
-    int wall = wall_between(row, col, next_row, next_col);
-    if (wall >= 0) {
-        s->true_walls[wall] = 0;
+    int wall_idx = wall_idx_between(row, col, next_row, next_col);
+    if (wall_idx >= 0) {
+        s->true_walls[wall_idx] = 0;
     }
 }
 
 static inline void mark_visited(State* s, int row, int col) {
-    if (!in_bounds(row, col) || s->visited[row][col]) {
+    if (s->visited[row][col]) {
         return;
     }
     s->visited[row][col] = 1;
@@ -232,12 +195,6 @@ static inline void reset_move_history(State* s) {
     s->recent_rows[0] = (unsigned char)s->agent_row;
     s->recent_cols[0] = (unsigned char)s->agent_col;
     s->recent_count = 1;
-}
-
-static inline void ensure_move_history(State* s) {
-    if (s->recent_count <= 0) {
-        reset_move_history(s);
-    }
 }
 
 static inline bool repeats_two_cell_cycle(
@@ -305,8 +262,8 @@ static int shortest_path(const State* s) {
             if (!in_bounds(nr, nc)) {
                 continue;
             }
-            int wall = wall_between(row, col, nr, nc);
-            if (wall < 0 || s->true_walls[wall]) {
+            int wall_idx = wall_idx_between(row, col, nr, nc);
+            if (wall_idx < 0 || s->true_walls[wall_idx]) {
                 continue;
             }
             if (dist[nr][nc] >= 0) {
@@ -320,22 +277,6 @@ static int shortest_path(const State* s) {
     return -1;
 }
 
-static inline bool has_path_to_goal(const State* s) {
-    return shortest_path(s) >= 0;
-}
-
-static void recount_known(State* s) {
-    s->known_wall_count = 0;
-    s->known_open_count = 0;
-    for (int i = 0; i < PATHFINDER_NUM_WALLS; i++) {
-        if (s->known_walls[i] == PATHFINDER_WALL) {
-            s->known_wall_count++;
-        } else if (s->known_walls[i] == PATHFINDER_OPEN) {
-            s->known_open_count++;
-        }
-    }
-}
-
 static void update_action_mask(Pathfinder* env) {
     if (env->action_mask == NULL) {
         return;
@@ -347,15 +288,14 @@ static void update_action_mask(Pathfinder* env) {
         action_delta(action, &d_row, &d_col);
         int next_row = env->state.agent_row + d_row;
         int next_col = env->state.agent_col + d_col;
-        int wall = wall_between(
+        int wall_idx = wall_idx_between(
             env->state.agent_row, env->state.agent_col, next_row, next_col);
         env->action_mask[action] =
-            (wall >= 0 && env->state.known_walls[wall] == PATHFINDER_WALL) ? 0 : 1;
+            (wall_idx >= 0 && env->state.known_walls[wall_idx] == PATHFINDER_WALL) ? 0 : 1;
     }
 }
 
 static void update_observations(Pathfinder* env) {
-    recount_known(&env->state);
     update_action_mask(env);
     if (env->observations == NULL) {
         return;
@@ -369,66 +309,27 @@ static void update_observations(Pathfinder* env) {
         (float)env->state.agent_row / (float)(PATHFINDER_ROWS - 1);
 }
 
-static void reset_known(State* s) {
-    for (int i = 0; i < PATHFINDER_NUM_WALLS; i++) {
-        s->known_walls[i] = PATHFINDER_UNKNOWN;
-    }
-    s->known_wall_count = 0;
-    s->known_open_count = 0;
+static inline int configured_base_max_solution_len(const Pathfinder* env) {
+    return env->max_solution_len > 0 ? env->max_solution_len : PATHFINDER_MAX_SOLUTION_LEN;
+}
+
+static inline bool curriculum_can_advance(const Pathfinder* env) {
+    // The environment advances by one each successful solve until the target
+    // distance cap is fully shifted to the board max.
+    return env->curriculum_level + configured_base_max_solution_len(env) <
+        PATHFINDER_MAX_SOLUTION_LEN;
 }
 
 static void init_walls(State* s) {
     memset(s->true_walls, 1, sizeof(s->true_walls));
-    reset_known(s);
-    s->true_walls[v_wall(0, 0)] = 0;
+    for (int i = 0; i < PATHFINDER_NUM_WALLS; i++) {
+        s->known_walls[i] = PATHFINDER_UNKNOWN;
+    }
+    s->true_walls[v_wall_idx(0, 0)] = 0;
 }
 
 static inline int pathfinder_rand(Pathfinder* env) {
     return (int)rand_u32(env);
-}
-
-static inline void pathfinder_reset_known(State* s) {
-    reset_known(s);
-}
-
-static inline void pathfinder_mark_visited(State* s, int row, int col) {
-    mark_visited(s, row, col);
-}
-
-static inline void pathfinder_open_edge(State* s, int row, int col, int next_row, int next_col) {
-    open_edge(s, row, col, next_row, next_col);
-}
-
-static inline int pathfinder_shortest_path(const State* s) {
-    return shortest_path(s);
-}
-
-static inline int pathfinder_v_wall(int row, int edge_col) {
-    return v_wall(row, edge_col);
-}
-
-static inline int pathfinder_h_wall(int edge_row, int col) {
-    return h_wall(edge_row, col);
-}
-
-static inline int pathfinder_wall_between(int row, int col, int next_row, int next_col) {
-    return wall_between(row, col, next_row, next_col);
-}
-
-static inline void pathfinder_action_delta(int action, int* d_row, int* d_col) {
-    action_delta(action, d_row, d_col);
-}
-
-static inline bool pathfinder_has_path_to_goal(const State* s) {
-    return has_path_to_goal(s);
-}
-
-static inline int pathfinder_curriculum_max_solution_len(const Pathfinder* env) {
-    return curriculum_max_solution_len(env);
-}
-
-static inline int pathfinder_curriculum_min_solution_len(const Pathfinder* env) {
-    return curriculum_min_solution_len(env);
 }
 
 static bool carve_solution_recursive(
@@ -523,24 +424,6 @@ static bool carve_solution(Pathfinder* env, int target_len) {
     return true;
 }
 
-static int biased_target_len(int min_len, int max_len, Pathfinder* env) {
-    int span = max_len - min_len + 1;
-    if (span <= 0) {
-        return min_len;
-    }
-    int roll_a = (int)(rand_u32(env) % (unsigned int)span);
-    int roll_b = (int)(rand_u32(env) % (unsigned int)span);
-    int roll_c = (int)(rand_u32(env) % (unsigned int)span);
-    int pick = roll_a;
-    if (roll_b > pick) {
-        pick = roll_b;
-    }
-    if (roll_c > pick) {
-        pick = roll_c;
-    }
-    return min_len + pick;
-}
-
 static void open_random_edges(Pathfinder* env, int target_len) {
     State* s = &env->state;
     float open_prob = env->branch_prob + env->loop_prob;
@@ -554,13 +437,13 @@ static void open_random_edges(Pathfinder* env, int target_len) {
     for (int row = 0; row < PATHFINDER_ROWS; row++) {
         for (int col = 0; col < PATHFINDER_COLS - 1; col++) {
             if (rand_chance_u8(env, open_threshold, &samples, &remaining)) {
-                int wall = v_wall(row, col + 1);
-                if (s->true_walls[wall] == 0) {
+                int wall_idx = v_wall_idx(row, col + 1);
+                if (s->true_walls[wall_idx] == 0) {
                     continue;
                 }
-                s->true_walls[wall] = 0;
+                s->true_walls[wall_idx] = 0;
                 if (shortest_path(s) < target_len) {
-                    s->true_walls[wall] = 1;
+                    s->true_walls[wall_idx] = 1;
                 }
             }
         }
@@ -568,26 +451,26 @@ static void open_random_edges(Pathfinder* env, int target_len) {
     for (int row = 0; row < PATHFINDER_ROWS - 1; row++) {
         for (int col = 0; col < PATHFINDER_COLS; col++) {
             if (rand_chance_u8(env, open_threshold, &samples, &remaining)) {
-                int wall = h_wall(row + 1, col);
-                if (s->true_walls[wall] == 0) {
+                int wall_idx = h_wall_idx(row + 1, col);
+                if (s->true_walls[wall_idx] == 0) {
                     continue;
                 }
-                s->true_walls[wall] = 0;
+                s->true_walls[wall_idx] = 0;
                 if (shortest_path(s) < target_len) {
-                    s->true_walls[wall] = 1;
+                    s->true_walls[wall_idx] = 1;
                 }
             }
         }
     }
     for (int row = 1; row < PATHFINDER_ROWS; row++) {
         if (rand_chance_u8(env, entry_threshold, &samples, &remaining)) {
-            int wall = v_wall(row, 0);
-            if (s->true_walls[wall] == 0) {
+            int wall_idx = v_wall_idx(row, 0);
+            if (s->true_walls[wall_idx] == 0) {
                 continue;
             }
-            s->true_walls[wall] = 0;
+            s->true_walls[wall_idx] = 0;
             if (shortest_path(s) < target_len) {
-                s->true_walls[wall] = 1;
+                s->true_walls[wall_idx] = 1;
             }
         }
     }
@@ -595,9 +478,9 @@ static void open_random_edges(Pathfinder* env, int target_len) {
 
 static void generate_maze(Pathfinder* env) {
     State* s = &env->state;
-    int min_solution_len = curriculum_min_solution_len(env);
-    int max_solution_len = curriculum_max_solution_len(env);
-    int target_len = biased_target_len(min_solution_len, max_solution_len, env);
+    env->curriculum_min_solution_len = env->min_solution_len + env->curriculum_level;
+    int min_solution_len = env->curriculum_min_solution_len;
+    int target_len = min_solution_len;
 
     init_walls(s);
     bool carved = carve_solution(env, target_len);
@@ -620,22 +503,24 @@ static void generate_maze(Pathfinder* env) {
 
 static void update_curriculum(Pathfinder* env, int success) {
     env->curriculum_episodes++;
-    if (success && curriculum_max_solution_len(env) < PATHFINDER_MAX_SOLUTION_LEN) {
-        env->curriculum_level++;
+    if (!success || !curriculum_can_advance(env)) {
+        return;
     }
+
+    env->curriculum_level++;
+    env->curriculum_min_solution_len++;
 }
 
 void add_log(Pathfinder* env) {
     State* s = &env->state;
     float success = (float)s->success;
     int current_curriculum_level = env->curriculum_level;
-    int current_curriculum_min_solution_len = curriculum_min_solution_len(env);
-    int current_curriculum_max_solution_len = curriculum_max_solution_len(env);
-    int next_curriculum_max_solution_len = pathfinder_clamp_int(
-        current_curriculum_max_solution_len + (s->success ? 1 : 0),
-        1,
-        PATHFINDER_MAX_SOLUTION_LEN
-    );
+    int current_curriculum_min_solution_len = env->curriculum_min_solution_len;
+    int current_curriculum_max_solution_len = env->max_solution_len + env->curriculum_level;
+    int next_curriculum_max_solution_len = current_curriculum_max_solution_len;
+    if (s->success && curriculum_can_advance(env)) {
+        next_curriculum_max_solution_len++;
+    }
     float efficiency = 0.0f;
     if (s->success && s->agent_path_len > 0 && s->shortest_path_len > 0) {
         efficiency = (float)s->shortest_path_len / (float)s->agent_path_len;
@@ -656,8 +541,6 @@ void add_log(Pathfinder* env) {
     env->log.revisits += (float)s->revisit_count;
     env->log.known_wall_deaths += (float)s->known_wall_death;
     env->log.repeat_move_deaths += (float)s->repeat_move_death;
-    env->log.known_walls += (float)s->known_wall_count;
-    env->log.known_open_edges += (float)s->known_open_count;
     env->log.shortest_path_len += (float)s->shortest_path_len;
     env->log.agent_path_len += (float)s->agent_path_len;
     env->log.curriculum_level += (float)current_curriculum_level;
@@ -685,6 +568,7 @@ void init(Pathfinder* env) {
     if (env->min_solution_len == 0) {
         env->min_solution_len = 1;
     }
+    env->curriculum_min_solution_len = env->min_solution_len + env->curriculum_level;
     env->step_penalty = env->step_penalty == 0.0f ? -0.001f : env->step_penalty;
     env->new_wall_penalty = env->new_wall_penalty == 0.0f ? 0.0f : env->new_wall_penalty;
     env->known_wall_penalty = env->known_wall_penalty == 0.0f ? -0.01f : env->known_wall_penalty;
@@ -696,6 +580,9 @@ void init(Pathfinder* env) {
     env->goal_reward = env->goal_reward == 0.0f ? 1.0f : env->goal_reward;
     if (env->max_steps == 0) {
         env->max_steps = 128;
+    }
+    if (env->max_solution_len == 0) {
+        env->max_solution_len = PATHFINDER_MAX_SOLUTION_LEN;
     }
 }
 
@@ -724,18 +611,20 @@ static void reset_attempt(Pathfinder* env) {
     s->success = 0;
     s->episode_return = 0.0f;
     memset(s->visited, 0, sizeof(s->visited));
-    reset_known(s);
+    for (int i = 0; i < PATHFINDER_NUM_WALLS; i++) {
+        s->known_walls[i] = PATHFINDER_UNKNOWN;
+    }
     mark_visited(s, s->agent_row, s->agent_col);
     reset_move_history(s);
     update_observations(env);
 }
 
-static void reveal_wall(Pathfinder* env, int wall) {
+static void reveal_wall(Pathfinder* env, int wall_idx) {
     State* s = &env->state;
-    if (s->known_walls[wall] != PATHFINDER_UNKNOWN) {
+    if (s->known_walls[wall_idx] != PATHFINDER_UNKNOWN) {
         return;
     }
-    s->known_walls[wall] = s->true_walls[wall] ? PATHFINDER_WALL : PATHFINDER_OPEN;
+    s->known_walls[wall_idx] = s->true_walls[wall_idx] ? PATHFINDER_WALL : PATHFINDER_OPEN;
 }
 
 void c_step(Pathfinder* env) {
@@ -755,16 +644,21 @@ void c_step(Pathfinder* env) {
         action_delta(action, &d_row, &d_col);
         int next_row = s->agent_row + d_row;
         int next_col = s->agent_col + d_col;
-        int wall = wall_between(s->agent_row, s->agent_col, next_row, next_col);
-
-        if (wall < 0) {
+        int wall_idx = wall_idx_between(s->agent_row, s->agent_col, next_row, next_col);
+        if (!in_bounds(next_row, next_col)) {
+            if (wall_idx >= 0) {
+                reveal_wall(env, wall_idx);
+            }
+            reward += env->impossible_penalty;
+            env->terminals[0] = 1.0f;
+        } else if (wall_idx < 0) {
             reward += env->impossible_penalty;
             env->terminals[0] = 1.0f;
         } else {
-            bool was_known = s->known_walls[wall] != PATHFINDER_UNKNOWN;
-            reveal_wall(env, wall);
+            bool was_known = s->known_walls[wall_idx] != PATHFINDER_UNKNOWN;
+            reveal_wall(env, wall_idx);
 
-            if (s->true_walls[wall]) {
+            if (s->true_walls[wall_idx]) {
                 s->wall_hits++;
                 reward += was_known ? env->known_wall_penalty : env->new_wall_penalty;
                 if (was_known) {
@@ -772,10 +666,7 @@ void c_step(Pathfinder* env) {
                     s->known_wall_death = 1;
                     env->terminals[0] = 1.0f;
                 }
-            } else if (!in_bounds(next_row, next_col)) {
-                reward += env->impossible_penalty;
             } else {
-                ensure_move_history(s);
                 if (repeats_two_cell_cycle(s, next_row, next_col)) {
                     reward += env->repeat_move_death_penalty;
                     s->repeat_move_death = 1;
@@ -875,26 +766,18 @@ static inline Vector2 cell_center(int row, int col) {
     };
 }
 
-static const char* action_name(int action) {
-    if (action == PATHFINDER_ACT_NORTH) return "north";
-    if (action == PATHFINDER_ACT_EAST) return "east";
-    if (action == PATHFINDER_ACT_SOUTH) return "south";
-    if (action == PATHFINDER_ACT_WEST) return "west";
-    return "invalid";
-}
-
 static void draw_centered_text(const char* text, int cx, int y,
         int font_size, Color color) {
     int width = MeasureText(text, font_size);
     DrawText(text, cx - width / 2, y, font_size, color);
 }
 
-static void draw_edge(Pathfinder* env, int wall, Vector2 start, Vector2 end) {
+static void draw_edge(Pathfinder* env, int wall_idx, Vector2 start, Vector2 end) {
     State* s = &env->state;
-    float known = s->known_walls[wall];
+    float known = s->known_walls[wall_idx];
 
     DrawLineEx(start, end, 2.0f, PATHFINDER_UNKNOWN_EDGE);
-    if (env->client->show_truth && s->true_walls[wall]) {
+    if (env->client->show_truth && s->true_walls[wall_idx]) {
         DrawLineEx(start, end, 6.0f, PATHFINDER_TRUE_WALL);
     }
 
@@ -951,20 +834,20 @@ static void draw_board(Pathfinder* env) {
 
     for (int row = 0; row < PATHFINDER_ROWS; row++) {
         for (int edge_col = 0; edge_col <= PATHFINDER_COLS; edge_col++) {
-            int wall = v_wall(row, edge_col);
+            int wall_idx = v_wall_idx(row, edge_col);
             float x = (float)(PATHFINDER_RENDER_BOARD_X + edge_col * PATHFINDER_RENDER_TILE);
             float y0 = (float)(cell_y(row) + 7);
             float y1 = (float)(cell_y(row + 1) - 7);
-            draw_edge(env, wall, (Vector2){x, y0}, (Vector2){x, y1});
+            draw_edge(env, wall_idx, (Vector2){x, y0}, (Vector2){x, y1});
         }
     }
     for (int edge_row = 0; edge_row <= PATHFINDER_ROWS; edge_row++) {
         for (int col = 0; col < PATHFINDER_COLS; col++) {
-            int wall = h_wall(edge_row, col);
+            int wall_idx = h_wall_idx(edge_row, col);
             float x0 = (float)(cell_x(col) + 7);
             float x1 = (float)(cell_x(col + 1) - 7);
             float y = (float)(PATHFINDER_RENDER_BOARD_Y + edge_row * PATHFINDER_RENDER_TILE);
-            draw_edge(env, wall, (Vector2){x0, y}, (Vector2){x1, y});
+            draw_edge(env, wall_idx, (Vector2){x0, y}, (Vector2){x1, y});
         }
     }
 

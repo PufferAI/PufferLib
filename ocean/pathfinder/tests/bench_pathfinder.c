@@ -73,7 +73,21 @@ static void bench_steps(Pathfinder* env, long steps) {
         steps, elapsed, step_sps, env->log.n,
         env->log.n > 0.0f ? env->log.success / env->log.n : 0.0f,
         env->log.repeat_move_deaths, reward_sum, env->curriculum_level,
-        pathfinder_curriculum_max_solution_len(env));
+        env->max_solution_len + env->curriculum_level);
+}
+
+static void bench_choose_goal_at_distance(Pathfinder* env, int target_len) {
+    for (int row = 0; row < PATHFINDER_ROWS; row++) {
+        for (int col = 0; col < PATHFINDER_COLS; col++) {
+            if (row + col == target_len) {
+                env->state.goal_row = row;
+                env->state.goal_col = col;
+                return;
+            }
+        }
+    }
+    env->state.goal_row = PATHFINDER_ROWS - 1;
+    env->state.goal_col = PATHFINDER_COLS - 1;
 }
 
 static void bench_reset_components(Pathfinder* env, long iters) {
@@ -88,19 +102,19 @@ static void bench_reset_components(Pathfinder* env, long iters) {
         memset(&env->state, 0, sizeof(env->state));
         env->state.agent_row = 0;
         env->state.agent_col = 0;
-        pathfinder_generate_maze(env);
+        generate_maze(env);
     }
     double gen_sec = now_seconds() - t0;
 
     t0 = now_seconds();
     for (long i = 0; i < iters; i++) {
-        pathfinder_update_observations(env);
+        update_observations(env);
     }
     double obs_sec = now_seconds() - t0;
 
     t0 = now_seconds();
     for (long i = 0; i < iters; i++) {
-        pathfinder_update_action_mask(env);
+        update_action_mask(env);
     }
     double mask_sec = now_seconds() - t0;
 
@@ -113,34 +127,34 @@ static void bench_reset_components(Pathfinder* env, long iters) {
 
     t0 = now_seconds();
     for (long i = 0; i < iters; i++) {
-        pathfinder_init_walls(&env->state);
+        init_walls(&env->state);
     }
     double init_walls_sec = now_seconds() - t0;
 
     t0 = now_seconds();
     for (long i = 0; i < iters; i++) {
-        pathfinder_choose_goal_at_distance(env, 4);
+        bench_choose_goal_at_distance(env, 4);
     }
     double choose_goal_sec = now_seconds() - t0;
 
-    pathfinder_init_walls(&env->state);
-    pathfinder_choose_goal_at_distance(env, 4);
+    init_walls(&env->state);
+    bench_choose_goal_at_distance(env, 4);
     t0 = now_seconds();
     for (long i = 0; i < iters; i++) {
-        pathfinder_init_walls(&env->state);
+        init_walls(&env->state);
         env->state.goal_row = 2;
         env->state.goal_col = 2;
-        pathfinder_carve_solution(env);
+        carve_solution(env, 4);
     }
     double carve_sec = now_seconds() - t0;
 
-    pathfinder_init_walls(&env->state);
+    init_walls(&env->state);
     env->state.goal_row = 2;
     env->state.goal_col = 2;
-    pathfinder_carve_solution(env);
+    carve_solution(env, 4);
     t0 = now_seconds();
     for (long i = 0; i < iters; i++) {
-        pathfinder_open_random_edges(env);
+        open_random_edges(env, 4);
     }
     double random_edges_sec = now_seconds() - t0;
 
@@ -156,16 +170,18 @@ static void setup_open_line(Pathfinder* env) {
     State* s = &env->state;
     memset(s, 0, sizeof(*s));
     memset(s->true_walls, 1, sizeof(s->true_walls));
-    pathfinder_reset_known(s);
+    for (int i = 0; i < PATHFINDER_NUM_WALLS; i++) {
+        s->known_walls[i] = PATHFINDER_UNKNOWN;
+    }
     s->agent_row = 0;
     s->agent_col = 0;
     s->goal_row = 5;
     s->goal_col = 5;
     for (int col = 0; col < PATHFINDER_COLS - 1; col++) {
-        pathfinder_open_edge(s, 0, col, 0, col + 1);
+        open_edge(s, 0, col, 0, col + 1);
     }
-    pathfinder_mark_visited(s, 0, 0);
-    pathfinder_update_observations(env);
+    mark_visited(s, 0, 0);
+    update_observations(env);
 }
 
 static void bench_forced_steps(Pathfinder* env, long iters) {
@@ -182,9 +198,9 @@ static void bench_forced_steps(Pathfinder* env, long iters) {
 
     memset(&env->log, 0, sizeof(env->log));
     setup_open_line(env);
-    int east_wall = pathfinder_wall_between(0, 0, 0, 1);
+    int east_wall = wall_idx_between(0, 0, 0, 1);
     env->state.true_walls[east_wall] = 1;
-    pathfinder_update_observations(env);
+    update_observations(env);
     t0 = now_seconds();
     for (long i = 0; i < iters; i++) {
         env->actions[0] = PATHFINDER_ACT_EAST;
@@ -194,7 +210,7 @@ static void bench_forced_steps(Pathfinder* env, long iters) {
         }
         setup_open_line(env);
         env->state.true_walls[east_wall] = 1;
-        pathfinder_update_observations(env);
+        update_observations(env);
     }
     double known_wall_death_sec = now_seconds() - t0;
 
