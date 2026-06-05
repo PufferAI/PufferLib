@@ -14,6 +14,15 @@ void my_init(Env* env, Dict* kwargs) {
     env->branch_prob = (float)dict_get(kwargs, "branch_prob")->value;
     env->loop_prob = (float)dict_get(kwargs, "loop_prob")->value;
     env->extra_entry_prob = (float)dict_get(kwargs, "extra_entry_prob")->value;
+    env->step_penalty = (float)dict_get(kwargs, "step_penalty")->value;
+    env->new_wall_penalty = (float)dict_get(kwargs, "new_wall_penalty")->value;
+    env->known_wall_penalty = (float)dict_get(kwargs, "known_wall_penalty")->value;
+    env->known_wall_death_penalty = (float)dict_get(kwargs, "known_wall_death_penalty")->value;
+    env->repeat_move_death_penalty = (float)dict_get(kwargs, "repeat_move_death_penalty")->value;
+    env->new_cell_reward = (float)dict_get(kwargs, "new_cell_reward")->value;
+    env->revisit_penalty = (float)dict_get(kwargs, "revisit_penalty")->value;
+    env->impossible_penalty = (float)dict_get(kwargs, "impossible_penalty")->value;
+    env->goal_reward = (float)dict_get(kwargs, "goal_reward")->value;
     env->min_solution_len = (int)dict_get(kwargs, "min_solution_len")->value;
     env->max_solution_len = (int)dict_get(kwargs, "max_solution_len")->value;
     env->max_steps = (int)dict_get(kwargs, "max_steps")->value;

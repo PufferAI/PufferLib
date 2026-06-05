@@ -209,7 +209,7 @@ static void test_position_observation_updates_after_move(void) {
     assert(fabsf(obs[PATHFINDER_NUM_WALLS] - 0.2f) < 1e-6f);
     assert(fabsf(obs[PATHFINDER_NUM_WALLS + 1] - 0.0f) < 1e-6f);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_NEW_CELL_REWARD)) < 1e-6f);
+        (env.step_penalty + env.new_cell_reward)) < 1e-6f);
     assert(env.state.visited[0][1] == 1);
     assert(env.state.visited_count == 2);
 }
@@ -262,7 +262,7 @@ static void test_open_edge_reveals_and_moves(void) {
     assert(env.state.agent_col == 1);
     assert(fabsf(obs[east_wall] - 0.0f) < 1e-6f);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_NEW_CELL_REWARD)) < 1e-6f);
+        (env.step_penalty + env.new_cell_reward)) < 1e-6f);
     assert(terminals[0] == 0.0f);
 }
 
@@ -283,7 +283,7 @@ static void test_blocked_edge_reveals_and_stays(void) {
     assert(env.state.agent_row == 0);
     assert(env.state.agent_col == 0);
     assert(fabsf(obs[east_wall] - 1.0f) < 1e-6f);
-    assert(fabsf(rewards[0] - PATHFINDER_STEP_PENALTY) < 1e-6f);
+    assert(fabsf(rewards[0] - env.step_penalty) < 1e-6f);
     assert(terminals[0] == 0.0f);
     assert(env.state.known_wall_death == 0);
 }
@@ -300,20 +300,20 @@ static void test_known_wall_repeat_terminates_with_penalty(void) {
 
     actions[0] = PATHFINDER_ACT_EAST;
     c_step(&env);
-    assert(fabsf(rewards[0] - PATHFINDER_STEP_PENALTY) < 1e-6f);
+    assert(fabsf(rewards[0] - env.step_penalty) < 1e-6f);
     assert(terminals[0] == 0.0f);
 
     c_step(&env);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_KNOWN_WALL_PENALTY +
-            PATHFINDER_KNOWN_WALL_DEATH_PENALTY)) < 1e-6f);
+        (env.step_penalty + env.known_wall_penalty +
+            env.known_wall_death_penalty)) < 1e-6f);
     assert(terminals[0] == 1.0f);
     assert(env.log.n >= 1.0f);
     assert(env.log.success == 0.0f);
     assert(env.log.known_wall_deaths == 1.0f);
 }
 
-static void test_invalid_action_penalizes_without_terminating(void) {
+static void test_invalid_action_penalizes_and_terminates(void) {
     Pathfinder env;
     float obs[PATHFINDER_OBS_SIZE];
     float actions[1] = {0};
@@ -329,8 +329,48 @@ static void test_invalid_action_penalizes_without_terminating(void) {
     assert(env.state.agent_row == 0);
     assert(env.state.agent_col == 0);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_IMPOSSIBLE_PENALTY)) < 1e-6f);
-    assert(terminals[0] == 0.0f);
+        (env.step_penalty + env.impossible_penalty)) < 1e-6f);
+    assert(terminals[0] == 1.0f);
+    assert(env.log.n == 1.0f);
+    assert(env.log.success == 0.0f);
+}
+
+static void test_configured_reward_constants_are_used(void) {
+    Pathfinder env;
+    float obs[PATHFINDER_OBS_SIZE];
+    float actions[1] = {0};
+    float rewards[1] = {0};
+    float terminals[1] = {0};
+    setup_env(&env, obs, actions, rewards, terminals);
+    setup_manual_state(&env, 0, 1);
+    open_manual_edge(&env, 0, 0, 0, 1);
+    env.step_penalty = -2.0f;
+    env.new_cell_reward = 0.5f;
+    env.goal_reward = 3.0f;
+
+    actions[0] = PATHFINDER_ACT_EAST;
+    c_step(&env);
+
+    assert(fabsf(rewards[0] - (env.step_penalty + env.new_cell_reward + env.goal_reward)) < 1e-6f);
+    assert(env.log.success == 1.0f);
+}
+
+static void test_configured_impossible_penalty_is_used(void) {
+    Pathfinder env;
+    float obs[PATHFINDER_OBS_SIZE];
+    float actions[1] = {0};
+    float rewards[1] = {0};
+    float terminals[1] = {0};
+    setup_env(&env, obs, actions, rewards, terminals);
+    setup_manual_state(&env, 5, 5);
+    env.impossible_penalty = -4.0f;
+
+    actions[0] = 99;
+    c_step(&env);
+
+    assert(terminals[0] == 1.0f);
+    assert(fabsf(rewards[0] - (env.step_penalty + env.impossible_penalty)) < 1e-6f);
+    assert(env.log.n == 1.0f);
 }
 
 static void test_boundary_action_reveals_wall(void) {
@@ -351,7 +391,7 @@ static void test_boundary_action_reveals_wall(void) {
     assert(env.state.agent_row == 0);
     assert(env.state.agent_col == 0);
     assert(fabsf(obs[north_wall] - PATHFINDER_WALL) < 1e-6f);
-    assert(fabsf(rewards[0] - PATHFINDER_STEP_PENALTY) < 1e-6f);
+    assert(fabsf(rewards[0] - env.step_penalty) < 1e-6f);
     assert(terminals[0] == 0.0f);
 }
 
@@ -368,12 +408,12 @@ static void test_revisiting_previously_left_square_has_penalty(void) {
     actions[0] = PATHFINDER_ACT_EAST;
     c_step(&env);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_NEW_CELL_REWARD)) < 1e-6f);
+        (env.step_penalty + env.new_cell_reward)) < 1e-6f);
 
     actions[0] = PATHFINDER_ACT_WEST;
     c_step(&env);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_REVISIT_PENALTY)) < 1e-6f);
+        (env.step_penalty + env.revisit_penalty)) < 1e-6f);
     assert(terminals[0] == 0.0f);
     assert(env.state.revisit_count == 1);
 }
@@ -451,7 +491,7 @@ static void test_longer_backtrack_then_forward_move_is_allowed(void) {
     assert(env.state.agent_row == 0);
     assert(env.state.agent_col == 1);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_REVISIT_PENALTY)) < 1e-6f);
+        (env.step_penalty + env.revisit_penalty)) < 1e-6f);
 }
 
 static void test_known_open_edge_to_new_square_has_no_extra_penalty(void) {
@@ -476,7 +516,7 @@ static void test_known_open_edge_to_new_square_has_no_extra_penalty(void) {
 
     assert(env.state.agent_col == 2);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_NEW_CELL_REWARD)) < 1e-6f);
+        (env.step_penalty + env.new_cell_reward)) < 1e-6f);
     assert(env.state.revisit_count == 0);
     assert(terminals[0] == 0.0f);
 }
@@ -601,7 +641,7 @@ static void test_timeout_restarts_same_map_with_unknown_wall_memory(void) {
 
     assert(terminals[0] == 1.0f);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_NEW_CELL_REWARD)) < 1e-6f);
+        (env.step_penalty + env.new_cell_reward)) < 1e-6f);
     assert(env.log.n == 1.0f);
     assert(env.log.success == 0.0f);
     assert(env.log.episode_length == 1.0f);
@@ -633,8 +673,8 @@ static void test_reaching_goal_terminates(void) {
 
     assert(terminals[0] == 1.0f);
     assert(fabsf(rewards[0] -
-        (PATHFINDER_STEP_PENALTY + PATHFINDER_NEW_CELL_REWARD +
-            PATHFINDER_GOAL_REWARD)) < 1e-6f);
+        (env.step_penalty + env.new_cell_reward +
+            env.goal_reward)) < 1e-6f);
     assert(env.log.success >= 1.0f);
     assert(env.log.n >= 1.0f);
 }
@@ -652,7 +692,9 @@ int main(void) {
     test_open_edge_reveals_and_moves();
     test_blocked_edge_reveals_and_stays();
     test_known_wall_repeat_terminates_with_penalty();
-    test_invalid_action_penalizes_without_terminating();
+    test_invalid_action_penalizes_and_terminates();
+    test_configured_reward_constants_are_used();
+    test_configured_impossible_penalty_is_used();
     test_boundary_action_reveals_wall();
     test_revisiting_previously_left_square_has_penalty();
     test_repeating_directed_move_dies_and_restarts_same_map_blind();

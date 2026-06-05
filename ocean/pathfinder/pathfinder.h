@@ -20,7 +20,8 @@
 #define PATHFINDER_MAX_SOLUTION_LEN ((PATHFINDER_ROWS - 1) + (PATHFINDER_COLS - 1))
 #define PATHFINDER_MAX_PATH_CELLS (PATHFINDER_ROWS * PATHFINDER_COLS)
 
-#define PATHFINDER_RENDER_TILE 72 // todo should this be derived from the number of rows/cols?
+#define PATHFINDER_RENDER_MAX_SIDE ((PATHFINDER_ROWS > PATHFINDER_COLS) ? PATHFINDER_ROWS : PATHFINDER_COLS)
+#define PATHFINDER_RENDER_TILE (432 / PATHFINDER_RENDER_MAX_SIDE)
 #define PATHFINDER_RENDER_MARGIN 40
 #define PATHFINDER_RENDER_BOARD_X PATHFINDER_RENDER_MARGIN
 #define PATHFINDER_RENDER_BOARD_Y 92
@@ -37,19 +38,9 @@
 #define PATHFINDER_ACT_SOUTH 2
 #define PATHFINDER_ACT_WEST 3
 
-#define PATHFINDER_UNKNOWN -1.0f // todo might it learn better if 0 is unknown, and wall is -1, and open is +1?
+#define PATHFINDER_UNKNOWN -1.0f
 #define PATHFINDER_OPEN 0.0f
 #define PATHFINDER_WALL 1.0f
-
-#define PATHFINDER_STEP_PENALTY -0.001f // todo should these be made sweepable in the pathfinder.ini?
-#define PATHFINDER_NEW_WALL_PENALTY 0.0f
-#define PATHFINDER_KNOWN_WALL_PENALTY -0.01f // todo do we need this? I think we just kill if they hit an already KNOWN wall
-#define PATHFINDER_KNOWN_WALL_DEATH_PENALTY -0.05f // todo prob make sweepable or -1
-#define PATHFINDER_REPEAT_MOVE_DEATH_PENALTY -1.0f
-#define PATHFINDER_NEW_CELL_REWARD 0.01f // todo idk if I want to micromanage rewards
-#define PATHFINDER_REVISIT_PENALTY -0.01f // todo make sweepable or maybe get rid of this, since we already have general move penalty
-#define PATHFINDER_IMPOSSIBLE_PENALTY -0.01f // todo impossible move should be instant death and -1
-#define PATHFINDER_GOAL_REWARD 1.0f
 
 typedef struct Log {
     float perf;
@@ -116,6 +107,15 @@ typedef struct Pathfinder {
     float branch_prob;
     float loop_prob;
     float extra_entry_prob;
+    float step_penalty;
+    float new_wall_penalty;
+    float known_wall_penalty;
+    float known_wall_death_penalty;
+    float repeat_move_death_penalty;
+    float new_cell_reward;
+    float revisit_penalty;
+    float impossible_penalty;
+    float goal_reward;
     int min_solution_len;
     int max_solution_len;
     int max_steps;
@@ -142,7 +142,7 @@ static inline int curriculum_max_solution_len(const Pathfinder* env) {
     return pathfinder_clamp_int(max_len, 1, PATHFINDER_MAX_SOLUTION_LEN);
 }
 
-static inline int curriculum_min_solution_len(const Pathfinder* env) { // todo is this named correctly?
+static inline int curriculum_min_solution_len(const Pathfinder* env) {
     int base_max_solution_len = curriculum_base_solution_len(env);
     int base_min_solution_len = pathfinder_clamp_int(
         env->min_solution_len <= 0 ? 1 : env->min_solution_len,
@@ -685,6 +685,15 @@ void init(Pathfinder* env) {
     if (env->min_solution_len == 0) {
         env->min_solution_len = 1;
     }
+    env->step_penalty = env->step_penalty == 0.0f ? -0.001f : env->step_penalty;
+    env->new_wall_penalty = env->new_wall_penalty == 0.0f ? 0.0f : env->new_wall_penalty;
+    env->known_wall_penalty = env->known_wall_penalty == 0.0f ? -0.01f : env->known_wall_penalty;
+    env->known_wall_death_penalty = env->known_wall_death_penalty == 0.0f ? -0.05f : env->known_wall_death_penalty;
+    env->repeat_move_death_penalty = env->repeat_move_death_penalty == 0.0f ? -1.0f : env->repeat_move_death_penalty;
+    env->new_cell_reward = env->new_cell_reward == 0.0f ? 0.01f : env->new_cell_reward;
+    env->revisit_penalty = env->revisit_penalty == 0.0f ? -0.01f : env->revisit_penalty;
+    env->impossible_penalty = env->impossible_penalty == 0.0f ? -1.0f : env->impossible_penalty;
+    env->goal_reward = env->goal_reward == 0.0f ? 1.0f : env->goal_reward;
     if (env->max_steps == 0) {
         env->max_steps = 128;
     }
@@ -735,10 +744,11 @@ void c_step(Pathfinder* env) {
     env->rewards[0] = 0.0f;
     s->tick++;
 
-    float reward = PATHFINDER_STEP_PENALTY;
+    float reward = env->step_penalty;
     int action = (int)env->actions[0];
     if (action < 0 || action >= PATHFINDER_NUM_ACTIONS) {
-        reward += PATHFINDER_IMPOSSIBLE_PENALTY;
+        reward += env->impossible_penalty;
+        env->terminals[0] = 1.0f;
     } else {
         int d_row;
         int d_col;
@@ -748,25 +758,26 @@ void c_step(Pathfinder* env) {
         int wall = wall_between(s->agent_row, s->agent_col, next_row, next_col);
 
         if (wall < 0) {
-            reward += PATHFINDER_IMPOSSIBLE_PENALTY;
+            reward += env->impossible_penalty;
+            env->terminals[0] = 1.0f;
         } else {
             bool was_known = s->known_walls[wall] != PATHFINDER_UNKNOWN;
             reveal_wall(env, wall);
 
             if (s->true_walls[wall]) {
                 s->wall_hits++;
-                reward += was_known ? PATHFINDER_KNOWN_WALL_PENALTY : PATHFINDER_NEW_WALL_PENALTY;
+                reward += was_known ? env->known_wall_penalty : env->new_wall_penalty;
                 if (was_known) {
-                    reward += PATHFINDER_KNOWN_WALL_DEATH_PENALTY;
+                    reward += env->known_wall_death_penalty;
                     s->known_wall_death = 1;
                     env->terminals[0] = 1.0f;
                 }
             } else if (!in_bounds(next_row, next_col)) {
-                reward += PATHFINDER_IMPOSSIBLE_PENALTY;
+                reward += env->impossible_penalty;
             } else {
                 ensure_move_history(s);
                 if (repeats_two_cell_cycle(s, next_row, next_col)) {
-                    reward += PATHFINDER_REPEAT_MOVE_DEATH_PENALTY;
+                    reward += env->repeat_move_death_penalty;
                     s->repeat_move_death = 1;
                     env->terminals[0] = 1.0f;
                 } else {
@@ -777,14 +788,14 @@ void c_step(Pathfinder* env) {
                     record_successful_move(s);
                     if (revisited) {
                         s->revisit_count++;
-                        reward += PATHFINDER_REVISIT_PENALTY;
+                        reward += env->revisit_penalty;
                     } else {
                         mark_visited(s, next_row, next_col);
-                        reward += PATHFINDER_NEW_CELL_REWARD;
+                        reward += env->new_cell_reward;
                     }
                     if (s->agent_row == s->goal_row && s->agent_col == s->goal_col) {
                         s->success = 1;
-                        reward += PATHFINDER_GOAL_REWARD;
+                        reward += env->goal_reward;
                         env->terminals[0] = 1.0f;
                     }
                 }
