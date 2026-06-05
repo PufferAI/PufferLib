@@ -410,8 +410,7 @@ static void test_known_wall_repeat_terminates_with_penalty(void) {
 
     c_step(&env);
     assert(fabsf(rewards[0] -
-        (env.step_penalty + env.known_wall_penalty +
-            env.known_wall_death_penalty)) < 1e-6f);
+        (env.step_penalty + env.known_wall_death_penalty)) < 1e-6f);
     assert(terminals[0] == 1.0f);
     assert(env.log.n >= 1.0f);
     assert(env.log.success == 0.0f);

@@ -16,7 +16,6 @@ void my_init(Env* env, Dict* kwargs) {
     env->extra_entry_prob = (float)dict_get(kwargs, "extra_entry_prob")->value;
     env->step_penalty = (float)dict_get(kwargs, "step_penalty")->value;
     env->new_wall_penalty = (float)dict_get(kwargs, "new_wall_penalty")->value;
-    env->known_wall_penalty = (float)dict_get(kwargs, "known_wall_penalty")->value;
     env->known_wall_death_penalty = (float)dict_get(kwargs, "known_wall_death_penalty")->value;
     env->repeat_move_death_penalty = (float)dict_get(kwargs, "repeat_move_death_penalty")->value;
     env->new_cell_reward = (float)dict_get(kwargs, "new_cell_reward")->value;

@@ -124,6 +124,13 @@ The Codex sandbox may not expose GPU devices. That can make PyTorch report
 valid GPU is visible. Native extension builds can still compile in the sandbox.
 GPU training/sweeps may need to run outside the sandbox.
 
+If `python -m pufferlib.pufferl train pathfinder --train.gpus 1` fails inside
+Codex with `Assertion 'device_count > 0 && "CUDA is not available"' failed`,
+do not switch to CPU, rewrite CUDA setup, or debug the venv as the first
+response. This is the managed sandbox hiding GPU devices. Re-run the same
+training command with escalated/outside-sandbox execution so it can see
+`/dev/nvidia*`.
+
 ## Verified Build Baseline
 
 The fresh workspace has already been prepared with:
@@ -213,14 +220,26 @@ Use test-driven development for Pathfinder behavior:
 1. Add focused tests for wall indexing, maze solvability, reset observation,
    movement/wall reveal semantics, and terminal success.
 2. Make the narrow tests pass.
-3. Build native:
+3. Run the Pathfinder core tests. The script compiles its own scoped C test
+   binary from the current `ocean/pathfinder/` source before executing it; it
+   does not use an existing `pufferlib/_C*.so` and is not testing stale native
+   extension code:
+
+```bash
+source .venv/bin/activate
+bash ocean/pathfinder/tests/run_all.sh
+```
+
+4. Build the native PufferLib extension. Do this before any Python-level
+   Pathfinder smoke test, training run, or eval, because those paths import the
+   built `pufferlib/_C*.so` artifact:
 
 ```bash
 source .venv/bin/activate
 ./build.sh pathfinder
 ```
 
-4. Run a short training smoke only after build and behavior tests pass:
+5. Run a short training smoke only after build and behavior tests pass:
 
 ```bash
 source .venv/bin/activate
@@ -229,6 +248,29 @@ python -m pufferlib.pufferl train pathfinder --train.total-timesteps 2097152
 
 If tests require helper binaries, put them under `ocean/pathfinder/tests/` and
 keep them scoped to Pathfinder.
+
+When the human asks to "run all tests" for Pathfinder, do not manually iterate
+the repo-root `tests/test_*.py` files. Those files are stale upstream or
+experimental tests for older PufferLib APIs and optional dependencies, not the
+current Pathfinder acceptance suite. Known expected failures there include
+missing `pufferlib.emulation`, missing `pufferl.make_parser`, missing
+`pufferlib/src/models.cu`, optional packages such as `heavyball`, `pandas`, and
+`pyximport`, and CUDA visibility failures inside the Codex sandbox.
+
+For Pathfinder, the supported baseline is:
+
+```bash
+source .venv/bin/activate
+bash ocean/pathfinder/tests/run_all.sh
+./build.sh pathfinder
+```
+
+If running any Python-level Pathfinder check after source edits, rebuild with
+`./build.sh pathfinder` first so Python does not import an old native extension.
+
+If the human explicitly asks for the stale repo-root Python tests anyway, state
+that they are not the Pathfinder baseline before running them, and do not report
+their expected failures as a Pathfinder regression.
 
 ## Quick Ops Notes
 

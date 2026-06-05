@@ -105,7 +105,6 @@ typedef struct Pathfinder {
     float extra_entry_prob;
     float step_penalty;
     float new_wall_penalty;
-    float known_wall_penalty;
     float known_wall_death_penalty;
     float repeat_move_death_penalty;
     float new_cell_reward;
@@ -233,6 +232,11 @@ static inline void action_delta(int action, int* d_row, int* d_col) {
         *d_row = 1;
     } else if (action == PATHFINDER_ACT_WEST) {
         *d_col = -1;
+    } else {
+        // Invalid actions are treated as an impossible move and handled by
+        // the bounds check in c_step.
+        *d_row = PATHFINDER_ROWS;
+        *d_col = PATHFINDER_ROWS;
     }
 }
 
@@ -325,7 +329,6 @@ static void init_walls(State* s) {
     for (int i = 0; i < PATHFINDER_NUM_WALLS; i++) {
         s->known_walls[i] = PATHFINDER_UNKNOWN;
     }
-    s->true_walls[v_wall_idx(0, 0)] = 0;
 }
 
 static inline int pathfinder_rand(Pathfinder* env) {
@@ -430,7 +433,6 @@ static void open_random_edges(Pathfinder* env, int target_len) {
     if (open_prob < 0.0f) open_prob = 0.0f;
     if (open_prob > 0.50f) open_prob = 0.50f;
     int open_threshold = (int)(open_prob * 256.0f);
-    int entry_threshold = (int)(env->extra_entry_prob * 256.0f);
     unsigned int samples = 0;
     int remaining = 0;
 
@@ -459,18 +461,6 @@ static void open_random_edges(Pathfinder* env, int target_len) {
                 if (shortest_path(s) < target_len) {
                     s->true_walls[wall_idx] = 1;
                 }
-            }
-        }
-    }
-    for (int row = 1; row < PATHFINDER_ROWS; row++) {
-        if (rand_chance_u8(env, entry_threshold, &samples, &remaining)) {
-            int wall_idx = v_wall_idx(row, 0);
-            if (s->true_walls[wall_idx] == 0) {
-                continue;
-            }
-            s->true_walls[wall_idx] = 0;
-            if (shortest_path(s) < target_len) {
-                s->true_walls[wall_idx] = 1;
             }
         }
     }
@@ -571,8 +561,7 @@ void init(Pathfinder* env) {
     env->curriculum_min_solution_len = env->min_solution_len + env->curriculum_level;
     env->step_penalty = env->step_penalty == 0.0f ? -0.001f : env->step_penalty;
     env->new_wall_penalty = env->new_wall_penalty == 0.0f ? 0.0f : env->new_wall_penalty;
-    env->known_wall_penalty = env->known_wall_penalty == 0.0f ? -0.01f : env->known_wall_penalty;
-    env->known_wall_death_penalty = env->known_wall_death_penalty == 0.0f ? -0.05f : env->known_wall_death_penalty;
+    env->known_wall_death_penalty = env->known_wall_death_penalty == 0.0f ? -1.0f : env->known_wall_death_penalty;
     env->repeat_move_death_penalty = env->repeat_move_death_penalty == 0.0f ? -1.0f : env->repeat_move_death_penalty;
     env->new_cell_reward = env->new_cell_reward == 0.0f ? 0.01f : env->new_cell_reward;
     env->revisit_penalty = env->revisit_penalty == 0.0f ? -0.01f : env->revisit_penalty;
@@ -635,60 +624,48 @@ void c_step(Pathfinder* env) {
 
     float reward = env->step_penalty;
     int action = (int)env->actions[0];
-    if (action < 0 || action >= PATHFINDER_NUM_ACTIONS) {
+    int d_row;
+    int d_col;
+    action_delta(action, &d_row, &d_col);
+    int next_row = s->agent_row + d_row;
+    int next_col = s->agent_col + d_col;
+    int wall_idx = wall_idx_between(s->agent_row, s->agent_col, next_row, next_col);
+    if (!in_bounds(next_row, next_col)) {
         reward += env->impossible_penalty;
         env->terminals[0] = 1.0f;
     } else {
-        int d_row;
-        int d_col;
-        action_delta(action, &d_row, &d_col);
-        int next_row = s->agent_row + d_row;
-        int next_col = s->agent_col + d_col;
-        int wall_idx = wall_idx_between(s->agent_row, s->agent_col, next_row, next_col);
-        if (!in_bounds(next_row, next_col)) {
-            if (wall_idx >= 0) {
-                reveal_wall(env, wall_idx);
-            }
-            reward += env->impossible_penalty;
-            env->terminals[0] = 1.0f;
-        } else if (wall_idx < 0) {
-            reward += env->impossible_penalty;
-            env->terminals[0] = 1.0f;
-        } else {
-            bool was_known = s->known_walls[wall_idx] != PATHFINDER_UNKNOWN;
-            reveal_wall(env, wall_idx);
+        bool was_known = s->known_walls[wall_idx] != PATHFINDER_UNKNOWN;
+        reveal_wall(env, wall_idx);
 
-            if (s->true_walls[wall_idx]) {
-                s->wall_hits++;
-                reward += was_known ? env->known_wall_penalty : env->new_wall_penalty;
-                if (was_known) {
-                    reward += env->known_wall_death_penalty;
-                    s->known_wall_death = 1;
-                    env->terminals[0] = 1.0f;
-                }
+        if (s->true_walls[wall_idx]) {
+            s->wall_hits++;
+            reward += was_known ? env->known_wall_death_penalty : env->new_wall_penalty;
+            if (was_known) {
+                s->known_wall_death = 1;
+                env->terminals[0] = 1.0f;
+            }
+        } else {
+            if (repeats_two_cell_cycle(s, next_row, next_col)) {
+                reward += env->repeat_move_death_penalty;
+                s->repeat_move_death = 1;
+                env->terminals[0] = 1.0f;
             } else {
-                if (repeats_two_cell_cycle(s, next_row, next_col)) {
-                    reward += env->repeat_move_death_penalty;
-                    s->repeat_move_death = 1;
-                    env->terminals[0] = 1.0f;
+                bool revisited = s->visited[next_row][next_col] != 0;
+                s->agent_row = next_row;
+                s->agent_col = next_col;
+                s->agent_path_len++;
+                record_successful_move(s);
+                if (revisited) {
+                    s->revisit_count++;
+                    reward += env->revisit_penalty;
                 } else {
-                    bool revisited = s->visited[next_row][next_col] != 0;
-                    s->agent_row = next_row;
-                    s->agent_col = next_col;
-                    s->agent_path_len++;
-                    record_successful_move(s);
-                    if (revisited) {
-                        s->revisit_count++;
-                        reward += env->revisit_penalty;
-                    } else {
-                        mark_visited(s, next_row, next_col);
-                        reward += env->new_cell_reward;
-                    }
-                    if (s->agent_row == s->goal_row && s->agent_col == s->goal_col) {
-                        s->success = 1;
-                        reward += env->goal_reward;
-                        env->terminals[0] = 1.0f;
-                    }
+                    mark_visited(s, next_row, next_col);
+                    reward += env->new_cell_reward;
+                }
+                if (s->agent_row == s->goal_row && s->agent_col == s->goal_col) {
+                    s->success = 1;
+                    reward += env->goal_reward;
+                    env->terminals[0] = 1.0f;
                 }
             }
         }
