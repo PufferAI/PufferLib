@@ -85,26 +85,26 @@ The generator must produce legal, solvable layouts without hand-authored maps.
 
 Puzzle generation:
 
-1. Pick a hidden pawn cell at the current curriculum distance from `A1`.
-2. Initialize all wall slots to blocked.
-3. Open the left entry edge for `A1`.
-4. Carve at least one orthogonal path from `A1` to the hidden pawn.
-5. Store `A1` as the agent spawn for the episode.
-6. Add false branches and optional loops without breaking the solved-path
-   invariant.
-7. Optionally open additional column-1 entries. These can connect to useful
-   routes or dead-end branches.
-8. Validate with BFS that `A1` reaches the pawn.
+1. Compute the curriculum span (`min_solution_len` to `max_solution_len`).
+2. Sample a target path length with a bias toward the upper end of the span.
+3. Initialize all wall slots to blocked.
+4. Open the left entry edge for `A1`.
+5. Carve one orthogonal randomized path from `A1` to a hidden pawn that is
+   exactly the sampled target length (including turns and winding moves).
+6. Store `A1` as the agent spawn for the episode.
+7. Add false branches and optional loops while preserving that the sampled
+   target length remains a valid shortest path lower bound.
+8. Optionally open additional column-1 entries under the same shortest-path
+   guard.
+9. Validate with BFS that `A1` reaches the pawn.
 
 Default generator style:
 
-- Choose a target with Manhattan distance equal to the current curriculum
-  length.
-- Carve a randomized monotonic path from `A1` to that target.
-- Open additional random internal edges as branch/loop density knobs rather
-  than trying to exactly copy human barricade layouts.
-- Because the target distance is Manhattan distance from `A1`, random extra
-  edges cannot create a shorter path than the curriculum length.
+- Choose a target length from the curriculum span with an upper-biased random
+  sample.
+- Carve a randomized, non-monotonic solution path of exact length to that target.
+- Open additional random internal edges as branch/loop density knobs rather than
+  trying to exactly copy human barricade layouts.
 
 Curriculum:
 

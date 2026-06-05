@@ -229,3 +229,13 @@ python -m pufferlib.pufferl train pathfinder --train.total-timesteps 2097152
 
 If tests require helper binaries, put them under `ocean/pathfinder/tests/` and
 keep them scoped to Pathfinder.
+
+## Quick Ops Notes
+
+- The eval command supports `--load-model-path latest` to automatically pick the
+  latest available checkpoint in the workspace.
+- Verified working invocation:
+
+  ```bash
+  source .venv/bin/activate && DISPLAY=:0 python -m pufferlib.pufferl eval pathfinder --load-model-path latest
+  ```
