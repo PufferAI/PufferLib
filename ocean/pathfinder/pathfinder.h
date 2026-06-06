@@ -90,6 +90,7 @@ typedef struct PathfinderClient {
 
 typedef struct Pathfinder {
     PathfinderClient* client;
+    bool player_mode;
     Log log;
     float* observations;
     float* actions;
@@ -671,9 +672,9 @@ static const Color PATHFINDER_GOAL = {232, 184, 58, 255};
 static const Color PATHFINDER_START = {118, 146, 150, 255};
 static const Color PATHFINDER_VISITED = {0, 187, 187, 42};
 
-static PathfinderClient* make_client(void) {
+static PathfinderClient* make_client(Pathfinder* env) {
     PathfinderClient* client = (PathfinderClient*)calloc(1, sizeof(PathfinderClient));
-    client->show_truth = true;
+    client->show_truth = !env->player_mode;
     InitWindow(PATHFINDER_RENDER_WIDTH, PATHFINDER_RENDER_HEIGHT, "PufferLib Pathfinder");
     SetTargetFPS(30);
     return client;
@@ -827,31 +828,38 @@ static void draw_panel(Pathfinder* env) {
 
     DrawText("Arrows/WASD move  |  R reset", PATHFINDER_RENDER_BOARD_X,
         PATHFINDER_RENDER_HEIGHT - 30, 18, PATHFINDER_MUTED);
-    DrawText("TAB view  |  SPACE random  |  ESC quit",
+    DrawText(env->player_mode
+        ? "SPACE random  |  TAB locked off  |  ESC quit"
+        : "TAB view  |  SPACE random  |  ESC quit",
         PATHFINDER_RENDER_BOARD_X + 310, PATHFINDER_RENDER_HEIGHT - 30,
         18, PATHFINDER_MUTED);
 }
 
 void c_render(Pathfinder* env) {
     if (!IsWindowReady()) {
-        env->client = make_client();
+        env->client = make_client(env);
     } else if (env->client == NULL) {
         env->client = (PathfinderClient*)calloc(1, sizeof(PathfinderClient));
-        env->client->show_truth = true;
+        env->client->show_truth = !env->player_mode;
+    }
+    if (env->player_mode) {
+        env->client->show_truth = false;
     }
 
     if (IsKeyDown(KEY_ESCAPE)) {
         c_close(env);
         exit(0);
     }
-    if (IsKeyPressed(KEY_TAB)) {
+    if (IsKeyPressed(KEY_TAB) && !env->player_mode) {
         env->client->show_truth = !env->client->show_truth;
     }
 
     BeginDrawing();
     ClearBackground(PATHFINDER_BG);
     DrawText("Milton Bradley Pathfinder", PATHFINDER_RENDER_BOARD_X, 26, 30, PATHFINDER_TEXT);
-    DrawText("Red = known wall, green = known open, gray = true hidden wall",
+    DrawText(env->player_mode
+        ? "Red = known wall, green = known open"
+        : "Red = known wall, green = known open, gray = true hidden wall",
         PATHFINDER_RENDER_BOARD_X, 60, 18, PATHFINDER_MUTED);
     draw_board(env);
     draw_panel(env);

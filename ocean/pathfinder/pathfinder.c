@@ -23,6 +23,7 @@ int main(void) {
     env.rewards = rewards;
     env.terminals = terminals;
     env.num_agents = 1;
+    env.player_mode = true;
     env.rng = (unsigned int)time(NULL);
     env.branch_prob = 0.35f;
     env.loop_prob = 0.10f;
