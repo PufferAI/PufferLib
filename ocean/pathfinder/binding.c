@@ -6,7 +6,6 @@
 #define MY_ACTION_MASK PATHFINDER_NUM_ACTIONS
 
 #define Env Pathfinder
-static inline void puffer_state_refresh(Pathfinder* env) { refresh_state(env); }
 #include "vecenv.h"
 
 void my_init(Env* env, Dict* kwargs) {

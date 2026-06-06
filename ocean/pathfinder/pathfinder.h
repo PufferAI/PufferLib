@@ -233,8 +233,6 @@ static inline void action_delta(int action, int* d_row, int* d_col) {
     } else if (action == PATHFINDER_ACT_WEST) {
         *d_col = -1;
     } else {
-        // Invalid actions are treated as an impossible move and handled by
-        // the bounds check in c_step.
         *d_row = PATHFINDER_ROWS;
         *d_col = PATHFINDER_ROWS;
     }
@@ -314,12 +312,10 @@ static void update_observations(Pathfinder* env) {
 }
 
 static inline int configured_base_max_solution_len(const Pathfinder* env) {
-    return env->max_solution_len > 0 ? env->max_solution_len : PATHFINDER_MAX_SOLUTION_LEN;
+    return env->max_solution_len;
 }
 
 static inline bool curriculum_can_advance(const Pathfinder* env) {
-    // The environment advances by one each successful solve until the target
-    // distance cap is fully shifted to the board max.
     return env->curriculum_level + configured_base_max_solution_len(env) <
         PATHFINDER_MAX_SOLUTION_LEN;
 }
@@ -541,7 +537,7 @@ void add_log(Pathfinder* env) {
     env->log.n += 1.0f;
 }
 
-void refresh_state(Pathfinder* env) {
+void puffer_state_refresh(Pathfinder* env) {
     update_observations(env);
 }
 
@@ -549,30 +545,7 @@ void init(Pathfinder* env) {
     if (env->num_agents == 0) {
         env->num_agents = 1;
     }
-    if (env->branch_prob == 0.0f) {
-        env->branch_prob = 0.10f;
-    }
-    if (env->loop_prob == 0.0f) {
-        env->loop_prob = 0.03f;
-    }
-    if (env->min_solution_len == 0) {
-        env->min_solution_len = 1;
-    }
     env->curriculum_min_solution_len = env->min_solution_len + env->curriculum_level;
-    env->step_penalty = env->step_penalty == 0.0f ? -0.001f : env->step_penalty;
-    env->new_wall_penalty = env->new_wall_penalty == 0.0f ? 0.0f : env->new_wall_penalty;
-    env->known_wall_death_penalty = env->known_wall_death_penalty == 0.0f ? -1.0f : env->known_wall_death_penalty;
-    env->repeat_move_death_penalty = env->repeat_move_death_penalty == 0.0f ? -1.0f : env->repeat_move_death_penalty;
-    env->new_cell_reward = env->new_cell_reward == 0.0f ? 0.01f : env->new_cell_reward;
-    env->revisit_penalty = env->revisit_penalty == 0.0f ? -0.01f : env->revisit_penalty;
-    env->impossible_penalty = env->impossible_penalty == 0.0f ? -1.0f : env->impossible_penalty;
-    env->goal_reward = env->goal_reward == 0.0f ? 1.0f : env->goal_reward;
-    if (env->max_steps == 0) {
-        env->max_steps = 128;
-    }
-    if (env->max_solution_len == 0) {
-        env->max_solution_len = PATHFINDER_MAX_SOLUTION_LEN;
-    }
 }
 
 void c_reset(Pathfinder* env) {

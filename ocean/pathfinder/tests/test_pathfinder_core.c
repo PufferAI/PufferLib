@@ -19,6 +19,14 @@ static void setup_env(Pathfinder* env, float* obs, float* actions,
     env->min_solution_len = 1;
     env->max_solution_len = 0;
     env->max_steps = 128;
+    env->step_penalty = -0.001f;
+    env->new_wall_penalty = 0.0f;
+    env->known_wall_death_penalty = -1.0f;
+    env->repeat_move_death_penalty = -1.0f;
+    env->new_cell_reward = 0.01f;
+    env->revisit_penalty = -0.01f;
+    env->impossible_penalty = -1.0f;
+    env->goal_reward = 1.0f;
     env->rng = 7;
     init(env);
 }
@@ -41,7 +49,7 @@ static void setup_manual_state(Pathfinder* env, int goal_row, int goal_col) {
 static void open_manual_edge(Pathfinder* env, int row, int col, int next_row, int next_col) {
     open_edge(&env->state, row, col, next_row, next_col);
     env->state.shortest_path_len = shortest_path(&env->state);
-    refresh_state(env);
+    puffer_state_refresh(env);
 }
 
 static void assert_wall_observations_unknown(Pathfinder* env, float* obs) {
@@ -177,7 +185,7 @@ static void test_action_mask_blocks_known_wall_but_forced_hit_still_dies(void) {
     setup_env(&env, obs, actions, rewards, terminals);
     env.action_mask = action_mask;
     setup_manual_state(&env, 5, 5);
-    refresh_state(&env);
+    puffer_state_refresh(&env);
 
     for (int i = 0; i < PATHFINDER_NUM_ACTIONS; i++) {
         assert(action_mask[i] == 1);
@@ -209,7 +217,7 @@ static void test_known_wall_death_restarts_same_map_with_unknown_wall_memory(voi
     setup_env(&env, obs, actions, rewards, terminals);
     env.action_mask = action_mask;
     setup_manual_state(&env, 5, 5);
-    refresh_state(&env);
+    puffer_state_refresh(&env);
 
     int east_wall = wall_idx_between(0, 0, 0, 1);
     memcpy(true_walls, env.state.true_walls, sizeof(true_walls));
@@ -380,7 +388,7 @@ static void test_blocked_edge_reveals_and_stays(void) {
     setup_env(&env, obs, actions, rewards, terminals);
     setup_manual_state(&env, 5, 5);
     int east_wall = wall_idx_between(0, 0, 0, 1);
-    refresh_state(&env);
+    puffer_state_refresh(&env);
 
     actions[0] = PATHFINDER_ACT_EAST;
     c_step(&env);
@@ -401,7 +409,7 @@ static void test_known_wall_repeat_terminates_with_penalty(void) {
     float terminals[1] = {0};
     setup_env(&env, obs, actions, rewards, terminals);
     setup_manual_state(&env, 5, 5);
-    refresh_state(&env);
+    puffer_state_refresh(&env);
 
     actions[0] = PATHFINDER_ACT_EAST;
     c_step(&env);
@@ -425,7 +433,7 @@ static void test_invalid_action_penalizes_and_terminates(void) {
     float terminals[1] = {0};
     setup_env(&env, obs, actions, rewards, terminals);
     setup_manual_state(&env, 5, 5);
-    refresh_state(&env);
+    puffer_state_refresh(&env);
 
     actions[0] = 99;
     c_step(&env);
@@ -485,7 +493,7 @@ static void test_boundary_action_terminates_with_impossible_penalty(void) {
     float terminals[1] = {0};
     setup_env(&env, obs, actions, rewards, terminals);
     setup_manual_state(&env, 5, 5);
-    refresh_state(&env);
+    puffer_state_refresh(&env);
 
     actions[0] = PATHFINDER_ACT_NORTH;
     c_step(&env);
@@ -612,7 +620,7 @@ static void test_known_open_edge_to_new_square_has_no_extra_penalty(void) {
     c_step(&env);
     int second_wall = wall_idx_between(0, 1, 0, 2);
     env.state.known_walls[second_wall] = PATHFINDER_OPEN;
-    refresh_state(&env);
+    puffer_state_refresh(&env);
 
     actions[0] = PATHFINDER_ACT_EAST;
     c_step(&env);
@@ -679,7 +687,7 @@ static void test_failure_retry_does_not_graduate_curriculum(void) {
     setup_env(&env, obs, actions, rewards, terminals);
     env.max_solution_len = 4;
     setup_manual_state(&env, 5, 5);
-    refresh_state(&env);
+    puffer_state_refresh(&env);
     memcpy(true_walls, env.state.true_walls, sizeof(true_walls));
 
     actions[0] = PATHFINDER_ACT_EAST;
