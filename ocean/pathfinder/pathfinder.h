@@ -56,8 +56,6 @@ typedef struct Log {
     float shortest_path_len;
     float agent_path_len;
     float curriculum_level;
-    float curriculum_min_solution_len;
-    float curriculum_max_solution_len;
     float curriculum_target_len;
     float curriculum_next_target_len;
     float n;
@@ -97,12 +95,10 @@ typedef struct Pathfinder {
     float* actions;
     float* rewards;
     float* terminals;
-    unsigned char* action_mask;
     int num_agents;
     unsigned int rng;
     float branch_prob;
     float loop_prob;
-    float extra_entry_prob;
     float step_penalty;
     float new_wall_penalty;
     float known_wall_death_penalty;
@@ -111,9 +107,8 @@ typedef struct Pathfinder {
     float revisit_penalty;
     float impossible_penalty;
     float goal_reward;
-    int min_solution_len;
-    int max_solution_len;
-    int curriculum_min_solution_len;
+    int start_solution_len;
+    int curriculum_enabled;
     int max_steps;
     int curriculum_level;
     int curriculum_episodes;
@@ -135,10 +130,6 @@ static inline bool in_bounds(int row, int col) {
 static inline unsigned int rand_u32(Pathfinder* env) {
     env->rng = 1664525u * env->rng + 1013904223u;
     return env->rng;
-}
-
-static inline float rand_float(Pathfinder* env) {
-    return (float)(rand_u32(env) >> 8) / 16777216.0f;
 }
 
 static inline bool rand_chance_u8(Pathfinder* env, int threshold,
@@ -248,8 +239,8 @@ static int shortest_path(const State* s) {
     dist[0][0] = 0;
     queue[tail++] = 0;
 
-    static const int d_rows[4] = {-1, 0, 1, 0};
-    static const int d_cols[4] = {0, 1, 0, -1};
+    static const int d_rows[PATHFINDER_NUM_ACTIONS] = {-1, 0, 1, 0};
+    static const int d_cols[PATHFINDER_NUM_ACTIONS] = {0, 1, 0, -1};
     while (head < tail) {
         int cell = queue[head++];
         int row = cell / PATHFINDER_COLS;
@@ -279,26 +270,7 @@ static int shortest_path(const State* s) {
     return -1;
 }
 
-static void update_action_mask(Pathfinder* env) {
-    if (env->action_mask == NULL) {
-        return;
-    }
-
-    for (int action = 0; action < PATHFINDER_NUM_ACTIONS; action++) {
-        int d_row;
-        int d_col;
-        action_delta(action, &d_row, &d_col);
-        int next_row = env->state.agent_row + d_row;
-        int next_col = env->state.agent_col + d_col;
-        int wall_idx = wall_idx_between(
-            env->state.agent_row, env->state.agent_col, next_row, next_col);
-        env->action_mask[action] =
-            (wall_idx >= 0 && env->state.known_walls[wall_idx] == PATHFINDER_WALL) ? 0 : 1;
-    }
-}
-
 static void update_observations(Pathfinder* env) {
-    update_action_mask(env);
     if (env->observations == NULL) {
         return;
     }
@@ -311,13 +283,26 @@ static void update_observations(Pathfinder* env) {
         (float)env->state.agent_row / (float)(PATHFINDER_ROWS - 1);
 }
 
-static inline int configured_base_max_solution_len(const Pathfinder* env) {
-    return env->max_solution_len;
+static inline int clamp_solution_len(int solution_len) {
+    if (solution_len < 1) {
+        return 1;
+    }
+    if (solution_len > PATHFINDER_MAX_SOLUTION_LEN) {
+        return PATHFINDER_MAX_SOLUTION_LEN;
+    }
+    return solution_len;
+}
+
+static inline int current_target_solution_len(const Pathfinder* env) {
+    if (!env->curriculum_enabled) {
+        return PATHFINDER_MAX_SOLUTION_LEN;
+    }
+    return clamp_solution_len(env->start_solution_len + env->curriculum_level);
 }
 
 static inline bool curriculum_can_advance(const Pathfinder* env) {
-    return env->curriculum_level + configured_base_max_solution_len(env) <
-        PATHFINDER_MAX_SOLUTION_LEN;
+    return env->curriculum_enabled &&
+        current_target_solution_len(env) < PATHFINDER_MAX_SOLUTION_LEN;
 }
 
 static void init_walls(State* s) {
@@ -464,14 +449,11 @@ static void open_random_edges(Pathfinder* env, int target_len) {
 
 static void generate_maze(Pathfinder* env) {
     State* s = &env->state;
-    env->curriculum_min_solution_len = env->min_solution_len + env->curriculum_level;
-    int min_solution_len = env->curriculum_min_solution_len;
-    int target_len = min_solution_len;
+    int target_len = current_target_solution_len(env);
 
     init_walls(s);
     bool carved = carve_solution(env, target_len);
     if (!carved) {
-        target_len = min_solution_len;
         carved = carve_solution(env, target_len);
     }
 
@@ -494,18 +476,17 @@ static void update_curriculum(Pathfinder* env, int success) {
     }
 
     env->curriculum_level++;
-    env->curriculum_min_solution_len++;
 }
 
 void add_log(Pathfinder* env) {
     State* s = &env->state;
     float success = (float)s->success;
     int current_curriculum_level = env->curriculum_level;
-    int current_curriculum_min_solution_len = env->curriculum_min_solution_len;
-    int current_curriculum_max_solution_len = env->max_solution_len + env->curriculum_level;
-    int next_curriculum_max_solution_len = current_curriculum_max_solution_len;
+    int current_target_len = current_target_solution_len(env);
+    int next_target_len = current_target_len;
     if (s->success && curriculum_can_advance(env)) {
-        next_curriculum_max_solution_len++;
+        next_target_len = clamp_solution_len(
+            env->start_solution_len + env->curriculum_level + 1);
     }
     float efficiency = 0.0f;
     if (s->success && s->agent_path_len > 0 && s->shortest_path_len > 0) {
@@ -530,10 +511,8 @@ void add_log(Pathfinder* env) {
     env->log.shortest_path_len += (float)s->shortest_path_len;
     env->log.agent_path_len += (float)s->agent_path_len;
     env->log.curriculum_level += (float)current_curriculum_level;
-    env->log.curriculum_min_solution_len += (float)current_curriculum_min_solution_len;
-    env->log.curriculum_max_solution_len += (float)current_curriculum_max_solution_len;
-    env->log.curriculum_target_len += (float)current_curriculum_max_solution_len;
-    env->log.curriculum_next_target_len += (float)next_curriculum_max_solution_len;
+    env->log.curriculum_target_len += (float)current_target_len;
+    env->log.curriculum_next_target_len += (float)next_target_len;
     env->log.n += 1.0f;
 }
 
@@ -545,7 +524,6 @@ void init(Pathfinder* env) {
     if (env->num_agents == 0) {
         env->num_agents = 1;
     }
-    env->curriculum_min_solution_len = env->min_solution_len + env->curriculum_level;
 }
 
 void c_reset(Pathfinder* env) {

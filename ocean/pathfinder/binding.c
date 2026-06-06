@@ -3,7 +3,6 @@
 #define NUM_ATNS 1
 #define ACT_SIZES {4}
 #define OBS_TENSOR_T FloatTensor
-#define MY_ACTION_MASK PATHFINDER_NUM_ACTIONS
 
 #define Env Pathfinder
 #include "vecenv.h"
@@ -12,7 +11,6 @@ void my_init(Env* env, Dict* kwargs) {
     env->num_agents = 1;
     env->branch_prob = (float)dict_get(kwargs, "branch_prob")->value;
     env->loop_prob = (float)dict_get(kwargs, "loop_prob")->value;
-    env->extra_entry_prob = (float)dict_get(kwargs, "extra_entry_prob")->value;
     env->step_penalty = (float)dict_get(kwargs, "step_penalty")->value;
     env->new_wall_penalty = (float)dict_get(kwargs, "new_wall_penalty")->value;
     env->known_wall_death_penalty = (float)dict_get(kwargs, "known_wall_death_penalty")->value;
@@ -21,8 +19,8 @@ void my_init(Env* env, Dict* kwargs) {
     env->revisit_penalty = (float)dict_get(kwargs, "revisit_penalty")->value;
     env->impossible_penalty = (float)dict_get(kwargs, "impossible_penalty")->value;
     env->goal_reward = (float)dict_get(kwargs, "goal_reward")->value;
-    env->min_solution_len = (int)dict_get(kwargs, "min_solution_len")->value;
-    env->max_solution_len = (int)dict_get(kwargs, "max_solution_len")->value;
+    env->start_solution_len = (int)dict_get(kwargs, "start_solution_len")->value;
+    env->curriculum_enabled = (int)dict_get(kwargs, "curriculum_enabled")->value;
     env->max_steps = (int)dict_get(kwargs, "max_steps")->value;
     init(env);
 }
@@ -41,8 +39,6 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "shortest_path_len", log->shortest_path_len);
     dict_set(out, "agent_path_len", log->agent_path_len);
     dict_set(out, "curriculum_level", log->curriculum_level);
-    dict_set(out, "curriculum_min_solution_len", log->curriculum_min_solution_len);
-    dict_set(out, "curriculum_max_solution_len", log->curriculum_max_solution_len);
     dict_set(out, "curriculum_target_len", log->curriculum_target_len);
     dict_set(out, "curriculum_next_target_len", log->curriculum_next_target_len);
 }

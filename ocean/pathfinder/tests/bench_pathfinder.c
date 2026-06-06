@@ -21,10 +21,17 @@ static void setup_env(Pathfinder* env, float* obs, float* actions,
     env->num_agents = 1;
     env->branch_prob = 0.35f;
     env->loop_prob = 0.10f;
-    env->extra_entry_prob = 0.0f;
-    env->min_solution_len = 1;
-    env->max_solution_len = 4;
+    env->start_solution_len = 4;
+    env->curriculum_enabled = 1;
     env->max_steps = 128;
+    env->step_penalty = -0.001f;
+    env->new_wall_penalty = 0.0f;
+    env->known_wall_death_penalty = -1.0f;
+    env->repeat_move_death_penalty = -1.0f;
+    env->new_cell_reward = 0.01f;
+    env->revisit_penalty = -0.01f;
+    env->impossible_penalty = -1.0f;
+    env->goal_reward = 1.0f;
     env->rng = 12345;
     init(env);
 }
@@ -69,11 +76,11 @@ static void bench_steps(Pathfinder* env, long steps) {
     }
     double elapsed = now_seconds() - t0;
     double step_sps = (double)steps / elapsed;
-    printf("step_bench steps=%ld seconds=%.6f step_sps=%.2f episodes=%.0f success=%.6f repeat_move_deaths=%.0f reward_sum=%.3f curriculum_level=%d curriculum_max_solution_len=%d\n",
+    printf("step_bench steps=%ld seconds=%.6f step_sps=%.2f episodes=%.0f success=%.6f repeat_move_deaths=%.0f reward_sum=%.3f curriculum_level=%d curriculum_target_len=%d\n",
         steps, elapsed, step_sps, env->log.n,
         env->log.n > 0.0f ? env->log.success / env->log.n : 0.0f,
         env->log.repeat_move_deaths, reward_sum, env->curriculum_level,
-        env->max_solution_len + env->curriculum_level);
+        current_target_solution_len(env));
 }
 
 static void bench_choose_goal_at_distance(Pathfinder* env, int target_len) {
@@ -112,18 +119,11 @@ static void bench_reset_components(Pathfinder* env, long iters) {
     }
     double obs_sec = now_seconds() - t0;
 
-    t0 = now_seconds();
-    for (long i = 0; i < iters; i++) {
-        update_action_mask(env);
-    }
-    double mask_sec = now_seconds() - t0;
-
-    printf("reset_components iters=%ld memset_ns=%.2f gen_plus_memset_ns=%.2f obs_ns=%.2f mask_ns=%.2f\n",
+    printf("reset_components iters=%ld memset_ns=%.2f gen_plus_memset_ns=%.2f obs_ns=%.2f\n",
         iters,
         1e9 * memset_sec / (double)iters,
         1e9 * gen_sec / (double)iters,
-        1e9 * obs_sec / (double)iters,
-        1e9 * mask_sec / (double)iters);
+        1e9 * obs_sec / (double)iters);
 
     t0 = now_seconds();
     for (long i = 0; i < iters; i++) {
@@ -239,9 +239,7 @@ int main(int argc, char** argv) {
     float actions[1] = {0};
     float rewards[1] = {0};
     float terminals[1] = {0};
-    unsigned char action_mask[PATHFINDER_NUM_ACTIONS] = {0};
     setup_env(&env, obs, actions, rewards, terminals);
-    env.action_mask = action_mask;
 
     bench_resets(&env, resets, 0);
     bench_resets(&env, resets, PATHFINDER_MAX_SOLUTION_LEN);

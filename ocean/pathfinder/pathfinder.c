@@ -26,10 +26,17 @@ int main(void) {
     env.rng = (unsigned int)time(NULL);
     env.branch_prob = 0.35f;
     env.loop_prob = 0.10f;
-    env.extra_entry_prob = 0.0f;
-    env.min_solution_len = 1;
-    env.max_solution_len = 4;
+    env.start_solution_len = 4;
+    env.curriculum_enabled = 1;
     env.max_steps = 128;
+    env.step_penalty = -0.001f;
+    env.new_wall_penalty = 0.0f;
+    env.known_wall_death_penalty = -1.0f;
+    env.repeat_move_death_penalty = -1.0f;
+    env.new_cell_reward = 0.01f;
+    env.revisit_penalty = -0.01f;
+    env.impossible_penalty = -1.0f;
+    env.goal_reward = 1.0f;
 
     init(&env);
     c_reset(&env);

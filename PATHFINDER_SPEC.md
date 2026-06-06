@@ -74,10 +74,9 @@ Total wall observation slots: `6*7 + 7*6 = 84`.
 
 Boundary behavior:
 
-- Left boundary edges are real Pathfinder entry/exit edges and may be open or
-  blocked by maze generation.
-- Top, right, and bottom boundary edges are hard board boundaries. Their truth
-  value is `1` and the agent can discover them by attempting to move off-board.
+- All off-board movement is impossible in v1. Asking to move off the board
+  applies `impossible_penalty`, terminates the attempt, and resets the agent to
+  `A1` on the same map.
 
 ## Maze Generation
 
@@ -85,34 +84,32 @@ The generator must produce legal, solvable layouts without hand-authored maps.
 
 Puzzle generation:
 
-1. Compute the curriculum span (`min_solution_len` to `max_solution_len`).
-2. Sample a target path length with a bias toward the upper end of the span.
-3. Initialize all wall slots to blocked.
-4. Open the left entry edge for `A1`.
-5. Carve one orthogonal randomized path from `A1` to a hidden pawn that is
-   exactly the sampled target length (including turns and winding moves).
-6. Store `A1` as the agent spawn for the episode.
-7. Add false branches and optional loops while preserving that the sampled
-   target length remains a valid shortest path lower bound.
-8. Optionally open additional column-1 entries under the same shortest-path
-   guard.
-9. Validate with BFS that `A1` reaches the pawn.
+1. Choose the target solution length from the curriculum state.
+2. Initialize all wall slots to blocked.
+3. Carve one randomized orthogonal path from `A1` to a hidden pawn that is
+   exactly the target length.
+4. Store `A1` as the agent spawn for the episode.
+5. Open additional random internal edges while preserving the target length as
+   the shortest path.
+6. Validate with BFS that `A1` reaches the pawn.
 
 Default generator style:
 
-- Choose a target length from the curriculum span with an upper-biased random
-  sample.
-- Carve a randomized, non-monotonic solution path of exact length to that target.
+- Use deterministic curriculum difficulty: target length starts at
+  `start_solution_len` and advances by one after each solve.
+- Carve a randomized, non-monotonic solution path of exact length to the current
+  target.
 - Open additional random internal edges as branch/loop density knobs rather than
   trying to exactly copy human barricade layouts.
 
 Curriculum:
 
-- `max_solution_len` is the starting curriculum distance. The default training
+- `start_solution_len` is the starting curriculum distance. The default training
   value is `4`.
-- `max_solution_len = 0` starts at the board maximum distance.
+- `curriculum_enabled = 0` disables the schedule and starts every generated map
+  at `PATHFINDER_MAX_SOLUTION_LEN`.
 - Each successful solve increments the next generated puzzle distance by one,
-  capped at `PATHFINDER_MAX_SOLUTION_LEN`.
+  capped at `PATHFINDER_MAX_SOLUTION_LEN`, when `curriculum_enabled = 1`.
 - Failed attempts do not advance curriculum.
 - Failed attempts restart the agent at `A1` on the same true map, but clear
   discovered wall/open observations back to `-1.0`, so map generation happens
@@ -122,10 +119,9 @@ Config knobs:
 
 - `branch_prob`: probability of adding false branches from the main route.
 - `loop_prob`: probability of opening extra internal edges after carving.
-- `extra_entry_prob`: probability each non-`A1` column-1 entrance is open.
-- `min_solution_len`: reserved for future variants; the current curriculum uses
-  an exact generated distance.
-- `max_solution_len`: starting exact solution distance.
+- `start_solution_len`: starting exact solution distance.
+- `curriculum_enabled`: `1` for deterministic solve-based curriculum, `0` for
+  max-difficulty maps from the first reset.
 - `max_steps`: timeout.
 - `seed`: inherited from vector env config.
 
@@ -184,14 +180,13 @@ Default reward model:
 - `+0.01` for first entering a cell in the current attempt.
 - `0.0` extra penalty for hitting a newly discovered wall; the agent paid the
   step cost but gained information.
-- `-0.01` for hitting a wall that was already known.
-- `-0.05` extra penalty and terminal attempt reset for hitting a known wall.
+- `-1.0` extra penalty and terminal attempt reset for hitting a wall that was
+  already known.
 - `-0.01` for revisiting a square that was previously left in the current
   attempt.
 - `-1.0` extra penalty and terminal attempt reset for immediate two-cell
   oscillation such as `A1 -> B1 -> A1 -> B1`.
-- `-0.01` for impossible movement, such as attempting to exit through the
-  left edge in v1.
+- `-1.0` for impossible movement, such as attempting to move off the board.
 
 Termination:
 
@@ -227,7 +222,8 @@ Logged metrics:
 - `shortest_path_len`
 - `agent_path_len`
 - `curriculum_level`
-- `curriculum_max_solution_len`
+- `curriculum_target_len`
+- `curriculum_next_target_len`
 - `n`
 
 ## PufferLib Integration
@@ -259,7 +255,6 @@ The env should follow current PufferLib 5 Ocean patterns:
   - `NUM_ATNS 1`
   - `ACT_SIZES {4}`
   - `OBS_TENSOR_T FloatTensor`
-  - `MY_ACTION_MASK PATHFINDER_NUM_ACTIONS`
   - `Env Pathfinder`
   - `puffer_state_refresh(Pathfinder* env)` to rebuild observations from
     restored state.
@@ -306,7 +301,7 @@ Verification commands after implementation:
 ```bash
 source .venv/bin/activate
 ./build.sh pathfinder
-python -m pufferlib.pufferl train pathfinder --train.total-timesteps 2097152
+python -m pufferlib.pufferl train pathfinder --train.gpus 1
 ```
 
 Native GPU builds are the expected path for this workspace.
@@ -317,10 +312,9 @@ Start conservative:
 
 - `vec.total_agents = 8192` or `16384`
 - `vec.num_buffers = 2`
-- `env.max_solution_len = 4` for early closer-target curriculum
+- `env.start_solution_len = 4` for early closer-target curriculum
+- `env.curriculum_enabled = 1`
 - `train.gpus = 1`
-- `train.total_timesteps = 100M` for real runs, at least `2,097,152` for smoke
-  tests with the initial `8192 x 128` rollout geometry.
 - `train.horizon = 128`
 - `train.minibatch_size = 32768`
 - `train.learning_rate = 0.001`

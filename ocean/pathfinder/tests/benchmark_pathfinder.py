@@ -75,8 +75,6 @@ def run_once(label, args, timesteps, eval_epochs_override):
         "shortest_path_len": stats.get("env/shortest_path_len", 0.0),
         "agent_path_len": stats.get("env/agent_path_len", 0.0),
         "curriculum_level": stats.get("env/curriculum_level", 0.0),
-        "curriculum_min_solution_len": stats.get("env/curriculum_min_solution_len", 0.0),
-        "curriculum_max_solution_len": stats.get("env/curriculum_max_solution_len", 0.0),
         "curriculum_target_len": stats.get("env/curriculum_target_len", 0.0),
         "curriculum_next_target_len": stats.get("env/curriculum_next_target_len", 0.0),
         "perf_rollout_sec": flat.get("perf/rollout", 0.0),

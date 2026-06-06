@@ -186,10 +186,11 @@ it is not the best state-memory reference on this branch.
 - Spawn: `A1`.
 - Hidden pawn: generated at the current curriculum distance from `A1`, and the
   maze must connect `A1` to it.
-- Initial curriculum: `env.max_solution_len = 4` starts targets exactly 4 moves
+- Initial curriculum: `env.start_solution_len = 4` starts targets exactly 4 moves
   from `A1`; each solve advances the next generated puzzle by 1 move, capped at
-  the board maximum. Set `max_solution_len = 0` only when you want to start at
   the board maximum.
+- Set `env.curriculum_enabled = 0` to disable curriculum and start every
+  generated map at the board maximum difficulty immediately.
 - Actions: four discrete moves.
 - Observation:
   - 84 wall slots as floats:
@@ -243,7 +244,7 @@ source .venv/bin/activate
 
 ```bash
 source .venv/bin/activate
-python -m pufferlib.pufferl train pathfinder --train.total-timesteps 2097152
+python -m pufferlib.pufferl train pathfinder --train.gpus 1
 ```
 
 If tests require helper binaries, put them under `ocean/pathfinder/tests/` and
