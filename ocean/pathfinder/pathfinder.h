@@ -313,8 +313,8 @@ static void init_walls(State* s) {
     }
 }
 
-static inline int pathfinder_rand(Pathfinder* env) {
-    return (int)rand_u32(env);
+static inline unsigned int pathfinder_rand(Pathfinder* env) {
+    return rand_u32(env);
 }
 
 static bool carve_solution_recursive(

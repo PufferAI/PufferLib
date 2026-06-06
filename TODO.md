@@ -4,10 +4,9 @@ Track simplifications to reduce unnecessary complexity and keep the env lean.
 
 ## High-priority refactors
 
-- [ ] Fix random action generation in player mode
-  - `pathfinder_rand` returns an `int` from `rand_u32`, which can be negative when cast.
-  - `pathfinder_rand(&env) % PATHFINDER_NUM_ACTIONS` can yield negative values and create invalid actions.
-  - Replace with unsigned-safe modulo path (`(int)(rand_u32(&env) & 0xFFu) % PATHFINDER_NUM_ACTIONS`) or direct `pathfinder_rand(&env)` modulo on `unsigned int` before cast.
+- [x] Fix random action generation in player mode
+  - `pathfinder_rand` now returns `unsigned int`, and action sampling uses unsigned modulo.
+  - This removes potential negative casts before indexing actions.
 
 - [ ] Remove curriculum helper asymmetry in `pathfinder.h`
   - [curriculum_min_solution_len](ocean/pathfinder/pathfinder.h:139) still does fallback/clamp sequencing while max length logic is already direct.
