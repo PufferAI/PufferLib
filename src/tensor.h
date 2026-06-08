@@ -30,6 +30,20 @@ typedef struct {
     precision_t* data;
     int64_t shape[PUF_MAX_DIMS];
 } PrecisionTensor;
+#else
+// C-compatible definition: precision_t is bf16 (uint16_t) or float depending on build mode.
+// Only the element size matters here (used by obs_element_size() in vecenv.h).
+#ifdef PRECISION_FLOAT
+typedef struct {
+    float* data;
+    int64_t shape[PUF_MAX_DIMS];
+} PrecisionTensor;
+#else
+typedef struct {
+    uint16_t* data;
+    int64_t shape[PUF_MAX_DIMS];
+} PrecisionTensor;
+#endif
 #endif
 
 #endif // PUFFERLIB_TENSOR_H

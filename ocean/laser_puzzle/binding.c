@@ -10,7 +10,6 @@
 
 void my_init(Env* env, Dict* kwargs) {
     // kwargs are passed in py the config .ini file, can set them here, will ignore for now
-    (void)kwargs;
     env->num_agents = 1;
     env->ROWS = INIT_ROWS;
     env->COLS = INIT_COLS;

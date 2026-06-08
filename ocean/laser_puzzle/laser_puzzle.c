@@ -23,6 +23,7 @@ int demo() {
     LaserPuzzle env = {0};
 
     // allocate memory, initialize the client
+    allocate(&env);
     c_reset(&env);
     env.client = make_client();
 

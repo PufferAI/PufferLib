@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 #include "pufferlib.cu"
 
 #define _PUFFER_STRINGIFY(x) #x
@@ -106,7 +107,9 @@ pybind11::dict puf_eval_log(pybind11::object pufferl_obj) {
     pufferl.last_log_step = pufferl.global_step;
  
     pybind11::dict env_dict;
-    Dict* env_out = create_dict(32);
+    // Capacity 64 to fit chess's per-bank hist_score_bank/hist_n_bank entries
+    // (16 keys across 8 banks) on top of base env-log fields.
+    Dict* env_out = create_dict(64);
     static_vec_eval_log(pufferl.vec, env_out);
     for (int i = 0; i < env_out->size; i++) {
         env_dict[env_out->items[i].key] = env_out->items[i].value;
@@ -134,10 +137,17 @@ void rollouts(pybind11::object pufferl_obj) {
     pybind11::gil_scoped_release no_gil;
     double t0 = wall_clock();
 
-    // Zero state buffers
+    // Zero state buffers (primary + every frozen bank, so all banks see fresh
+    // state symmetrically — otherwise frozen banks accumulate indefinitely while
+    // primary resets, giving primary an unfair in-distribution advantage).
     if (pufferl.hypers.reset_state) {
         for (int i = 0; i < pufferl.hypers.num_buffers; i++) {
             puf_zero(&pufferl.buffer_states[i], pufferl.default_stream);
+        }
+        for (int b = 0; b < pufferl.num_frozen_banks; b++) {
+            for (int i = 0; i < pufferl.hypers.num_buffers; i++) {
+                puf_zero(&pufferl.frozen_banks[b].buffer_states[i], pufferl.default_stream);
+            }
         }
     }
 
@@ -205,6 +215,48 @@ void load_weights(pybind11::object pufferl_obj, const std::string& path) {
         cast<<<grid_size(n), BLOCK_SIZE, 0, pufferl.default_stream>>>(
             pufferl.param_puf.data, pufferl.master_weights.data, n);
     }
+}
+
+int py_add_frozen_bank(py::object pufferl_obj, int slice_size,
+                       int hidden_size, int num_layers) {
+    PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
+    return pufferl_add_frozen_bank(&pufferl, slice_size, hidden_size, num_layers);
+}
+
+void py_load_frozen_bank(py::object pufferl_obj, int bank_idx, const std::string& path) {
+    PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
+    pufferl_load_frozen_bank(&pufferl, bank_idx, path.c_str());
+}
+
+void py_set_agent_perm(py::object pufferl_obj, py::array_t<int> perm) {
+    PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
+    auto buf = perm.request();
+    if (buf.ndim != 1) throw std::runtime_error("agent_perm must be 1-D");
+    if ((int)buf.shape[0] != pufferl.vec->total_agents) {
+        throw std::runtime_error("agent_perm length must equal total_agents");
+    }
+    pufferl_set_agent_perm(&pufferl, (const int*)buf.ptr);
+}
+
+void py_set_env_tags(py::object pufferl_obj, py::array_t<int> tags) {
+    PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
+    auto buf = tags.request();
+    if (buf.ndim != 1) throw std::runtime_error("env_tags must be 1-D");
+    int num_envs = pufferl_num_envs(&pufferl);
+    if ((int)buf.shape[0] != num_envs) {
+        throw std::runtime_error("env_tags length must equal num_envs");
+    }
+    pufferl_set_env_tags(&pufferl, (const int*)buf.ptr);
+}
+
+int py_count_aligned(py::object pufferl_obj, int tag_value, int reset_flags) {
+    PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
+    return pufferl_count_aligned(&pufferl, tag_value, reset_flags);
+}
+
+int py_num_envs(py::object pufferl_obj) {
+    PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
+    return pufferl_num_envs(&pufferl);
 }
 
 void py_puff_advantage(
@@ -367,6 +419,8 @@ std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
     hypers.vf_clip_coef = get_config(train_kwargs, "vf_clip_coef");
     hypers.vf_coef = get_config(train_kwargs, "vf_coef");
     hypers.ent_coef = get_config(train_kwargs, "ent_coef");
+    hypers.min_ent_coef_ratio = get_config(train_kwargs, "min_ent_coef_ratio");
+    hypers.anneal_ent_coef = get_config(train_kwargs, "anneal_ent_coef");
     // GAE
     hypers.gamma = get_config(train_kwargs, "gamma");
     hypers.gae_lambda = get_config(train_kwargs, "gae_lambda");
@@ -465,6 +519,12 @@ PYBIND11_MODULE(_C, m) {
     m.def("close", &puf_close);
     m.def("save_weights", &save_weights);
     m.def("load_weights", &load_weights);
+    m.def("add_frozen_bank", &py_add_frozen_bank);
+    m.def("load_frozen_bank", &py_load_frozen_bank);
+    m.def("set_agent_perm", &py_set_agent_perm);
+    m.def("set_env_tags", &py_set_env_tags);
+    m.def("count_aligned", &py_count_aligned);
+    m.def("num_envs", &py_num_envs);
     m.def("python_vec_recv", &python_vec_recv);
     m.def("python_vec_send", &python_vec_send);
     py::class_<Policy>(m, "Policy");
@@ -493,6 +553,8 @@ PYBIND11_MODULE(_C, m) {
         .def_readwrite("vf_clip_coef", &HypersT::vf_clip_coef)
         .def_readwrite("vf_coef", &HypersT::vf_coef)
         .def_readwrite("ent_coef", &HypersT::ent_coef)
+        .def_readwrite("min_ent_coef_ratio", &HypersT::min_ent_coef_ratio)
+        .def_readwrite("anneal_ent_coef", &HypersT::anneal_ent_coef)
         .def_readwrite("gamma", &HypersT::gamma)
         .def_readwrite("gae_lambda", &HypersT::gae_lambda)
         .def_readwrite("vtrace_rho_clip", &HypersT::vtrace_rho_clip)

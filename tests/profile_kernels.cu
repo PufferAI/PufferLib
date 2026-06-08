@@ -511,7 +511,7 @@ void run_samplelogits(SampleLogitsProfile* p) {
     sample_logits<<<grid_size(p->B), BLOCK_SIZE>>>(
         p->dec_out, p->logstd, p->act_sizes,
         p->actions_t.data, p->logprobs_t.data, p->value_out_t.data,
-        p->rng_states);
+        p->rng_states, nullptr, 0);
 }
 
 void profile_samplelogits(int B, int A) {

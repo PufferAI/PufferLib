@@ -6,55 +6,54 @@ void demo() {
     int logit_sizes[1] = {5};
     PufferNet* net = make_puffernet(weights, 1, 121, 512, 5, logit_sizes, 1);
 
-    int max_size = 47;
     int num_maps = 64;
-    int num_agents = 1;
     int horizon = 256;
     float speed = 1;
     int vision = 5;
     bool discretize = true;
 
-    Grid* env = allocate_maze(max_size, num_agents, horizon,
-        vision, speed, discretize);
+    Grid* env = (Grid*)calloc(1, sizeof(Grid));
+    env->num_agents = 1;
+    env->rng = 73;
+    env->observations = calloc(WINDOW*WINDOW, sizeof(unsigned char));
+    env->actions = calloc(1, sizeof(float));
+    env->rewards = calloc(1, sizeof(float));
+    env->terminals = calloc(1, sizeof(float));
 
     // Generate maps matching binding.c: random odd sizes, random difficulty
     State* levels = calloc(num_maps, sizeof(State));
-    Grid temp_env;
-    temp_env.max_size = max_size;
-    init_maze(&temp_env);
     unsigned int map_rng = 42;
     for (int i = 0; i < num_maps; i++) {
-        int sz = 5 + (rand_r(&map_rng) % (max_size - 5));
+        int sz = 5 + (rand_r(&map_rng) % (MAX_SIZE - 5));
         if (sz % 2 == 0) sz -= 1;
         float difficulty = (float)rand_r(&map_rng) / (float)(RAND_MAX);
-        create_maze_level(&temp_env, sz, sz, difficulty, i);
-        init_state(&levels[i], max_size, num_agents);
-        get_state(&temp_env, &levels[i]);
+        State* level = &levels[i];
+        level->width = sz;
+        level->height = sz;
+        create_maze_level(level, difficulty, i);
     }
-    free(temp_env.maze);
 
-    env->num_maps = num_maps;
+    env->num_levels = num_maps;
     env->levels = levels;
 
     c_reset(env);
     c_render(env);
     while (!WindowShouldClose()) {
         env->actions[0] = ATN_PASS;
-        Agent* agent = &env->agents[0];
+        env->actions[0] = ATN_SOUTH;
+        State* s = &env->state;
 
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)){
-                agent->direction = 3.0*PI/2.0;
-                env->actions[0] = ATN_FORWARD;
+                env->actions[0] = ATN_NORTH;
             } else if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) {
-                agent->direction = PI/2.0;
-                env->actions[0] = ATN_FORWARD;
+                env->actions[0] = ATN_SOUTH;
             } else if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) {
-                agent->direction = PI;
-                env->actions[0] = ATN_FORWARD;
+                s->direction = PI;
+                env->actions[0] = ATN_WEST;
             } else if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) {
-                agent->direction = 0;
-                env->actions[0] = ATN_FORWARD;
+                s->direction = 0;
+                env->actions[0] = ATN_EAST;
             } else {
                 env->actions[0] = ATN_PASS;
             }
@@ -70,8 +69,11 @@ void demo() {
     
     free_puffernet(net);
     free(weights);
-    free_allocated_maze(env);
-    for (int i = 0; i < num_maps; i++) free_state(&levels[i]);
+    free(env->observations);
+    free(env->actions);
+    free(env->rewards);
+    free(env->terminals);
+    c_close(env);
     free(levels);
 }
 

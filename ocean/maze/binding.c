@@ -16,7 +16,7 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int agents_per_buffer = total_agents / num_buffers;
     int num_envs = total_agents;
 
-    int max_size = (int)dict_get(env_kwargs, "max_size")->value;
+    int max_size = MAX_SIZE;
     int num_maps = (int)dict_get(env_kwargs, "num_maps")->value;
     int map_size = (int)dict_get(env_kwargs, "map_size")->value;
 
@@ -27,11 +27,6 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
 
     // Generate maze levels (shared across all envs)
     State* levels = calloc(num_maps, sizeof(State));
-
-    // Temporary env used to generate maps
-    Grid temp_env;
-    temp_env.max_size = max_size;
-    init_maze(&temp_env);
 
     unsigned int map_rng = 42;
     for (int i = 0; i < num_maps; i++) {
@@ -44,16 +39,13 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
             sz -= 1;
         }
 
-        float difficulty = (float)rand_r(&map_rng) / (float)(RAND_MAX);
-        create_maze_level(&temp_env, sz, sz, difficulty, i);
-        init_state(&levels[i], max_size, 1);
-        get_state(&temp_env, &levels[i]);
-    }
+        State* level = &levels[i];
+        level->width = sz;
+        level->height = sz;
 
-    // Free temp env internal allocations
-    free(temp_env.maze);
-    free(temp_env.counts);
-    free(temp_env.agents);
+        float difficulty = (float)rand_r(&map_rng) / (float)(RAND_MAX);
+        create_maze_level(level, difficulty, i);
+    }
 
     // Allocate all environments
     Env* envs = (Env*)calloc(num_envs, sizeof(Env));
@@ -63,14 +55,13 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     buffer_env_starts[0] = 0;
     buffer_env_counts[0] = 0;
 
+    unsigned int env_rng = 42;
     for (int i = 0; i < num_envs; i++) {
         Env* env = &envs[i];
-        env->rng = i;
-        env->max_size = max_size;
-        env->num_maps = num_maps;
+        env->num_levels = num_maps;
         env->num_agents = 1;
         env->levels = levels;
-        init_maze(env);
+        env->rng = rand_r(&env_rng);
 
         buf_agents += env->num_agents;
         buffer_env_counts[buf]++;
@@ -91,10 +82,8 @@ void my_vec_close(Env* envs) {
 }
 
 void my_init(Env* env, Dict* kwargs) {
-    env->max_size = (int)dict_get(kwargs, "max_size")->value;
-    env->num_maps = (int)dict_get(kwargs, "num_maps")->value;
+    env->num_levels = (int)dict_get(kwargs, "num_maps")->value;
     env->num_agents = 1;
-    init_maze(env);
 }
 
 void my_log(Log* log, Dict* out) {

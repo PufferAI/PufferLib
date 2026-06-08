@@ -39,4 +39,3 @@ int main() {
     free(env.terminals);
     c_close(&env);
 }
-

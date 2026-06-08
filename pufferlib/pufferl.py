@@ -25,6 +25,8 @@ try:
 except ImportError:
     raise ImportError('Failed to import PufferLib C++ backend. If you have non-default PyTorch, try installing with --no-build-isolation')
 
+from pufferlib import selfplay
+
 import rich
 import rich.traceback
 from rich.table import Table
@@ -203,6 +205,11 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
     total_timesteps = args['train']['total_timesteps']
     all_logs = []
 
+    # When sweeping, optionally score each trial by winrate vs a fixed enemy
+    # checkpoint (match mode) instead of the training-time self-play metric.
+    match_mode = (sweep_obj is not None
+        and bool(args.get('sweep', {}).get('match_enemy_model_path')))
+
     checkpoint_dir = os.path.join(args['checkpoint_dir'], args['env_name'], run_id)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -223,6 +230,18 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
         flat_logs = dict(unroll_nested_dict(backend.log(pufferl)))
         print_dashboard(args, model_size, flat_logs, clear=True)
 
+    # Selfplay-pool curriculum (no-op unless selfplay.enabled). Disabled
+    # under match-mode sweeps since match() owns its own perm/frozen bank.
+    pool_state = None
+    try:
+        pool_state = selfplay.setup(pufferl, backend, args, run_id)
+    except RuntimeError as e:
+        print(f'WARNING: {e}, skipping')
+        backend.close(pufferl)
+        if result_queue is not None:
+            result_queue.put((args['gpu_id'], [], [], []))
+        return
+
     model_path = ''
     flat_logs = {}
     train_epochs = int(total_timesteps // (args['vec']['total_agents'] * args['train']['horizon']))
@@ -233,7 +252,12 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
         if epoch < train_epochs:
             backend.train(pufferl)
 
-        if (epoch % args['checkpoint_interval'] == 0 or epoch == train_epochs - 1) and sweep_obj is None:
+        # In match-sweep mode we need the final checkpoint to feed into match().
+        is_final = epoch == train_epochs - 1
+        should_save = (sweep_obj is None
+            and (epoch % args['checkpoint_interval'] == 0 or is_final)
+        ) or (match_mode and is_final)
+        if should_save:
             model_path = os.path.join(checkpoint_dir, f'{pufferl.global_step:016d}.bin')
             backend.save_weights(pufferl, model_path)
 
@@ -243,6 +267,9 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 
         logs = backend.eval_log(pufferl) if epoch >= train_epochs else backend.log(pufferl)
         flat_logs = {**flat_logs, **dict(unroll_nested_dict(logs))}
+
+        if epoch < train_epochs:
+            selfplay.step(pufferl, backend, pool_state, flat_logs, epoch)
 
         if verbose:
             print_dashboard(args, model_size, flat_logs)
@@ -265,12 +292,36 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
 
 
     print_dashboard(args, model_size, flat_logs)
+    # Match-mode trials may have early-stopped before the in-loop save fired;
+    # ensure we always have a checkpoint to feed match().
+    if match_mode and not model_path:
+        model_path = os.path.join(checkpoint_dir, f'{pufferl.global_step:016d}.bin')
+        backend.save_weights(pufferl, model_path)
     backend.close(pufferl)
 
     if target_key not in flat_logs:
         if result_queue is not None:
             result_queue.put((args['gpu_id'], None, None, None))
         return
+
+    # Match-mode scoring: primary = trained policy (model_path); frozen bank =
+    # fixed enemy. Score is slot 0's average winrate. Creates its own pufferl
+    # so must run after the training instance is closed. Single observation per
+    # trial (mid-training curve doesn't predict final match score).
+    match_score = None
+    if match_mode:
+        sweep_cfg = args['sweep']
+        match_args = deepcopy(args)
+        match_args['enemy_hidden_size'] = int(sweep_cfg['match_enemy_hidden_size'])
+        match_args['enemy_num_layers'] = int(sweep_cfg['match_enemy_num_layers'])
+        match_logs = match(env_name,
+            policy_a_path=model_path,
+            policy_b_path=sweep_cfg['match_enemy_model_path'],
+            num_games=int(sweep_cfg['match_num_games']),
+            args=match_args, verbose=verbose)
+        match_score = float(match_logs['env/slot_0_score'])
+        if args['wandb']:
+            wandb.log({'env/match_score': match_score}, step=flat_logs['agent_steps'])
 
     # This version has the training perf logs and eval env logs
     all_logs.append(flat_logs)
@@ -295,6 +346,14 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
     for k in metrics:
         metrics[k][-1] = all_logs[-1][k]
 
+    # Match-mode: single observation at final-training cost. Protein's curve
+    # fit collapses to one point — we only trust the match winrate, not any
+    # training-time proxy. Replicate the scalar across all downsample bins so
+    # the JSON log shape matches every other metric (cache_data.py rejects
+    # length-mismatched metrics as "bad data").
+    if match_mode:
+        metrics['env/match_score'] = [match_score] * len(metrics['agent_steps'])
+
     # Save own log: config + downsampled results
     log_dir = os.path.join(args['log_dir'], args['env_name'])
     os.makedirs(log_dir, exist_ok=True)
@@ -310,7 +369,12 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
         wandb.run.finish()
 
     if result_queue is not None:
-        result_queue.put((args['gpu_id'], metrics['env/score'], metrics['uptime'], metrics['agent_steps']))
+        if match_mode:
+            # One observation: final hypers -> match winrate, at total training cost.
+            result_queue.put((args['gpu_id'], [match_score],
+                [metrics['uptime'][-1]], [metrics['agent_steps'][-1]]))
+        else:
+            result_queue.put((args['gpu_id'], metrics['env/score'], metrics['uptime'], metrics['agent_steps']))
 
 def train(env_name, args=None, gpus=None, **kwargs):
     args = args or load_config(env_name)
@@ -333,6 +397,9 @@ def train(env_name, args=None, gpus=None, **kwargs):
         if rank == 0 and not subprocess:
             _train(env_name, worker_args, verbose=True)
         else:
+            # Protein's GP models live on cuda:0 on non-WSL setups; spawn-pickling
+            # them works fine via CUDA IPC. On WSL, sweep.py forces device='cpu'
+            # at construction so there's nothing to move.
             ctx.Process(target=_train, args=(env_name, worker_args),
                 kwargs=kwargs).start()
 
@@ -427,10 +494,106 @@ def eval(env_name, args=None, load_path=None):
 
     backend.close(pufferl)
 
+def match(env_name, policy_a_path, policy_b_path, num_games=4096, args=None, verbose=True):
+    '''Head-to-head match between two trained policies in a 2-agent selfplay env.
+    Policy A plays slot 0 (e.g. white in chess), policy B plays slot 1 (black).
+    Both checkpoints must come from the same env / arch.
+    '''
+    args = args or load_config(env_name)
+    args['reset_state'] = False
+    args['train']['horizon'] = 1
+    args.setdefault('nccl_id', b'')  # match is always single-GPU
+    # Sweep suggestions can give odd agents_per_buffer (e.g. num_buffers=5,
+    # total_agents=4096 -> 819). Pin to a stable eval config that guarantees
+    # clean slot-0/slot-1 split; ignores trial's vec tuning (eval, not train).
+    args['vec']['num_buffers'] = 2
+    args['vec']['total_agents'] = 8192
+    backend = _resolve_backend(args)
+    if backend is not _C:
+        raise RuntimeError('match() requires the native CUDA backend')
+
+    def _resolve_latest(path):
+        if path != 'latest':
+            return path
+        pattern = os.path.join(args['checkpoint_dir'], args['env_name'], '**', '*.bin')
+        candidates = glob.glob(pattern, recursive=True)
+        if not candidates:
+            raise FileNotFoundError(f'No .bin checkpoints found in {args["checkpoint_dir"]}/{args["env_name"]}/')
+        return max(candidates, key=os.path.getctime)
+    policy_a_path = _resolve_latest(policy_a_path)
+    policy_b_path = _resolve_latest(policy_b_path)
+
+    total_agents = int(args['vec']['total_agents'])
+    num_buffers = int(args['vec']['num_buffers'])
+    agents_per_buffer = total_agents // num_buffers
+    half = agents_per_buffer // 2
+    if 2 * half != agents_per_buffer:
+        raise RuntimeError(f'agents_per_buffer ({agents_per_buffer}) must be even for 2-agent selfplay')
+
+    # Primary holds policy A (owns first half of each buffer); one frozen bank
+    # holds policy B (owns second half). Bank is created inside create_pufferl
+    # before cudagraph capture so the graph bakes in its pointers; weight loads
+    # later only update data.
+    args['vec']['num_frozen_banks'] = 1
+    args['vec']['frozen_bank_pct'] = 0.5
+    # CLI flags take precedence; fall back to [sweep].match_enemy_* so the same
+    # config drives sweep-time and CLI-time matches. 0 / None means "use primary".
+    sweep_cfg = args.get('sweep', {})
+    enemy_hidden = args.get('enemy_hidden_size') or sweep_cfg.get('match_enemy_hidden_size')
+    enemy_layers = args.get('enemy_num_layers')  or sweep_cfg.get('match_enemy_num_layers')
+    if enemy_hidden:
+        args['vec']['frozen_bank_hidden_size'] = int(enemy_hidden)
+    if enemy_layers:
+        args['vec']['frozen_bank_num_layers'] = int(enemy_layers)
+
+    pufferl = backend.create_pufferl(args)
+
+    # Per-buffer perm: each env's slot 0 lands in primary's slice [0, half),
+    # slot 1 lands in frozen bank's slice [half, agents_per_buffer). The env
+    # side randomizes slot<->color per env, so A and B each play both colors.
+    perm = np.empty(total_agents, dtype=np.int32)
+    envs_per_buffer = half
+    for b in range(num_buffers):
+        off = b * agents_per_buffer
+        for i in range(envs_per_buffer):
+            perm[off + 2*i]     = off + i
+            perm[off + 2*i + 1] = off + half + i
+    backend.set_agent_perm(pufferl, perm)
+
+    backend.load_weights(pufferl, policy_a_path)
+    backend.load_frozen_bank(pufferl, 0, policy_b_path)
+
+    logs = {}
+    while True:
+        backend.rollouts(pufferl)
+        logs = dict(unroll_nested_dict(backend.eval_log(pufferl)))
+        n = int(logs.get('env/n', 0))
+        if verbose:
+            a = logs.get('env/slot_0_score', 0.0)
+            b = logs.get('env/slot_1_score', 0.0)
+            draws = logs.get('env/draw_rate', 0.0)
+            print(f'\rgames={n}/{num_games}  A={a:.3f}  B={b:.3f}  draw={draws:.3f}', end='')
+        if n >= num_games:
+            break
+
+    if verbose:
+        print()
+
+    backend.close(pufferl)
+    return logs
+
 def load_config(env_name):
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
     parser.add_argument('--load-model-path', type=str, default=None,
         help='Path to a pretrained checkpoint')
+    parser.add_argument('--load-enemy-model-path', type=str, default=None,
+        help='Path to opponent checkpoint for `puffer match` (slot 1 / black in chess)')
+    parser.add_argument('--num-games', type=int, default=4096,
+        help='Number of games to play in `puffer match`')
+    parser.add_argument('--enemy-hidden-size', type=int, default=None,
+        help='hidden_size of the enemy checkpoint (defaults to primary)')
+    parser.add_argument('--enemy-num-layers', type=int, default=None,
+        help='num_layers of the enemy checkpoint (defaults to primary)')
     parser.add_argument('--load-id', type=str,
         default=None, help='Kickstart/eval from from a finished Wandbrun')
     parser.add_argument('--render-mode', type=str, default='auto',
@@ -496,7 +659,7 @@ def load_config(env_name):
     return dict(args)
 
 def main():
-    err = 'Usage: puffer [train, eval, sweep, paretosweep] [env_name] [optional args]. --help for more info'
+    err = 'Usage: puffer [train, eval, sweep, paretosweep, match] [env_name] [optional args]. --help for more info'
     if len(sys.argv) < 3:
         raise ValueError(err)
 
@@ -510,6 +673,13 @@ def main():
         eval(env_name=env_name, args=args)
     elif 'sweep' in mode:
         sweep(env_name=env_name, args=args, pareto='pareto' in mode)
+    elif 'match' in mode:
+        a_path = args.get('load_model_path')
+        b_path = args.get('load_enemy_model_path')
+        if not a_path or not b_path:
+            raise ValueError('puffer match requires --load-model-path and --load-enemy-model-path')
+        match(env_name=env_name, policy_a_path=a_path, policy_b_path=b_path,
+            num_games=args.get('num_games', 4096), args=args)
     else:
         raise ValueError(err)
 

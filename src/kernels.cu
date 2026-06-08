@@ -317,6 +317,13 @@ __global__ void cast(precision_t* __restrict__ dst,
     }
 }
 
+inline void cast_dispatch(precision_t* dst, const precision_t* src, int n, cudaStream_t stream) {
+    cudaMemcpyAsync(dst, src, n * sizeof(precision_t), cudaMemcpyDeviceToDevice, stream);
+}
+inline void cast_dispatch(precision_t* dst, const float* src, int n, cudaStream_t stream) {
+    cast<<<grid_size(n), BLOCK_SIZE, 0, stream>>>(dst, src, n);
+}
+
 #ifndef PRECISION_FLOAT
 __global__ void cast(float* __restrict__ dst,
         const precision_t* __restrict__ src, int n) {
@@ -341,6 +348,10 @@ __global__ void cast(unsigned char* __restrict__ dst,
     if (idx < n) {
         dst[idx] = to_float(src[idx]);
     }
+}
+
+inline void cast_dispatch(precision_t* dst, const unsigned char* src, int n, cudaStream_t stream) {
+    cast<<<grid_size(n), BLOCK_SIZE, 0, stream>>>(dst, src, n);
 }
 
 void puf_copy(PrecisionTensor* dst, const PrecisionTensor* src, cudaStream_t stream) {

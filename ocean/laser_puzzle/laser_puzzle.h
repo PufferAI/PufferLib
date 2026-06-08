@@ -8,7 +8,6 @@
 #include "level_generation/puzzle_types.h"
 
 #define BOARD_IDX(cols, r, c) ((r) * (cols) + (c))
-// Level generation scripts are kept outside pufferlib for now; this env loads pre-generated levels.
 #define LASER_PUZZLE_LEVELS_PATH "resources/laser_puzzle/laser_puzzle_levels.bin"
 
 // observations: 6*6 board, one byte per cell:
@@ -20,13 +19,11 @@
 #define OBS_MIRROR_RIGHT (OBS_SENSOR + MAX_LASERS)
 #define OBS_MIRROR_LEFT (OBS_MIRROR_RIGHT + 1)
 
-
 // actions: 4 * 4 * 3, set mirror to none, left or right for each interior cell. discrete actions
 #define ACTIONS_PER_CELL 3
 #define INNER_ROWS (INIT_ROWS - 2)
 #define INNER_COLS (INIT_COLS - 2)
 #define NUM_ACTIONS (ACTIONS_PER_CELL * INNER_ROWS * INNER_COLS)
-
 
 static const int CELL_SIZE = 80;
 static const Color LASER_COLORS[] = {SKYBLUE, RED, GREEN, YELLOW, BLUE, ORANGE, PURPLE, MAGENTA};
@@ -55,8 +52,7 @@ typedef struct {
 } LaserPuzzleLevel;
 
 typedef struct {
-    // this will store the log resutls for only the completed episodes
-    Log log;
+    Log log;  // only stores results for completed episodes
     Client* client;
 
     unsigned char* observations;
@@ -69,14 +65,9 @@ typedef struct {
     unsigned int rng;
     int owns_buffers;
 
-    // length of the current episode
     int episode_length;
-
-    // max actions allowed before the episode is over
-    int max_steps;
-
-    // return for this episode
-    float episode_return;
+    int max_steps;  // max actions allowed before the episode is over
+    float episode_return; // return for this episode
 
     // env specific
     int ROWS;
@@ -94,31 +85,13 @@ typedef struct {
 } LaserPuzzle;
 
 void load_laser_puzzle_levels(LaserPuzzle* env, const char* path) {
-    static LaserPuzzleLevel* levels = NULL;
-    static int level_count = 0;
-    if (levels != NULL) {
-        env->levels = levels;
-        env->num_levels = level_count;
-        return;
-    }
-
     FILE* file = fopen(path, "rb");
-    if (file == NULL) {
-        perror("Failed to open laser puzzle levels");
-        env->num_levels = 0;
-        return;
-    }
 
     uint32_t header[3] = {0};
-    if (fread(header, sizeof(uint32_t), 3, file) != 3 || header[2] == 0) {
-        fprintf(stderr, "Failed to read laser puzzle level count from %s\n", path);
-        fclose(file);
-        env->num_levels = 0;
-        return;
-    }
+    fread(header, sizeof(uint32_t), 3, file);
 
-    level_count = (int)header[2];
-    levels = (LaserPuzzleLevel*)calloc((size_t)level_count, sizeof(LaserPuzzleLevel));
+    int level_count = (int)header[2];
+    LaserPuzzleLevel* levels = (LaserPuzzleLevel*)calloc((size_t)level_count, sizeof(LaserPuzzleLevel));
 
     for (int i = 0; i < level_count; i++) {
         fread(&levels[i].optimal_mirrors, sizeof(int), 1, file);
@@ -142,7 +115,6 @@ void load_laser_puzzle_levels(LaserPuzzle* env, const char* path) {
 }
 
 
-// Environment lifecycle
 // This allocate function only runs in the standalone demo since puffer vecenv already allocates memory.
 void allocate(LaserPuzzle* env) {
     env->ROWS = INIT_ROWS;
@@ -164,8 +136,8 @@ void allocate(LaserPuzzle* env) {
 
 // Called from c_close in both standalone and vecenv modes.
 void deallocate(LaserPuzzle* env) {
-    // always free the board, puffer doesnt own it
     free(env->board);
+    free(env->levels);
 
     // check if we are in the standalone demo or puffer owns the buffers
     if (env->owns_buffers) {
@@ -176,10 +148,12 @@ void deallocate(LaserPuzzle* env) {
     }
 
     env->board = NULL;
+    env->levels = NULL;
     env->observations = NULL;
     env->actions = NULL;
     env->rewards = NULL;
     env->terminals = NULL;
+    env->num_levels = 0;
 
     env->owns_buffers = 0;
 }
@@ -196,21 +170,17 @@ Client* make_client() {
 }
 
 void close_client(Client* client) {
-    if (client->assets_loaded) {
-        UnloadTexture(client->sprites);
-        if (client->background.id != 0) {
-            UnloadTexture(client->background);
-        }
-        UnloadFont(client->font);
-        client->assets_loaded = 0;
-    }
+    UnloadTexture(client->sprites);
+    UnloadTexture(client->background);
+    UnloadFont(client->font);
+    client->assets_loaded = 0;
     if (IsWindowReady()) {
         CloseWindow();
     }
     free(client);
 }
 
-// any closing preparations, free any allocated memory
+// free alocated memory, unload raylib resources
 void c_close(LaserPuzzle* env) {
     if (env->client != NULL) {
         close_client(env->client);
@@ -221,15 +191,13 @@ void c_close(LaserPuzzle* env) {
 }
 
 void add_log(LaserPuzzle* env) {
-    // takes into account sinks + mirros placed, normalized
-    float perf = 0.0f;
+    float perf = 0.0f; // takes into account sinks + mirros placed, normalized
     if (env->mirrors_placed > 0) {
         perf = ((float)env->sinks_found * (float)env->optimal_mirrors)
             / ((float)env->total_sinks * (float)env->mirrors_placed);
     }
 
-    // takes into account sinks + mirros placed, unnormalized
-    float score = 0.0f;
+    float score = 0.0f; // takes into account sinks + mirros placed, unnormalized
     if (env->mirrors_placed > 0) {
         score = (float)env->sinks_found
             * ((float)env->optimal_mirrors / (float)env->mirrors_placed);
@@ -278,36 +246,23 @@ void compute_observations(LaserPuzzle* env) {
     }
 }
 
-// Episode lifecycle
-// reset the game state, start a new game
+// reset the env state (ignore rewards, terminals --> handled by c_step)
 void c_reset(LaserPuzzle* env) {
-    // check if memory has been allocated for the env variable (by puffer venvc), if not allocate
-    if (env->board == NULL) {
-        allocate(env);
-    }
-
     env->sinks_found = 0;
     env->mirrors_placed = 0;
     env->moves_made = 0;
     env->episode_length = 0;
     env->episode_return = 0.0f;
     env->pending_reset = 0;
-    for (int i = 0; i < MAX_LASERS; i++) {
-        env->sink_hit_before[i] = 0;
-    }
 
-    if (env->num_levels > 0) {
-        int level_index = rand_r(&env->rng) % env->num_levels;
-        const LaserPuzzleLevel* level = &env->levels[level_index];
-        env->total_sinks = level->sensor_count;
-        env->optimal_mirrors = level->optimal_mirrors;
+    memset(env->sink_hit_before, 0, sizeof(env->sink_hit_before));
 
-        for (int r = 0; r < env->ROWS; r++) {
-            for (int c = 0; c < env->COLS; c++) {
-                env->board[BOARD_IDX(env->COLS, r, c)] = level->puzzle[r][c];
-            }
-        }
-    }
+    int level_index = rand_r(&env->rng) % env->num_levels;
+    const LaserPuzzleLevel* level = &env->levels[level_index];
+    env->total_sinks = level->sensor_count;
+    env->optimal_mirrors = level->optimal_mirrors;
+
+    memcpy(env->board, level->puzzle, sizeof(level->puzzle));
 
     compute_observations(env);
 }
@@ -315,10 +270,8 @@ void c_reset(LaserPuzzle* env) {
 // advance state
 void c_step(LaserPuzzle* env) {
     if (env->client && env->pending_reset) {
-        // When we have a client, since we deferred reset to display the terminal state, reset now.
+        // When we have a client, since we deferred reset to display the terminal state, reset now. This also menas we are skipping an action given by puffernet. Not really an issue since this block only runs with puffer eval and standalone demo, not in training
         c_reset(env);
-        env->rewards[0] = 0.0f;
-        env->terminals[0] = 0.0f;
         return;
     }
 
@@ -336,46 +289,46 @@ void c_step(LaserPuzzle* env) {
                 env->mirrors_placed++;
             }
 
-            if (boardCell.type == LASER) {
-                int laserId = boardCell.id;
-                int curR = r;
-                int curC = c;
-                int dr = 0;
-                int dc = 0;
+            if (boardCell.type != LASER) {
+                continue;
+            }
 
-                if (curR == 0) {
-                    dr = 1;
-                } else if (curR == env->ROWS - 1) {
-                    dr = -1;
-                } else if (curC == 0) {
-                    dc = 1;
-                } else if (curC == env->COLS - 1) {
-                    dc = -1;
-                }
+            int laserId = boardCell.id;
+            int curR = r;
+            int curC = c;
+            int dr = 0;
+            int dc = 0;
 
-                while (curR + dr >= 0 && curR + dr < env->ROWS && curC + dc >= 0 && curC + dc < env->COLS) {
-                    curR += dr;
-                    curC += dc;
+            if (curR == 0) {
+                dr = 1;
+            } else if (curR == env->ROWS - 1) {
+                dr = -1;
+            } else if (curC == 0) {
+                dc = 1;
+            } else if (curC == env->COLS - 1) {
+                dc = -1;
+            }
 
-                    Cell hitCell = env->board[BOARD_IDX(env->COLS, curR, curC)];
-                    if (hitCell.type == SENSOR) {
-                        if (hitCell.id == laserId) {
-                            env->sinks_found++;
+            while (curR + dr >= 0 && curR + dr < env->ROWS && curC + dc >= 0 && curC + dc < env->COLS) {
+                curR += dr;
+                curC += dc;
 
-                            if (!env->sink_hit_before[laserId]) {
-                                env->sink_hit_before[laserId] = 1;
-                                new_sinks_hit++;
-                            }
-                        }
-                    } else if (hitCell.mirror == MIRROR_LEFT) {
-                        int oldDr = dr;
-                        dr = dc;
-                        dc = oldDr;
-                    } else if (hitCell.mirror == MIRROR_RIGHT) {
-                        int oldDr = dr;
-                        dr = -dc;
-                        dc = -oldDr;
+                Cell hitCell = env->board[BOARD_IDX(env->COLS, curR, curC)];
+                if (hitCell.type == SENSOR && hitCell.id == laserId) {
+                    env->sinks_found++;
+
+                    if (!env->sink_hit_before[laserId]) {
+                        env->sink_hit_before[laserId] = 1;
+                        new_sinks_hit++;
                     }
+                } else if (hitCell.mirror == MIRROR_LEFT) {
+                    int oldDr = dr;
+                    dr = dc;
+                    dc = oldDr;
+                } else if (hitCell.mirror == MIRROR_RIGHT) {
+                    int oldDr = dr;
+                    dr = -dc;
+                    dc = -oldDr;
                 }
             }
         }
@@ -384,10 +337,9 @@ void c_step(LaserPuzzle* env) {
     // handle the rewards, episode_length, terminal, episode_return
     // rewards: +1 for ending the episode optimally (minimal mirrors), +0.6 for ending the episode suboptimally, -0.01 per move, +0.3 for first time laser hit
     env->episode_length++;
-    env->rewards[0] = -0.01f + 0.3f * (float)new_sinks_hit;
+    env->rewards[0] = 0.3f * (float)new_sinks_hit;
     env->terminals[0] = 0.0f;
 
-    // end episode when all the sinks have been found (assign diff rewards based on whether the optimal //amount of mirros has been used)
     if (env->sinks_found == env->total_sinks) {
         env->terminals[0] = 1.0f;
         if (env->mirrors_placed == env->optimal_mirrors) {
@@ -400,9 +352,7 @@ void c_step(LaserPuzzle* env) {
     }
 
     env->episode_return += env->rewards[0];
-    compute_observations(env);
 
-    // update the logs, should be updated on every episode termination (should also only be floats used')
     if (env->terminals[0]) {
         // we defer reset so that client can display the terminal state without it being immediately reset
         add_log(env);
@@ -412,10 +362,10 @@ void c_step(LaserPuzzle* env) {
             c_reset(env);
         }
     }
+
+    compute_observations(env);
 }
 
-
-// Rendering
 void trace_laser(LaserPuzzle * env, int r, int c) {
     Cell laser = env->board[BOARD_IDX(env->COLS, r, c)];
     Color laserColor = LASER_COLORS[laser.id % 8];
@@ -465,7 +415,7 @@ void trace_laser(LaserPuzzle * env, int r, int c) {
         // update current cell
         curR = nextR;
         curC = nextC;
-
+        
         // update direction
         Cell cell = env->board[BOARD_IDX(env->COLS, curR, curC)];
         if (cell.mirror == MIRROR_LEFT) {
@@ -578,11 +528,9 @@ void c_render(LaserPuzzle* env) {
     DrawTextEx(client->font, movesText, (Vector2){GetScreenWidth() - movesSize.x - 16, GetScreenHeight() - fontSize - 16}, fontSize, spacing, RAYWHITE);
     DrawTextEx(client->font, mirrorsText, (Vector2){GetScreenWidth() - mirrorsSize.x - 16, 14}, fontSize, spacing, RAYWHITE);
 
-
-    // level if we foudn the optimal mirror count)
     if (env->sinks_found == env->total_sinks) {
         const char* solvedText = "Puzzle solved! Can you do it with less mirrors?";
-        if (env->sinks_found == env->total_sinks && env->mirrors_placed == env->optimal_mirrors) {
+        if (env->mirrors_placed == env->optimal_mirrors) {
             solvedText = "Optimal solve! Press R for the next puzzle.";
         }
 
