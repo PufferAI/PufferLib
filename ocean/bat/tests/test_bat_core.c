@@ -765,6 +765,32 @@ static int test_curriculum_initial_level_does_not_reset_progress(void) {
     return 0;
 }
 
+static int test_bug_bounces_off_arena_walls(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.bug_x = env.width - env.bug_radius + 0.1f;
+    env.bug_y = env.height * 0.5f;
+    env.bug_vx = 3.0f;
+    env.bug_vy = 1.0f;
+    bat_update_bug(&env, 0.0f);
+    ASSERT_TRUE(env.bug_x == env.width - env.bug_radius);
+    ASSERT_TRUE(env.bug_vx < 0.0f);
+    ASSERT_TRUE(env.bug_vy == 1.0f);
+
+    env.bug_x = env.width * 0.5f;
+    env.bug_y = env.bug_radius - 0.1f;
+    env.bug_vx = 2.0f;
+    env.bug_vy = -4.0f;
+    bat_update_bug(&env, 0.0f);
+    ASSERT_TRUE(env.bug_y == env.bug_radius);
+    ASSERT_TRUE(env.bug_vx == 2.0f);
+    ASSERT_TRUE(env.bug_vy > 0.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_chirp_echo_arrives_after_two_way_travel_not_immediately(void) {
     Bat env = make_test_env();
     env.num_obstacles = 0;
@@ -1028,6 +1054,7 @@ int main(void) {
     if (test_curriculum_waits_for_required_catches()) return 1;
     if (test_curriculum_initial_level_sets_first_reset_difficulty()) return 1;
     if (test_curriculum_initial_level_does_not_reset_progress()) return 1;
+    if (test_bug_bounces_off_arena_walls()) return 1;
     if (test_chirp_echo_arrives_after_two_way_travel_not_immediately()) return 1;
     if (test_frequency_bin_energy_sums_and_caps()) return 1;
     if (test_bug_echo_reward_is_added_when_bug_echo_is_closer()) return 1;
