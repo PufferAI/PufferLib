@@ -1,0 +1,451 @@
+# Bat Environment Spec
+
+Status: draft baseline; ready for implementation planning after review
+
+Workspace: `/home/claude/pathfinder`
+
+Target branch: `bat`
+
+Target env name: `bat`
+
+## Intent
+
+Build a single-agent PufferLib Ocean environment inspired by bat echolocation.
+The agent controls a bat flying in a 2D arena with walls, static obstacles, and
+a moving bug target. The bat must avoid collisions and catch the bug using
+binaural acoustic returns from self-generated chirps rather than direct map or
+position observations.
+
+The first version should copy the small native-C env style used by Breakout:
+fixed-size observations, a compact action space, simple deterministic physics,
+and enough instrumentation to make training failures debuggable.
+
+The core challenge is active sensing. The policy must learn both how to move
+and how to emit useful chirps. The environment should make chirping meaningful
+without turning v1 into a full acoustic wave simulator.
+
+## Research Grounding
+
+Range cue:
+
+- Echolocating bats primarily estimate target distance from the delay between
+  an emitted call and the returning echo.
+- Source: https://pmc.ncbi.nlm.nih.gov/articles/PMC9157489/
+- Source: https://pmc.ncbi.nlm.nih.gov/articles/PMC7888678/
+
+Binaural direction cue:
+
+- Left/right ear differences are biologically plausible and useful. Bats use
+  binaural and spectral cues, including head-related transfer effects, to infer
+  sound direction.
+- Source: https://pubmed.ncbi.nlm.nih.gov/15658710/
+- Source: https://pmc.ncbi.nlm.nih.gov/articles/PMC4555857/
+
+Chirp design:
+
+- Linear frequency-modulated chirps are standard in radar and sonar because
+  matched filtering can compress a long emitted pulse into a sharp return peak.
+  Bandwidth controls range resolution, and the time-bandwidth product controls
+  processing gain.
+- Source: https://rfessentials.com/rf-knowledge-base/how-does-pulse-compression-improve-the-range-resolution-and-sensitivity-of-a-rad/
+
+Doppler:
+
+- Doppler shift is a useful velocity cue, especially for moving targets and
+  insect-like prey. Some bat species actively compensate call frequency to keep
+  important echo bands in a sensitive range.
+- Source: https://pmc.ncbi.nlm.nih.gov/articles/PMC2438418/
+- Source: https://www.nature.com/articles/s41598-018-22880-y
+
+Fast signal processing:
+
+- FFTW is the high-performance reference point for C FFT design, but v1 should
+  avoid adding FFTW as a dependency. A fixed-size radix-2 FFT or precomputed
+  analytic matched-filter bins are preferred.
+- Source: https://www.fftw.org/fftw2_doc/fftw_1.html
+- Source: https://web.stanford.edu/class/cme324/classics/cooley-tukey.pdf
+
+Reflection model:
+
+- Full wave acoustics is out of scope for v1. A geometric echo model is the
+  right first approximation: sound travels in straight paths, reflects from
+  objects, and returns with delay, angle-dependent ear gain, attenuation, and
+  optional Doppler.
+- Source: https://au.mathworks.com/help/audio/ug/room-impulse-response-simulation-with-image-source-method-and-hrtf-interpolation.html
+
+## Environment Model
+
+World:
+
+- 2D continuous rectangular arena.
+- Arena dimensions are fixed by config.
+- Boundaries are solid walls.
+- Static obstacles are axis-aligned rectangles.
+- The bug is a moving circular target.
+- The bat is a moving circular agent with heading, speed, turn rate, and
+  collision radius.
+
+Physics:
+
+- Fixed control/physics timestep, default `1/60` second.
+- Bat motion is acceleration-limited and turn-rate-limited.
+- Bug motion uses a simple deterministic or seeded random policy.
+- The bug reflects from walls and obstacles.
+- The bat collides with walls and obstacles.
+- Catch success occurs when bat and bug circles overlap.
+- The `1/60` second tick is not the acoustic sample rate. Echo delays are
+  computed analytically with fractional timing inside each env step.
+
+Acoustics:
+
+- Walls, obstacles, and the bug reflect chirps.
+- Static reflectors provide range and direction cues.
+- The bug is the only moving reflector, so it is the main Doppler source.
+- The env computes compact acoustic features analytically instead of storing or
+  convolving high-rate audio samples.
+- Sound speed is configurable and artificial. The default should be much slower
+  than real air acoustics so echo timing is learnable in a small game arena.
+- Start with `sound_speed = 100.0` world units per second.
+- Every echo contribution has:
+  - two-way distance from mouth/source to reflector to each ear,
+  - delay derived from speed of sound,
+  - amplitude falloff from distance and reflector strength,
+  - left/right ear gain from relative azimuth,
+  - Doppler shift from reflector radial velocity.
+
+Point-reflector renderer:
+
+- v1 should represent walls and obstacle surfaces as stationary point
+  reflectors.
+- Sample each wall and obstacle edge at a fixed spacing, default
+  `reflector_spacing = 1.0` world unit.
+- The bug contributes one moving circular/point reflector at its center.
+- This avoids wavefront bookkeeping while preserving range, angle, and Doppler
+  learning signals.
+
+First-order echoes only:
+
+- v1 should include direct echo paths from visible surfaces and the bug.
+- Multiple-bounce reverberation is out of scope for v1.
+- Occlusion can be approximated by ray intersection against the nearest
+  obstacle along the bat-to-reflector path.
+- Segment-level specular reflection and raw waveform propagation are later
+  variants, not the v1 baseline.
+
+## Chirp Model
+
+The policy controls chirp parameters rather than emitting arbitrary audio.
+
+Chirp parameters:
+
+- `chirp_start_freq`
+- `chirp_end_freq`
+- `chirp_duration`
+
+Derived fields:
+
+- `chirp_bandwidth = abs(chirp_end_freq - chirp_start_freq)`
+- `chirp_slope = (chirp_end_freq - chirp_start_freq) / chirp_duration`
+- `chirp_age_ticks = ticks since most recent emitted chirp`
+
+Defaults:
+
+- Frequency range is normalized in the policy/action interface and mapped to a
+  narrow ultrasonic band in the env.
+- Duration is normalized in the policy/action interface and mapped to a small
+  tick/subtick window.
+- Up-chirps and down-chirps are both legal.
+- A zero-amplitude/no-chirp action should be available so the bat is not forced
+  to emit every tick.
+
+Implementation direction:
+
+- Start with analytic range/Doppler bins, not literal audio buffers.
+- If an FFT is needed, use a fixed power-of-two size with precomputed twiddle
+  factors.
+- Prefer precomputed chirp templates or direct bin accumulation for v1 because
+  this env will run thousands of agents in parallel.
+- The v1 observation bins are not raw FFT bins. They are compact
+  matched-filter-like echo features derived from chirp parameters, delay,
+  amplitude, and normalized Doppler.
+
+## Action Space
+
+Use a small multi-discrete action space.
+
+Recommended v1 action heads:
+
+- `move`: 5 values
+  - `0`: no thrust
+  - `1`: thrust forward
+  - `2`: brake/reverse
+  - `3`: strafe left
+  - `4`: strafe right
+- `turn`: 3 values
+  - `0`: no turn
+  - `1`: turn left
+  - `2`: turn right
+- `chirp_start_freq`: discrete bins, default `8`
+- `chirp_end_freq`: discrete bins, default `8`
+- `chirp_duration`: discrete bins, default `4`
+- `chirp_emit`: 2 values
+  - `0`: do not emit a chirp this tick
+  - `1`: emit chirp using selected chirp parameters
+
+Initial action sizes:
+
+- `ACT_SIZES {5, 3, 8, 8, 4, 2}`
+- `NUM_ATNS 6`
+
+Rationale:
+
+- Multi-discrete actions let the agent combine flight and active sensing.
+- Discrete chirp bins keep the policy simple and cheap.
+- Continuous actions can be a later variant after the first training baseline
+  is understood.
+
+## Observation Space
+
+Do not expose absolute position, absolute bug position, obstacle map, or global
+heading.
+
+Observation layout:
+
+1. `left_range_energy[16]`
+2. `left_doppler_energy[16]`
+3. `right_range_energy[16]`
+4. `right_doppler_energy[16]`
+3. `chirp_age_norm`
+4. `last_chirp_start_freq_norm`
+5. `last_chirp_end_freq_norm`
+6. `last_chirp_duration_norm`
+7. `forward_speed_norm`
+8. `turn_rate_norm`
+
+Initial observation size:
+
+- `OBS_SIZE = 70`
+
+Echo bins:
+
+- Each ear receives 16 range-energy bins and 16 Doppler-energy bins.
+- Bins represent compact matched-filter-like range and Doppler energy, not raw
+  audio and not direct FFT bins.
+- The frequency range is intentionally narrow, and bat/bug speeds are bounded,
+  so normalized Doppler can fit in a compact representation.
+- Values are normalized to a bounded range before policy input.
+- Nearer and stronger reflectors produce larger bin energy.
+- Bug echoes can be distinguished statistically because the bug moves and
+  produces Doppler-shifted returns.
+
+Range bins:
+
+- Range bins accumulate echo energy by delay.
+- Bin `0` represents the nearest useful echo distance.
+- The last bin represents `max_echo_range`.
+- Echoes beyond `max_echo_range` are ignored.
+
+Doppler bins:
+
+- Doppler energy is accumulated into the same range-indexed layout as range
+  energy.
+- Approaching reflectors add positive normalized Doppler energy.
+- Receding reflectors add negative normalized Doppler energy.
+- Static reflectors contribute near-zero Doppler energy.
+
+Chirp metadata:
+
+- The agent receives the last emitted chirp start frequency, end frequency, and
+  duration because interpreting a return depends on knowing the transmitted
+  signal.
+- `chirp_age_norm` lets the policy distinguish fresh echo windows from stale or
+  silent intervals.
+
+Self-motion:
+
+- `forward_speed_norm` and `turn_rate_norm` are proprioceptive signals.
+- These do not reveal map coordinates or target location.
+- They reduce unnecessary burden on recurrent policy memory.
+
+Model memory note:
+
+- PufferLib has recurrent policy support through `MinGRU`, `GRU`, and `LSTM`.
+- The default config currently uses `MinGRU`, but v1 should not require the
+  policy to remember chirp identity just to interpret the current acoustic
+  observation.
+
+## Reward and Termination
+
+Reward shaping is intentionally simple in v1. It should make pursuit learnable
+without leaking any privileged information through observations.
+
+Default reward model:
+
+- `+1.0` for catching the bug.
+- Small negative step cost to encourage efficient pursuit.
+- Dense progress reward based on reduction in true bat-to-bug distance.
+- `-1.0` for hitting walls or obstacles, terminal.
+- Optional chirp cost so constant chirping is not free.
+- Optional silence bonus or energy budget should wait until the basic task
+  trains.
+
+Progress reward:
+
+- Track previous true bat-to-bug distance internally.
+- Reward positive distance reduction.
+- Penalize distance increase by the same or smaller scale.
+- Do not expose the true distance in observations.
+- Default formula:
+  - `reward += progress_reward_scale * (prev_bug_dist - bug_dist)`
+  - `reward -= step_cost`
+  - `reward -= chirp_cost` when a chirp is emitted
+- Default starting values:
+  - `progress_reward_scale = 0.05`
+  - `step_cost = 0.001`
+  - `chirp_cost = 0.0005`
+
+Important caveat:
+
+- Dense distance reward is privileged training signal. It is acceptable for v1
+  if the goal is to get learning started, but it should be easy to disable or
+  scale down once the acoustic policy learns basic pursuit.
+
+Termination:
+
+- Success: bat catches bug.
+- Failure: bat collides with a wall or obstacle.
+- Timeout: `tick >= max_steps`.
+
+Reset:
+
+- New episode samples arena layout, bat spawn, bug spawn, and bug velocity.
+- Bat and bug should not spawn overlapping obstacles or each other.
+- Initial bug distance should support curriculum.
+
+Logged metrics:
+
+- `perf`
+- `score`
+- `episode_return`
+- `episode_length`
+- `success`
+- `collision`
+- `timeout`
+- `bug_distance_start`
+- `bug_distance_final`
+- `bug_distance_delta`
+- `chirps_emitted`
+- `mean_chirp_duration`
+- `mean_chirp_bandwidth`
+- `mean_echo_energy_left`
+- `mean_echo_energy_right`
+- `n`
+
+## Curriculum
+
+The first curriculum should keep obstacles present but make target behavior
+simple before adding maneuvering.
+
+Recommended stages:
+
+- Stage 0: fixed arena, boundary walls, simple fixed obstacles, slow bug with
+  fixed velocity and bounce behavior.
+- Stage 1: same layout class, faster bug with fixed velocity and bounce
+  behavior.
+- Stage 2: randomized obstacles, slow bug with fixed velocity and bounce
+  behavior.
+- Stage 3: randomized obstacles, faster bug with small seeded random turns.
+- Stage 4: randomized obstacles, faster bug that can maneuver or flee.
+- Stage 5: lower progress reward scale and higher chirp cost.
+
+Config knobs:
+
+- `arena_width`
+- `arena_height`
+- `num_obstacles`
+- `obstacle_min_size`
+- `obstacle_max_size`
+- `bat_radius`
+- `bug_radius`
+- `bat_max_speed`
+- `bat_accel`
+- `bat_turn_rate`
+- `bug_speed`
+- `max_steps`
+- `range_bins_per_ear`
+- `doppler_bins_per_ear`
+- `max_echo_range`
+- `sound_speed`
+- `reflector_spacing`
+- `chirp_freq_bins`
+- `chirp_duration_bins`
+- `chirp_cost`
+- `step_cost`
+- `progress_reward_scale`
+- `collision_penalty`
+- `curriculum_enabled`
+- `curriculum_stage`
+
+## PufferLib Integration
+
+Expected files after spec approval:
+
+- `ocean/bat/bat.h`
+- `ocean/bat/bat.c`
+- `ocean/bat/binding.c`
+- `ocean/bat/tests/`
+- `config/bat.ini`
+
+Follow the Breakout-style native env shape:
+
+- Define `Log`.
+- Define env struct `Bat`.
+- Store required pointers:
+  - `float* observations`
+  - `float* actions`
+  - `float* rewards`
+  - `float* terminals`
+  - `int num_agents`
+  - `Log log`
+  - `unsigned int rng`
+- In `binding.c`, start with:
+  - `OBS_SIZE 70`
+  - `NUM_ATNS 6`
+  - `ACT_SIZES {5, 3, 8, 8, 4, 2}`
+  - `OBS_TENSOR_T FloatTensor`
+  - `Env Bat`
+
+Testing expectations:
+
+- Unit tests for chirp parameter normalization.
+- Unit tests for echo delay/range bin placement.
+- Unit tests for left/right ear asymmetry from azimuth.
+- Unit tests for Doppler sign on approaching vs receding bug.
+- Unit tests for collision and catch termination.
+- Unit tests for progress reward sign.
+- Unit tests that wall collision returns `-1.0` and terminates.
+- Unit tests that obstacle reflectors create boundary-approach signals.
+
+## Open Design Questions
+
+Reward shaping:
+
+- The first implementation should use the default shaping constants above.
+- After the first trainability pass, decide whether to clip progress reward,
+  anneal privileged progress reward down, or increase chirp cost.
+
+Acoustic representation:
+
+- v1 uses 16 range-energy bins and 16 signed Doppler-energy bins per ear.
+- A later variant can test a flattened range-Doppler grid or literal FFT bins.
+
+Bug behavior:
+
+- v1 starts with fixed-velocity bounce behavior.
+- Later curriculum stages add seeded random turns and maneuvering.
+
+Obstacle reflections:
+
+- v1 samples walls and obstacle edges into point reflectors.
+- Later variants can compare analytic segment reflections or multiple-bounce
+  reflections.
