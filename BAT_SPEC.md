@@ -93,6 +93,8 @@ Physics:
 
 - Fixed control/physics timestep, default `1/60` second.
 - Bat motion is acceleration-limited and turn-rate-limited.
+- The bat has a configurable minimum forward speed. It cannot hover; brake
+  only reduces speed down to this stall-speed floor.
 - Bug motion uses a simple deterministic or seeded random policy.
 - The bug reflects from walls and obstacles.
 - The bat collides with walls and obstacles.
@@ -211,7 +213,7 @@ Rationale:
 - Discrete chirp bins keep the policy simple and cheap.
 - Bat movement is scalar forward speed plus heading. The velocity vector is
   recomputed as `heading * speed` every tick.
-- Brake clamps speed at zero. The bat cannot fly backward.
+- Brake clamps speed at `bat_min_speed`. The bat cannot fly backward or hover.
 - Strafe/lateral velocity is intentionally unavailable. This avoids sideways
   spiral policies and makes the visual behavior match the game fantasy better
   than a full inertial top-down spacecraft model.
@@ -324,7 +326,11 @@ Default reward model:
 - Sound-derived bug echo progress reward:
   - when a bug echo returns with a shorter acoustic path than the previous bug
     echo, add a small shaped reward,
-  - farther bug echoes update the previous bug echo path but do not reward,
+  - this reward only applies if the bat has moved at least
+    `bug_echo_min_displacement` since the previous scored bug echo, so a
+    stationary bat cannot farm reward from the bug moving closer by itself,
+  - farther bug echoes update the previous bug echo path and receive a weaker
+    penalty scaled by `bug_echo_farther_penalty_scale`, default `0.10`,
   - static wall and obstacle echoes do not receive this reward.
 - Optional silence bonus or energy budget should wait until the basic task
   trains.
@@ -344,7 +350,10 @@ Progress reward:
   - `reward += chirp_efficiency_reward * chirp_efficiency` on catch
   - `reward += bug_echo_reward_scale * echo_path_reduction / max_echo_range`
     when a returning bug echo indicates the bug is closer than the previous bug
-    echo
+    echo and the bat has moved enough since that previous echo
+  - `reward -= bug_echo_reward_scale * bug_echo_farther_penalty_scale *
+    echo_path_increase / max_echo_range` when a later moved-enough bug echo is
+    farther away
 - Default starting values:
   - `progress_reward_scale = 0.05`
   - `step_cost = 0.001`
@@ -372,27 +381,28 @@ Reset:
 - Bat and bug should not spawn overlapping obstacles or each other.
 - Initial bug distance should support curriculum.
 
-Logged metrics:
+W&B exported metrics:
+
+- Export at most 31 explicit `dict_set(out, ...)` metrics from `binding.c`.
+  PufferLib appends `n`, giving the 32-key cap. Keep lower-value diagnostics
+  internal unless they are actively needed for sweep decisions.
 
 - `perf`
   - composite sweep objective:
-    `base_perf * curriculum_difficulty * budget_difficulty * chirp_efficiency`
+    `base_perf * curriculum_difficulty * chirp_perf`
 - `base_perf`
   - pure catch rate: `1.0` for catching the bug, `0.0` otherwise
 - `curriculum_level`
 - `curriculum_difficulty`
-  - normalized actual episode difficulty from start bug distance and obstacle
-    count
+  - weighted normalized episode difficulty from split curriculum components
 - `curriculum_perf`
   - `base_perf * curriculum_difficulty`; useful diagnostic for level progress
     without chirp-budget weighting
-- `budget_difficulty`
-  - sweep-pressure multiplier derived from selected `max_chirps_per_episode`;
-    `15` chirps maps to the floor `0.50`, budgets below `6` chirps map to
-    `1.0`, and `20` chirps is intentionally outside the default sweep because
-    it was too easy in the June 9, 2026 budget grid
+- `curriculum_distance_difficulty`
+- `curriculum_obstacle_difficulty`
+- `curriculum_chirp_budget_difficulty`
 - `score`
-- `episode_return`
+  - required by PufferLib train worker; do not remove from `binding.c`
 - `episode_length`
 - `success`
 - `collision`
@@ -400,18 +410,21 @@ Logged metrics:
 - `bug_distance_start`
 - `bug_distance_final`
 - `bug_distance_delta`
+- `num_obstacles`
 - `chirps_emitted`
 - `chirp_budget`
 - `chirps_used_ratio`
-- `chirps_remaining_ratio`
 - `chirp_efficiency`
   - `0.5` if the full budget was spent, approaching `1.0` when few chirps were
     used
+- `chirp_perf`
+  - sweep-objective chirp multiplier:
+    `clamp(1.0 - chirps_emitted / 15.0, 0.05, 1.0)`
+  - this uses a fixed 15-chirp reference instead of the current per-level
+    budget so 6-chirp and 8-chirp policies remain meaningfully separated
 - `chirp_overlap_fraction`
   - fraction of emitted chirps that were sent before the previous chirp's max
     return window cleared
-- `far_chirp_fraction`
-- `near_chirp_fraction`
 - `far_chirp_rate`
 - `near_chirp_rate`
 - `chirp_tempo_ratio`
@@ -453,6 +466,7 @@ Config knobs:
 - `ear_separation_scale`
 - `bug_radius`
 - `bat_max_speed`
+- `bat_min_speed`
 - `bat_accel`
 - `bat_turn_rate`
 - `bug_speed`
@@ -469,6 +483,8 @@ Config knobs:
 - `chirp_cost`
 - `chirp_efficiency_reward`
 - `chirp_overlap_penalty`
+- `bug_echo_farther_penalty_scale`
+- `bug_echo_min_displacement`
 - `step_cost`
 - `progress_reward_scale`
 - `collision_penalty`
@@ -543,16 +559,36 @@ Obstacle reflections:
 
 ## Training and Sweep Operations
 
+- Curriculum design notes are tracked in `BAT_CURRICULUM.md`. Keep that file
+  updated when changing level progression, difficulty metrics, or bug motion
+  rungs.
+- The next proposed curriculum cleanup is documented in
+  `BAT_CURRICULUM.md`: start level 0 with no obstacles, remove chirp-budget
+  pressure from curriculum difficulty, and use a simpler distance/obstacle
+  curriculum difficulty. Do this only after the current sweep is finished or
+  intentionally stopped, because it changes `perf` comparability.
 - Keep `base_perf` as pure catch rate. Use composite `perf` as the sweep
-  objective. It rewards catching harder curriculum levels with fewer chirps and
-  under stricter configured chirp budgets without changing in-episode reward
-  shaping. Current budget scoring treats `15` chirps as the easy floor and
-  gives full pressure below `6` chirps; do not include `20` chirps in the
-  default budget sweep.
+  objective. It rewards catching harder curriculum levels with fewer chirps
+  without changing in-episode reward shaping:
+  `perf = base_perf * curriculum_difficulty * chirp_perf`.
+- `chirp_perf` uses a fixed 15-chirp reference:
+  `clamp(1.0 - chirps_emitted / 15.0, 0.05, 1.0)`. This intentionally gives
+  strong sweep-ranking separation between 10, 8, and 6 chirps. Do not multiply
+  `perf` by both `budget_difficulty` and `chirp_efficiency`; that made the
+  metric harder to reason about and double-counted chirp pressure.
+- Keep `score` exported in `binding.c`. If the 31-metric cap is tight, drop
+  `episode_return` before dropping `score`; PufferLib reads `metrics["env/score"]`
+  when train workers finish.
 - Reward terms are training scaffolding and should remain sweepable. `progress_reward_scale` is true-distance shaping and should usually stay below `bug_echo_reward_scale`, which is based on closer received bug reflections.
 - Forward-only movement dynamics should be swept with bounded ranges:
-  `env.bat_max_speed` in `[8.0, 22.0]`, `env.bat_accel` in `[40.0, 90.0]`,
-  and `env.bat_turn_rate` in `[4.0, 3pi]`.
+  `env.bat_max_speed` in `[8.0, 22.0]`, `env.bat_min_speed` in `[2.0, 6.0]`,
+  `env.bat_accel` in `[40.0, 90.0]`, and `env.bat_turn_rate` in `[4.0, 3pi]`.
+- Do not remove the minimum forward speed invariant. If the bat can hover at
+  zero velocity, PPO can learn a bad local optimum where it avoids collision
+  and timeout-shapes instead of exploring movement.
+- Bug-echo progress shaping must be gated on bat displacement. Closer bug
+  echoes can reward, and farther bug echoes can weakly penalize, but neither
+  should pay out when the bat has not moved enough since the prior bug echo.
 - Acoustic scale terms should be swept before increasing model size. Current bounded acoustic sweep knobs are `env.sound_speed` in `[80.0, 180.0]` and `env.ear_separation_scale` in `[1.0, 3.0]`.
 - The June 9, 2026 `bat1` sweep strongly improved after the forward-only
   dynamics change. Best observed run was `sage-cherry-92` with `perf ~= 0.953`,

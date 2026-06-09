@@ -153,6 +153,29 @@ static int test_chirp_efficiency_scores_low_usage_above_full_budget(void) {
     return 0;
 }
 
+static int test_chirp_perf_uses_fixed_fifteen_chirp_reference(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.chirps_emitted_episode = 0;
+    ASSERT_FLOAT_NEAR(bat_chirp_perf(&env), 1.0f, 0.0001f);
+
+    env.chirps_emitted_episode = 6;
+    ASSERT_FLOAT_NEAR(bat_chirp_perf(&env), 0.60f, 0.0001f);
+
+    env.chirps_emitted_episode = 8;
+    ASSERT_FLOAT_NEAR(bat_chirp_perf(&env), 0.4666667f, 0.0001f);
+
+    env.chirps_emitted_episode = 15;
+    ASSERT_FLOAT_NEAR(bat_chirp_perf(&env), 0.05f, 0.0001f);
+
+    env.chirps_emitted_episode = 30;
+    ASSERT_FLOAT_NEAR(bat_chirp_perf(&env), 0.05f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_success_reward_includes_chirp_efficiency_bonus(void) {
     Bat env = make_test_env();
     env.chirp_efficiency_reward = 1.0f;
@@ -191,7 +214,7 @@ static int test_chirp_budget_logs_ratios_for_wandb(void) {
     return 0;
 }
 
-static int test_curriculum_perf_uses_success_and_actual_difficulty(void) {
+static int test_curriculum_perf_logs_split_weighted_difficulty_components(void) {
     Bat env = make_test_env();
     c_reset(&env);
 
@@ -200,21 +223,30 @@ static int test_curriculum_perf_uses_success_and_actual_difficulty(void) {
     env.curriculum_start_obstacles = 1;
     env.curriculum_max_obstacles = 3;
     env.num_obstacles = 2;
-    env.max_chirps_per_episode = 10;
-    env.min_chirps_per_episode = 5;
-    env.chirp_budget = 8;
+    env.max_chirps_per_episode = 15;
+    env.min_chirps_per_episode = 6;
+    env.chirp_budget = 12;
     env.start_bug_dist = 32.0f;
 
-    ASSERT_FLOAT_NEAR(bat_curriculum_difficulty(&env), 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_curriculum_distance_difficulty(&env), 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_curriculum_obstacle_difficulty(&env), 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_curriculum_chirp_budget_difficulty(&env), 0.3333333f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_curriculum_motion_difficulty(&env), 0.0000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_curriculum_difficulty(&env), 0.4607843f, 0.0001f);
     add_log(&env, 1.0f, 0.0f, 0.0f);
     ASSERT_FLOAT_NEAR(env.log.base_perf, 1.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.5000000f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.curriculum_perf, 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_distance_difficulty, 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_obstacle_difficulty, 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_chirp_budget_difficulty, 0.3333333f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_motion_difficulty, 0.0000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.4607843f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_perf, 0.4607843f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.num_obstacles, 2.0f, 0.0001f);
 
     memset(&env.log, 0, sizeof(env.log));
     add_log(&env, 0.0f, 1.0f, 0.0f);
     ASSERT_FLOAT_NEAR(env.log.base_perf, 0.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.4607843f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.curriculum_perf, 0.0f, 0.0001f);
 
     free_allocated(&env);
@@ -264,8 +296,9 @@ static int test_perf_composes_base_perf_difficulty_budget_and_chirp_efficiency(v
     ASSERT_FLOAT_NEAR(env.log.base_perf, 1.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.budget_difficulty, 0.55f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.chirp_efficiency, 0.75f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.50f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.perf, 0.20625f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.chirp_perf, 0.5333334f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.3823529f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.perf, 0.2039215f, 0.0001f);
 
     memset(&env.log, 0, sizeof(env.log));
     add_log(&env, 0.0f, 1.0f, 0.0f);
@@ -636,6 +669,49 @@ static int test_bat_cannot_accelerate_backward_from_brake(void) {
     return 0;
 }
 
+static int test_bat_reset_starts_with_forward_stall_speed(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    float forward = env.bat_vx * cosf(env.bat_heading) + env.bat_vy * sinf(env.bat_heading);
+    ASSERT_TRUE(forward >= 0.19f * env.bat_max_speed);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_FORWARD_SPEED_OBS], forward / env.bat_max_speed, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bat_brake_clamps_to_forward_stall_speed(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    env.bat_heading = 0.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.actions[0] = BAT_BRAKE;
+    env.actions[1] = BAT_TURN_NONE;
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 0.0f;
+
+    c_step(&env);
+
+    float forward = env.bat_vx * cosf(env.bat_heading) + env.bat_vy * sinf(env.bat_heading);
+    ASSERT_TRUE(forward >= 0.19f * env.bat_max_speed);
+    ASSERT_TRUE(env.bat_x > 20.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_bat_velocity_is_locked_to_heading(void) {
     Bat env = make_test_env();
     c_reset(&env);
@@ -664,6 +740,70 @@ static int test_bat_velocity_is_locked_to_heading(void) {
     ASSERT_TRUE(forward >= -0.0001f);
     ASSERT_FLOAT_NEAR(lateral, 0.0f, 0.0001f);
     ASSERT_TRUE(env.observations[BAT_FORWARD_SPEED_OBS] >= -0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bat_zero_speed_recovers_to_forward_arc(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    env.bat_heading = 0.25f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.actions[0] = BAT_NOOP;
+    env.actions[1] = BAT_TURN_LEFT;
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 0.0f;
+
+    float start_x = env.bat_x;
+    float start_y = env.bat_y;
+    c_step(&env);
+
+    float forward = env.bat_vx * cosf(env.bat_heading) + env.bat_vy * sinf(env.bat_heading);
+    ASSERT_TRUE(forward >= 0.19f * env.bat_max_speed);
+    ASSERT_TRUE(bat_dist(start_x, start_y, env.bat_x, env.bat_y) > 0.0f);
+    ASSERT_TRUE(fabsf(env.bat_heading - 0.25f) > 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bat_turn_rate_scales_with_forward_speed(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    env.bat_heading = 0.0f;
+    env.bat_vx = env.bat_max_speed * 0.5f;
+    env.bat_vy = 0.0f;
+    env.actions[0] = BAT_NOOP;
+    env.actions[1] = BAT_TURN_RIGHT;
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 0.0f;
+
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.bat_turn_velocity, env.bat_turn_rate * 0.5f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.bat_heading, env.bat_turn_rate * 0.5f * BAT_TICK_RATE, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -1129,6 +1269,8 @@ static int test_bug_echo_reward_is_added_when_bug_echo_is_closer(void) {
     c_reset(&env);
     env.bug_echo_reward_scale = 0.05f;
     env.last_bug_echo_path = 20.0f;
+    env.last_bug_echo_bat_x = 8.0f;
+    env.last_bug_echo_bat_y = 10.0f;
     env.step_cost = 0.0f;
     env.progress_reward_scale = 0.0f;
     env.chirp_cost = 0.0f;
@@ -1152,11 +1294,44 @@ static int test_bug_echo_reward_is_added_when_bug_echo_is_closer(void) {
     return 0;
 }
 
-static int test_bug_echo_reward_ignores_farther_bug_echo(void) {
+static int test_bug_echo_reward_requires_bat_displacement(void) {
     Bat env = make_test_env();
     c_reset(&env);
     env.bug_echo_reward_scale = 0.05f;
     env.last_bug_echo_path = 20.0f;
+    env.last_bug_echo_bat_x = 10.0f;
+    env.last_bug_echo_bat_y = 10.0f;
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 10.0f;
+    env.bat_y = 10.0f;
+    env.bat_heading = 0.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bug_vx = 0.0f;
+    env.bug_vy = 0.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    bat_clear_echo_queue(&env);
+    bat_add_echo_event(&env, 0, 1.0f, 0.5f, 0.6f, 15.0f, BAT_ECHO_BUG);
+
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.rewards[0], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.last_bug_echo_path, 15.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bug_echo_reward_penalizes_farther_bug_echo_weakly(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    env.bug_echo_reward_scale = 0.05f;
+    env.last_bug_echo_path = 20.0f;
+    env.last_bug_echo_bat_x = 8.0f;
+    env.last_bug_echo_bat_y = 10.0f;
     env.step_cost = 0.0f;
     env.progress_reward_scale = 0.0f;
     env.chirp_cost = 0.0f;
@@ -1173,7 +1348,7 @@ static int test_bug_echo_reward_ignores_farther_bug_echo(void) {
 
     c_step(&env);
 
-    ASSERT_FLOAT_NEAR(env.rewards[0], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], -0.0003125f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.last_bug_echo_path, 25.0f, 0.0001f);
 
     free_allocated(&env);
@@ -1304,9 +1479,10 @@ int main(void) {
     if (test_chirp_budget_decreases_with_curriculum_level()) return 1;
     if (test_chirping_after_budget_terminates_with_penalty()) return 1;
     if (test_chirp_efficiency_scores_low_usage_above_full_budget()) return 1;
+    if (test_chirp_perf_uses_fixed_fifteen_chirp_reference()) return 1;
     if (test_success_reward_includes_chirp_efficiency_bonus()) return 1;
     if (test_chirp_budget_logs_ratios_for_wandb()) return 1;
-    if (test_curriculum_perf_uses_success_and_actual_difficulty()) return 1;
+    if (test_curriculum_perf_logs_split_weighted_difficulty_components()) return 1;
     if (test_budget_difficulty_uses_hard_edge_below_six_chirps()) return 1;
     if (test_perf_composes_base_perf_difficulty_budget_and_chirp_efficiency()) return 1;
     if (test_chirp_tempo_logs_far_and_near_rates()) return 1;
@@ -1319,7 +1495,11 @@ int main(void) {
     if (test_catch_bug_is_terminal_plus_one()) return 1;
     if (test_progress_reward_sign()) return 1;
     if (test_bat_cannot_accelerate_backward_from_brake()) return 1;
+    if (test_bat_reset_starts_with_forward_stall_speed()) return 1;
+    if (test_bat_brake_clamps_to_forward_stall_speed()) return 1;
     if (test_bat_velocity_is_locked_to_heading()) return 1;
+    if (test_bat_zero_speed_recovers_to_forward_arc()) return 1;
+    if (test_bat_turn_rate_scales_with_forward_speed()) return 1;
     if (test_bat_speed_action_space_has_no_strafe()) return 1;
     if (test_chirp_ring_physical_ordering()) return 1;
     if (test_chirp_color_maps_low_to_red_high_to_blue()) return 1;
@@ -1340,7 +1520,8 @@ int main(void) {
     if (test_chirp_echo_arrives_after_two_way_travel_not_immediately()) return 1;
     if (test_frequency_bin_energy_sums_and_caps()) return 1;
     if (test_bug_echo_reward_is_added_when_bug_echo_is_closer()) return 1;
-    if (test_bug_echo_reward_ignores_farther_bug_echo()) return 1;
+    if (test_bug_echo_reward_requires_bat_displacement()) return 1;
+    if (test_bug_echo_reward_penalizes_farther_bug_echo_weakly()) return 1;
     if (test_static_echo_does_not_get_bug_echo_reward()) return 1;
     if (test_spawns_use_different_random_quadrants()) return 1;
     if (test_spawns_keep_minimum_separation_and_avoid_obstacles()) return 1;

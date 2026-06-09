@@ -47,6 +47,8 @@
 #define BAT_ECHO_QUEUE_TICKS 256
 #define BAT_BUDGET_EASY_CHIRPS 15.0f
 #define BAT_BUDGET_EDGE_CHIRPS 5.0f
+#define BAT_CHIRP_PERF_REFERENCE_CHIRPS 15.0f
+#define BAT_CHIRP_PERF_FLOOR 0.05f
 
 #define BAT_ECHO_STATIC 0
 #define BAT_ECHO_BUG 1
@@ -87,7 +89,12 @@ typedef struct Log {
     float curriculum_level;
     float curriculum_difficulty;
     float curriculum_perf;
+    float curriculum_distance_difficulty;
+    float curriculum_obstacle_difficulty;
+    float curriculum_chirp_budget_difficulty;
+    float curriculum_motion_difficulty;
     float budget_difficulty;
+    float num_obstacles;
     float bug_distance_start;
     float bug_distance_final;
     float bug_distance_delta;
@@ -96,6 +103,7 @@ typedef struct Log {
     float chirps_used_ratio;
     float chirps_remaining_ratio;
     float chirp_efficiency;
+    float chirp_perf;
     float chirp_overlap_fraction;
     float far_chirp_fraction;
     float near_chirp_fraction;
@@ -152,6 +160,7 @@ typedef struct Bat {
     float bat_radius;
     float ear_separation_scale;
     float bat_max_speed;
+    float bat_min_speed;
     float bat_accel;
     float bat_turn_rate;
 
@@ -208,9 +217,13 @@ typedef struct Bat {
     float step_cost;
     float progress_reward_scale;
     float bug_echo_reward_scale;
+    float bug_echo_farther_penalty_scale;
+    float bug_echo_min_displacement;
     float tick_bug_echo_energy;
     float tick_bug_echo_path;
     float last_bug_echo_path;
+    float last_bug_echo_bat_x;
+    float last_bug_echo_bat_y;
     float collision_penalty;
     float prev_bug_dist;
     float start_bug_dist;
@@ -394,18 +407,55 @@ static inline float bat_chirp_efficiency(Bat* env) {
     return 0.5f + 0.5f * (1.0f - bat_chirps_used_ratio(env));
 }
 
+static inline float bat_chirp_perf(Bat* env) {
+    float raw = 1.0f - env->chirps_emitted_episode / BAT_CHIRP_PERF_REFERENCE_CHIRPS;
+    return bat_clampf(raw, BAT_CHIRP_PERF_FLOOR, 1.0f);
+}
+
+static inline float bat_min_forward_speed(Bat* env) {
+    float min_speed = env->bat_min_speed;
+    if (min_speed <= 0.0f) {
+        min_speed = 0.20f * env->bat_max_speed;
+    }
+    return bat_clampf(min_speed, 0.0f, env->bat_max_speed);
+}
+
 static inline float bat_norm_range(float value, float lo, float hi) {
     float span = hi - lo;
     if (span <= 0.000001f) return 0.0f;
     return bat_clampf((value - lo) / span, 0.0f, 1.0f);
 }
 
-static inline float bat_curriculum_difficulty(Bat* env) {
-    float distance = bat_norm_range(env->start_bug_dist,
+static inline float bat_curriculum_distance_difficulty(Bat* env) {
+    return bat_norm_range(env->start_bug_dist,
         env->curriculum_start_bug_distance, env->curriculum_max_bug_distance);
-    float obstacles = bat_norm_range((float)env->num_obstacles,
+}
+
+static inline float bat_curriculum_obstacle_difficulty(Bat* env) {
+    return bat_norm_range((float)env->num_obstacles,
         (float)env->curriculum_start_obstacles, (float)env->curriculum_max_obstacles);
-    return (distance + obstacles) / 2.0f;
+}
+
+static inline float bat_curriculum_chirp_budget_difficulty(Bat* env) {
+    float span = (float)(env->max_chirps_per_episode - env->min_chirps_per_episode);
+    if (span <= 0.000001f) return 0.0f;
+    float budget = env->chirp_budget > 0 ? (float)env->chirp_budget : (float)env->max_chirps_per_episode;
+    return bat_clampf(((float)env->max_chirps_per_episode - budget) / span, 0.0f, 1.0f);
+}
+
+static inline float bat_curriculum_motion_difficulty(Bat* env) {
+    (void)env;
+    return 0.0f;
+}
+
+static inline float bat_curriculum_difficulty(Bat* env) {
+    float distance = bat_curriculum_distance_difficulty(env);
+    float obstacles = bat_curriculum_obstacle_difficulty(env);
+    float budget = bat_curriculum_chirp_budget_difficulty(env);
+    float active_weight = 0.40f + 0.25f + 0.20f;
+    if (active_weight <= 0.000001f) return 0.0f;
+    float weighted = 0.40f * distance + 0.25f * obstacles + 0.20f * budget;
+    return bat_clampf(weighted / active_weight, 0.0f, 1.0f);
 }
 
 static inline float bat_budget_difficulty(Bat* env) {
@@ -548,6 +598,8 @@ void init(Bat* env) {
     env->ear_separation_scale = bat_clampf(env->ear_separation_scale, 0.25f, 2.0f);
     if (env->bug_radius <= 0.0f) env->bug_radius = 1.5f;
     if (env->bat_max_speed <= 0.0f) env->bat_max_speed = 12.0f;
+    if (env->bat_min_speed <= 0.0f) env->bat_min_speed = 0.20f * env->bat_max_speed;
+    env->bat_min_speed = bat_min_forward_speed(env);
     if (env->bat_accel <= 0.0f) env->bat_accel = 30.0f;
     if (env->bat_turn_rate <= 0.0f) env->bat_turn_rate = BAT_PI;
     if (env->bug_speed <= 0.0f) env->bug_speed = 4.0f;
@@ -572,6 +624,9 @@ void init(Bat* env) {
     if (env->early_chirp_penalty <= 0.0f) env->early_chirp_penalty = 0.001f;
     if (env->chirp_overlap_penalty < 0.0f) env->chirp_overlap_penalty = 0.0f;
     if (env->bug_echo_reward_scale <= 0.0f) env->bug_echo_reward_scale = 0.0f;
+    if (env->bug_echo_farther_penalty_scale <= 0.0f) env->bug_echo_farther_penalty_scale = 0.10f;
+    env->bug_echo_farther_penalty_scale = bat_clampf(env->bug_echo_farther_penalty_scale, 0.0f, 1.0f);
+    if (env->bug_echo_min_displacement <= 0.0f) env->bug_echo_min_displacement = 1.0f;
     if (env->rng == 0) env->rng = 1;
 
     if (env->num_obstacles < 0) env->num_obstacles = 0;
@@ -622,9 +677,14 @@ void free_allocated(Bat* env) {
 static inline void add_log(Bat* env, float success, float collision, float timeout) {
     float final_dist = bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y);
     float curriculum_difficulty = bat_curriculum_difficulty(env);
+    float distance_difficulty = bat_curriculum_distance_difficulty(env);
+    float obstacle_difficulty = bat_curriculum_obstacle_difficulty(env);
+    float chirp_budget_difficulty = bat_curriculum_chirp_budget_difficulty(env);
+    float motion_difficulty = bat_curriculum_motion_difficulty(env);
     float budget_difficulty = bat_budget_difficulty(env);
     float chirp_efficiency = bat_chirp_efficiency(env);
-    env->log.perf += success * curriculum_difficulty * budget_difficulty * chirp_efficiency;
+    float chirp_perf = bat_chirp_perf(env);
+    env->log.perf += success * curriculum_difficulty * chirp_perf;
     env->log.base_perf += success;
     env->log.score += env->episode_return;
     env->log.episode_return += env->episode_return;
@@ -635,7 +695,12 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.curriculum_level += env->curriculum_level;
     env->log.curriculum_difficulty += curriculum_difficulty;
     env->log.curriculum_perf += success * curriculum_difficulty;
+    env->log.curriculum_distance_difficulty += distance_difficulty;
+    env->log.curriculum_obstacle_difficulty += obstacle_difficulty;
+    env->log.curriculum_chirp_budget_difficulty += chirp_budget_difficulty;
+    env->log.curriculum_motion_difficulty += motion_difficulty;
     env->log.budget_difficulty += budget_difficulty;
+    env->log.num_obstacles += env->num_obstacles;
     env->log.bug_distance_start += env->start_bug_dist;
     env->log.bug_distance_final += final_dist;
     env->log.bug_distance_delta += env->start_bug_dist - final_dist;
@@ -644,6 +709,7 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.chirps_used_ratio += bat_chirps_used_ratio(env);
     env->log.chirps_remaining_ratio += 1.0f - bat_chirps_used_ratio(env);
     env->log.chirp_efficiency += chirp_efficiency;
+    env->log.chirp_perf += chirp_perf;
     float chirps = fmaxf(1.0f, (float)env->chirps_emitted_episode);
     env->log.chirp_overlap_fraction += env->chirps_overlapped / chirps;
     env->log.far_chirp_fraction += env->chirps_far / chirps;
@@ -890,16 +956,17 @@ void compute_observations(Bat* env) {
     env->observations[BAT_CHIRP_DURATION_OBS] = env->last_chirp_duration;
     env->observations[BAT_CHIRPS_USED_OBS] = bat_chirps_used_ratio(env);
     float fwd_speed = env->bat_vx * cosf(env->bat_heading) + env->bat_vy * sinf(env->bat_heading);
-    env->observations[BAT_FORWARD_SPEED_OBS] = bat_clampf(fwd_speed / env->bat_max_speed, -1.0f, 1.0f);
+    env->observations[BAT_FORWARD_SPEED_OBS] = bat_clampf(fwd_speed / env->bat_max_speed, 0.0f, 1.0f);
     env->observations[BAT_TURN_RATE_OBS] = bat_clampf(env->bat_turn_velocity / env->bat_turn_rate, -1.0f, 1.0f);
 }
 
 static inline void bat_reset_episode(Bat* env) {
     env->tick = 0;
-    env->bat_vx = 0.0f;
-    env->bat_vy = 0.0f;
     env->bat_turn_velocity = 0.0f;
     env->bat_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+    float initial_speed = bat_min_forward_speed(env);
+    env->bat_vx = cosf(env->bat_heading) * initial_speed;
+    env->bat_vy = sinf(env->bat_heading) * initial_speed;
     if (env->curriculum_enabled && env->curriculum_level < env->curriculum_initial_level) {
         env->curriculum_level = env->curriculum_initial_level;
     }
@@ -942,6 +1009,8 @@ static inline void bat_reset_episode(Bat* env) {
     env->episode_return = 0.0f;
     env->start_bug_dist = bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y);
     env->prev_bug_dist = env->start_bug_dist;
+    env->last_bug_echo_bat_x = env->bat_x;
+    env->last_bug_echo_bat_y = env->bat_y;
     compute_observations(env);
 }
 
@@ -995,18 +1064,21 @@ static inline void bat_update_motion(Bat* env, float dt) {
     float fx = cosf(env->bat_heading);
     float fy = sinf(env->bat_heading);
     float speed = env->bat_vx * fx + env->bat_vy * fy;
-    if (speed < 0.0f) speed = 0.0f;
-
-    env->bat_turn_velocity = 0.0f;
-    if (turn == BAT_TURN_LEFT) env->bat_turn_velocity = -env->bat_turn_rate;
-    if (turn == BAT_TURN_RIGHT) env->bat_turn_velocity = env->bat_turn_rate;
-    env->bat_heading += env->bat_turn_velocity * dt;
-    if (env->bat_heading > BAT_PI) env->bat_heading -= 2.0f * BAT_PI;
-    if (env->bat_heading < -BAT_PI) env->bat_heading += 2.0f * BAT_PI;
+    float min_speed = bat_min_forward_speed(env);
+    if (speed < min_speed) speed = min_speed;
 
     if (move == BAT_THRUST_FORWARD) speed += env->bat_accel * dt;
     if (move == BAT_BRAKE) speed -= env->bat_accel * dt;
-    speed = bat_clampf(speed, 0.0f, env->bat_max_speed);
+    speed = bat_clampf(speed, min_speed, env->bat_max_speed);
+
+    float turn_command = 0.0f;
+    if (turn == BAT_TURN_LEFT) turn_command = -1.0f;
+    if (turn == BAT_TURN_RIGHT) turn_command = 1.0f;
+    float speed_ratio = env->bat_max_speed > 0.0f ? speed / env->bat_max_speed : 0.0f;
+    env->bat_turn_velocity = turn_command * env->bat_turn_rate * bat_clampf(speed_ratio, 0.0f, 1.0f);
+    env->bat_heading += env->bat_turn_velocity * dt;
+    if (env->bat_heading > BAT_PI) env->bat_heading -= 2.0f * BAT_PI;
+    if (env->bat_heading < -BAT_PI) env->bat_heading += 2.0f * BAT_PI;
 
     float heading_fx = cosf(env->bat_heading);
     float heading_fy = sinf(env->bat_heading);
@@ -1147,11 +1219,23 @@ void c_step(Bat* env) {
 
     compute_observations(env);
     if (env->tick_bug_echo_path > 0.0f) {
-        if (env->last_bug_echo_path > 0.0f && env->tick_bug_echo_path < env->last_bug_echo_path) {
-            float echo_progress = (env->last_bug_echo_path - env->tick_bug_echo_path) / fmaxf(1.0f, env->max_echo_range);
-            env->rewards[0] += env->bug_echo_reward_scale * echo_progress;
+        if (env->last_bug_echo_path > 0.0f) {
+            float bat_echo_displacement = bat_dist(env->last_bug_echo_bat_x, env->last_bug_echo_bat_y,
+                env->bat_x, env->bat_y);
+            if (bat_echo_displacement >= env->bug_echo_min_displacement) {
+                float echo_progress = (env->last_bug_echo_path - env->tick_bug_echo_path)
+                    / fmaxf(1.0f, env->max_echo_range);
+                if (echo_progress > 0.0f) {
+                    env->rewards[0] += env->bug_echo_reward_scale * echo_progress;
+                } else if (echo_progress < 0.0f) {
+                    env->rewards[0] += env->bug_echo_reward_scale
+                        * env->bug_echo_farther_penalty_scale * echo_progress;
+                }
+            }
         }
         env->last_bug_echo_path = env->tick_bug_echo_path;
+        env->last_bug_echo_bat_x = env->bat_x;
+        env->last_bug_echo_bat_y = env->bat_y;
     }
     env->episode_return += env->rewards[0];
 }
