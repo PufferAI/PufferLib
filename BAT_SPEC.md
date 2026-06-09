@@ -491,9 +491,19 @@ Obstacle reflections:
 - Use `perf` as the sweep objective. It is `1.0` only when the bat catches the bug and `0.0` for collision or timeout.
 - Reward terms are training scaffolding and should remain sweepable. `progress_reward_scale` is true-distance shaping and should usually stay below `bug_echo_reward_scale`, which is based on closer received bug reflections.
 - Forward-only movement dynamics should be swept with bounded ranges:
-  `env.bat_max_speed` in `[8.0, 18.0]`, `env.bat_accel` in `[15.0, 60.0]`,
-  and `env.bat_turn_rate` in `[pi/2, 2pi]`.
-- Acoustic scale terms should be swept before increasing model size. Current bounded acoustic sweep knobs are `env.sound_speed` in `[45.0, 120.0]` and `env.ear_separation_scale` in `[0.5, 2.0]`.
+  `env.bat_max_speed` in `[8.0, 22.0]`, `env.bat_accel` in `[40.0, 90.0]`,
+  and `env.bat_turn_rate` in `[4.0, 3pi]`.
+- Acoustic scale terms should be swept before increasing model size. Current bounded acoustic sweep knobs are `env.sound_speed` in `[80.0, 180.0]` and `env.ear_separation_scale` in `[1.0, 3.0]`.
+- The June 9, 2026 `bat1` sweep strongly improved after the forward-only
+  dynamics change. Best observed run was `sage-cherry-92` with `perf ~= 0.953`,
+  `SPS ~= 2.06M`, collision `~= 0.031`, and timeout `~= 0.016`. The old default
+  had higher SPS but poor `perf`, so use `perf` first and SPS only as a
+  tie-breaker.
+- That sweep pushed several bounds upward: `bat_accel`, `bat_turn_rate`,
+  `sound_speed`, `ear_separation_scale`, `progress_reward_scale`,
+  `replay_ratio`, and often `ent_coef`. It pushed `step_cost` and
+  `valid_chirp_reward` down. Defaults in `config/bat.ini` now track the best
+  high-perf region rather than the highest-SPS failed default.
 - Train workers should use CUDA with `--train.gpus 1`.
 - Protein/sweep control does not need CUDA. Run sweeps with `--sweep.use-gpu ""` so the optimizer stays off CUDA and avoids CUDA IPC/resource-handle failures.
 - Do not override training duration with ad hoc `--train.total-timesteps`. Put duration ranges in `config/bat.ini`.
