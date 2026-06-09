@@ -236,6 +236,7 @@ typedef struct Bat {
     float tick_bug_echo_energy;
     float tick_bug_echo_path;
     float last_bug_echo_path;
+    float last_bug_echo_expected_tick;
     float last_bug_echo_bat_x;
     float last_bug_echo_bat_y;
     float collision_penalty;
@@ -872,6 +873,33 @@ static inline void bat_ear_positions(Bat* env, float* left_x, float* left_y,
     *right_y = env->bat_y + ly * ear_sep * 0.5f;
 }
 
+static inline float bat_expected_bug_echo_tick(Bat* env, ChirpEvent* chirp) {
+    float fx = cosf(env->bat_heading);
+    float fy = sinf(env->bat_heading);
+    float ux, uy;
+    bat_norm_vec(env->bug_x - chirp->x, env->bug_y - chirp->y, &ux, &uy);
+    float forward = ux * fx + uy * fy;
+    if (forward < -0.35f) return -1.0f;
+
+    float left_ear_x, left_ear_y, right_ear_x, right_ear_y;
+    bat_ear_positions(env, &left_ear_x, &left_ear_y, &right_ear_x, &right_ear_y);
+    float source_path = bat_dist(chirp->x, chirp->y, env->bug_x, env->bug_y);
+    float left_path = source_path + bat_dist(env->bug_x, env->bug_y, left_ear_x, left_ear_y);
+    float right_path = source_path + bat_dist(env->bug_x, env->bug_y, right_ear_x, right_ear_y);
+    float best_path = -1.0f;
+    if (left_path <= env->max_echo_range) best_path = left_path;
+    if (right_path <= env->max_echo_range && (best_path < 0.0f || right_path < best_path)) {
+        best_path = right_path;
+    }
+    if (best_path < 0.0f) return -1.0f;
+
+    int slices = (int)ceilf(chirp->duration / BAT_TICK_RATE);
+    if (slices < 1) slices = 1;
+    if (slices > BAT_MAX_CHIRP_SLICES) slices = BAT_MAX_CHIRP_SLICES;
+    float first_slice_ticks = (0.5f / (float)slices) * chirp->duration / BAT_TICK_RATE;
+    return chirp->birth_tick + first_slice_ticks + best_path / env->sound_speed / BAT_TICK_RATE;
+}
+
 static inline void bat_schedule_echo(Bat* env, ChirpEvent* chirp,
         float slice_ticks, float freq, float rx, float ry, float rvx, float rvy,
         float strength, int source) {
@@ -1059,6 +1087,7 @@ static inline void bat_reset_episode(Bat* env) {
     env->tick_bug_echo_energy = 0.0f;
     env->tick_bug_echo_path = -1.0f;
     env->last_bug_echo_path = -1.0f;
+    env->last_bug_echo_expected_tick = -1.0f;
     env->chirps_emitted_episode = 0;
     env->chirps_overlapped = 0;
     env->chirp_duration_sum = 0.0f;
@@ -1187,13 +1216,18 @@ static inline bool bat_try_emit_chirp(Bat* env) {
     chirp->active = 1;
     env->chirp_head = (env->chirp_head + 1) % BAT_CHIRP_HISTORY;
     env->audio_chirp_serial += 1;
+    env->last_bug_echo_expected_tick = bat_expected_bug_echo_tick(env, chirp);
     bat_schedule_chirp_echoes(env, chirp);
     return true;
 }
 
-static inline bool bat_next_chirp_overlaps_return_window(Bat* env) {
-    if (env->chirps_emitted_episode <= 0) return false;
-    return env->tick - env->last_chirp_tick < env->max_chirp_age_ticks;
+static inline float bat_next_chirp_overlap_fraction(Bat* env) {
+    if (env->chirps_emitted_episode <= 0) return 0.0f;
+    if (env->last_bug_echo_expected_tick <= (float)env->tick) return 0.0f;
+    float wait_ticks = env->last_bug_echo_expected_tick - (float)env->last_chirp_tick;
+    if (wait_ticks <= 0.000001f) return 0.0f;
+    float remaining_ticks = env->last_bug_echo_expected_tick - (float)env->tick;
+    return bat_clampf(remaining_ticks / wait_ticks, 0.0f, 1.0f);
 }
 
 static inline int bat_update_chirp(Bat* env) {
@@ -1218,7 +1252,7 @@ void c_step(Bat* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
 
-    bool chirp_overlaps_return_window = bat_next_chirp_overlaps_return_window(env);
+    float chirp_overlap_fraction = bat_next_chirp_overlap_fraction(env);
     int chirp_status = bat_update_chirp(env);
     if (chirp_status == -2) {
         env->rewards[0] = -1.0f;
@@ -1268,8 +1302,8 @@ void c_step(Bat* env) {
     env->rewards[0] -= env->step_cost;
     if (chirp_status > 0) {
         env->rewards[0] += env->valid_chirp_reward;
-        if (chirp_overlaps_return_window) {
-            env->rewards[0] -= env->chirp_overlap_penalty;
+        if (chirp_overlap_fraction > 0.0f) {
+            env->rewards[0] -= env->chirp_overlap_penalty * chirp_overlap_fraction;
             env->chirps_overlapped += 1;
         }
     } else if (chirp_status < 0) {

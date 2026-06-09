@@ -323,10 +323,11 @@ Default reward model:
 - `-1.0` for hitting walls or obstacles, terminal.
 - Tiny chirp cost so constant chirping is not fully free without causing
   chirp collapse.
-- Chirping again before the prior chirp's max echo return window has cleared
+- Chirping again before the prior chirp's expected bug reflection has returned
   gets a small physical overlap penalty. This is not a generic timing-efficiency
-  reward; it represents self-induced acoustic ambiguity from overlapping
-  returns.
+  reward; it represents self-induced acoustic ambiguity from overlapping bug
+  returns without forcing the bat to wait for every static wall or obstacle
+  reflection.
 - Solve-time chirp efficiency reward:
   - `chirp_efficiency = 0.5 + 0.5 * (1.0 - chirps_used / chirp_budget)`,
   - a catch after spending the full budget gets efficiency `0.5`,
@@ -354,8 +355,9 @@ Progress reward:
   - `reward += progress_reward_scale * (prev_bug_dist - bug_dist)`
   - `reward -= step_cost`
   - `reward -= chirp_cost` when a chirp is emitted
-  - `reward -= chirp_overlap_penalty` when a valid chirp is emitted before
-    the previous chirp's max echo return window has cleared
+  - `reward -= chirp_overlap_penalty * bug_echo_wait_fraction` when a valid
+    chirp is emitted before the previous chirp's expected bug reflection has
+    returned
   - `reward += chirp_efficiency_reward * chirp_efficiency` on catch
   - `reward += bug_echo_reward_scale * echo_path_reduction / max_echo_range`
     when a returning bug echo indicates the bug is closer than the previous bug
