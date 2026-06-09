@@ -22,6 +22,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->bat_turn_rate = dict_get(kwargs, "bat_turn_rate")->value;
     env->bug_speed = dict_get(kwargs, "bug_speed")->value;
     env->max_steps = dict_get(kwargs, "max_steps")->value;
+    env->render_target_fps = dict_get(kwargs, "render_target_fps")->value;
     env->curriculum_enabled = dict_get(kwargs, "curriculum_enabled")->value;
     env->curriculum_initial_level = dict_get(kwargs, "curriculum_initial_level")->value;
     env->curriculum_start_obstacles = dict_get(kwargs, "curriculum_start_obstacles")->value;

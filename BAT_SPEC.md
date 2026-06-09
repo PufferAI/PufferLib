@@ -180,6 +180,15 @@ Implementation direction:
 - The v1 observation bins are not raw FFT bins. They are compact
   matched-filter-like echo features derived from chirp parameters, delay,
   amplitude, and normalized Doppler.
+- RayLib eval rendering may play an audible debug version of emitted chirps.
+  This is render-only and must not run in headless training. The audible sound
+  maps the normalized chirp band to a human-hearable swept sine while preserving
+  the selected start frequency, end frequency, and duration.
+- RayLib eval rendering also supports `env.render_target_fps`; default `60`,
+  and `0` leaves RayLib uncapped. This is for visualization/audio inspection
+  only and should not be used in training or sweep interpretation. Audible
+  debug chirp duration scales as `max(1, 60 / render_target_fps)` so low-FPS
+  inspection preserves chirp ordering while making each sweep easier to hear.
 
 ## Action Space
 
@@ -524,6 +533,8 @@ Follow the Breakout-style native env shape:
 Testing expectations:
 
 - Unit tests for chirp parameter normalization.
+- Unit tests for audible chirp waveform helper math. Rendering playback itself
+  stays a RayLib eval concern, not a training dependency.
 - Unit tests for echo delay and per-tick frequency-bin placement.
 - Unit tests for left/right ear asymmetry from azimuth.
 - Unit tests for Doppler sign on approaching vs receding bug.

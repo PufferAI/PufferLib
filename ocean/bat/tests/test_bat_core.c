@@ -842,6 +842,48 @@ static int test_chirp_color_maps_low_to_red_high_to_blue(void) {
     return 0;
 }
 
+static int test_chirp_audio_maps_norm_freq_to_audible_sweep(void) {
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_frequency_hz(0.0f), 600.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_frequency_hz(1.0f), 3600.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_instant_hz(0.0f, 1.0f, 0.20f, 0.10f), 2100.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_instant_hz(1.0f, 0.0f, 0.20f, 0.10f), 2100.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_sample_f32(0.0f, 1.0f, 0.20f, -1, 48000), 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_sample_f32(0.0f, 1.0f, 0.20f, 9600, 48000), 0.0f, 0.0001f);
+    float sample = bat_chirp_audio_sample_f32(0.0f, 1.0f, 0.20f, 2400, 48000);
+    ASSERT_TRUE(sample >= -0.25f);
+    ASSERT_TRUE(sample <= 0.25f);
+    return 0;
+}
+
+static int test_render_target_fps_is_eval_only_and_can_be_uncapped(void) {
+    Bat env = make_test_env();
+    env.render_target_fps = 60;
+    ASSERT_TRUE(bat_render_target_fps(&env) == 60);
+    env.render_target_fps = 15;
+    ASSERT_TRUE(bat_render_target_fps(&env) == 15);
+    env.render_target_fps = 0;
+    ASSERT_TRUE(bat_render_target_fps(&env) == 0);
+    env.render_target_fps = -1;
+    ASSERT_TRUE(bat_render_target_fps(&env) == 0);
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_chirp_audio_duration_scales_with_render_fps(void) {
+    Bat env = make_test_env();
+    float base_duration = bat_chirp_duration_seconds(0.0f);
+    env.render_target_fps = 60;
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_duration_seconds(&env, 0.0f), base_duration, 0.0001f);
+    env.render_target_fps = 30;
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_duration_seconds(&env, 0.0f), base_duration * 2.0f, 0.0001f);
+    env.render_target_fps = 15;
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_duration_seconds(&env, 0.0f), base_duration * 4.0f, 0.0001f);
+    env.render_target_fps = 0;
+    ASSERT_FLOAT_NEAR(bat_chirp_audio_duration_seconds(&env, 0.0f), base_duration, 0.0001f);
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_chirp_cooldown_accepts_only_after_delay(void) {
     Bat env = make_test_env();
     c_reset(&env);
@@ -1529,6 +1571,9 @@ int main(void) {
     if (test_bat_speed_action_space_has_no_strafe()) return 1;
     if (test_chirp_ring_physical_ordering()) return 1;
     if (test_chirp_color_maps_low_to_red_high_to_blue()) return 1;
+    if (test_chirp_audio_maps_norm_freq_to_audible_sweep()) return 1;
+    if (test_render_target_fps_is_eval_only_and_can_be_uncapped()) return 1;
+    if (test_chirp_audio_duration_scales_with_render_fps()) return 1;
     if (test_chirp_cooldown_accepts_only_after_delay()) return 1;
     if (test_valid_chirp_gets_reward_without_legacy_cost()) return 1;
     if (test_early_chirp_gets_penalty_and_emits_nothing()) return 1;

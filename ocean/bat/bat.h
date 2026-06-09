@@ -45,6 +45,11 @@
 #define BAT_CHIRP_RINGS 5
 #define BAT_MAX_CHIRP_SLICES 16
 #define BAT_ECHO_QUEUE_TICKS 256
+#define BAT_AUDIO_VOICES 8
+#define BAT_AUDIO_SAMPLE_RATE 48000
+#define BAT_AUDIO_MIN_HZ 600.0f
+#define BAT_AUDIO_MAX_HZ 3600.0f
+#define BAT_AUDIO_VOLUME 0.22f
 #define BAT_BUDGET_EASY_CHIRPS 15.0f
 #define BAT_BUDGET_EDGE_CHIRPS 5.0f
 #define BAT_CHIRP_PERF_REFERENCE_CHIRPS 15.0f
@@ -122,6 +127,13 @@ typedef struct Log {
 typedef struct Client {
     int width;
     int height;
+#ifndef BAT_HEADLESS
+    int audio_ready;
+    int last_audio_chirp_serial;
+    int audio_voice_cursor;
+    Sound chirp_sounds[BAT_AUDIO_VOICES];
+    int chirp_sound_loaded[BAT_AUDIO_VOICES];
+#endif
 } Client;
 
 typedef struct Bat {
@@ -138,6 +150,7 @@ typedef struct Bat {
     int height;
     int tick;
     int max_steps;
+    int render_target_fps;
     int num_obstacles;
     int curriculum_enabled;
     int curriculum_level;
@@ -195,6 +208,7 @@ typedef struct Bat {
     int chirp_head;
     EchoBucket echo_queue[BAT_ECHO_QUEUE_TICKS];
     int chirps_emitted_episode;
+    int audio_chirp_serial;
     int chirps_overlapped;
     float chirp_duration_sum;
     float chirp_bandwidth_sum;
@@ -254,8 +268,59 @@ static inline int bat_action_index(float v, int n) {
     return idx;
 }
 
+static inline int bat_render_target_fps(Bat* env) {
+    return env->render_target_fps > 0 ? env->render_target_fps : 0;
+}
+
 static inline float bat_chirp_duration_seconds(float duration_norm) {
     return 0.04f + 0.18f * bat_clampf(duration_norm, 0.0f, 1.0f);
+}
+
+static inline float bat_chirp_audio_duration_seconds(Bat* env, float duration_norm) {
+    float duration = bat_chirp_duration_seconds(duration_norm);
+    int fps = bat_render_target_fps(env);
+    if (fps <= 0) return duration;
+    float scale = 60.0f / (float)fps;
+    if (scale < 1.0f) scale = 1.0f;
+    return duration * scale;
+}
+
+static inline float bat_chirp_audio_frequency_hz(float freq_norm) {
+    return BAT_AUDIO_MIN_HZ + bat_clampf(freq_norm, 0.0f, 1.0f)
+        * (BAT_AUDIO_MAX_HZ - BAT_AUDIO_MIN_HZ);
+}
+
+static inline float bat_chirp_audio_instant_hz(float start_norm, float end_norm,
+        float duration_seconds, float t_seconds) {
+    if (duration_seconds <= 0.0f) {
+        return bat_chirp_audio_frequency_hz(start_norm);
+    }
+    float t = bat_clampf(t_seconds / duration_seconds, 0.0f, 1.0f);
+    float start_hz = bat_chirp_audio_frequency_hz(start_norm);
+    float end_hz = bat_chirp_audio_frequency_hz(end_norm);
+    return start_hz + t * (end_hz - start_hz);
+}
+
+static inline float bat_chirp_audio_envelope(float t_norm) {
+    if (t_norm <= 0.0f || t_norm >= 1.0f) return 0.0f;
+    const float fade = 0.08f;
+    float attack = t_norm / fade;
+    float release = (1.0f - t_norm) / fade;
+    return bat_clampf(fminf(attack, release), 0.0f, 1.0f);
+}
+
+static inline float bat_chirp_audio_sample_f32(float start_norm, float end_norm,
+        float duration_seconds, int sample_index, int sample_rate) {
+    if (duration_seconds <= 0.0f || sample_index < 0 || sample_rate <= 0) return 0.0f;
+    float t = sample_index / (float)sample_rate;
+    if (t < 0.0f || t >= duration_seconds) return 0.0f;
+
+    float start_hz = bat_chirp_audio_frequency_hz(start_norm);
+    float end_hz = bat_chirp_audio_frequency_hz(end_norm);
+    float chirp_rate = (end_hz - start_hz) / duration_seconds;
+    float phase = 2.0f * BAT_PI * (start_hz * t + 0.5f * chirp_rate * t * t);
+    float envelope = bat_chirp_audio_envelope(t / duration_seconds);
+    return BAT_AUDIO_VOLUME * envelope * sinf(phase);
 }
 
 static inline float bat_chirp_ring_radius(float age_seconds, float slice,
@@ -1121,6 +1186,7 @@ static inline bool bat_try_emit_chirp(Bat* env) {
     chirp->birth_tick = env->tick;
     chirp->active = 1;
     env->chirp_head = (env->chirp_head + 1) % BAT_CHIRP_HISTORY;
+    env->audio_chirp_serial += 1;
     bat_schedule_chirp_echoes(env, chirp);
     return true;
 }
@@ -1355,15 +1421,83 @@ static inline void bat_draw_echo_reflections(Bat* env, float sx, float sy) {
     }
 }
 
+static inline void bat_unload_chirp_sound(Client* client, int i) {
+    if (!client->chirp_sound_loaded[i]) return;
+    UnloadSound(client->chirp_sounds[i]);
+    client->chirp_sound_loaded[i] = 0;
+}
+
+static inline void bat_cleanup_audio(Client* client) {
+    if (!client->audio_ready) return;
+    for (int i = 0; i < BAT_AUDIO_VOICES; i++) {
+        if (client->chirp_sound_loaded[i] && !IsSoundPlaying(client->chirp_sounds[i])) {
+            bat_unload_chirp_sound(client, i);
+        }
+    }
+}
+
+static inline void bat_play_chirp_audio(Bat* env) {
+    Client* client = env->client;
+    if (client == NULL || !client->audio_ready) return;
+    bat_cleanup_audio(client);
+    if (env->audio_chirp_serial <= 0 ||
+            env->audio_chirp_serial == client->last_audio_chirp_serial) {
+        return;
+    }
+    client->last_audio_chirp_serial = env->audio_chirp_serial;
+
+    float duration = bat_chirp_audio_duration_seconds(env, env->last_chirp_duration);
+    int sample_count = (int)ceilf(duration * BAT_AUDIO_SAMPLE_RATE);
+    if (sample_count <= 0) return;
+
+    short* samples = (short*)malloc(sample_count * sizeof(short));
+    if (samples == NULL) return;
+    for (int i = 0; i < sample_count; i++) {
+        float sample = bat_chirp_audio_sample_f32(env->last_chirp_start_freq,
+            env->last_chirp_end_freq, duration, i, BAT_AUDIO_SAMPLE_RATE);
+        samples[i] = (short)(bat_clampf(sample, -1.0f, 1.0f) * 32767.0f);
+    }
+
+    Wave wave = {
+        .frameCount = (unsigned int)sample_count,
+        .sampleRate = BAT_AUDIO_SAMPLE_RATE,
+        .sampleSize = 16,
+        .channels = 1,
+        .data = samples,
+    };
+    Sound sound = LoadSoundFromWave(wave);
+    UnloadWave(wave);
+
+    int voice = client->audio_voice_cursor;
+    client->audio_voice_cursor = (client->audio_voice_cursor + 1) % BAT_AUDIO_VOICES;
+    bat_unload_chirp_sound(client, voice);
+    client->chirp_sounds[voice] = sound;
+    client->chirp_sound_loaded[voice] = 1;
+    SetSoundVolume(client->chirp_sounds[voice], 1.0f);
+    PlaySound(client->chirp_sounds[voice]);
+}
+
 Client* make_client(Bat* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = env->width * 10;
     client->height = env->height * 10;
     InitWindow(client->width, client->height, "Bat");
+    int target_fps = bat_render_target_fps(env);
+    if (target_fps > 0) {
+        SetTargetFPS(target_fps);
+    }
+    InitAudioDevice();
+    client->audio_ready = IsAudioDeviceReady();
     return client;
 }
 
 void close_client(Client* client) {
+    if (client->audio_ready) {
+        for (int i = 0; i < BAT_AUDIO_VOICES; i++) {
+            bat_unload_chirp_sound(client, i);
+        }
+        CloseAudioDevice();
+    }
     CloseWindow();
     free(client);
 }
@@ -1375,6 +1509,7 @@ void c_render(Bat* env) {
     if (env->client == NULL) {
         env->client = make_client(env);
     }
+    bat_play_chirp_audio(env);
     float sx = env->client->width / (float)env->width;
     float sy = env->client->height / (float)env->height;
     BeginDrawing();
