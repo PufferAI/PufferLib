@@ -381,8 +381,9 @@ Logged metrics:
     without chirp-budget weighting
 - `budget_difficulty`
   - sweep-pressure multiplier derived from selected `max_chirps_per_episode`;
-    the empirical edge from the June 9, 2026 budget grid is `8` chirps, while
-    `20` chirps is easy
+    `15` chirps maps to the floor `0.50`, budgets below `6` chirps map to
+    `1.0`, and `20` chirps is intentionally outside the default sweep because
+    it was too easy in the June 9, 2026 budget grid
 - `score`
 - `episode_return`
 - `episode_length`
@@ -534,7 +535,9 @@ Obstacle reflections:
 - Keep `base_perf` as pure catch rate. Use composite `perf` as the sweep
   objective. It rewards catching harder curriculum levels with fewer chirps and
   under stricter configured chirp budgets without changing in-episode reward
-  shaping.
+  shaping. Current budget scoring treats `15` chirps as the easy floor and
+  gives full pressure below `6` chirps; do not include `20` chirps in the
+  default budget sweep.
 - Reward terms are training scaffolding and should remain sweepable. `progress_reward_scale` is true-distance shaping and should usually stay below `bug_echo_reward_scale`, which is based on closer received bug reflections.
 - Forward-only movement dynamics should be swept with bounded ranges:
   `env.bat_max_speed` in `[8.0, 22.0]`, `env.bat_accel` in `[40.0, 90.0]`,
@@ -583,7 +586,8 @@ train/eval after each rung, and commit each known-good rung separately.
      initial level, resets must not drop it back down.
 
 2. Finite chirp budget.
-   - Default to `20` chirps per episode at low curriculum levels.
+   - Keep the low-curriculum budget below the old `20`-chirp setting; `20`
+     proved too easy and should not be part of the default sweep.
    - Reduce the budget as curriculum level increases, with a floor so harder
      levels require smarter chirp timing without creating an impossible cliff.
    - Track `chirps_used / chirp_budget` as a normalized `0..1` observation.

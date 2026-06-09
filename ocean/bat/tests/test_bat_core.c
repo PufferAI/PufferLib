@@ -221,20 +221,20 @@ static int test_curriculum_perf_uses_success_and_actual_difficulty(void) {
     return 0;
 }
 
-static int test_budget_difficulty_uses_empirical_edge_at_eight_chirps(void) {
+static int test_budget_difficulty_uses_hard_edge_below_six_chirps(void) {
     Bat env = make_test_env();
     c_reset(&env);
 
-    env.max_chirps_per_episode = 20;
+    env.max_chirps_per_episode = 15;
     ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.50f, 0.0001f);
 
-    env.max_chirps_per_episode = 14;
+    env.max_chirps_per_episode = 10;
     ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.75f, 0.0001f);
 
-    env.max_chirps_per_episode = 10;
-    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.9166667f, 0.0001f);
+    env.max_chirps_per_episode = 6;
+    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.95f, 0.0001f);
 
-    env.max_chirps_per_episode = 8;
+    env.max_chirps_per_episode = 5;
     ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 1.0f, 0.0001f);
 
     env.max_chirps_per_episode = 4;
@@ -262,10 +262,10 @@ static int test_perf_composes_base_perf_difficulty_budget_and_chirp_efficiency(v
     add_log(&env, 1.0f, 0.0f, 0.0f);
 
     ASSERT_FLOAT_NEAR(env.log.base_perf, 1.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.budget_difficulty, 0.75f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.budget_difficulty, 0.55f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.chirp_efficiency, 0.75f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.50f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.perf, 0.28125f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.perf, 0.20625f, 0.0001f);
 
     memset(&env.log, 0, sizeof(env.log));
     add_log(&env, 0.0f, 1.0f, 0.0f);
@@ -1271,7 +1271,7 @@ int main(void) {
     if (test_success_reward_includes_chirp_efficiency_bonus()) return 1;
     if (test_chirp_budget_logs_ratios_for_wandb()) return 1;
     if (test_curriculum_perf_uses_success_and_actual_difficulty()) return 1;
-    if (test_budget_difficulty_uses_empirical_edge_at_eight_chirps()) return 1;
+    if (test_budget_difficulty_uses_hard_edge_below_six_chirps()) return 1;
     if (test_perf_composes_base_perf_difficulty_budget_and_chirp_efficiency()) return 1;
     if (test_chirp_tempo_logs_far_and_near_rates()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
