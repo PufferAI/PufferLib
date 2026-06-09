@@ -419,6 +419,7 @@ Config knobs:
 - `progress_reward_scale`
 - `collision_penalty`
 - `curriculum_enabled`
+- `curriculum_initial_level`
 - `curriculum_stage`
 
 ## PufferLib Integration
@@ -520,3 +521,33 @@ Obstacle reflections:
   later runs. Use at least `--sweep.max-runs 3` for one actual suggestion, or
   run explicit bounded comparison trains when testing a small acoustic grid.
 - Curriculum difficulty should not advance on a single lucky catch. `env.curriculum_successes_per_level` gates advancement so each env must catch the bug multiple times at the current level before increasing bug distance or obstacle count.
+
+## Near-Term Roadmap
+
+Keep these changes small and reversible. Use TDD for env behavior changes,
+train/eval after each rung, and commit each known-good rung separately.
+
+1. Harder curriculum and eval difficulty.
+   - Plain eval starts from a fresh env at curriculum level 0, so the bug can
+     look too close even when training eventually reaches harder levels.
+   - Add a configurable initial curriculum level so eval can start at a
+     representative harder level without requiring manual in-session catches.
+   - Increase the maximum curriculum bug distance so longer runs can keep
+     getting harder after the current successful range.
+   - Preserve monotonic progress: once an env advances above the configured
+     initial level, resets must not drop it back down.
+
+2. Finite chirp budget.
+   - Try a default around `20` chirps per episode.
+   - Track remaining chirps as a normalized observation unless explicitly
+     testing a memory-only variant.
+   - When the budget is exhausted, terminate with a `-1` style failure penalty.
+     Prefer triggering this on an over-budget chirp attempt rather than
+     instantly after the last valid chirp, so the final echo can still matter.
+
+3. Later bug motion curriculum.
+   - Keep the current fixed-velocity bounce bug as the base rung.
+   - Add later stages for sine/cosine perturbations, circular/arc paths, and
+     simple maneuvers.
+   - Sweep bug speed and maneuver amplitude only after harder curriculum and
+     chirp budget are stable.

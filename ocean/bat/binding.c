@@ -22,6 +22,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->bug_speed = dict_get(kwargs, "bug_speed")->value;
     env->max_steps = dict_get(kwargs, "max_steps")->value;
     env->curriculum_enabled = dict_get(kwargs, "curriculum_enabled")->value;
+    env->curriculum_initial_level = dict_get(kwargs, "curriculum_initial_level")->value;
     env->curriculum_start_obstacles = dict_get(kwargs, "curriculum_start_obstacles")->value;
     env->curriculum_max_obstacles = dict_get(kwargs, "curriculum_max_obstacles")->value;
     env->curriculum_obstacle_step = dict_get(kwargs, "curriculum_obstacle_step")->value;

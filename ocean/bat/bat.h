@@ -113,6 +113,7 @@ typedef struct Bat {
     int num_obstacles;
     int curriculum_enabled;
     int curriculum_level;
+    int curriculum_initial_level;
     int curriculum_start_obstacles;
     int curriculum_max_obstacles;
     int curriculum_obstacle_step;
@@ -464,6 +465,7 @@ void init(Bat* env) {
     if (env->curriculum_start_obstacles > env->curriculum_max_obstacles) {
         env->curriculum_start_obstacles = env->curriculum_max_obstacles;
     }
+    if (env->curriculum_initial_level < 0) env->curriculum_initial_level = 0;
     if (env->curriculum_obstacle_step <= 0) env->curriculum_obstacle_step = 8;
     if (env->curriculum_successes_per_level <= 0) env->curriculum_successes_per_level = 1;
     if (env->curriculum_start_bug_distance <= 0.0f) env->curriculum_start_bug_distance = 14.0f;
@@ -747,6 +749,9 @@ static inline void bat_reset_episode(Bat* env) {
     env->bat_vy = 0.0f;
     env->bat_turn_velocity = 0.0f;
     env->bat_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+    if (env->curriculum_enabled && env->curriculum_level < env->curriculum_initial_level) {
+        env->curriculum_level = env->curriculum_initial_level;
+    }
     bat_apply_curriculum(env);
     if (env->curriculum_enabled) {
         bat_sample_spawns_at_distance(env, bat_curriculum_bug_distance(env));

@@ -14,6 +14,7 @@ void demo() {
         .bat_turn_rate = BAT_PI,
         .bug_speed = 4.0f,
         .max_steps = 512,
+        .curriculum_initial_level = 3,
         .range_bins_per_ear = BAT_RANGE_BINS,
         .doppler_bins_per_ear = BAT_DOPPLER_BINS,
         .max_echo_range = 80.0f,

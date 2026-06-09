@@ -715,6 +715,56 @@ static int test_curriculum_waits_for_required_catches(void) {
     return 0;
 }
 
+static int test_curriculum_initial_level_sets_first_reset_difficulty(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 3;
+    env.curriculum_enabled = 1;
+    env.curriculum_initial_level = 4;
+    env.curriculum_start_obstacles = 1;
+    env.curriculum_max_obstacles = 3;
+    env.curriculum_obstacle_step = 2;
+    env.curriculum_start_bug_distance = 8.0f;
+    env.curriculum_max_bug_distance = 56.0f;
+    env.curriculum_bug_distance_step = 4.0f;
+    c_reset(&env);
+
+    ASSERT_TRUE(env.curriculum_level == 4);
+    ASSERT_TRUE(env.num_obstacles == 3);
+    float dist = bat_dist(env.bat_x, env.bat_y, env.bug_x, env.bug_y);
+    ASSERT_TRUE(dist >= 20.0f);
+    ASSERT_TRUE(dist <= 28.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_curriculum_initial_level_does_not_reset_progress(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 3;
+    env.curriculum_enabled = 1;
+    env.curriculum_initial_level = 2;
+    env.curriculum_start_obstacles = 1;
+    env.curriculum_max_obstacles = 3;
+    env.curriculum_obstacle_step = 1;
+    env.curriculum_successes_per_level = 1;
+    env.curriculum_start_bug_distance = 8.0f;
+    env.curriculum_max_bug_distance = 56.0f;
+    env.curriculum_bug_distance_step = 4.0f;
+    c_reset(&env);
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 20.5f;
+    env.bug_y = 20.0f;
+
+    c_step(&env);
+
+    ASSERT_TRUE(env.curriculum_level == 3);
+    ASSERT_TRUE(env.curriculum_successes_at_level == 0);
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_chirp_echo_arrives_after_two_way_travel_not_immediately(void) {
     Bat env = make_test_env();
     env.num_obstacles = 0;
@@ -976,6 +1026,8 @@ int main(void) {
     if (test_curriculum_starts_close_with_one_obstacle()) return 1;
     if (test_curriculum_advances_after_catch()) return 1;
     if (test_curriculum_waits_for_required_catches()) return 1;
+    if (test_curriculum_initial_level_sets_first_reset_difficulty()) return 1;
+    if (test_curriculum_initial_level_does_not_reset_progress()) return 1;
     if (test_chirp_echo_arrives_after_two_way_travel_not_immediately()) return 1;
     if (test_frequency_bin_energy_sums_and_caps()) return 1;
     if (test_bug_echo_reward_is_added_when_bug_echo_is_closer()) return 1;
