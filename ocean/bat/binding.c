@@ -1,5 +1,5 @@
 #include "bat.h"
-#define OBS_SIZE 39
+#define OBS_SIZE 40
 #define NUM_ATNS 6
 #define ACT_SIZES {3, 3, 8, 8, 4, 2}
 #define OBS_TENSOR_T FloatTensor
@@ -36,7 +36,11 @@ void my_init(Env* env, Dict* kwargs) {
     env->reflector_spacing = dict_get(kwargs, "reflector_spacing")->value;
     env->max_chirp_age_ticks = dict_get(kwargs, "max_chirp_age_ticks")->value;
     env->chirp_cooldown_ticks = dict_get(kwargs, "chirp_cooldown_ticks")->value;
+    env->max_chirps_per_episode = dict_get(kwargs, "max_chirps_per_episode")->value;
+    env->min_chirps_per_episode = dict_get(kwargs, "min_chirps_per_episode")->value;
+    env->chirp_budget_decay_levels = dict_get(kwargs, "chirp_budget_decay_levels")->value;
     env->chirp_cost = dict_get(kwargs, "chirp_cost")->value;
+    env->chirp_efficiency_reward = dict_get(kwargs, "chirp_efficiency_reward")->value;
     env->valid_chirp_reward = dict_get(kwargs, "valid_chirp_reward")->value;
     env->early_chirp_penalty = dict_get(kwargs, "early_chirp_penalty")->value;
     env->bug_echo_reward_scale = dict_get(kwargs, "bug_echo_reward_scale")->value;
@@ -48,15 +52,31 @@ void my_init(Env* env, Dict* kwargs) {
 
 void my_log(Log* log, Dict* out) {
     dict_set(out, "perf", log->perf);
+    dict_set(out, "base_perf", log->base_perf);
     dict_set(out, "score", log->score);
     dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
     dict_set(out, "collision", log->collision);
     dict_set(out, "timeout", log->timeout);
+    dict_set(out, "curriculum_level", log->curriculum_level);
+    dict_set(out, "curriculum_difficulty", log->curriculum_difficulty);
+    dict_set(out, "curriculum_perf", log->curriculum_perf);
+    dict_set(out, "budget_difficulty", log->budget_difficulty);
     dict_set(out, "bug_distance_start", log->bug_distance_start);
     dict_set(out, "bug_distance_final", log->bug_distance_final);
     dict_set(out, "bug_distance_delta", log->bug_distance_delta);
     dict_set(out, "chirps_emitted", log->chirps_emitted);
+    dict_set(out, "chirp_budget", log->chirp_budget);
+    dict_set(out, "chirps_used_ratio", log->chirps_used_ratio);
+    dict_set(out, "chirps_remaining_ratio", log->chirps_remaining_ratio);
+    dict_set(out, "chirp_efficiency", log->chirp_efficiency);
+    dict_set(out, "far_chirp_fraction", log->far_chirp_fraction);
+    dict_set(out, "near_chirp_fraction", log->near_chirp_fraction);
+    dict_set(out, "far_chirp_rate", log->far_chirp_rate);
+    dict_set(out, "near_chirp_rate", log->near_chirp_rate);
+    dict_set(out, "chirp_tempo_ratio", log->chirp_tempo_ratio);
+    dict_set(out, "first_chirp_tick_norm", log->first_chirp_tick_norm);
+    dict_set(out, "mean_chirp_tick_norm", log->mean_chirp_tick_norm);
     dict_set(out, "mean_chirp_duration", log->mean_chirp_duration);
     dict_set(out, "mean_chirp_bandwidth", log->mean_chirp_bandwidth);
     dict_set(out, "mean_echo_energy_left", log->mean_echo_energy_left);

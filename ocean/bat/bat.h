@@ -10,7 +10,7 @@
 #include "raylib.h"
 #endif
 
-#define BAT_OBS_SIZE 39
+#define BAT_OBS_SIZE 40
 #define BAT_NUM_ACTIONS 6
 #define BAT_MOVE_ACTIONS 3
 #define BAT_TURN_ACTIONS 3
@@ -26,8 +26,9 @@
 #define BAT_CHIRP_START_OBS 34
 #define BAT_CHIRP_END_OBS 35
 #define BAT_CHIRP_DURATION_OBS 36
-#define BAT_FORWARD_SPEED_OBS 37
-#define BAT_TURN_RATE_OBS 38
+#define BAT_CHIRPS_USED_OBS 37
+#define BAT_FORWARD_SPEED_OBS 38
+#define BAT_TURN_RATE_OBS 39
 
 #define BAT_NOOP 0
 #define BAT_THRUST_FORWARD 1
@@ -44,6 +45,8 @@
 #define BAT_CHIRP_RINGS 5
 #define BAT_MAX_CHIRP_SLICES 16
 #define BAT_ECHO_QUEUE_TICKS 256
+#define BAT_BUDGET_EASY_CHIRPS 20.0f
+#define BAT_BUDGET_EDGE_CHIRPS 8.0f
 
 #define BAT_ECHO_STATIC 0
 #define BAT_ECHO_BUG 1
@@ -74,16 +77,32 @@ typedef struct EchoBucket {
 
 typedef struct Log {
     float perf;
+    float base_perf;
     float score;
     float episode_return;
     float episode_length;
     float success;
     float collision;
     float timeout;
+    float curriculum_level;
+    float curriculum_difficulty;
+    float curriculum_perf;
+    float budget_difficulty;
     float bug_distance_start;
     float bug_distance_final;
     float bug_distance_delta;
     float chirps_emitted;
+    float chirp_budget;
+    float chirps_used_ratio;
+    float chirps_remaining_ratio;
+    float chirp_efficiency;
+    float far_chirp_fraction;
+    float near_chirp_fraction;
+    float far_chirp_rate;
+    float near_chirp_rate;
+    float chirp_tempo_ratio;
+    float first_chirp_tick_norm;
+    float mean_chirp_tick_norm;
     float mean_chirp_duration;
     float mean_chirp_bandwidth;
     float mean_echo_energy_left;
@@ -153,6 +172,10 @@ typedef struct Bat {
     float reflector_spacing;
     int max_chirp_age_ticks;
     int chirp_cooldown_ticks;
+    int max_chirps_per_episode;
+    int min_chirps_per_episode;
+    int chirp_budget_decay_levels;
+    int chirp_budget;
     int chirp_age_ticks;
     int last_chirp_tick;
     float last_chirp_start_freq;
@@ -164,10 +187,19 @@ typedef struct Bat {
     int chirps_emitted_episode;
     float chirp_duration_sum;
     float chirp_bandwidth_sum;
+    float chirps_far;
+    float chirps_mid;
+    float chirps_near;
+    float ticks_far;
+    float ticks_mid;
+    float ticks_near;
+    float first_chirp_tick;
+    float chirp_tick_sum;
     float echo_energy_left_sum;
     float echo_energy_right_sum;
 
     float chirp_cost;
+    float chirp_efficiency_reward;
     float valid_chirp_reward;
     float early_chirp_penalty;
     float step_cost;
@@ -339,6 +371,80 @@ static inline float bat_curriculum_bug_distance(Bat* env) {
         env->curriculum_max_bug_distance);
 }
 
+static inline int bat_curriculum_chirp_budget(Bat* env) {
+    int decay = env->chirp_budget_decay_levels <= 0 ? 1 : env->chirp_budget_decay_levels;
+    int level = env->curriculum_enabled ? env->curriculum_level : 0;
+    int budget = env->max_chirps_per_episode - level / decay;
+    if (budget < env->min_chirps_per_episode) budget = env->min_chirps_per_episode;
+    if (budget > env->max_chirps_per_episode) budget = env->max_chirps_per_episode;
+    if (budget < 1) budget = 1;
+    return budget;
+}
+
+static inline float bat_chirps_used_ratio(Bat* env) {
+    int budget = env->chirp_budget > 0 ? env->chirp_budget : env->max_chirps_per_episode;
+    if (budget <= 0) budget = 1;
+    return bat_clampf(env->chirps_emitted_episode / (float)budget, 0.0f, 1.0f);
+}
+
+static inline float bat_chirp_efficiency(Bat* env) {
+    return 0.5f + 0.5f * (1.0f - bat_chirps_used_ratio(env));
+}
+
+static inline float bat_norm_range(float value, float lo, float hi) {
+    float span = hi - lo;
+    if (span <= 0.000001f) return 0.0f;
+    return bat_clampf((value - lo) / span, 0.0f, 1.0f);
+}
+
+static inline float bat_curriculum_difficulty(Bat* env) {
+    float distance = bat_norm_range(env->start_bug_dist,
+        env->curriculum_start_bug_distance, env->curriculum_max_bug_distance);
+    float obstacles = bat_norm_range((float)env->num_obstacles,
+        (float)env->curriculum_start_obstacles, (float)env->curriculum_max_obstacles);
+    return (distance + obstacles) / 2.0f;
+}
+
+static inline float bat_budget_difficulty(Bat* env) {
+    float pressure = (BAT_BUDGET_EASY_CHIRPS - (float)env->max_chirps_per_episode)
+        / (BAT_BUDGET_EASY_CHIRPS - BAT_BUDGET_EDGE_CHIRPS);
+    return 0.5f + 0.5f * bat_clampf(pressure, 0.0f, 1.0f);
+}
+
+static inline float bat_success_reward(Bat* env) {
+    return 1.0f + env->chirp_efficiency_reward * bat_chirp_efficiency(env);
+}
+
+static inline float bat_current_distance_ratio(Bat* env) {
+    float dist = bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y);
+    return dist / fmaxf(1.0f, env->start_bug_dist);
+}
+
+static inline void bat_accumulate_distance_region(float ratio, float amount,
+        float* far, float* mid, float* near) {
+    if (ratio > 0.66f) {
+        *far += amount;
+    } else if (ratio < 0.33f) {
+        *near += amount;
+    } else {
+        *mid += amount;
+    }
+}
+
+static inline void bat_record_distance_tick(Bat* env) {
+    bat_accumulate_distance_region(bat_current_distance_ratio(env), 1.0f,
+        &env->ticks_far, &env->ticks_mid, &env->ticks_near);
+}
+
+static inline void bat_record_chirp_timing(Bat* env) {
+    if (env->first_chirp_tick < 0.0f) {
+        env->first_chirp_tick = (float)env->tick;
+    }
+    env->chirp_tick_sum += (float)env->tick;
+    bat_accumulate_distance_region(bat_current_distance_ratio(env), 1.0f,
+        &env->chirps_far, &env->chirps_mid, &env->chirps_near);
+}
+
 static inline void bat_sample_spawns_at_distance(Bat* env, float target_distance) {
     float margin = fmaxf(6.0f, fmaxf(env->bat_radius, env->bug_radius) + 3.0f);
     target_distance = fmaxf(0.0f, target_distance);
@@ -448,10 +554,17 @@ void init(Bat* env) {
     if (env->reflector_spacing <= 0.0f) env->reflector_spacing = 8.0f;
     if (env->max_chirp_age_ticks <= 0) env->max_chirp_age_ticks = 30;
     if (env->chirp_cooldown_ticks <= 0) env->chirp_cooldown_ticks = 12;
+    if (env->max_chirps_per_episode <= 0) env->max_chirps_per_episode = 20;
+    if (env->min_chirps_per_episode <= 0) env->min_chirps_per_episode = 10;
+    if (env->min_chirps_per_episode > env->max_chirps_per_episode) {
+        env->min_chirps_per_episode = env->max_chirps_per_episode;
+    }
+    if (env->chirp_budget_decay_levels <= 0) env->chirp_budget_decay_levels = 4;
     if (env->step_cost <= 0.0f) env->step_cost = 0.001f;
     if (env->progress_reward_scale <= 0.0f) env->progress_reward_scale = 0.05f;
     if (env->collision_penalty <= 0.0f) env->collision_penalty = 1.0f;
     if (env->chirp_cost < 0.0f) env->chirp_cost = 0.0f;
+    if (env->chirp_efficiency_reward < 0.0f) env->chirp_efficiency_reward = 0.0f;
     if (env->valid_chirp_reward <= 0.0f) env->valid_chirp_reward = 0.0005f;
     if (env->early_chirp_penalty <= 0.0f) env->early_chirp_penalty = 0.001f;
     if (env->bug_echo_reward_scale <= 0.0f) env->bug_echo_reward_scale = 0.0f;
@@ -504,17 +617,49 @@ void free_allocated(Bat* env) {
 
 static inline void add_log(Bat* env, float success, float collision, float timeout) {
     float final_dist = bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y);
-    env->log.perf += success;
+    float curriculum_difficulty = bat_curriculum_difficulty(env);
+    float budget_difficulty = bat_budget_difficulty(env);
+    float chirp_efficiency = bat_chirp_efficiency(env);
+    env->log.perf += success * curriculum_difficulty * budget_difficulty * chirp_efficiency;
+    env->log.base_perf += success;
     env->log.score += env->episode_return;
     env->log.episode_return += env->episode_return;
     env->log.episode_length += env->tick;
     env->log.success += success;
     env->log.collision += collision;
     env->log.timeout += timeout;
+    env->log.curriculum_level += env->curriculum_level;
+    env->log.curriculum_difficulty += curriculum_difficulty;
+    env->log.curriculum_perf += success * curriculum_difficulty;
+    env->log.budget_difficulty += budget_difficulty;
     env->log.bug_distance_start += env->start_bug_dist;
     env->log.bug_distance_final += final_dist;
     env->log.bug_distance_delta += env->start_bug_dist - final_dist;
     env->log.chirps_emitted += env->chirps_emitted_episode;
+    env->log.chirp_budget += env->chirp_budget;
+    env->log.chirps_used_ratio += bat_chirps_used_ratio(env);
+    env->log.chirps_remaining_ratio += 1.0f - bat_chirps_used_ratio(env);
+    env->log.chirp_efficiency += chirp_efficiency;
+    float chirps = fmaxf(1.0f, (float)env->chirps_emitted_episode);
+    env->log.far_chirp_fraction += env->chirps_far / chirps;
+    env->log.near_chirp_fraction += env->chirps_near / chirps;
+    float far_rate = env->chirps_far / fmaxf(1.0f, env->ticks_far);
+    float near_rate = env->chirps_near / fmaxf(1.0f, env->ticks_near);
+    env->log.far_chirp_rate += far_rate;
+    env->log.near_chirp_rate += near_rate;
+    float tempo_ratio = 0.0f;
+    if (far_rate > 0.000001f) {
+        tempo_ratio = near_rate / far_rate;
+    } else if (near_rate > 0.000001f) {
+        tempo_ratio = 10.0f;
+    }
+    env->log.chirp_tempo_ratio += bat_clampf(tempo_ratio, 0.0f, 10.0f);
+    env->log.first_chirp_tick_norm += env->first_chirp_tick >= 0.0f
+        ? bat_clampf(env->first_chirp_tick / fmaxf(1.0f, (float)env->max_steps), 0.0f, 1.0f)
+        : 1.0f;
+    env->log.mean_chirp_tick_norm += env->chirps_emitted_episode > 0
+        ? bat_clampf((env->chirp_tick_sum / chirps) / fmaxf(1.0f, (float)env->max_steps), 0.0f, 1.0f)
+        : 1.0f;
     if (env->chirps_emitted_episode > 0) {
         env->log.mean_chirp_duration += env->chirp_duration_sum / env->chirps_emitted_episode;
         env->log.mean_chirp_bandwidth += env->chirp_bandwidth_sum / env->chirps_emitted_episode;
@@ -738,6 +883,7 @@ void compute_observations(Bat* env) {
     env->observations[BAT_CHIRP_START_OBS] = env->last_chirp_start_freq;
     env->observations[BAT_CHIRP_END_OBS] = env->last_chirp_end_freq;
     env->observations[BAT_CHIRP_DURATION_OBS] = env->last_chirp_duration;
+    env->observations[BAT_CHIRPS_USED_OBS] = bat_chirps_used_ratio(env);
     float fwd_speed = env->bat_vx * cosf(env->bat_heading) + env->bat_vy * sinf(env->bat_heading);
     env->observations[BAT_FORWARD_SPEED_OBS] = bat_clampf(fwd_speed / env->bat_max_speed, -1.0f, 1.0f);
     env->observations[BAT_TURN_RATE_OBS] = bat_clampf(env->bat_turn_velocity / env->bat_turn_rate, -1.0f, 1.0f);
@@ -770,12 +916,21 @@ static inline void bat_reset_episode(Bat* env) {
     memset(env->chirps, 0, sizeof(env->chirps));
     env->chirp_head = 0;
     bat_clear_echo_queue(env);
+    env->chirp_budget = bat_curriculum_chirp_budget(env);
     env->tick_bug_echo_energy = 0.0f;
     env->tick_bug_echo_path = -1.0f;
     env->last_bug_echo_path = -1.0f;
     env->chirps_emitted_episode = 0;
     env->chirp_duration_sum = 0.0f;
     env->chirp_bandwidth_sum = 0.0f;
+    env->chirps_far = 0.0f;
+    env->chirps_mid = 0.0f;
+    env->chirps_near = 0.0f;
+    env->ticks_far = 0.0f;
+    env->ticks_mid = 0.0f;
+    env->ticks_near = 0.0f;
+    env->first_chirp_tick = -1.0f;
+    env->chirp_tick_sum = 0.0f;
     env->echo_energy_left_sum = 0.0f;
     env->echo_energy_right_sum = 0.0f;
     env->episode_return = 0.0f;
@@ -864,11 +1019,16 @@ static inline bool bat_try_emit_chirp(Bat* env) {
         return false;
     }
 
+    if (env->chirps_emitted_episode >= env->chirp_budget) {
+        return false;
+    }
+
     env->last_chirp_start_freq = bat_norm_bin(start_idx, BAT_CHIRP_FREQ_BINS);
     env->last_chirp_end_freq = bat_norm_bin(end_idx, BAT_CHIRP_FREQ_BINS);
     env->last_chirp_duration = bat_norm_bin(duration_idx, BAT_CHIRP_DURATION_BINS);
     env->chirp_age_ticks = 0;
     env->last_chirp_tick = env->tick;
+    bat_record_chirp_timing(env);
     env->chirps_emitted_episode += 1;
     env->chirp_duration_sum += env->last_chirp_duration;
     env->chirp_bandwidth_sum += fabsf(env->last_chirp_end_freq - env->last_chirp_start_freq);
@@ -888,6 +1048,10 @@ static inline bool bat_try_emit_chirp(Bat* env) {
 static inline int bat_update_chirp(Bat* env) {
     int emit = bat_action_index(env->actions[5], BAT_CHIRP_EMIT_ACTIONS);
     if (emit) {
+        if (env->tick - env->last_chirp_tick >= env->chirp_cooldown_ticks &&
+                env->chirps_emitted_episode >= env->chirp_budget) {
+            return -2;
+        }
         return bat_try_emit_chirp(env) ? 1 : -1;
     } else if (env->chirp_age_ticks < env->max_chirp_age_ticks) {
         env->chirp_age_ticks += 1;
@@ -904,8 +1068,16 @@ void c_step(Bat* env) {
     env->terminals[0] = 0.0f;
 
     int chirp_status = bat_update_chirp(env);
+    if (chirp_status == -2) {
+        env->rewards[0] = -1.0f;
+        env->terminals[0] = 1.0f;
+        env->episode_return += env->rewards[0];
+        add_log(env, 0.0f, 1.0f, 0.0f);
+        bat_reset_episode(env);
+        return;
+    }
     if (bat_caught_bug(env)) {
-        env->rewards[0] = 1.0f;
+        env->rewards[0] = bat_success_reward(env);
         env->terminals[0] = 1.0f;
         env->episode_return += env->rewards[0];
         bat_advance_curriculum(env);
@@ -926,7 +1098,7 @@ void c_step(Bat* env) {
             return;
         }
         if (bat_caught_bug(env)) {
-            env->rewards[0] = 1.0f;
+            env->rewards[0] = bat_success_reward(env);
             env->terminals[0] = 1.0f;
             env->episode_return += env->rewards[0];
             bat_advance_curriculum(env);
@@ -937,6 +1109,7 @@ void c_step(Bat* env) {
     }
 
     env->tick += 1;
+    bat_record_distance_tick(env);
     float bug_dist = bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y);
     float progress = env->prev_bug_dist - bug_dist;
     env->rewards[0] += env->progress_reward_scale * progress;

@@ -232,12 +232,13 @@ Observation layout:
 5. `last_chirp_start_freq_norm`
 6. `last_chirp_end_freq_norm`
 7. `last_chirp_duration_norm`
-8. `forward_speed_norm`
-9. `turn_rate_norm`
+8. `chirps_used_norm = chirps_used / chirp_budget`
+9. `forward_speed_norm`
+10. `turn_rate_norm`
 
 Initial observation size:
 
-- `OBS_SIZE = 39`
+- `OBS_SIZE = 40`
 
 Echo bins:
 
@@ -311,6 +312,11 @@ Default reward model:
 - `-1.0` for hitting walls or obstacles, terminal.
 - Tiny chirp cost so constant chirping is not fully free without causing
   chirp collapse.
+- Solve-time chirp efficiency reward:
+  - `chirp_efficiency = 0.5 + 0.5 * (1.0 - chirps_used / chirp_budget)`,
+  - a catch after spending the full budget gets efficiency `0.5`,
+  - a catch with very few chirps approaches efficiency `1.0`,
+  - `chirp_efficiency_reward` scales this bonus and should be sweepable.
 - Sound-derived bug echo progress reward:
   - when a bug echo returns with a shorter acoustic path than the previous bug
     echo, add a small shaped reward,
@@ -329,12 +335,14 @@ Progress reward:
   - `reward += progress_reward_scale * (prev_bug_dist - bug_dist)`
   - `reward -= step_cost`
   - `reward -= chirp_cost` when a chirp is emitted
+  - `reward += chirp_efficiency_reward * chirp_efficiency` on catch
   - `reward += bug_echo_reward_scale * echo_path_reduction / max_echo_range`
     when a returning bug echo indicates the bug is closer than the previous bug
     echo
 - Default starting values:
   - `progress_reward_scale = 0.05`
   - `step_cost = 0.001`
+  - `chirp_efficiency_reward = 1.0`
   - `chirp_cost = 0.00005`
   - `bug_echo_reward_scale = 0.02`
   - `chirp_cost = 0.0005`
@@ -360,6 +368,21 @@ Reset:
 Logged metrics:
 
 - `perf`
+  - composite sweep objective:
+    `base_perf * curriculum_difficulty * budget_difficulty * chirp_efficiency`
+- `base_perf`
+  - pure catch rate: `1.0` for catching the bug, `0.0` otherwise
+- `curriculum_level`
+- `curriculum_difficulty`
+  - normalized actual episode difficulty from start bug distance and obstacle
+    count
+- `curriculum_perf`
+  - `base_perf * curriculum_difficulty`; useful diagnostic for level progress
+    without chirp-budget weighting
+- `budget_difficulty`
+  - sweep-pressure multiplier derived from selected `max_chirps_per_episode`;
+    the empirical edge from the June 9, 2026 budget grid is `8` chirps, while
+    `20` chirps is easy
 - `score`
 - `episode_return`
 - `episode_length`
@@ -370,6 +393,21 @@ Logged metrics:
 - `bug_distance_final`
 - `bug_distance_delta`
 - `chirps_emitted`
+- `chirp_budget`
+- `chirps_used_ratio`
+- `chirps_remaining_ratio`
+- `chirp_efficiency`
+  - `0.5` if the full budget was spent, approaching `1.0` when few chirps were
+    used
+- `far_chirp_fraction`
+- `near_chirp_fraction`
+- `far_chirp_rate`
+- `near_chirp_rate`
+- `chirp_tempo_ratio`
+  - `near_chirp_rate / far_chirp_rate`, clamped to `[0, 10]`; values above
+    `1.0` indicate chirps are denser near the bug than far away
+- `first_chirp_tick_norm`
+- `mean_chirp_tick_norm`
 - `mean_chirp_duration`
 - `mean_chirp_bandwidth`
 - `mean_echo_energy_left`
@@ -412,9 +450,13 @@ Config knobs:
 - `max_echo_range`
 - `sound_speed`
 - `reflector_spacing`
+- `max_chirps_per_episode`
+- `min_chirps_per_episode`
+- `chirp_budget_decay_levels`
 - `chirp_freq_bins`
 - `chirp_duration_bins`
 - `chirp_cost`
+- `chirp_efficiency_reward`
 - `step_cost`
 - `progress_reward_scale`
 - `collision_penalty`
@@ -489,7 +531,10 @@ Obstacle reflections:
 
 ## Training and Sweep Operations
 
-- Use `perf` as the sweep objective. It is `1.0` only when the bat catches the bug and `0.0` for collision or timeout.
+- Keep `base_perf` as pure catch rate. Use composite `perf` as the sweep
+  objective. It rewards catching harder curriculum levels with fewer chirps and
+  under stricter configured chirp budgets without changing in-episode reward
+  shaping.
 - Reward terms are training scaffolding and should remain sweepable. `progress_reward_scale` is true-distance shaping and should usually stay below `bug_echo_reward_scale`, which is based on closer received bug reflections.
 - Forward-only movement dynamics should be swept with bounded ranges:
   `env.bat_max_speed` in `[8.0, 22.0]`, `env.bat_accel` in `[40.0, 90.0]`,
@@ -538,12 +583,19 @@ train/eval after each rung, and commit each known-good rung separately.
      initial level, resets must not drop it back down.
 
 2. Finite chirp budget.
-   - Try a default around `20` chirps per episode.
-   - Track remaining chirps as a normalized observation unless explicitly
-     testing a memory-only variant.
-   - When the budget is exhausted, terminate with a `-1` style failure penalty.
-     Prefer triggering this on an over-budget chirp attempt rather than
-     instantly after the last valid chirp, so the final echo can still matter.
+   - Default to `20` chirps per episode at low curriculum levels.
+   - Reduce the budget as curriculum level increases, with a floor so harder
+     levels require smarter chirp timing without creating an impossible cliff.
+   - Track `chirps_used / chirp_budget` as a normalized `0..1` observation.
+   - When the budget is exhausted, terminate with a `-1` style failure penalty
+     if the policy attempts another chirp. Do not terminate immediately after
+     the last valid chirp, so the final echo can still matter.
+   - Log chirp budget, used ratio, remaining ratio, and efficiency to W&B so
+     sweeps can distinguish successful policies that waste every chirp from
+     successful policies that catch the bug with useful chirp timing.
+   - Add a sweepable solve-time efficiency reward where spending the full
+     budget scores `0.5` on the efficiency component and using very few chirps
+     approaches `1.0`.
 
 3. Later bug motion curriculum.
    - Keep the current fixed-velocity bounce bug as the base rung.

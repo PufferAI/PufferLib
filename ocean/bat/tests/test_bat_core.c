@@ -71,6 +71,240 @@ static int test_chirp_metadata_and_observation_size(void) {
     return 0;
 }
 
+static int test_chirp_budget_observation_tracks_used_chirps(void) {
+    Bat env = make_test_env();
+    env.max_chirps_per_episode = 4;
+    env.min_chirps_per_episode = 2;
+    env.chirp_budget_decay_levels = 4;
+    c_reset(&env);
+
+    ASSERT_TRUE(env.chirp_budget == 4);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_CHIRPS_USED_OBS], 0.0f, 0.0001f);
+
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 1.0f;
+    c_step(&env);
+
+    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_CHIRPS_USED_OBS], 0.25f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_chirp_budget_decreases_with_curriculum_level(void) {
+    Bat env = make_test_env();
+    env.curriculum_enabled = 1;
+    env.curriculum_initial_level = 8;
+    env.max_chirps_per_episode = 20;
+    env.min_chirps_per_episode = 10;
+    env.chirp_budget_decay_levels = 4;
+    c_reset(&env);
+
+    ASSERT_TRUE(env.curriculum_level == 8);
+    ASSERT_TRUE(env.chirp_budget == 18);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_chirping_after_budget_terminates_with_penalty(void) {
+    Bat env = make_test_env();
+    env.max_chirps_per_episode = 1;
+    env.min_chirps_per_episode = 1;
+    env.chirp_budget_decay_levels = 4;
+    env.chirp_cooldown_ticks = 1;
+    env.early_chirp_penalty = 0.0f;
+    c_reset(&env);
+
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 1.0f;
+    c_step(&env);
+    ASSERT_TRUE(env.terminals[0] == 0.0f);
+    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+
+    env.tick = env.last_chirp_tick + env.chirp_cooldown_ticks;
+    c_step(&env);
+
+    ASSERT_TRUE(env.terminals[0] == 1.0f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], -1.0f, 0.0001f);
+    ASSERT_TRUE(env.chirps_emitted_episode == 0);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_chirp_efficiency_scores_low_usage_above_full_budget(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.chirp_budget = 10;
+    env.chirps_emitted_episode = 1;
+    ASSERT_FLOAT_NEAR(bat_chirp_efficiency(&env), 0.95f, 0.0001f);
+
+    env.chirps_emitted_episode = 10;
+    ASSERT_FLOAT_NEAR(bat_chirp_efficiency(&env), 0.50f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_success_reward_includes_chirp_efficiency_bonus(void) {
+    Bat env = make_test_env();
+    env.chirp_efficiency_reward = 1.0f;
+    c_reset(&env);
+
+    env.chirp_budget = 10;
+    env.chirps_emitted_episode = 2;
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 20.5f;
+    env.bug_y = 20.0f;
+
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.terminals[0], 1.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], 1.90f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_chirp_budget_logs_ratios_for_wandb(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.chirp_budget = 10;
+    env.chirps_emitted_episode = 4;
+    add_log(&env, 1.0f, 0.0f, 0.0f);
+
+    ASSERT_FLOAT_NEAR(env.log.chirp_budget, 10.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.chirps_used_ratio, 0.40f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.chirps_remaining_ratio, 0.60f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.chirp_efficiency, 0.80f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_curriculum_perf_uses_success_and_actual_difficulty(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.curriculum_start_bug_distance = 8.0f;
+    env.curriculum_max_bug_distance = 56.0f;
+    env.curriculum_start_obstacles = 1;
+    env.curriculum_max_obstacles = 3;
+    env.num_obstacles = 2;
+    env.max_chirps_per_episode = 10;
+    env.min_chirps_per_episode = 5;
+    env.chirp_budget = 8;
+    env.start_bug_dist = 32.0f;
+
+    ASSERT_FLOAT_NEAR(bat_curriculum_difficulty(&env), 0.5000000f, 0.0001f);
+    add_log(&env, 1.0f, 0.0f, 0.0f);
+    ASSERT_FLOAT_NEAR(env.log.base_perf, 1.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_perf, 0.5000000f, 0.0001f);
+
+    memset(&env.log, 0, sizeof(env.log));
+    add_log(&env, 0.0f, 1.0f, 0.0f);
+    ASSERT_FLOAT_NEAR(env.log.base_perf, 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.5000000f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_perf, 0.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_budget_difficulty_uses_empirical_edge_at_eight_chirps(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.max_chirps_per_episode = 20;
+    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.50f, 0.0001f);
+
+    env.max_chirps_per_episode = 14;
+    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.75f, 0.0001f);
+
+    env.max_chirps_per_episode = 10;
+    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.9166667f, 0.0001f);
+
+    env.max_chirps_per_episode = 8;
+    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 1.0f, 0.0001f);
+
+    env.max_chirps_per_episode = 4;
+    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 1.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_perf_composes_base_perf_difficulty_budget_and_chirp_efficiency(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.curriculum_start_bug_distance = 8.0f;
+    env.curriculum_max_bug_distance = 56.0f;
+    env.curriculum_start_obstacles = 1;
+    env.curriculum_max_obstacles = 3;
+    env.num_obstacles = 2;
+    env.max_chirps_per_episode = 14;
+    env.min_chirps_per_episode = 4;
+    env.chirp_budget = 14;
+    env.chirps_emitted_episode = 7;
+    env.start_bug_dist = 32.0f;
+
+    add_log(&env, 1.0f, 0.0f, 0.0f);
+
+    ASSERT_FLOAT_NEAR(env.log.base_perf, 1.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.budget_difficulty, 0.75f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.chirp_efficiency, 0.75f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.50f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.perf, 0.28125f, 0.0001f);
+
+    memset(&env.log, 0, sizeof(env.log));
+    add_log(&env, 0.0f, 1.0f, 0.0f);
+    ASSERT_FLOAT_NEAR(env.log.base_perf, 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.perf, 0.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_chirp_tempo_logs_far_and_near_rates(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.chirps_emitted_episode = 4;
+    env.chirps_far = 2.0f;
+    env.chirps_mid = 1.0f;
+    env.chirps_near = 1.0f;
+    env.ticks_far = 40.0f;
+    env.ticks_mid = 20.0f;
+    env.ticks_near = 10.0f;
+    env.first_chirp_tick = 12.0f;
+    env.chirp_tick_sum = 120.0f;
+    env.max_steps = 120;
+
+    add_log(&env, 1.0f, 0.0f, 0.0f);
+
+    ASSERT_FLOAT_NEAR(env.log.far_chirp_fraction, 0.50f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.near_chirp_fraction, 0.25f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.far_chirp_rate, 0.05f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.near_chirp_rate, 0.10f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.chirp_tempo_ratio, 2.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.first_chirp_tick_norm, 0.10f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.mean_chirp_tick_norm, 0.25f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_left_right_echo_asymmetry(void) {
     Bat env = make_test_env();
     c_reset(&env);
@@ -579,7 +813,7 @@ static float test_sum_obs(Bat* env, int offset, int count) {
 }
 
 static int test_bins_only_observation_layout(void) {
-    ASSERT_TRUE(BAT_OBS_SIZE == 39);
+    ASSERT_TRUE(BAT_OBS_SIZE == 40);
     ASSERT_TRUE(BAT_FREQ_BINS == 16);
     ASSERT_TRUE(BAT_LEFT_FREQ_OFFSET == 0);
     ASSERT_TRUE(BAT_RIGHT_FREQ_OFFSET == 16);
@@ -588,8 +822,9 @@ static int test_bins_only_observation_layout(void) {
     ASSERT_TRUE(BAT_CHIRP_START_OBS == 34);
     ASSERT_TRUE(BAT_CHIRP_END_OBS == 35);
     ASSERT_TRUE(BAT_CHIRP_DURATION_OBS == 36);
-    ASSERT_TRUE(BAT_FORWARD_SPEED_OBS == 37);
-    ASSERT_TRUE(BAT_TURN_RATE_OBS == 38);
+    ASSERT_TRUE(BAT_CHIRPS_USED_OBS == 37);
+    ASSERT_TRUE(BAT_FORWARD_SPEED_OBS == 38);
+    ASSERT_TRUE(BAT_TURN_RATE_OBS == 39);
     return 0;
 }
 
@@ -1029,6 +1264,16 @@ static int test_obstacles_are_small_enough_for_trainability(void) {
 
 int main(void) {
     if (test_chirp_metadata_and_observation_size()) return 1;
+    if (test_chirp_budget_observation_tracks_used_chirps()) return 1;
+    if (test_chirp_budget_decreases_with_curriculum_level()) return 1;
+    if (test_chirping_after_budget_terminates_with_penalty()) return 1;
+    if (test_chirp_efficiency_scores_low_usage_above_full_budget()) return 1;
+    if (test_success_reward_includes_chirp_efficiency_bonus()) return 1;
+    if (test_chirp_budget_logs_ratios_for_wandb()) return 1;
+    if (test_curriculum_perf_uses_success_and_actual_difficulty()) return 1;
+    if (test_budget_difficulty_uses_empirical_edge_at_eight_chirps()) return 1;
+    if (test_perf_composes_base_perf_difficulty_budget_and_chirp_efficiency()) return 1;
+    if (test_chirp_tempo_logs_far_and_near_rates()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
     if (test_default_sound_speed_allows_one_tick_interaural_delay()) return 1;
     if (test_echo_scheduling_uses_tick_bucket_accumulator()) return 1;
