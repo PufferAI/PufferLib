@@ -26,6 +26,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->sound_speed = dict_get(kwargs, "sound_speed")->value;
     env->reflector_spacing = dict_get(kwargs, "reflector_spacing")->value;
     env->max_chirp_age_ticks = dict_get(kwargs, "max_chirp_age_ticks")->value;
+    env->chirp_cooldown_ticks = dict_get(kwargs, "chirp_cooldown_ticks")->value;
     env->chirp_cost = dict_get(kwargs, "chirp_cost")->value;
     env->step_cost = dict_get(kwargs, "step_cost")->value;
     env->progress_reward_scale = dict_get(kwargs, "progress_reward_scale")->value;
@@ -50,4 +51,3 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "mean_echo_energy_left", log->mean_echo_energy_left);
     dict_set(out, "mean_echo_energy_right", log->mean_echo_energy_right);
 }
-

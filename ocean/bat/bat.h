@@ -44,6 +44,25 @@
 #define BAT_MAX_OBSTACLES 16
 #define BAT_TICK_RATE (1.0f/60.0f)
 #define BAT_PI 3.14159265358979323846f
+#define BAT_CHIRP_HISTORY 4
+#define BAT_CHIRP_RINGS 5
+
+typedef struct BatColor {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+} BatColor;
+
+typedef struct ChirpEvent {
+    float x;
+    float y;
+    float start_freq;
+    float end_freq;
+    float duration;
+    int birth_tick;
+    int active;
+} ChirpEvent;
 
 typedef struct Log {
     float perf;
@@ -114,10 +133,14 @@ typedef struct Bat {
     float sound_speed;
     float reflector_spacing;
     int max_chirp_age_ticks;
+    int chirp_cooldown_ticks;
     int chirp_age_ticks;
+    int last_chirp_tick;
     float last_chirp_start_freq;
     float last_chirp_end_freq;
     float last_chirp_duration;
+    ChirpEvent chirps[BAT_CHIRP_HISTORY];
+    int chirp_head;
     int chirps_emitted_episode;
     float chirp_duration_sum;
     float chirp_bandwidth_sum;
@@ -155,6 +178,39 @@ static inline int bat_action_index(float v, int n) {
     if (idx < 0) return 0;
     if (idx >= n) return n - 1;
     return idx;
+}
+
+static inline float bat_chirp_duration_seconds(float duration_norm) {
+    return 0.04f + 0.18f * bat_clampf(duration_norm, 0.0f, 1.0f);
+}
+
+static inline float bat_chirp_ring_radius(float age_seconds, float slice,
+        float duration_seconds, float sound_speed) {
+    float ring_age = age_seconds - slice * duration_seconds;
+    if (ring_age < 0.0f) return 0.0f;
+    return sound_speed * ring_age;
+}
+
+static inline float bat_echo_time_seconds(float distance, float sound_speed) {
+    if (sound_speed <= 0.0f) return 0.0f;
+    return 2.0f * distance / sound_speed;
+}
+
+static inline bool bat_echo_is_arriving(float echo_time, float chirp_age,
+        float window) {
+    return fabsf(chirp_age - echo_time) <= window;
+}
+
+static inline BatColor bat_freq_color(float freq_norm, float alpha_norm) {
+    float f = bat_clampf(freq_norm, 0.0f, 1.0f);
+    float mid = 1.0f - fabsf(2.0f * f - 1.0f);
+    BatColor color = {
+        .r = (unsigned char)(255.0f * (1.0f - f) + 45.0f * f),
+        .g = (unsigned char)(45.0f + 180.0f * mid),
+        .b = (unsigned char)(45.0f * (1.0f - f) + 255.0f * f),
+        .a = (unsigned char)(255.0f * bat_clampf(alpha_norm, 0.0f, 1.0f)),
+    };
+    return color;
 }
 
 static inline float bat_norm_bin(int idx, int count) {
@@ -222,6 +278,7 @@ void init(Bat* env) {
     if (env->sound_speed <= 0.0f) env->sound_speed = 100.0f;
     if (env->reflector_spacing <= 0.0f) env->reflector_spacing = 8.0f;
     if (env->max_chirp_age_ticks <= 0) env->max_chirp_age_ticks = 30;
+    if (env->chirp_cooldown_ticks <= 0) env->chirp_cooldown_ticks = 12;
     if (env->step_cost <= 0.0f) env->step_cost = 0.001f;
     if (env->progress_reward_scale <= 0.0f) env->progress_reward_scale = 0.05f;
     if (env->collision_penalty <= 0.0f) env->collision_penalty = 1.0f;
@@ -403,6 +460,9 @@ static inline void bat_reset_episode(Bat* env) {
     env->last_chirp_end_freq = 1.0f;
     env->last_chirp_duration = 0.33333334f;
     env->chirp_age_ticks = 0;
+    env->last_chirp_tick = -env->chirp_cooldown_ticks;
+    memset(env->chirps, 0, sizeof(env->chirps));
+    env->chirp_head = 0;
     env->chirps_emitted_episode = 0;
     env->chirp_duration_sum = 0.0f;
     env->chirp_bandwidth_sum = 0.0f;
@@ -500,22 +560,43 @@ static inline void bat_update_motion(Bat* env, float dt) {
     env->bat_y += env->bat_vy * dt;
 }
 
-static inline void bat_update_chirp(Bat* env) {
+static inline bool bat_try_emit_chirp(Bat* env) {
     int start_idx = bat_action_index(env->actions[2], BAT_CHIRP_FREQ_BINS);
     int end_idx = bat_action_index(env->actions[3], BAT_CHIRP_FREQ_BINS);
     int duration_idx = bat_action_index(env->actions[4], BAT_CHIRP_DURATION_BINS);
+
+    if (env->tick - env->last_chirp_tick < env->chirp_cooldown_ticks) {
+        return false;
+    }
+
+    env->last_chirp_start_freq = bat_norm_bin(start_idx, BAT_CHIRP_FREQ_BINS);
+    env->last_chirp_end_freq = bat_norm_bin(end_idx, BAT_CHIRP_FREQ_BINS);
+    env->last_chirp_duration = bat_norm_bin(duration_idx, BAT_CHIRP_DURATION_BINS);
+    env->chirp_age_ticks = 0;
+    env->last_chirp_tick = env->tick;
+    env->chirps_emitted_episode += 1;
+    env->chirp_duration_sum += env->last_chirp_duration;
+    env->chirp_bandwidth_sum += fabsf(env->last_chirp_end_freq - env->last_chirp_start_freq);
+    ChirpEvent* chirp = &env->chirps[env->chirp_head];
+    chirp->x = env->bat_x;
+    chirp->y = env->bat_y;
+    chirp->start_freq = env->last_chirp_start_freq;
+    chirp->end_freq = env->last_chirp_end_freq;
+    chirp->duration = bat_chirp_duration_seconds(env->last_chirp_duration);
+    chirp->birth_tick = env->tick;
+    chirp->active = 1;
+    env->chirp_head = (env->chirp_head + 1) % BAT_CHIRP_HISTORY;
+    return true;
+}
+
+static inline bool bat_update_chirp(Bat* env) {
     int emit = bat_action_index(env->actions[5], BAT_CHIRP_EMIT_ACTIONS);
     if (emit) {
-        env->last_chirp_start_freq = bat_norm_bin(start_idx, BAT_CHIRP_FREQ_BINS);
-        env->last_chirp_end_freq = bat_norm_bin(end_idx, BAT_CHIRP_FREQ_BINS);
-        env->last_chirp_duration = bat_norm_bin(duration_idx, BAT_CHIRP_DURATION_BINS);
-        env->chirp_age_ticks = 0;
-        env->chirps_emitted_episode += 1;
-        env->chirp_duration_sum += env->last_chirp_duration;
-        env->chirp_bandwidth_sum += fabsf(env->last_chirp_end_freq - env->last_chirp_start_freq);
+        return bat_try_emit_chirp(env);
     } else if (env->chirp_age_ticks < env->max_chirp_age_ticks) {
         env->chirp_age_ticks += 1;
     }
+    return false;
 }
 
 static inline bool bat_caught_bug(Bat* env) {
@@ -526,7 +607,7 @@ void c_step(Bat* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
 
-    bat_update_chirp(env);
+    bool accepted_chirp = bat_update_chirp(env);
     if (bat_caught_bug(env)) {
         env->rewards[0] = 1.0f;
         env->terminals[0] = 1.0f;
@@ -562,7 +643,7 @@ void c_step(Bat* env) {
     float progress = env->prev_bug_dist - bug_dist;
     env->rewards[0] += env->progress_reward_scale * progress;
     env->rewards[0] -= env->step_cost;
-    if (bat_action_index(env->actions[5], BAT_CHIRP_EMIT_ACTIONS)) {
+    if (accepted_chirp) {
         env->rewards[0] -= env->chirp_cost;
     }
     env->prev_bug_dist = bug_dist;
@@ -580,6 +661,118 @@ void c_step(Bat* env) {
 }
 
 #ifndef BAT_HEADLESS
+static inline Color bat_ray_color(BatColor c) {
+    return (Color){c.r, c.g, c.b, c.a};
+}
+
+static inline void bat_draw_chirp_rings(Bat* env, float sx, float sy) {
+    float scale = fminf(sx, sy);
+    for (int i = 0; i < BAT_CHIRP_HISTORY; i++) {
+        ChirpEvent* chirp = &env->chirps[i];
+        if (!chirp->active) continue;
+
+        float age_seconds = (env->tick - chirp->birth_tick) * BAT_TICK_RATE;
+        float max_age = env->max_echo_range / env->sound_speed + chirp->duration;
+        if (age_seconds < 0.0f || age_seconds > max_age) {
+            chirp->active = 0;
+            continue;
+        }
+
+        for (int ring = 0; ring < BAT_CHIRP_RINGS; ring++) {
+            float slice = ring / (float)(BAT_CHIRP_RINGS - 1);
+            float freq = chirp->start_freq + slice * (chirp->end_freq - chirp->start_freq);
+            float radius = bat_chirp_ring_radius(age_seconds, slice, chirp->duration, env->sound_speed);
+            if (radius <= 0.0f || radius > env->max_echo_range) continue;
+
+            float fade = 1.0f - radius / env->max_echo_range;
+            float alpha = 0.18f + 0.42f * bat_clampf(fade, 0.0f, 1.0f);
+            DrawCircleLines(
+                (int)(chirp->x * sx),
+                (int)(chirp->y * sy),
+                radius * scale,
+                bat_ray_color(bat_freq_color(freq, alpha)));
+        }
+    }
+}
+
+static inline Color bat_doppler_ray_color(float doppler, float alpha) {
+    BatColor c;
+    if (doppler > 0.05f) {
+        c = bat_freq_color(1.0f, alpha);
+    } else if (doppler < -0.05f) {
+        c = bat_freq_color(0.0f, alpha);
+    } else {
+        c = (BatColor){210, 210, 220, (unsigned char)(255.0f * bat_clampf(alpha, 0.0f, 1.0f))};
+    }
+    return bat_ray_color(c);
+}
+
+static inline void bat_draw_echo_flash(Bat* env, ChirpEvent* chirp,
+        float rx, float ry, float rvx, float rvy, float strength,
+        float sx, float sy) {
+    float age_seconds = (env->tick - chirp->birth_tick) * BAT_TICK_RATE;
+    float distance = bat_dist(chirp->x, chirp->y, rx, ry);
+    float echo_time = bat_echo_time_seconds(distance, env->sound_speed);
+    if (!bat_echo_is_arriving(echo_time, age_seconds, 0.025f)) return;
+
+    float ux, uy;
+    bat_norm_vec(rx - chirp->x, ry - chirp->y, &ux, &uy);
+    float rel_vx = rvx - env->bat_vx;
+    float rel_vy = rvy - env->bat_vy;
+    float distance_rate = rel_vx * ux + rel_vy * uy;
+    float doppler = bat_clampf(-distance_rate / (env->bat_max_speed + env->bug_speed + 0.0001f), -1.0f, 1.0f);
+    float amp = strength / (1.0f + 0.02f * distance * distance);
+    float alpha = bat_clampf(0.20f + amp * 2.0f, 0.20f, 0.90f);
+    Color color = bat_doppler_ray_color(doppler, alpha);
+
+    DrawLine((int)(chirp->x * sx), (int)(chirp->y * sy),
+        (int)(rx * sx), (int)(ry * sy), color);
+    DrawCircleLines((int)(rx * sx), (int)(ry * sy),
+        fmaxf(3.0f, 8.0f * alpha), color);
+}
+
+static inline void bat_draw_segment_echoes(Bat* env, ChirpEvent* chirp,
+        float x1, float y1, float x2, float y2, float strength,
+        float sx, float sy) {
+    float len = bat_dist(x1, y1, x2, y2);
+    int count = (int)(len / env->reflector_spacing) + 1;
+    if (count < 1) count = 1;
+    for (int i = 0; i <= count; i++) {
+        float t = i / (float)count;
+        float x = x1 + (x2 - x1) * t;
+        float y = y1 + (y2 - y1) * t;
+        bat_draw_echo_flash(env, chirp, x, y, 0.0f, 0.0f, strength, sx, sy);
+    }
+}
+
+static inline void bat_draw_obstacle_echoes(Bat* env, ChirpEvent* chirp,
+        int i, float sx, float sy) {
+    float x = env->obstacle_x[i];
+    float y = env->obstacle_y[i];
+    float w = env->obstacle_w[i];
+    float h = env->obstacle_h[i];
+    bat_draw_segment_echoes(env, chirp, x, y, x + w, y, 0.55f, sx, sy);
+    bat_draw_segment_echoes(env, chirp, x, y + h, x + w, y + h, 0.55f, sx, sy);
+    bat_draw_segment_echoes(env, chirp, x, y, x, y + h, 0.55f, sx, sy);
+    bat_draw_segment_echoes(env, chirp, x + w, y, x + w, y + h, 0.55f, sx, sy);
+}
+
+static inline void bat_draw_echo_reflections(Bat* env, float sx, float sy) {
+    for (int i = 0; i < BAT_CHIRP_HISTORY; i++) {
+        ChirpEvent* chirp = &env->chirps[i];
+        if (!chirp->active) continue;
+        bat_draw_echo_flash(env, chirp, env->bug_x, env->bug_y,
+            env->bug_vx, env->bug_vy, 4.0f, sx, sy);
+        bat_draw_segment_echoes(env, chirp, 0.0f, 0.0f, (float)env->width, 0.0f, 0.18f, sx, sy);
+        bat_draw_segment_echoes(env, chirp, 0.0f, (float)env->height, (float)env->width, (float)env->height, 0.18f, sx, sy);
+        bat_draw_segment_echoes(env, chirp, 0.0f, 0.0f, 0.0f, (float)env->height, 0.18f, sx, sy);
+        bat_draw_segment_echoes(env, chirp, (float)env->width, 0.0f, (float)env->width, (float)env->height, 0.18f, sx, sy);
+        for (int j = 0; j < env->num_obstacles; j++) {
+            bat_draw_obstacle_echoes(env, chirp, j, sx, sy);
+        }
+    }
+}
+
 Client* make_client(Bat* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = env->width * 10;
@@ -594,6 +787,9 @@ void close_client(Client* client) {
 }
 
 void c_render(Bat* env) {
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        exit(0);
+    }
     if (env->client == NULL) {
         env->client = make_client(env);
     }
@@ -601,6 +797,8 @@ void c_render(Bat* env) {
     float sy = env->client->height / (float)env->height;
     BeginDrawing();
     ClearBackground((Color){18, 20, 24, 255});
+    bat_draw_chirp_rings(env, sx, sy);
+    bat_draw_echo_reflections(env, sx, sy);
     DrawRectangleLines(0, 0, env->client->width, env->client->height, GRAY);
     for (int i = 0; i < env->num_obstacles; i++) {
         DrawRectangle(
@@ -617,8 +815,10 @@ void c_render(Bat* env) {
     float hx = env->bat_x + cosf(env->bat_heading) * env->bat_radius * 2.0f;
     float hy = env->bat_y + sinf(env->bat_heading) * env->bat_radius * 2.0f;
     DrawLine((int)(env->bat_x * sx), (int)(env->bat_y * sy), (int)(hx * sx), (int)(hy * sy), WHITE);
-    DrawText(TextFormat("reward %.3f tick %d chirps %d", env->rewards[0], env->tick,
-        env->chirps_emitted_episode), 10, 10, 20, RAYWHITE);
+    int cooldown = env->chirp_cooldown_ticks - (env->tick - env->last_chirp_tick);
+    if (cooldown < 0) cooldown = 0;
+    DrawText(TextFormat("reward %.3f tick %d chirps %d cooldown %d ESC exits", env->rewards[0], env->tick,
+        env->chirps_emitted_episode, cooldown), 10, 10, 20, RAYWHITE);
     EndDrawing();
 }
 #else

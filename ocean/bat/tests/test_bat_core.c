@@ -193,6 +193,62 @@ static int test_progress_reward_sign(void) {
     return 0;
 }
 
+static int test_chirp_ring_physical_ordering(void) {
+    float duration = bat_chirp_duration_seconds(1.0f);
+    float outer = bat_chirp_ring_radius(1.0f, 0.0f, duration, 100.0f);
+    float inner = bat_chirp_ring_radius(1.0f, 1.0f, duration, 100.0f);
+
+    ASSERT_TRUE(outer > inner);
+    ASSERT_FLOAT_NEAR(outer, 100.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(inner, 100.0f * (1.0f - duration), 0.0001f);
+
+    return 0;
+}
+
+static int test_chirp_color_maps_low_to_red_high_to_blue(void) {
+    BatColor low = bat_freq_color(0.0f, 1.0f);
+    BatColor mid = bat_freq_color(0.5f, 1.0f);
+    BatColor high = bat_freq_color(1.0f, 1.0f);
+
+    ASSERT_TRUE(low.r > low.b);
+    ASSERT_TRUE(high.b > high.r);
+    ASSERT_TRUE(mid.g >= low.g);
+    ASSERT_TRUE(mid.g >= high.g);
+
+    return 0;
+}
+
+static int test_chirp_cooldown_accepts_only_after_delay(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    env.chirp_cooldown_ticks = 12;
+
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 1.0f;
+    ASSERT_TRUE(bat_try_emit_chirp(&env));
+    ASSERT_TRUE(!bat_try_emit_chirp(&env));
+
+    env.tick += 12;
+    ASSERT_TRUE(bat_try_emit_chirp(&env));
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_reflection_arrives_at_two_way_travel_time(void) {
+    float sound_speed = 100.0f;
+    float distance = 25.0f;
+    float echo_time = bat_echo_time_seconds(distance, sound_speed);
+
+    ASSERT_FLOAT_NEAR(echo_time, 0.5f, 0.0001f);
+    ASSERT_TRUE(bat_echo_is_arriving(echo_time, echo_time + 0.005f, 0.02f));
+    ASSERT_TRUE(!bat_echo_is_arriving(echo_time, echo_time + 0.050f, 0.02f));
+
+    return 0;
+}
+
 int main(void) {
     if (test_chirp_metadata_and_observation_size()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
@@ -200,8 +256,11 @@ int main(void) {
     if (test_wall_collision_is_terminal_minus_one()) return 1;
     if (test_catch_bug_is_terminal_plus_one()) return 1;
     if (test_progress_reward_sign()) return 1;
+    if (test_chirp_ring_physical_ordering()) return 1;
+    if (test_chirp_color_maps_low_to_red_high_to_blue()) return 1;
+    if (test_chirp_cooldown_accepts_only_after_delay()) return 1;
+    if (test_reflection_arrives_at_two_way_travel_time()) return 1;
 
     printf("bat core tests passed\n");
     return 0;
 }
-
