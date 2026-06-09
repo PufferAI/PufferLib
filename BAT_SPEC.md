@@ -312,6 +312,10 @@ Default reward model:
 - `-1.0` for hitting walls or obstacles, terminal.
 - Tiny chirp cost so constant chirping is not fully free without causing
   chirp collapse.
+- Chirping again before the prior chirp's max echo return window has cleared
+  gets a small physical overlap penalty. This is not a generic timing-efficiency
+  reward; it represents self-induced acoustic ambiguity from overlapping
+  returns.
 - Solve-time chirp efficiency reward:
   - `chirp_efficiency = 0.5 + 0.5 * (1.0 - chirps_used / chirp_budget)`,
   - a catch after spending the full budget gets efficiency `0.5`,
@@ -335,6 +339,8 @@ Progress reward:
   - `reward += progress_reward_scale * (prev_bug_dist - bug_dist)`
   - `reward -= step_cost`
   - `reward -= chirp_cost` when a chirp is emitted
+  - `reward -= chirp_overlap_penalty` when a valid chirp is emitted before
+    the previous chirp's max echo return window has cleared
   - `reward += chirp_efficiency_reward * chirp_efficiency` on catch
   - `reward += bug_echo_reward_scale * echo_path_reduction / max_echo_range`
     when a returning bug echo indicates the bug is closer than the previous bug
@@ -344,6 +350,7 @@ Progress reward:
   - `step_cost = 0.001`
   - `chirp_efficiency_reward = 1.0`
   - `chirp_cost = 0.00005`
+  - `chirp_overlap_penalty = 0.004`
   - `bug_echo_reward_scale = 0.02`
   - `chirp_cost = 0.0005`
 
@@ -400,6 +407,9 @@ Logged metrics:
 - `chirp_efficiency`
   - `0.5` if the full budget was spent, approaching `1.0` when few chirps were
     used
+- `chirp_overlap_fraction`
+  - fraction of emitted chirps that were sent before the previous chirp's max
+    return window cleared
 - `far_chirp_fraction`
 - `near_chirp_fraction`
 - `far_chirp_rate`
@@ -458,6 +468,7 @@ Config knobs:
 - `chirp_duration_bins`
 - `chirp_cost`
 - `chirp_efficiency_reward`
+- `chirp_overlap_penalty`
 - `step_cost`
 - `progress_reward_scale`
 - `collision_penalty`

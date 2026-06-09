@@ -43,6 +43,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->chirp_efficiency_reward = dict_get(kwargs, "chirp_efficiency_reward")->value;
     env->valid_chirp_reward = dict_get(kwargs, "valid_chirp_reward")->value;
     env->early_chirp_penalty = dict_get(kwargs, "early_chirp_penalty")->value;
+    env->chirp_overlap_penalty = dict_get(kwargs, "chirp_overlap_penalty")->value;
     env->bug_echo_reward_scale = dict_get(kwargs, "bug_echo_reward_scale")->value;
     env->step_cost = dict_get(kwargs, "step_cost")->value;
     env->progress_reward_scale = dict_get(kwargs, "progress_reward_scale")->value;
@@ -70,6 +71,7 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "chirps_used_ratio", log->chirps_used_ratio);
     dict_set(out, "chirps_remaining_ratio", log->chirps_remaining_ratio);
     dict_set(out, "chirp_efficiency", log->chirp_efficiency);
+    dict_set(out, "chirp_overlap_fraction", log->chirp_overlap_fraction);
     dict_set(out, "far_chirp_fraction", log->far_chirp_fraction);
     dict_set(out, "near_chirp_fraction", log->near_chirp_fraction);
     dict_set(out, "far_chirp_rate", log->far_chirp_rate);

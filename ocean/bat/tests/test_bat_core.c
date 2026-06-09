@@ -792,6 +792,42 @@ static int test_early_chirp_gets_penalty_and_emits_nothing(void) {
     return 0;
 }
 
+static int test_chirp_before_echo_window_clears_gets_overlap_penalty(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    test_place_safe_stationary_scene(&env);
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.bug_echo_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.valid_chirp_reward = 0.0005f;
+    env.early_chirp_penalty = 0.0020f;
+    env.chirp_overlap_penalty = 0.0040f;
+    env.chirp_cooldown_ticks = 1;
+    env.max_chirp_age_ticks = 8;
+    test_set_emit_chirp_action(&env);
+
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], env.valid_chirp_reward, 0.0001f);
+    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+    ASSERT_TRUE(env.chirps_overlapped == 0);
+
+    test_place_safe_stationary_scene(&env);
+    test_set_emit_chirp_action(&env);
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.rewards[0],
+        env.valid_chirp_reward - env.chirp_overlap_penalty, 0.0001f);
+    ASSERT_TRUE(env.chirps_emitted_episode == 2);
+    ASSERT_TRUE(env.chirps_overlapped == 1);
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_reflection_arrives_at_two_way_travel_time(void) {
     float sound_speed = 100.0f;
     float distance = 25.0f;
@@ -1290,6 +1326,7 @@ int main(void) {
     if (test_chirp_cooldown_accepts_only_after_delay()) return 1;
     if (test_valid_chirp_gets_reward_without_legacy_cost()) return 1;
     if (test_early_chirp_gets_penalty_and_emits_nothing()) return 1;
+    if (test_chirp_before_echo_window_clears_gets_overlap_penalty()) return 1;
     if (test_reflection_arrives_at_two_way_travel_time()) return 1;
     if (test_bins_only_observation_layout()) return 1;
     if (test_no_chirp_produces_silent_frequency_bins()) return 1;

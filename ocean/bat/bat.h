@@ -96,6 +96,7 @@ typedef struct Log {
     float chirps_used_ratio;
     float chirps_remaining_ratio;
     float chirp_efficiency;
+    float chirp_overlap_fraction;
     float far_chirp_fraction;
     float near_chirp_fraction;
     float far_chirp_rate;
@@ -185,6 +186,7 @@ typedef struct Bat {
     int chirp_head;
     EchoBucket echo_queue[BAT_ECHO_QUEUE_TICKS];
     int chirps_emitted_episode;
+    int chirps_overlapped;
     float chirp_duration_sum;
     float chirp_bandwidth_sum;
     float chirps_far;
@@ -202,6 +204,7 @@ typedef struct Bat {
     float chirp_efficiency_reward;
     float valid_chirp_reward;
     float early_chirp_penalty;
+    float chirp_overlap_penalty;
     float step_cost;
     float progress_reward_scale;
     float bug_echo_reward_scale;
@@ -567,6 +570,7 @@ void init(Bat* env) {
     if (env->chirp_efficiency_reward < 0.0f) env->chirp_efficiency_reward = 0.0f;
     if (env->valid_chirp_reward <= 0.0f) env->valid_chirp_reward = 0.0005f;
     if (env->early_chirp_penalty <= 0.0f) env->early_chirp_penalty = 0.001f;
+    if (env->chirp_overlap_penalty < 0.0f) env->chirp_overlap_penalty = 0.0f;
     if (env->bug_echo_reward_scale <= 0.0f) env->bug_echo_reward_scale = 0.0f;
     if (env->rng == 0) env->rng = 1;
 
@@ -641,6 +645,7 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.chirps_remaining_ratio += 1.0f - bat_chirps_used_ratio(env);
     env->log.chirp_efficiency += chirp_efficiency;
     float chirps = fmaxf(1.0f, (float)env->chirps_emitted_episode);
+    env->log.chirp_overlap_fraction += env->chirps_overlapped / chirps;
     env->log.far_chirp_fraction += env->chirps_far / chirps;
     env->log.near_chirp_fraction += env->chirps_near / chirps;
     float far_rate = env->chirps_far / fmaxf(1.0f, env->ticks_far);
@@ -921,6 +926,7 @@ static inline void bat_reset_episode(Bat* env) {
     env->tick_bug_echo_path = -1.0f;
     env->last_bug_echo_path = -1.0f;
     env->chirps_emitted_episode = 0;
+    env->chirps_overlapped = 0;
     env->chirp_duration_sum = 0.0f;
     env->chirp_bandwidth_sum = 0.0f;
     env->chirps_far = 0.0f;
@@ -1045,6 +1051,11 @@ static inline bool bat_try_emit_chirp(Bat* env) {
     return true;
 }
 
+static inline bool bat_next_chirp_overlaps_return_window(Bat* env) {
+    if (env->chirps_emitted_episode <= 0) return false;
+    return env->tick - env->last_chirp_tick < env->max_chirp_age_ticks;
+}
+
 static inline int bat_update_chirp(Bat* env) {
     int emit = bat_action_index(env->actions[5], BAT_CHIRP_EMIT_ACTIONS);
     if (emit) {
@@ -1067,6 +1078,7 @@ void c_step(Bat* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
 
+    bool chirp_overlaps_return_window = bat_next_chirp_overlaps_return_window(env);
     int chirp_status = bat_update_chirp(env);
     if (chirp_status == -2) {
         env->rewards[0] = -1.0f;
@@ -1116,6 +1128,10 @@ void c_step(Bat* env) {
     env->rewards[0] -= env->step_cost;
     if (chirp_status > 0) {
         env->rewards[0] += env->valid_chirp_reward;
+        if (chirp_overlaps_return_window) {
+            env->rewards[0] -= env->chirp_overlap_penalty;
+            env->chirps_overlapped += 1;
+        }
     } else if (chirp_status < 0) {
         env->rewards[0] -= env->early_chirp_penalty;
     }
