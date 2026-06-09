@@ -249,6 +249,97 @@ static int test_reflection_arrives_at_two_way_travel_time(void) {
     return 0;
 }
 
+static int test_quadrant(float x, float y, float width, float height) {
+    int east = x >= width * 0.5f;
+    int south = y >= height * 0.5f;
+    return south * 2 + east;
+}
+
+static int test_spawns_use_different_random_quadrants(void) {
+    Bat env = make_test_env();
+    int seen_bat[4] = {0};
+    int seen_bug[4] = {0};
+    int bat_quadrants = 0;
+    int bug_quadrants = 0;
+
+    for (int i = 0; i < 48; i++) {
+        c_reset(&env);
+        int bq = test_quadrant(env.bat_x, env.bat_y, env.width, env.height);
+        int gq = test_quadrant(env.bug_x, env.bug_y, env.width, env.height);
+        ASSERT_TRUE(bq != gq);
+        if (!seen_bat[bq]) {
+            seen_bat[bq] = 1;
+            bat_quadrants += 1;
+        }
+        if (!seen_bug[gq]) {
+            seen_bug[gq] = 1;
+            bug_quadrants += 1;
+        }
+    }
+
+    ASSERT_TRUE(bat_quadrants >= 3);
+    ASSERT_TRUE(bug_quadrants >= 3);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_spawns_keep_minimum_separation_and_avoid_obstacles(void) {
+    Bat env = make_test_env();
+    float min_sep = 20.0f;
+
+    for (int reset = 0; reset < 32; reset++) {
+        c_reset(&env);
+        ASSERT_TRUE(bat_dist(env.bat_x, env.bat_y, env.bug_x, env.bug_y) >= min_sep);
+        for (int i = 0; i < env.num_obstacles; i++) {
+            ASSERT_TRUE(!bat_circle_rect_collision(env.bat_x, env.bat_y, env.bat_radius + 1.0f,
+                env.obstacle_x[i], env.obstacle_y[i], env.obstacle_w[i], env.obstacle_h[i]));
+            ASSERT_TRUE(!bat_circle_rect_collision(env.bug_x, env.bug_y, env.bug_radius + 1.0f,
+                env.obstacle_x[i], env.obstacle_y[i], env.obstacle_w[i], env.obstacle_h[i]));
+        }
+    }
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_obstacles_move_substantially_across_resets(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    float first_x = env.obstacle_x[0];
+    float first_y = env.obstacle_y[0];
+    float max_delta = 0.0f;
+
+    for (int i = 0; i < 32; i++) {
+        c_reset(&env);
+        float delta = bat_dist(first_x, first_y, env.obstacle_x[0], env.obstacle_y[0]);
+        if (delta > max_delta) max_delta = delta;
+    }
+
+    ASSERT_TRUE(max_delta > 16.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_obstacles_are_small_enough_for_trainability(void) {
+    Bat env = make_test_env();
+
+    for (int reset = 0; reset < 64; reset++) {
+        c_reset(&env);
+        for (int i = 0; i < env.num_obstacles; i++) {
+            ASSERT_TRUE(env.obstacle_w[i] >= 3.0f);
+            ASSERT_TRUE(env.obstacle_h[i] >= 3.0f);
+            ASSERT_TRUE(env.obstacle_w[i] <= 8.0f);
+            ASSERT_TRUE(env.obstacle_h[i] <= 8.0f);
+            ASSERT_TRUE(env.obstacle_w[i] * env.obstacle_h[i] <= 64.0f);
+        }
+    }
+
+    free_allocated(&env);
+    return 0;
+}
+
 int main(void) {
     if (test_chirp_metadata_and_observation_size()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
@@ -260,6 +351,10 @@ int main(void) {
     if (test_chirp_color_maps_low_to_red_high_to_blue()) return 1;
     if (test_chirp_cooldown_accepts_only_after_delay()) return 1;
     if (test_reflection_arrives_at_two_way_travel_time()) return 1;
+    if (test_spawns_use_different_random_quadrants()) return 1;
+    if (test_spawns_keep_minimum_separation_and_avoid_obstacles()) return 1;
+    if (test_obstacles_move_substantially_across_resets()) return 1;
+    if (test_obstacles_are_small_enough_for_trainability()) return 1;
 
     printf("bat core tests passed\n");
     return 0;

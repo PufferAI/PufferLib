@@ -244,18 +244,97 @@ static inline bool bat_circle_rect_collision(float cx, float cy, float r,
     return bat_dist(cx, cy, px, py) <= r;
 }
 
+static inline bool bat_rects_overlap(float ax, float ay, float aw, float ah,
+        float bx, float by, float bw, float bh, float margin) {
+    return ax - margin < bx + bw &&
+        ax + aw + margin > bx &&
+        ay - margin < by + bh &&
+        ay + ah + margin > by;
+}
+
+static inline void bat_sample_in_quadrant(Bat* env, int quadrant, float radius,
+        float* x, float* y) {
+    int east = quadrant & 1;
+    int south = (quadrant >> 1) & 1;
+    float margin = fmaxf(6.0f, radius + 3.0f);
+    float half_w = env->width * 0.5f;
+    float half_h = env->height * 0.5f;
+    float min_x = (east ? half_w : 0.0f) + margin;
+    float max_x = (east ? (float)env->width : half_w) - margin;
+    float min_y = (south ? half_h : 0.0f) + margin;
+    float max_y = (south ? (float)env->height : half_h) - margin;
+    if (max_x < min_x) max_x = min_x;
+    if (max_y < min_y) max_y = min_y;
+    *x = min_x + bat_randf(env) * (max_x - min_x);
+    *y = min_y + bat_randf(env) * (max_y - min_y);
+}
+
+static inline void bat_sample_spawns(Bat* env) {
+    int bat_quadrant = (int)(bat_rand(env) & 3u);
+    int bug_quadrant = bat_quadrant ^ 3;
+    float min_sep = fminf(env->width, env->height) * 0.31f;
+
+    for (int attempt = 0; attempt < 64; attempt++) {
+        bat_sample_in_quadrant(env, bat_quadrant, env->bat_radius, &env->bat_x, &env->bat_y);
+        bat_sample_in_quadrant(env, bug_quadrant, env->bug_radius, &env->bug_x, &env->bug_y);
+        if (bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y) >= min_sep) {
+            return;
+        }
+    }
+
+    float qx[4] = {0.25f, 0.75f, 0.25f, 0.75f};
+    float qy[4] = {0.25f, 0.25f, 0.75f, 0.75f};
+    env->bat_x = env->width * qx[bat_quadrant];
+    env->bat_y = env->height * qy[bat_quadrant];
+    env->bug_x = env->width * qx[bug_quadrant];
+    env->bug_y = env->height * qy[bug_quadrant];
+}
+
+static inline bool bat_obstacle_clear(Bat* env, int idx, float x, float y,
+        float w, float h) {
+    if (bat_circle_rect_collision(env->bat_x, env->bat_y, env->bat_radius + 2.0f, x, y, w, h)) {
+        return false;
+    }
+    if (bat_circle_rect_collision(env->bug_x, env->bug_y, env->bug_radius + 2.0f, x, y, w, h)) {
+        return false;
+    }
+    for (int j = 0; j < idx; j++) {
+        if (bat_rects_overlap(x, y, w, h,
+                env->obstacle_x[j], env->obstacle_y[j], env->obstacle_w[j], env->obstacle_h[j], 3.0f)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static inline void generate_obstacles(Bat* env) {
     for (int i = 0; i < env->num_obstacles; i++) {
-        float w = 7.0f + 2.0f * (float)(i % 3);
-        float h = 7.0f + 2.0f * (float)((i + 1) % 3);
-        float lane = (i + 1.0f) / (env->num_obstacles + 1.0f);
-        float jitter = (bat_randf(env) - 0.5f) * 6.0f;
-        env->obstacle_w[i] = w;
-        env->obstacle_h[i] = h;
-        env->obstacle_x[i] = bat_clampf(env->width * lane - w * 0.5f + jitter,
-            env->bat_radius + 2.0f, env->width - w - env->bat_radius - 2.0f);
-        env->obstacle_y[i] = bat_clampf(env->height * (0.35f + 0.3f * (i % 2)) - h * 0.5f - jitter,
-            env->bat_radius + 2.0f, env->height - h - env->bat_radius - 2.0f);
+        bool placed = false;
+        for (int attempt = 0; attempt < 96; attempt++) {
+            float w = 3.0f + 5.0f * bat_randf(env);
+            float h = 3.0f + 5.0f * bat_randf(env);
+            float margin = 4.0f;
+            float x = margin + bat_randf(env) * (env->width - w - 2.0f * margin);
+            float y = margin + bat_randf(env) * (env->height - h - 2.0f * margin);
+            if (bat_obstacle_clear(env, i, x, y, w, h)) {
+                env->obstacle_x[i] = x;
+                env->obstacle_y[i] = y;
+                env->obstacle_w[i] = w;
+                env->obstacle_h[i] = h;
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) {
+            float w = 6.0f;
+            float h = 6.0f;
+            float x = env->width * (0.30f + 0.20f * (i % 2)) - w * 0.5f;
+            float y = env->height * (0.30f + 0.20f * ((i + 1) % 2)) - h * 0.5f;
+            env->obstacle_x[i] = x;
+            env->obstacle_y[i] = y;
+            env->obstacle_w[i] = w;
+            env->obstacle_h[i] = h;
+        }
     }
 }
 
@@ -445,17 +524,15 @@ void compute_observations(Bat* env) {
 
 static inline void bat_reset_episode(Bat* env) {
     env->tick = 0;
-    env->bat_x = env->width * 0.25f;
-    env->bat_y = env->height * 0.5f;
     env->bat_vx = 0.0f;
     env->bat_vy = 0.0f;
-    env->bat_heading = 0.0f;
     env->bat_turn_velocity = 0.0f;
+    env->bat_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+    bat_sample_spawns(env);
     generate_obstacles(env);
-    env->bug_x = env->width * 0.75f;
-    env->bug_y = env->height * (0.35f + 0.30f * bat_randf(env));
-    env->bug_vx = -env->bug_speed;
-    env->bug_vy = (bat_randf(env) - 0.5f) * env->bug_speed * 0.5f;
+    float bug_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+    env->bug_vx = cosf(bug_heading) * env->bug_speed;
+    env->bug_vy = sinf(bug_heading) * env->bug_speed;
     env->last_chirp_start_freq = 0.0f;
     env->last_chirp_end_freq = 1.0f;
     env->last_chirp_duration = 0.33333334f;
