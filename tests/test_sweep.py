@@ -76,7 +76,7 @@ def test_sweep(args):
 
     target_metric = args['sweep']['metric']
     scores, costs = [], []
-    for i in range(args['max_runs']):
+    for i in range(args['sweep']['max_runs']):
         seed = time.time_ns() & 0xFFFFFFFF
         random.seed(seed)
         np.random.seed(seed)
@@ -164,19 +164,26 @@ def visualize(args):
 
 
 if __name__ == '__main__':
+    import argparse
+    import sys
     from pufferlib import pufferl
 
-    parser = pufferl.make_parser()
-    parser.add_argument('--task', type=str, default='linear', help='Task to optimize')
-    parser.add_argument('--vis-path', type=str, default='',
+    custom_parser = argparse.ArgumentParser(add_help=False)
+    custom_parser.add_argument('--task', type=str, default='linear', help='Task to optimize')
+    custom_parser.add_argument('--vis-path', type=str, default='',
         help='Set to visualize a saved sweep')
-    parser.add_argument('--data-path', type=str, default='sweep',
+    custom_parser.add_argument('--data-path', type=str, default='sweep',
         help='Used for testing hparam algorithms')
+    custom_args, remaining_argv = custom_parser.parse_known_args()
+    sys.argv = [sys.argv[0]] + remaining_argv
 
-    args = pufferl.load_config('default', parser=parser)
+    args = pufferl.load_config('default')
+    args['task'] = custom_args.task
+    args['vis_path'] = custom_args.vis_path
+    args['data_path'] = custom_args.data_path
+
+    test_sweep(args)
 
     if args['vis_path']:
         visualize(args)
         exit(0)
-
-    test_sweep(args)
