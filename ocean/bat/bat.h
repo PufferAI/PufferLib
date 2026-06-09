@@ -12,7 +12,7 @@
 
 #define BAT_OBS_SIZE 39
 #define BAT_NUM_ACTIONS 6
-#define BAT_MOVE_ACTIONS 5
+#define BAT_MOVE_ACTIONS 3
 #define BAT_TURN_ACTIONS 3
 #define BAT_CHIRP_FREQ_BINS 8
 #define BAT_CHIRP_DURATION_BINS 4
@@ -32,8 +32,6 @@
 #define BAT_NOOP 0
 #define BAT_THRUST_FORWARD 1
 #define BAT_BRAKE 2
-#define BAT_STRAFE_LEFT 3
-#define BAT_STRAFE_RIGHT 4
 
 #define BAT_TURN_NONE 0
 #define BAT_TURN_LEFT 1
@@ -830,24 +828,8 @@ static inline void bat_update_motion(Bat* env, float dt) {
     int turn = bat_action_index(env->actions[1], BAT_TURN_ACTIONS);
     float fx = cosf(env->bat_heading);
     float fy = sinf(env->bat_heading);
-    float rx = -sinf(env->bat_heading);
-    float ry = cosf(env->bat_heading);
-    float ax = 0.0f;
-    float ay = 0.0f;
-
-    if (move == BAT_THRUST_FORWARD) {
-        ax += fx * env->bat_accel;
-        ay += fy * env->bat_accel;
-    } else if (move == BAT_BRAKE) {
-        ax -= fx * env->bat_accel;
-        ay -= fy * env->bat_accel;
-    } else if (move == BAT_STRAFE_LEFT) {
-        ax -= rx * env->bat_accel;
-        ay -= ry * env->bat_accel;
-    } else if (move == BAT_STRAFE_RIGHT) {
-        ax += rx * env->bat_accel;
-        ay += ry * env->bat_accel;
-    }
+    float speed = env->bat_vx * fx + env->bat_vy * fy;
+    if (speed < 0.0f) speed = 0.0f;
 
     env->bat_turn_velocity = 0.0f;
     if (turn == BAT_TURN_LEFT) env->bat_turn_velocity = -env->bat_turn_rate;
@@ -856,13 +838,14 @@ static inline void bat_update_motion(Bat* env, float dt) {
     if (env->bat_heading > BAT_PI) env->bat_heading -= 2.0f * BAT_PI;
     if (env->bat_heading < -BAT_PI) env->bat_heading += 2.0f * BAT_PI;
 
-    env->bat_vx += ax * dt;
-    env->bat_vy += ay * dt;
-    float speed = bat_len(env->bat_vx, env->bat_vy);
-    if (speed > env->bat_max_speed) {
-        env->bat_vx = env->bat_vx / speed * env->bat_max_speed;
-        env->bat_vy = env->bat_vy / speed * env->bat_max_speed;
-    }
+    if (move == BAT_THRUST_FORWARD) speed += env->bat_accel * dt;
+    if (move == BAT_BRAKE) speed -= env->bat_accel * dt;
+    speed = bat_clampf(speed, 0.0f, env->bat_max_speed);
+
+    float heading_fx = cosf(env->bat_heading);
+    float heading_fy = sinf(env->bat_heading);
+    env->bat_vx = heading_fx * speed;
+    env->bat_vy = heading_fy * speed;
     env->bat_x += env->bat_vx * dt;
     env->bat_y += env->bat_vy * dt;
 }

@@ -1,7 +1,7 @@
 #include "bat.h"
 #define OBS_SIZE 39
 #define NUM_ATNS 6
-#define ACT_SIZES {5, 3, 8, 8, 4, 2}
+#define ACT_SIZES {3, 3, 8, 8, 4, 2}
 #define OBS_TENSOR_T FloatTensor
 
 #define Env Bat

@@ -34,10 +34,8 @@ void demo() {
         memset(env.actions, 0, sizeof(float) * BAT_NUM_ACTIONS);
         if (IsKeyDown(KEY_W)) env.actions[0] = BAT_THRUST_FORWARD;
         if (IsKeyDown(KEY_S)) env.actions[0] = BAT_BRAKE;
-        if (IsKeyDown(KEY_A)) env.actions[0] = BAT_STRAFE_LEFT;
-        if (IsKeyDown(KEY_D)) env.actions[0] = BAT_STRAFE_RIGHT;
-        if (IsKeyDown(KEY_LEFT)) env.actions[1] = BAT_TURN_LEFT;
-        if (IsKeyDown(KEY_RIGHT)) env.actions[1] = BAT_TURN_RIGHT;
+        if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) env.actions[1] = BAT_TURN_LEFT;
+        if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) env.actions[1] = BAT_TURN_RIGHT;
         env.actions[2] = 0;
         env.actions[3] = 7;
         env.actions[4] = 1;
@@ -54,4 +52,3 @@ int main() {
     demo();
     return 0;
 }
-

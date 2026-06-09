@@ -371,6 +371,78 @@ static int test_progress_reward_sign(void) {
     return 0;
 }
 
+static int test_bat_cannot_accelerate_backward_from_brake(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    env.bat_heading = 0.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.actions[0] = BAT_BRAKE;
+    env.actions[1] = BAT_TURN_NONE;
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 0.0f;
+
+    c_step(&env);
+
+    float forward = env.bat_vx * cosf(env.bat_heading) + env.bat_vy * sinf(env.bat_heading);
+    ASSERT_TRUE(forward >= -0.0001f);
+    ASSERT_TRUE(env.observations[BAT_FORWARD_SPEED_OBS] >= -0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bat_velocity_is_locked_to_heading(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    env.bat_heading = 0.0f;
+    env.bat_vx = -env.bat_max_speed * 0.5f;
+    env.bat_vy = 3.0f;
+    env.actions[0] = BAT_NOOP;
+    env.actions[1] = BAT_TURN_NONE;
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 0.0f;
+
+    c_step(&env);
+
+    float forward = env.bat_vx * cosf(env.bat_heading) + env.bat_vy * sinf(env.bat_heading);
+    float lateral = env.bat_vx * -sinf(env.bat_heading) + env.bat_vy * cosf(env.bat_heading);
+    ASSERT_TRUE(forward >= -0.0001f);
+    ASSERT_FLOAT_NEAR(lateral, 0.0f, 0.0001f);
+    ASSERT_TRUE(env.observations[BAT_FORWARD_SPEED_OBS] >= -0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bat_speed_action_space_has_no_strafe(void) {
+    ASSERT_TRUE(BAT_MOVE_ACTIONS == 3);
+    ASSERT_TRUE(BAT_NOOP == 0);
+    ASSERT_TRUE(BAT_THRUST_FORWARD == 1);
+    ASSERT_TRUE(BAT_BRAKE == 2);
+    return 0;
+}
+
 static int test_chirp_ring_physical_ordering(void) {
     float duration = bat_chirp_duration_seconds(1.0f);
     float outer = bat_chirp_ring_radius(1.0f, 0.0f, duration, 100.0f);
@@ -889,6 +961,9 @@ int main(void) {
     if (test_wall_collision_is_terminal_minus_one()) return 1;
     if (test_catch_bug_is_terminal_plus_one()) return 1;
     if (test_progress_reward_sign()) return 1;
+    if (test_bat_cannot_accelerate_backward_from_brake()) return 1;
+    if (test_bat_velocity_is_locked_to_heading()) return 1;
+    if (test_bat_speed_action_space_has_no_strafe()) return 1;
     if (test_chirp_ring_physical_ordering()) return 1;
     if (test_chirp_color_maps_low_to_red_high_to_blue()) return 1;
     if (test_chirp_cooldown_accepts_only_after_delay()) return 1;

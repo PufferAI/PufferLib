@@ -185,12 +185,10 @@ Use a small multi-discrete action space.
 
 Recommended v1 action heads:
 
-- `move`: 5 values
+- `move`: 3 values
   - `0`: no thrust
   - `1`: thrust forward
-  - `2`: brake/reverse
-  - `3`: strafe left
-  - `4`: strafe right
+  - `2`: brake / reduce forward speed
 - `turn`: 3 values
   - `0`: no turn
   - `1`: turn left
@@ -204,13 +202,19 @@ Recommended v1 action heads:
 
 Initial action sizes:
 
-- `ACT_SIZES {5, 3, 8, 8, 4, 2}`
+- `ACT_SIZES {3, 3, 8, 8, 4, 2}`
 - `NUM_ATNS 6`
 
 Rationale:
 
 - Multi-discrete actions let the agent combine flight and active sensing.
 - Discrete chirp bins keep the policy simple and cheap.
+- Bat movement is scalar forward speed plus heading. The velocity vector is
+  recomputed as `heading * speed` every tick.
+- Brake clamps speed at zero. The bat cannot fly backward.
+- Strafe/lateral velocity is intentionally unavailable. This avoids sideways
+  spiral policies and makes the visual behavior match the game fantasy better
+  than a full inertial top-down spacecraft model.
 - Continuous actions can be a later variant after the first training baseline
   is understood.
 
@@ -283,6 +287,7 @@ Current implementation note:
 Self-motion:
 
 - `forward_speed_norm` and `turn_rate_norm` are proprioceptive signals.
+- `forward_speed_norm` is normalized scalar speed and should stay in `[0, 1]`.
 - These do not reveal map coordinates or target location.
 - They reduce unnecessary burden on recurrent policy memory.
 
@@ -485,6 +490,9 @@ Obstacle reflections:
 
 - Use `perf` as the sweep objective. It is `1.0` only when the bat catches the bug and `0.0` for collision or timeout.
 - Reward terms are training scaffolding and should remain sweepable. `progress_reward_scale` is true-distance shaping and should usually stay below `bug_echo_reward_scale`, which is based on closer received bug reflections.
+- Forward-only movement dynamics should be swept with bounded ranges:
+  `env.bat_max_speed` in `[8.0, 18.0]`, `env.bat_accel` in `[15.0, 60.0]`,
+  and `env.bat_turn_rate` in `[pi/2, 2pi]`.
 - Acoustic scale terms should be swept before increasing model size. Current bounded acoustic sweep knobs are `env.sound_speed` in `[45.0, 120.0]` and `env.ear_separation_scale` in `[0.5, 2.0]`.
 - Train workers should use CUDA with `--train.gpus 1`.
 - Protein/sweep control does not need CUDA. Run sweeps with `--sweep.use-gpu ""` so the optimizer stays off CUDA and avoids CUDA IPC/resource-handle failures.
@@ -493,6 +501,9 @@ Obstacle reflections:
 - The default Bat sweep does not sweep policy model size; it keeps `policy.hidden_size = 128` and `policy.num_layers = 4`. Current cost-sensitive sweep bounds cap training duration at `50_000_000`, rollout horizon at `128`, replay ratio at `1.25`, and `vec.num_buffers` at `8`.
 - Do not add broad model-size sweep ranges. If model size must be swept later, require explicit human approval and keep a hard ceiling of `policy.hidden_size <= 256` and `policy.num_layers <= 4` unless there is a measured SPS reason to widen it.
 - Keep PufferLib core stock for Bat. If sweep parsing conflicts with inherited default sweep keys, solve it through Bat config or command-line args, not core edits.
+- Checkpoints trained before the forward-only action model are stale. After
+  changing action dimensions or movement semantics, run a normal `train bat`
+  before `eval bat --load-model-path latest`.
 - On this PufferLib branch, `sweep bat --sweep.max-runs 2` is not enough to
   exercise suggested hyperparameters: the first two launched experiments use
   the current config defaults, and `sweep_obj.suggest(...)` is only called for
