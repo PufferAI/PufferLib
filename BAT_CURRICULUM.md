@@ -40,20 +40,19 @@ impossible wall. It means the metric gives half of its difficulty credit to
 obstacles, but obstacle difficulty stays zero until level `18`.
 
 The current code logs split difficulty components and computes
-`curriculum_difficulty` from active weighted components:
+`curriculum_difficulty` from active distance and obstacle components:
 
 ```text
 distance_norm = normalize(start_bug_dist)
 obstacle_norm = normalize(num_obstacles)
-budget_norm = normalize(chirp budget reduction)
 motion_norm = 0 until bug maneuvers are added
 
 curriculum_difficulty =
-    (0.40 * distance_norm +
-     0.25 * obstacle_norm +
-     0.20 * budget_norm) / 0.85
+    (0.50 * distance_norm +
+     0.50 * obstacle_norm) / active_weight
 ```
 
+Chirp-budget pressure is intentionally excluded from curriculum difficulty.
 Motion difficulty is logged separately as `0`, but it does not lower the metric
 ceiling before maneuver curricula exist.
 
@@ -85,7 +84,7 @@ curriculum_perf
 curriculum_level
 curriculum_distance_difficulty
 curriculum_obstacle_difficulty
-curriculum_chirp_budget_difficulty
+curriculum_chirp_budget_difficulty (legacy fixed zero)
 curriculum_difficulty
 bug_motion_mode
 bug_motion_speed
@@ -108,7 +107,7 @@ Do not remove `score` from `binding.c`; PufferLib's train worker reads
 
 The key change is splitting `curriculum_difficulty` into components. If
 `curriculum_perf` is low, we should be able to tell whether the policy is stuck
-on distance, obstacles, chirp budget, or motion.
+on distance, obstacles, or later motion.
 
 ## Recommended Difficulty Formula
 
@@ -118,15 +117,13 @@ over active components:
 ```text
 distance_norm = normalize(start_bug_dist)
 obstacle_norm = normalize(num_obstacles)
-budget_norm = normalize(chirp budget pressure)
 motion_norm = normalize(bug maneuver difficulty)
 
 curriculum_difficulty =
-    0.40 * distance_norm +
-    0.25 * obstacle_norm +
-    0.20 * budget_norm
+    0.50 * distance_norm +
+    0.50 * obstacle_norm
 
-curriculum_difficulty /= 0.85
+curriculum_difficulty /= active_weight
 
 curriculum_perf = base_perf * curriculum_difficulty
 ```
@@ -147,7 +144,7 @@ Purpose:
 
 Task:
 
-- One obstacle.
+- No obstacles at level 0.
 - Moderate starting bug distance.
 - Current forward-only bat dynamics.
 - Configurable minimum forward speed; brake cannot stop the bat below this
@@ -193,12 +190,13 @@ Purpose:
 Recommendation:
 
 - Reduce default `curriculum_obstacle_step`.
-- A practical next default is `6`, giving:
+- The current default is `4`, with only level 0 obstacle-free:
 
 ```text
-level 0..5:  1 obstacle
-level 6..11: 2 obstacles
-level 12+:   3 obstacles
+level 0:     0 obstacles
+level 1..4:  1 obstacle
+level 5..8:  2 obstacles
+level 9+:    3 obstacles
 ```
 
 Alternative:
@@ -208,8 +206,8 @@ Alternative:
 
 Gate:
 
-- Do not increase obstacles and reduce chirp budget on the same level unless
-  the previous rung is clearly solved.
+- Do not reduce chirp budget as obstacle count rises; clutter legitimately
+  requires reacquisition chirps.
 
 ### Stage 3: Chirp budget curriculum
 
@@ -221,7 +219,7 @@ Current behavior:
 
 - Observation includes `chirps_used / chirp_budget`.
 - Chirping after the last chirp causes `-1` terminal.
-- Budget reduces as curriculum level increases.
+- Budget is fixed across curriculum levels.
 - Valid chirps before the previous max echo window clears get a physical
   overlap penalty.
 
@@ -378,9 +376,9 @@ The goal is a ladder where each rung is visibly harder, metrics explain why,
 and the bat must improve sensing behavior without reward terms that directly
 script the desired chirp timing.
 
-## Proposed Cleanup After Current Sweep
+## Current Curriculum Cleanup
 
-Do not mix chirp-budget pressure into curriculum difficulty.
+Chirp-budget pressure is no longer mixed into curriculum difficulty.
 
 Rationale:
 
@@ -390,7 +388,7 @@ Rationale:
 - A shrinking chirp budget can make later curriculum levels impossible before
   we know whether the policy has learned robust obstacle disambiguation.
 
-Proposed next curriculum split:
+Current curriculum split:
 
 ```text
 level 0:
@@ -399,12 +397,12 @@ level 0:
 
 later levels:
   increase bug start distance
-  then introduce obstacles
-  then increase obstacle count/clutter
+  introduce the first obstacle immediately at level 1
+  increase obstacle count/clutter every few levels
   then add maneuvering bug motion
 ```
 
-Proposed curriculum difficulty:
+Current curriculum difficulty:
 
 ```text
 curriculum_difficulty =
@@ -417,7 +415,7 @@ instead of letting inactive components cap the score. Once obstacle curriculum
 is active, the two-component `0.5 / 0.5` interpretation is easy to explain:
 half distance, half clutter.
 
-Proposed chirp handling:
+Current chirp handling:
 
 ```text
 max_chirps_per_episode = 15
@@ -438,9 +436,9 @@ fewer chirps everywhere:
   diagnostic/objective term, but interpret it together with obstacle difficulty
   and not as an absolute "fewer chirps is always better" rule.
 
-This cleanup should be done in a clean commit after the current sweep is either
-finished or intentionally stopped, because it changes how `perf` compares to
-existing Bat sweep runs.
+This cleanup changes how `perf` compares to older Bat sweep runs. Compare old
+and new runs through component logs (`base_perf`, `curriculum_perf`,
+`chirp_perf`) when needed.
 
 ## Bat3 Partial Sweep Notes
 
@@ -500,8 +498,8 @@ Implication:
 - Be careful with any metric or reward that simply minimizes chirp count. At
   harder distances or with obstacles, useful policies may need more search and
   reacquisition chirps.
-- This supports the proposed cleanup: keep a fixed chirp budget for now and
-  remove chirp-budget reduction from curriculum difficulty before adding harder
+- This supports the current cleanup: keep a fixed chirp budget for now and keep
+  chirp pressure separate from curriculum difficulty before adding harder
   motion or more clutter.
 
 ## Reward-Shaping Guardrails

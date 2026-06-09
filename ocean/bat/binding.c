@@ -38,8 +38,6 @@ void my_init(Env* env, Dict* kwargs) {
     env->max_chirp_age_ticks = dict_get(kwargs, "max_chirp_age_ticks")->value;
     env->chirp_cooldown_ticks = dict_get(kwargs, "chirp_cooldown_ticks")->value;
     env->max_chirps_per_episode = dict_get(kwargs, "max_chirps_per_episode")->value;
-    env->min_chirps_per_episode = dict_get(kwargs, "min_chirps_per_episode")->value;
-    env->chirp_budget_decay_levels = dict_get(kwargs, "chirp_budget_decay_levels")->value;
     env->chirp_cost = dict_get(kwargs, "chirp_cost")->value;
     env->chirp_efficiency_reward = dict_get(kwargs, "chirp_efficiency_reward")->value;
     env->valid_chirp_reward = dict_get(kwargs, "valid_chirp_reward")->value;

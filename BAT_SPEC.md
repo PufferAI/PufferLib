@@ -401,6 +401,8 @@ W&B exported metrics:
 - `curriculum_distance_difficulty`
 - `curriculum_obstacle_difficulty`
 - `curriculum_chirp_budget_difficulty`
+  - legacy diagnostic; fixed at `0.0` because chirp budget no longer decays
+    with curriculum
 - `score`
   - required by PufferLib train worker; do not remove from `binding.c`
 - `episode_length`
@@ -476,8 +478,6 @@ Config knobs:
 - `sound_speed`
 - `reflector_spacing`
 - `max_chirps_per_episode`
-- `min_chirps_per_episode`
-- `chirp_budget_decay_levels`
 - `chirp_freq_bins`
 - `chirp_duration_bins`
 - `chirp_cost`
@@ -562,11 +562,9 @@ Obstacle reflections:
 - Curriculum design notes are tracked in `BAT_CURRICULUM.md`. Keep that file
   updated when changing level progression, difficulty metrics, or bug motion
   rungs.
-- The next proposed curriculum cleanup is documented in
-  `BAT_CURRICULUM.md`: start level 0 with no obstacles, remove chirp-budget
-  pressure from curriculum difficulty, and use a simpler distance/obstacle
-  curriculum difficulty. Do this only after the current sweep is finished or
-  intentionally stopped, because it changes `perf` comparability.
+- Current curriculum cleanup is documented in `BAT_CURRICULUM.md`: level 0
+  starts with no obstacles, chirp-budget pressure is separate from curriculum
+  difficulty, and curriculum difficulty uses distance/obstacles only.
 - Keep `base_perf` as pure catch rate. Use composite `perf` as the sweep
   objective. It rewards catching harder curriculum levels with fewer chirps
   without changing in-episode reward shaping:
@@ -603,7 +601,9 @@ Obstacle reflections:
 - Train workers should use CUDA with `--train.gpus 1`.
 - Protein/sweep control does not need CUDA. Run sweeps with `--sweep.use-gpu ""` so the optimizer stays off CUDA and avoids CUDA IPC/resource-handle failures.
 - Do not override training duration with ad hoc `--train.total-timesteps`. Put duration ranges in `config/bat.ini`.
-- Keep Bat sweep ranges bounded so a sweep cannot accidentally launch huge slow models. Bat config uses stock `sweep_only` as a safety filter because PufferLib's default sweep config includes unsafe inherited ranges such as `train.total_timesteps` up to `1e11`, `policy.hidden_size` up to `1024`, `policy.num_layers` up to `8`, and `train.horizon` up to `1024`.
+- Keep Bat sweep ranges bounded so a sweep cannot accidentally launch huge slow models.
+- Do not use `sweep_only` in Bat config. Keep the config clean and bound the
+  actual sweep sections/defaults instead.
 - The default Bat sweep does not sweep policy model size; it keeps `policy.hidden_size = 128` and `policy.num_layers = 4`. Current cost-sensitive sweep bounds cap training duration at `50_000_000`, rollout horizon at `128`, replay ratio at `1.25`, and `vec.num_buffers` at `8`.
 - Do not add broad model-size sweep ranges. If model size must be swept later, require explicit human approval and keep a hard ceiling of `policy.hidden_size <= 256` and `policy.num_layers <= 4` unless there is a measured SPS reason to widen it.
 - Keep PufferLib core stock for Bat. If sweep parsing conflicts with inherited default sweep keys, solve it through Bat config or command-line args, not core edits.
@@ -635,8 +635,9 @@ train/eval after each rung, and commit each known-good rung separately.
 2. Finite chirp budget.
    - Keep the low-curriculum budget below the old `20`-chirp setting; `20`
      proved too easy and should not be part of the default sweep.
-   - Reduce the budget as curriculum level increases, with a floor so harder
-     levels require smarter chirp timing without creating an impossible cliff.
+   - Keep the chirp budget fixed across curriculum levels. Harder levels and
+     clutter legitimately need reacquisition chirps, so budget decay made
+     later levels fail for the wrong reason.
    - Track `chirps_used / chirp_budget` as a normalized `0..1` observation.
    - When the budget is exhausted, terminate with a `-1` style failure penalty
      if the policy attempts another chirp. Do not terminate immediately after

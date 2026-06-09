@@ -373,7 +373,10 @@ static inline void bat_sample_spawns(Bat* env) {
 static inline int bat_curriculum_obstacles(Bat* env) {
     if (!env->curriculum_enabled) return env->num_obstacles;
     int step = env->curriculum_obstacle_step <= 0 ? 1 : env->curriculum_obstacle_step;
-    int count = env->curriculum_start_obstacles + env->curriculum_level / step;
+    int count = env->curriculum_start_obstacles;
+    if (env->curriculum_level > 0) {
+        count = env->curriculum_start_obstacles + 1 + (env->curriculum_level - 1) / step;
+    }
     if (count < 0) count = 0;
     if (count > env->curriculum_max_obstacles) count = env->curriculum_max_obstacles;
     if (count > BAT_MAX_OBSTACLES) count = BAT_MAX_OBSTACLES;
@@ -388,13 +391,7 @@ static inline float bat_curriculum_bug_distance(Bat* env) {
 }
 
 static inline int bat_curriculum_chirp_budget(Bat* env) {
-    int decay = env->chirp_budget_decay_levels <= 0 ? 1 : env->chirp_budget_decay_levels;
-    int level = env->curriculum_enabled ? env->curriculum_level : 0;
-    int budget = env->max_chirps_per_episode - level / decay;
-    if (budget < env->min_chirps_per_episode) budget = env->min_chirps_per_episode;
-    if (budget > env->max_chirps_per_episode) budget = env->max_chirps_per_episode;
-    if (budget < 1) budget = 1;
-    return budget;
+    return env->max_chirps_per_episode > 0 ? env->max_chirps_per_episode : 1;
 }
 
 static inline float bat_chirps_used_ratio(Bat* env) {
@@ -437,10 +434,8 @@ static inline float bat_curriculum_obstacle_difficulty(Bat* env) {
 }
 
 static inline float bat_curriculum_chirp_budget_difficulty(Bat* env) {
-    float span = (float)(env->max_chirps_per_episode - env->min_chirps_per_episode);
-    if (span <= 0.000001f) return 0.0f;
-    float budget = env->chirp_budget > 0 ? (float)env->chirp_budget : (float)env->max_chirps_per_episode;
-    return bat_clampf(((float)env->max_chirps_per_episode - budget) / span, 0.0f, 1.0f);
+    (void)env;
+    return 0.0f;
 }
 
 static inline float bat_curriculum_motion_difficulty(Bat* env) {
@@ -451,10 +446,17 @@ static inline float bat_curriculum_motion_difficulty(Bat* env) {
 static inline float bat_curriculum_difficulty(Bat* env) {
     float distance = bat_curriculum_distance_difficulty(env);
     float obstacles = bat_curriculum_obstacle_difficulty(env);
-    float budget = bat_curriculum_chirp_budget_difficulty(env);
-    float active_weight = 0.40f + 0.25f + 0.20f;
+    float active_weight = 0.0f;
+    float weighted = 0.0f;
+    if (env->curriculum_max_bug_distance > env->curriculum_start_bug_distance) {
+        weighted += 0.5f * distance;
+        active_weight += 0.5f;
+    }
+    if (env->curriculum_max_obstacles > env->curriculum_start_obstacles) {
+        weighted += 0.5f * obstacles;
+        active_weight += 0.5f;
+    }
     if (active_weight <= 0.000001f) return 0.0f;
-    float weighted = 0.40f * distance + 0.25f * obstacles + 0.20f * budget;
     return bat_clampf(weighted / active_weight, 0.0f, 1.0f);
 }
 
@@ -631,7 +633,7 @@ void init(Bat* env) {
 
     if (env->num_obstacles < 0) env->num_obstacles = 0;
     if (env->num_obstacles > BAT_MAX_OBSTACLES) env->num_obstacles = BAT_MAX_OBSTACLES;
-    if (env->curriculum_start_obstacles <= 0) env->curriculum_start_obstacles = 1;
+    if (env->curriculum_start_obstacles < 0) env->curriculum_start_obstacles = 0;
     if (env->curriculum_max_obstacles <= 0) env->curriculum_max_obstacles = env->num_obstacles;
     if (env->curriculum_max_obstacles > BAT_MAX_OBSTACLES) env->curriculum_max_obstacles = BAT_MAX_OBSTACLES;
     if (env->curriculum_start_obstacles > env->curriculum_max_obstacles) {
