@@ -35,8 +35,7 @@ static Bat make_test_env(void) {
         .bat_turn_rate = 3.1415926f,
         .bug_speed = 4.0f,
         .max_steps = 512,
-        .range_bins_per_ear = BAT_RANGE_BINS,
-        .doppler_bins_per_ear = BAT_DOPPLER_BINS,
+        .freq_bins_per_ear = BAT_FREQ_BINS,
         .max_echo_range = 80.0f,
         .sound_speed = 100.0f,
         .reflector_spacing = 8.0f,
@@ -83,18 +82,146 @@ static int test_left_right_echo_asymmetry(void) {
     env.bug_y = 10.0f;
     env.bug_vx = 0.0f;
     env.bug_vy = 0.0f;
-    compute_observations(&env);
+    memset(env.echo_events, 0, sizeof(env.echo_events));
+    env.echo_head = 0;
+    env.tick = 0;
+
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 1.0f,
+        .end_freq = 1.0f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = 0,
+        .active = 1,
+    };
+    bat_schedule_echo(&env, &chirp, 0.0f, 1.0f,
+        env.bug_x, env.bug_y, env.bug_vx, env.bug_vy, 8.0f, BAT_ECHO_BUG);
 
     float left_energy = 0.0f;
     float right_energy = 0.0f;
-    for (int i = 0; i < BAT_RANGE_BINS; i++) {
-        left_energy += env.observations[BAT_LEFT_RANGE_OFFSET + i];
-        right_energy += env.observations[BAT_RIGHT_RANGE_OFFSET + i];
+    for (int i = 0; i < BAT_MAX_ECHO_EVENTS; i++) {
+        if (!env.echo_events[i].active) continue;
+        if (env.echo_events[i].ear == 0) {
+            left_energy += env.echo_events[i].intensity;
+        } else {
+            right_energy += env.echo_events[i].intensity;
+        }
     }
 
     ASSERT_TRUE(left_energy > right_energy);
 
     free_allocated(&env);
+    return 0;
+}
+
+static int test_default_sound_speed_allows_one_tick_interaural_delay(void) {
+    Bat env = {
+        .num_agents = 1,
+        .frameskip = 1,
+        .width = 64,
+        .height = 64,
+        .num_obstacles = 0,
+        .bat_radius = 2.0f,
+        .bug_radius = 1.5f,
+        .bat_max_speed = 12.0f,
+        .bat_accel = 30.0f,
+        .bat_turn_rate = 3.1415926f,
+        .bug_speed = 4.0f,
+        .max_steps = 512,
+        .freq_bins_per_ear = BAT_FREQ_BINS,
+        .max_echo_range = 80.0f,
+        .reflector_spacing = 8.0f,
+        .rng = 1,
+    };
+    allocate(&env);
+
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bat_heading = 0.0f;
+    env.tick = 0;
+    memset(env.echo_events, 0, sizeof(env.echo_events));
+    env.echo_head = 0;
+
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 0.5f,
+        .end_freq = 0.5f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = 0,
+        .active = 1,
+    };
+    bat_schedule_echo(&env, &chirp, 0.0f, 0.5f,
+        env.bat_x, env.bat_y - 12.0f, 0.0f, 0.0f, 8.0f, BAT_ECHO_BUG);
+
+    float left_tick = -1.0f;
+    float right_tick = -1.0f;
+    for (int i = 0; i < BAT_MAX_ECHO_EVENTS; i++) {
+        if (!env.echo_events[i].active) continue;
+        if (env.echo_events[i].ear == 0) left_tick = env.echo_events[i].receive_tick;
+        if (env.echo_events[i].ear == 1) right_tick = env.echo_events[i].receive_tick;
+    }
+
+    ASSERT_TRUE(left_tick > 0.0f);
+    ASSERT_TRUE(right_tick > 0.0f);
+    ASSERT_TRUE(fabsf(left_tick - right_tick) >= 1.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static float test_side_echo_receive_tick_gap(float ear_separation_scale) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.ear_separation_scale = ear_separation_scale;
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bat_heading = 0.0f;
+    env.tick = 0;
+    memset(env.echo_events, 0, sizeof(env.echo_events));
+    env.echo_head = 0;
+
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 0.5f,
+        .end_freq = 0.5f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = 0,
+        .active = 1,
+    };
+    bat_schedule_echo(&env, &chirp, 0.0f, 0.5f,
+        env.bat_x, env.bat_y - 12.0f, 0.0f, 0.0f, 8.0f, BAT_ECHO_BUG);
+
+    float left_tick = -1.0f;
+    float right_tick = -1.0f;
+    for (int i = 0; i < BAT_MAX_ECHO_EVENTS; i++) {
+        if (!env.echo_events[i].active) continue;
+        if (env.echo_events[i].ear == 0) left_tick = env.echo_events[i].receive_tick;
+        if (env.echo_events[i].ear == 1) right_tick = env.echo_events[i].receive_tick;
+    }
+
+    ASSERT_TRUE(left_tick > 0.0f);
+    ASSERT_TRUE(right_tick > 0.0f);
+    float gap = fabsf(left_tick - right_tick);
+
+    free_allocated(&env);
+    return gap;
+}
+
+static int test_ear_separation_scale_controls_arrival_gap(void) {
+    float narrow_gap = test_side_echo_receive_tick_gap(0.75f);
+    float wide_gap = test_side_echo_receive_tick_gap(1.50f);
+
+    ASSERT_TRUE(narrow_gap > 0.0f);
+    ASSERT_TRUE(wide_gap > narrow_gap * 1.75f);
+
     return 0;
 }
 
@@ -108,17 +235,42 @@ static int test_doppler_sign_for_approaching_bug(void) {
     env.bat_vy = 0.0f;
     env.bug_x = 42.0f;
     env.bug_y = 20.0f;
-    env.bug_vx = -3.0f;
+    env.bug_vx = -16.0f;
     env.bug_vy = 0.0f;
+    env.bat_heading = 0.0f;
+    memset(env.observations, 0, BAT_OBS_SIZE * sizeof(float));
+    memset(env.echo_events, 0, sizeof(env.echo_events));
+    env.echo_head = 0;
+    env.tick = 0;
+
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 0.5f,
+        .end_freq = 0.5f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = 0,
+        .active = 1,
+    };
+    bat_schedule_echo(&env, &chirp, 0.0f, 0.5f,
+        env.bug_x, env.bug_y, env.bug_vx, env.bug_vy, 8.0f, BAT_ECHO_BUG);
+
+    env.tick = 27;
     compute_observations(&env);
 
-    float doppler = 0.0f;
-    for (int i = 0; i < BAT_DOPPLER_BINS; i++) {
-        doppler += env.observations[BAT_LEFT_DOPPLER_OFFSET + i];
-        doppler += env.observations[BAT_RIGHT_DOPPLER_OFFSET + i];
+    float low_energy = 0.0f;
+    float high_energy = 0.0f;
+    for (int i = 0; i < BAT_FREQ_BINS; i++) {
+        float energy = env.observations[BAT_LEFT_FREQ_OFFSET + i]
+            + env.observations[BAT_RIGHT_FREQ_OFFSET + i];
+        if (i < BAT_FREQ_BINS / 2) {
+            low_energy += energy;
+        } else {
+            high_energy += energy;
+        }
     }
 
-    ASSERT_TRUE(doppler > 0.0f);
+    ASSERT_TRUE(high_energy > low_energy);
 
     free_allocated(&env);
     return 0;
@@ -237,6 +389,77 @@ static int test_chirp_cooldown_accepts_only_after_delay(void) {
     return 0;
 }
 
+static void test_place_safe_stationary_scene(Bat* env) {
+    env->num_obstacles = 0;
+    env->bat_x = 20.0f;
+    env->bat_y = 20.0f;
+    env->bat_vx = 0.0f;
+    env->bat_vy = 0.0f;
+    env->bat_heading = 0.0f;
+    env->bug_x = 48.0f;
+    env->bug_y = 48.0f;
+    env->bug_vx = 0.0f;
+    env->bug_vy = 0.0f;
+    env->prev_bug_dist = bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y);
+}
+
+static void test_set_emit_chirp_action(Bat* env) {
+    env->actions[0] = BAT_NOOP;
+    env->actions[1] = BAT_TURN_NONE;
+    env->actions[2] = 0.0f;
+    env->actions[3] = 7.0f;
+    env->actions[4] = 1.0f;
+    env->actions[5] = 1.0f;
+}
+
+static int test_valid_chirp_gets_reward_without_legacy_cost(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    test_place_safe_stationary_scene(&env);
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.bug_echo_reward_scale = 0.0f;
+    env.chirp_cost = 10.0f;
+    env.valid_chirp_reward = 0.0005f;
+    env.early_chirp_penalty = 0.0020f;
+    test_set_emit_chirp_action(&env);
+
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], env.valid_chirp_reward, 0.0001f);
+    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_early_chirp_gets_penalty_and_emits_nothing(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    test_place_safe_stationary_scene(&env);
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.bug_echo_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.valid_chirp_reward = 0.0005f;
+    env.early_chirp_penalty = 0.0020f;
+    env.chirp_cooldown_ticks = 12;
+    test_set_emit_chirp_action(&env);
+    c_step(&env);
+    test_place_safe_stationary_scene(&env);
+    test_set_emit_chirp_action(&env);
+
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], -env.early_chirp_penalty, 0.0001f);
+    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_reflection_arrives_at_two_way_travel_time(void) {
     float sound_speed = 100.0f;
     float distance = 25.0f;
@@ -246,6 +469,323 @@ static int test_reflection_arrives_at_two_way_travel_time(void) {
     ASSERT_TRUE(bat_echo_is_arriving(echo_time, echo_time + 0.005f, 0.02f));
     ASSERT_TRUE(!bat_echo_is_arriving(echo_time, echo_time + 0.050f, 0.02f));
 
+    return 0;
+}
+
+static float test_sum_obs(Bat* env, int offset, int count) {
+    float sum = 0.0f;
+    for (int i = 0; i < count; i++) {
+        sum += env->observations[offset + i];
+    }
+    return sum;
+}
+
+static int test_bins_only_observation_layout(void) {
+    ASSERT_TRUE(BAT_OBS_SIZE == 39);
+    ASSERT_TRUE(BAT_FREQ_BINS == 16);
+    ASSERT_TRUE(BAT_LEFT_FREQ_OFFSET == 0);
+    ASSERT_TRUE(BAT_RIGHT_FREQ_OFFSET == 16);
+    ASSERT_TRUE(BAT_CHIRP_AGE_OBS == 32);
+    ASSERT_TRUE(BAT_CHIRP_COOLDOWN_OBS == 33);
+    ASSERT_TRUE(BAT_CHIRP_START_OBS == 34);
+    ASSERT_TRUE(BAT_CHIRP_END_OBS == 35);
+    ASSERT_TRUE(BAT_CHIRP_DURATION_OBS == 36);
+    ASSERT_TRUE(BAT_FORWARD_SPEED_OBS == 37);
+    ASSERT_TRUE(BAT_TURN_RATE_OBS == 38);
+    return 0;
+}
+
+static int test_no_chirp_produces_silent_frequency_bins(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    ASSERT_FLOAT_NEAR(test_sum_obs(&env, BAT_LEFT_FREQ_OFFSET, BAT_FREQ_BINS), 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(test_sum_obs(&env, BAT_RIGHT_FREQ_OFFSET, BAT_FREQ_BINS), 0.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_observations_stay_normalized_after_chirp(void) {
+    Bat env = make_test_env();
+    env.max_steps = 1000;
+    c_reset(&env);
+
+    ASSERT_FLOAT_NEAR(env.observations[BAT_CHIRP_AGE_OBS], 1.0f, 0.0001f);
+    for (int i = 0; i < BAT_OBS_SIZE; i++) {
+        ASSERT_TRUE(env.observations[i] >= -1.0f);
+        ASSERT_TRUE(env.observations[i] <= 1.0f);
+    }
+
+    env.actions[0] = BAT_NOOP;
+    env.actions[1] = BAT_TURN_NONE;
+    env.actions[2] = 0.0f;
+    env.actions[3] = 7.0f;
+    env.actions[4] = 1.0f;
+    env.actions[5] = 1.0f;
+    c_step(&env);
+
+    float age_denom = bat_chirp_age_norm_denominator(&env);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_CHIRP_AGE_OBS], 1.0f / age_denom, 0.0001f);
+    for (int i = 0; i < BAT_OBS_SIZE; i++) {
+        ASSERT_TRUE(env.observations[i] >= -1.0f);
+        ASSERT_TRUE(env.observations[i] <= 1.0f);
+    }
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_curriculum_starts_close_with_one_obstacle(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 3;
+    env.curriculum_enabled = 1;
+    env.curriculum_start_obstacles = 1;
+    env.curriculum_max_obstacles = 3;
+    env.curriculum_obstacle_step = 1;
+    env.curriculum_start_bug_distance = 12.0f;
+    env.curriculum_max_bug_distance = 40.0f;
+    env.curriculum_bug_distance_step = 6.0f;
+    c_reset(&env);
+
+    ASSERT_TRUE(env.num_obstacles == 1);
+    ASSERT_TRUE(bat_dist(env.bat_x, env.bat_y, env.bug_x, env.bug_y) <= 14.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_curriculum_advances_after_catch(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 3;
+    env.curriculum_enabled = 1;
+    env.curriculum_start_obstacles = 1;
+    env.curriculum_max_obstacles = 3;
+    env.curriculum_obstacle_step = 1;
+    env.curriculum_start_bug_distance = 12.0f;
+    env.curriculum_max_bug_distance = 40.0f;
+    env.curriculum_bug_distance_step = 6.0f;
+    c_reset(&env);
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 20.5f;
+    env.bug_y = 20.0f;
+
+    c_step(&env);
+
+    ASSERT_TRUE(env.curriculum_level == 1);
+    ASSERT_TRUE(env.num_obstacles == 2);
+    ASSERT_TRUE(bat_dist(env.bat_x, env.bat_y, env.bug_x, env.bug_y) <= 20.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_curriculum_waits_for_required_catches(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 3;
+    env.curriculum_enabled = 1;
+    env.curriculum_start_obstacles = 1;
+    env.curriculum_max_obstacles = 3;
+    env.curriculum_obstacle_step = 1;
+    env.curriculum_start_bug_distance = 12.0f;
+    env.curriculum_max_bug_distance = 40.0f;
+    env.curriculum_bug_distance_step = 6.0f;
+    env.curriculum_successes_per_level = 2;
+    c_reset(&env);
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 20.5f;
+    env.bug_y = 20.0f;
+
+    c_step(&env);
+
+    ASSERT_TRUE(env.curriculum_level == 0);
+    ASSERT_TRUE(env.curriculum_successes_at_level == 1);
+
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bug_x = 20.5f;
+    env.bug_y = 20.0f;
+
+    c_step(&env);
+
+    ASSERT_TRUE(env.curriculum_level == 1);
+    ASSERT_TRUE(env.curriculum_successes_at_level == 0);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_chirp_echo_arrives_after_two_way_travel_not_immediately(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 0;
+    env.sound_speed = 60.0f;
+    env.max_echo_range = 128.0f;
+    c_reset(&env);
+
+    env.bat_x = 32.0f;
+    env.bat_y = 32.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bat_heading = 0.0f;
+    env.bug_x = 38.0f;
+    env.bug_y = 32.0f;
+    env.bug_vx = 0.0f;
+    env.bug_vy = 0.0f;
+    compute_observations(&env);
+
+    env.actions[0] = BAT_NOOP;
+    env.actions[1] = BAT_TURN_NONE;
+    env.actions[2] = 7;
+    env.actions[3] = 7;
+    env.actions[4] = 0;
+    env.actions[5] = 1;
+    c_step(&env);
+
+    for (int i = 0; i < 6; i++) {
+        ASSERT_FLOAT_NEAR(test_sum_obs(&env, BAT_LEFT_FREQ_OFFSET, BAT_FREQ_BINS), 0.0f, 0.0001f);
+        ASSERT_FLOAT_NEAR(test_sum_obs(&env, BAT_RIGHT_FREQ_OFFSET, BAT_FREQ_BINS), 0.0f, 0.0001f);
+        env.actions[5] = 0;
+        c_step(&env);
+    }
+
+    float max_energy = 0.0f;
+    for (int i = 0; i < 32; i++) {
+        float energy = test_sum_obs(&env, BAT_LEFT_FREQ_OFFSET, BAT_FREQ_BINS)
+            + test_sum_obs(&env, BAT_RIGHT_FREQ_OFFSET, BAT_FREQ_BINS);
+        if (energy > max_energy) max_energy = energy;
+        c_step(&env);
+    }
+
+    ASSERT_TRUE(max_energy > 0.01f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_frequency_bin_energy_sums_and_caps(void) {
+    Bat env = make_test_env();
+    memset(env.observations, 0, BAT_OBS_SIZE * sizeof(float));
+
+    bat_add_freq_energy(&env, BAT_LEFT_FREQ_OFFSET, 1.0f, 0.75f);
+    bat_add_freq_energy(&env, BAT_LEFT_FREQ_OFFSET, 1.0f, 0.75f);
+    bat_add_freq_energy(&env, BAT_RIGHT_FREQ_OFFSET, 0.0f, 0.35f);
+
+    ASSERT_FLOAT_NEAR(env.observations[BAT_LEFT_FREQ_OFFSET + BAT_FREQ_BINS - 1], 1.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_RIGHT_FREQ_OFFSET], 0.35f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bug_echo_reward_is_added_when_bug_echo_is_closer(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    env.bug_echo_reward_scale = 0.05f;
+    env.last_bug_echo_path = 20.0f;
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 10.0f;
+    env.bat_y = 10.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bug_vx = 0.0f;
+    env.bug_vy = 0.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    memset(env.echo_events, 0, sizeof(env.echo_events));
+
+    env.echo_events[0] = (EchoEvent){
+        .receive_tick = 1.0f,
+        .freq = 0.5f,
+        .intensity = 0.6f,
+        .ear = 0,
+        .source = BAT_ECHO_BUG,
+        .path = 15.0f,
+        .active = 1,
+    };
+
+    c_step(&env);
+
+    ASSERT_TRUE(env.rewards[0] > 0.002f);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_LEFT_FREQ_OFFSET + 8], 0.6f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bug_echo_reward_ignores_farther_bug_echo(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    env.bug_echo_reward_scale = 0.05f;
+    env.last_bug_echo_path = 20.0f;
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 10.0f;
+    env.bat_y = 10.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bug_vx = 0.0f;
+    env.bug_vy = 0.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    memset(env.echo_events, 0, sizeof(env.echo_events));
+
+    env.echo_events[0] = (EchoEvent){
+        .receive_tick = 1.0f,
+        .freq = 0.5f,
+        .intensity = 0.6f,
+        .ear = 0,
+        .source = BAT_ECHO_BUG,
+        .path = 25.0f,
+        .active = 1,
+    };
+
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.rewards[0], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.last_bug_echo_path, 25.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_static_echo_does_not_get_bug_echo_reward(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+    env.bug_echo_reward_scale = 0.05f;
+    env.step_cost = 0.0f;
+    env.progress_reward_scale = 0.0f;
+    env.chirp_cost = 0.0f;
+    env.bat_x = 10.0f;
+    env.bat_y = 10.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bug_vx = 0.0f;
+    env.bug_vy = 0.0f;
+    env.bug_x = 50.0f;
+    env.bug_y = 50.0f;
+    memset(env.echo_events, 0, sizeof(env.echo_events));
+
+    env.echo_events[0] = (EchoEvent){
+        .receive_tick = 1.0f,
+        .freq = 0.5f,
+        .intensity = 0.6f,
+        .ear = 0,
+        .source = BAT_ECHO_STATIC,
+        .path = 15.0f,
+        .active = 1,
+    };
+
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.rewards[0], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_LEFT_FREQ_OFFSET + 8], 0.6f, 0.0001f);
+
+    free_allocated(&env);
     return 0;
 }
 
@@ -343,6 +883,8 @@ static int test_obstacles_are_small_enough_for_trainability(void) {
 int main(void) {
     if (test_chirp_metadata_and_observation_size()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
+    if (test_default_sound_speed_allows_one_tick_interaural_delay()) return 1;
+    if (test_ear_separation_scale_controls_arrival_gap()) return 1;
     if (test_doppler_sign_for_approaching_bug()) return 1;
     if (test_wall_collision_is_terminal_minus_one()) return 1;
     if (test_catch_bug_is_terminal_plus_one()) return 1;
@@ -350,7 +892,20 @@ int main(void) {
     if (test_chirp_ring_physical_ordering()) return 1;
     if (test_chirp_color_maps_low_to_red_high_to_blue()) return 1;
     if (test_chirp_cooldown_accepts_only_after_delay()) return 1;
+    if (test_valid_chirp_gets_reward_without_legacy_cost()) return 1;
+    if (test_early_chirp_gets_penalty_and_emits_nothing()) return 1;
     if (test_reflection_arrives_at_two_way_travel_time()) return 1;
+    if (test_bins_only_observation_layout()) return 1;
+    if (test_no_chirp_produces_silent_frequency_bins()) return 1;
+    if (test_observations_stay_normalized_after_chirp()) return 1;
+    if (test_curriculum_starts_close_with_one_obstacle()) return 1;
+    if (test_curriculum_advances_after_catch()) return 1;
+    if (test_curriculum_waits_for_required_catches()) return 1;
+    if (test_chirp_echo_arrives_after_two_way_travel_not_immediately()) return 1;
+    if (test_frequency_bin_energy_sums_and_caps()) return 1;
+    if (test_bug_echo_reward_is_added_when_bug_echo_is_closer()) return 1;
+    if (test_bug_echo_reward_ignores_farther_bug_echo()) return 1;
+    if (test_static_echo_does_not_get_bug_echo_reward()) return 1;
     if (test_spawns_use_different_random_quadrants()) return 1;
     if (test_spawns_keep_minimum_separation_and_avoid_obstacles()) return 1;
     if (test_obstacles_move_substantially_across_resets()) return 1;

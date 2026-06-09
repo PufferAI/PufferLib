@@ -10,7 +10,7 @@
 #include "raylib.h"
 #endif
 
-#define BAT_OBS_SIZE 70
+#define BAT_OBS_SIZE 39
 #define BAT_NUM_ACTIONS 6
 #define BAT_MOVE_ACTIONS 5
 #define BAT_TURN_ACTIONS 3
@@ -18,18 +18,16 @@
 #define BAT_CHIRP_DURATION_BINS 4
 #define BAT_CHIRP_EMIT_ACTIONS 2
 
-#define BAT_RANGE_BINS 16
-#define BAT_DOPPLER_BINS 16
-#define BAT_LEFT_RANGE_OFFSET 0
-#define BAT_LEFT_DOPPLER_OFFSET 16
-#define BAT_RIGHT_RANGE_OFFSET 32
-#define BAT_RIGHT_DOPPLER_OFFSET 48
-#define BAT_CHIRP_AGE_OBS 64
-#define BAT_CHIRP_START_OBS 65
-#define BAT_CHIRP_END_OBS 66
-#define BAT_CHIRP_DURATION_OBS 67
-#define BAT_FORWARD_SPEED_OBS 68
-#define BAT_TURN_RATE_OBS 69
+#define BAT_FREQ_BINS 16
+#define BAT_LEFT_FREQ_OFFSET 0
+#define BAT_RIGHT_FREQ_OFFSET 16
+#define BAT_CHIRP_AGE_OBS 32
+#define BAT_CHIRP_COOLDOWN_OBS 33
+#define BAT_CHIRP_START_OBS 34
+#define BAT_CHIRP_END_OBS 35
+#define BAT_CHIRP_DURATION_OBS 36
+#define BAT_FORWARD_SPEED_OBS 37
+#define BAT_TURN_RATE_OBS 38
 
 #define BAT_NOOP 0
 #define BAT_THRUST_FORWARD 1
@@ -46,6 +44,11 @@
 #define BAT_PI 3.14159265358979323846f
 #define BAT_CHIRP_HISTORY 4
 #define BAT_CHIRP_RINGS 5
+#define BAT_MAX_CHIRP_SLICES 16
+#define BAT_MAX_ECHO_EVENTS 4096
+
+#define BAT_ECHO_STATIC 0
+#define BAT_ECHO_BUG 1
 
 typedef struct BatColor {
     unsigned char r;
@@ -63,6 +66,16 @@ typedef struct ChirpEvent {
     int birth_tick;
     int active;
 } ChirpEvent;
+
+typedef struct EchoEvent {
+    float receive_tick;
+    float freq;
+    float intensity;
+    float path;
+    int ear;
+    int source;
+    int active;
+} EchoEvent;
 
 typedef struct Log {
     float perf;
@@ -103,6 +116,16 @@ typedef struct Bat {
     int tick;
     int max_steps;
     int num_obstacles;
+    int curriculum_enabled;
+    int curriculum_level;
+    int curriculum_start_obstacles;
+    int curriculum_max_obstacles;
+    int curriculum_obstacle_step;
+    int curriculum_successes_per_level;
+    int curriculum_successes_at_level;
+    float curriculum_start_bug_distance;
+    float curriculum_max_bug_distance;
+    float curriculum_bug_distance_step;
 
     float bat_x;
     float bat_y;
@@ -111,6 +134,7 @@ typedef struct Bat {
     float bat_heading;
     float bat_turn_velocity;
     float bat_radius;
+    float ear_separation_scale;
     float bat_max_speed;
     float bat_accel;
     float bat_turn_rate;
@@ -127,8 +151,7 @@ typedef struct Bat {
     float* obstacle_w;
     float* obstacle_h;
 
-    int range_bins_per_ear;
-    int doppler_bins_per_ear;
+    int freq_bins_per_ear;
     float max_echo_range;
     float sound_speed;
     float reflector_spacing;
@@ -141,6 +164,8 @@ typedef struct Bat {
     float last_chirp_duration;
     ChirpEvent chirps[BAT_CHIRP_HISTORY];
     int chirp_head;
+    EchoEvent echo_events[BAT_MAX_ECHO_EVENTS];
+    int echo_head;
     int chirps_emitted_episode;
     float chirp_duration_sum;
     float chirp_bandwidth_sum;
@@ -148,8 +173,14 @@ typedef struct Bat {
     float echo_energy_right_sum;
 
     float chirp_cost;
+    float valid_chirp_reward;
+    float early_chirp_penalty;
     float step_cost;
     float progress_reward_scale;
+    float bug_echo_reward_scale;
+    float tick_bug_echo_energy;
+    float tick_bug_echo_path;
+    float last_bug_echo_path;
     float collision_penalty;
     float prev_bug_dist;
     float start_bug_dist;
@@ -199,6 +230,12 @@ static inline float bat_echo_time_seconds(float distance, float sound_speed) {
 static inline bool bat_echo_is_arriving(float echo_time, float chirp_age,
         float window) {
     return fabsf(chirp_age - echo_time) <= window;
+}
+
+static inline float bat_chirp_age_norm_denominator(Bat* env) {
+    float travel_ticks = env->max_echo_range / fmaxf(1.0f, env->sound_speed) / BAT_TICK_RATE;
+    float chirp_ticks = bat_chirp_duration_seconds(1.0f) / BAT_TICK_RATE;
+    return fmaxf(1.0f, 1.25f * (travel_ticks + chirp_ticks));
 }
 
 static inline BatColor bat_freq_color(float freq_norm, float alpha_norm) {
@@ -290,6 +327,63 @@ static inline void bat_sample_spawns(Bat* env) {
     env->bug_y = env->height * qy[bug_quadrant];
 }
 
+static inline int bat_curriculum_obstacles(Bat* env) {
+    if (!env->curriculum_enabled) return env->num_obstacles;
+    int step = env->curriculum_obstacle_step <= 0 ? 1 : env->curriculum_obstacle_step;
+    int count = env->curriculum_start_obstacles + env->curriculum_level / step;
+    if (count < 0) count = 0;
+    if (count > env->curriculum_max_obstacles) count = env->curriculum_max_obstacles;
+    if (count > BAT_MAX_OBSTACLES) count = BAT_MAX_OBSTACLES;
+    return count;
+}
+
+static inline float bat_curriculum_bug_distance(Bat* env) {
+    float distance = env->curriculum_start_bug_distance
+        + env->curriculum_bug_distance_step * env->curriculum_level;
+    return bat_clampf(distance, env->curriculum_start_bug_distance,
+        env->curriculum_max_bug_distance);
+}
+
+static inline void bat_sample_spawns_at_distance(Bat* env, float target_distance) {
+    float margin = fmaxf(6.0f, fmaxf(env->bat_radius, env->bug_radius) + 3.0f);
+    target_distance = fmaxf(0.0f, target_distance);
+
+    for (int attempt = 0; attempt < 96; attempt++) {
+        float angle = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+        float dx = cosf(angle) * target_distance;
+        float dy = sinf(angle) * target_distance;
+        float min_bat_x = fmaxf(margin, margin - dx);
+        float max_bat_x = fminf(env->width - margin, env->width - margin - dx);
+        float min_bat_y = fmaxf(margin, margin - dy);
+        float max_bat_y = fminf(env->height - margin, env->height - margin - dy);
+        if (max_bat_x < min_bat_x || max_bat_y < min_bat_y) continue;
+
+        env->bat_x = min_bat_x + bat_randf(env) * (max_bat_x - min_bat_x);
+        env->bat_y = min_bat_y + bat_randf(env) * (max_bat_y - min_bat_y);
+        env->bug_x = env->bat_x + dx;
+        env->bug_y = env->bat_y + dy;
+        return;
+    }
+
+    bat_sample_spawns(env);
+}
+
+static inline void bat_apply_curriculum(Bat* env) {
+    if (env->curriculum_enabled) {
+        env->num_obstacles = bat_curriculum_obstacles(env);
+    }
+}
+
+static inline void bat_advance_curriculum(Bat* env) {
+    if (env->curriculum_enabled) {
+        env->curriculum_successes_at_level += 1;
+        if (env->curriculum_successes_at_level >= env->curriculum_successes_per_level) {
+            env->curriculum_level += 1;
+            env->curriculum_successes_at_level = 0;
+        }
+    }
+}
+
 static inline bool bat_obstacle_clear(Bat* env, int idx, float x, float y,
         float w, float h) {
     if (bat_circle_rect_collision(env->bat_x, env->bat_y, env->bat_radius + 2.0f, x, y, w, h)) {
@@ -346,30 +440,47 @@ void init(Bat* env) {
     if (env->height <= 0) env->height = 64;
     if (env->max_steps <= 0) env->max_steps = 512;
     if (env->bat_radius <= 0.0f) env->bat_radius = 2.0f;
+    if (env->ear_separation_scale <= 0.0f) env->ear_separation_scale = 0.75f;
+    env->ear_separation_scale = bat_clampf(env->ear_separation_scale, 0.25f, 2.0f);
     if (env->bug_radius <= 0.0f) env->bug_radius = 1.5f;
     if (env->bat_max_speed <= 0.0f) env->bat_max_speed = 12.0f;
     if (env->bat_accel <= 0.0f) env->bat_accel = 30.0f;
     if (env->bat_turn_rate <= 0.0f) env->bat_turn_rate = BAT_PI;
     if (env->bug_speed <= 0.0f) env->bug_speed = 4.0f;
-    if (env->range_bins_per_ear <= 0) env->range_bins_per_ear = BAT_RANGE_BINS;
-    if (env->doppler_bins_per_ear <= 0) env->doppler_bins_per_ear = BAT_DOPPLER_BINS;
+    if (env->freq_bins_per_ear <= 0) env->freq_bins_per_ear = BAT_FREQ_BINS;
     if (env->max_echo_range <= 0.0f) env->max_echo_range = 80.0f;
-    if (env->sound_speed <= 0.0f) env->sound_speed = 100.0f;
+    if (env->sound_speed <= 0.0f) env->sound_speed = 60.0f;
     if (env->reflector_spacing <= 0.0f) env->reflector_spacing = 8.0f;
     if (env->max_chirp_age_ticks <= 0) env->max_chirp_age_ticks = 30;
     if (env->chirp_cooldown_ticks <= 0) env->chirp_cooldown_ticks = 12;
     if (env->step_cost <= 0.0f) env->step_cost = 0.001f;
     if (env->progress_reward_scale <= 0.0f) env->progress_reward_scale = 0.05f;
     if (env->collision_penalty <= 0.0f) env->collision_penalty = 1.0f;
-    if (env->chirp_cost <= 0.0f) env->chirp_cost = 0.0005f;
+    if (env->chirp_cost < 0.0f) env->chirp_cost = 0.0f;
+    if (env->valid_chirp_reward <= 0.0f) env->valid_chirp_reward = 0.0005f;
+    if (env->early_chirp_penalty <= 0.0f) env->early_chirp_penalty = 0.001f;
+    if (env->bug_echo_reward_scale <= 0.0f) env->bug_echo_reward_scale = 0.0f;
     if (env->rng == 0) env->rng = 1;
 
     if (env->num_obstacles < 0) env->num_obstacles = 0;
     if (env->num_obstacles > BAT_MAX_OBSTACLES) env->num_obstacles = BAT_MAX_OBSTACLES;
-    env->obstacle_x = (float*)calloc(env->num_obstacles, sizeof(float));
-    env->obstacle_y = (float*)calloc(env->num_obstacles, sizeof(float));
-    env->obstacle_w = (float*)calloc(env->num_obstacles, sizeof(float));
-    env->obstacle_h = (float*)calloc(env->num_obstacles, sizeof(float));
+    if (env->curriculum_start_obstacles <= 0) env->curriculum_start_obstacles = 1;
+    if (env->curriculum_max_obstacles <= 0) env->curriculum_max_obstacles = env->num_obstacles;
+    if (env->curriculum_max_obstacles > BAT_MAX_OBSTACLES) env->curriculum_max_obstacles = BAT_MAX_OBSTACLES;
+    if (env->curriculum_start_obstacles > env->curriculum_max_obstacles) {
+        env->curriculum_start_obstacles = env->curriculum_max_obstacles;
+    }
+    if (env->curriculum_obstacle_step <= 0) env->curriculum_obstacle_step = 8;
+    if (env->curriculum_successes_per_level <= 0) env->curriculum_successes_per_level = 1;
+    if (env->curriculum_start_bug_distance <= 0.0f) env->curriculum_start_bug_distance = 14.0f;
+    if (env->curriculum_max_bug_distance <= 0.0f) {
+        env->curriculum_max_bug_distance = fminf(env->width, env->height) * 0.70f;
+    }
+    if (env->curriculum_bug_distance_step <= 0.0f) env->curriculum_bug_distance_step = 1.5f;
+    env->obstacle_x = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
+    env->obstacle_y = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
+    env->obstacle_w = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
+    env->obstacle_h = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
 }
 
 void allocate(Bat* env) {
@@ -417,20 +528,56 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.n += 1.0f;
 }
 
-static inline void bat_add_echo(Bat* env, float rx, float ry, float rvx, float rvy,
-        float strength) {
+static inline void bat_add_freq_energy(Bat* env, int offset, float freq_norm,
+        float intensity) {
+    int bins = env->freq_bins_per_ear;
+    if (bins <= 0) bins = BAT_FREQ_BINS;
+    if (bins > BAT_FREQ_BINS) bins = BAT_FREQ_BINS;
+    int bin = (int)(bat_clampf(freq_norm, 0.0f, 1.0f) * bins);
+    if (bin < 0) bin = 0;
+    if (bin >= bins) bin = bins - 1;
+    int idx = offset + bin;
+    env->observations[idx] = bat_clampf(env->observations[idx] + intensity, 0.0f, 1.0f);
+}
+
+static inline void bat_add_echo_event(Bat* env, int ear, float receive_tick,
+        float freq, float intensity, float path, int source) {
+    if (receive_tick <= env->tick) return;
+    if (intensity <= 0.000001f) return;
+    EchoEvent* event = &env->echo_events[env->echo_head];
+    event->receive_tick = receive_tick;
+    event->freq = bat_clampf(freq, 0.0f, 1.0f);
+    event->intensity = intensity;
+    event->path = path;
+    event->ear = ear;
+    event->source = source;
+    event->active = 1;
+    env->echo_head = (env->echo_head + 1) % BAT_MAX_ECHO_EVENTS;
+}
+
+static inline void bat_ear_positions(Bat* env, float* left_x, float* left_y,
+        float* right_x, float* right_y) {
+    float lx = -sinf(env->bat_heading);
+    float ly = cosf(env->bat_heading);
+    float ear_sep = env->bat_radius * env->ear_separation_scale;
+    *left_x = env->bat_x - lx * ear_sep * 0.5f;
+    *left_y = env->bat_y - ly * ear_sep * 0.5f;
+    *right_x = env->bat_x + lx * ear_sep * 0.5f;
+    *right_y = env->bat_y + ly * ear_sep * 0.5f;
+}
+
+static inline void bat_schedule_echo(Bat* env, ChirpEvent* chirp,
+        float slice_ticks, float freq, float rx, float ry, float rvx, float rvy,
+        float strength, int source) {
     float fx = cosf(env->bat_heading);
     float fy = sinf(env->bat_heading);
     float lx = -sinf(env->bat_heading);
     float ly = cosf(env->bat_heading);
-    float ear_sep = env->bat_radius * 0.75f;
-    float left_ear_x = env->bat_x - lx * ear_sep * 0.5f;
-    float left_ear_y = env->bat_y - ly * ear_sep * 0.5f;
-    float right_ear_x = env->bat_x + lx * ear_sep * 0.5f;
-    float right_ear_y = env->bat_y + ly * ear_sep * 0.5f;
+    float left_ear_x, left_ear_y, right_ear_x, right_ear_y;
+    bat_ear_positions(env, &left_ear_x, &left_ear_y, &right_ear_x, &right_ear_y);
 
     float ux, uy;
-    bat_norm_vec(rx - env->bat_x, ry - env->bat_y, &ux, &uy);
+    bat_norm_vec(rx - chirp->x, ry - chirp->y, &ux, &uy);
     float forward = ux * fx + uy * fy;
     if (forward < -0.35f) return;
 
@@ -441,31 +588,32 @@ static inline void bat_add_echo(Bat* env, float rx, float ry, float rvx, float r
     float left_gain = bat_clampf(0.75f + 0.25f * (ux * left_dir_x + uy * left_dir_y), 0.1f, 1.0f);
     float right_gain = bat_clampf(0.75f + 0.25f * (ux * right_dir_x + uy * right_dir_y), 0.1f, 1.0f);
 
-    float left_path = bat_dist(env->bat_x, env->bat_y, rx, ry) + bat_dist(rx, ry, left_ear_x, left_ear_y);
-    float right_path = bat_dist(env->bat_x, env->bat_y, rx, ry) + bat_dist(rx, ry, right_ear_x, right_ear_y);
-    float path = 0.5f * (left_path + right_path);
-    if (path > env->max_echo_range) return;
+    float source_path = bat_dist(chirp->x, chirp->y, rx, ry);
+    float left_path = source_path + bat_dist(rx, ry, left_ear_x, left_ear_y);
+    float right_path = source_path + bat_dist(rx, ry, right_ear_x, right_ear_y);
+    if (left_path > env->max_echo_range && right_path > env->max_echo_range) return;
 
-    int bin = (int)((path / env->max_echo_range) * env->range_bins_per_ear);
-    if (bin < 0) bin = 0;
-    if (bin >= env->range_bins_per_ear) bin = env->range_bins_per_ear - 1;
-
-    float attenuation = strength / (1.0f + 0.02f * path * path);
     float rel_vx = rvx - env->bat_vx;
     float rel_vy = rvy - env->bat_vy;
     float distance_rate = rel_vx * ux + rel_vy * uy;
     float doppler = bat_clampf(-distance_rate / (env->bat_max_speed + env->bug_speed + 0.0001f), -1.0f, 1.0f);
+    float shifted_freq = bat_clampf(freq + 0.20f * doppler, 0.0f, 1.0f);
 
-    float left_energy = attenuation * left_gain;
-    float right_energy = attenuation * right_gain;
-    env->observations[BAT_LEFT_RANGE_OFFSET + bin] += left_energy;
-    env->observations[BAT_RIGHT_RANGE_OFFSET + bin] += right_energy;
-    env->observations[BAT_LEFT_DOPPLER_OFFSET + bin] += left_energy * doppler;
-    env->observations[BAT_RIGHT_DOPPLER_OFFSET + bin] += right_energy * doppler;
+    if (left_path <= env->max_echo_range) {
+        float attenuation = strength / (1.0f + 0.02f * left_path * left_path);
+        float receive_tick = chirp->birth_tick + slice_ticks + left_path / env->sound_speed / BAT_TICK_RATE;
+        bat_add_echo_event(env, 0, receive_tick, shifted_freq, attenuation * left_gain, left_path, source);
+    }
+    if (right_path <= env->max_echo_range) {
+        float attenuation = strength / (1.0f + 0.02f * right_path * right_path);
+        float receive_tick = chirp->birth_tick + slice_ticks + right_path / env->sound_speed / BAT_TICK_RATE;
+        bat_add_echo_event(env, 1, receive_tick, shifted_freq, attenuation * right_gain, right_path, source);
+    }
 }
 
-static inline void bat_add_segment_reflectors(Bat* env, float x1, float y1,
-        float x2, float y2, float strength) {
+static inline void bat_schedule_segment_reflectors(Bat* env, ChirpEvent* chirp,
+        float slice_ticks, float freq, float x1, float y1, float x2, float y2,
+        float strength) {
     float len = bat_dist(x1, y1, x2, y2);
     int count = (int)(len / env->reflector_spacing) + 1;
     if (count < 1) count = 1;
@@ -473,47 +621,97 @@ static inline void bat_add_segment_reflectors(Bat* env, float x1, float y1,
         float t = count == 0 ? 0.0f : i / (float)count;
         float x = x1 + (x2 - x1) * t;
         float y = y1 + (y2 - y1) * t;
-        bat_add_echo(env, x, y, 0.0f, 0.0f, strength);
+        bat_schedule_echo(env, chirp, slice_ticks, freq, x, y, 0.0f, 0.0f, strength, BAT_ECHO_STATIC);
     }
 }
 
-static inline void bat_add_obstacle_echoes(Bat* env, int i) {
+static inline void bat_schedule_obstacle_echoes(Bat* env, ChirpEvent* chirp,
+        float slice_ticks, float freq, int i) {
     float x = env->obstacle_x[i];
     float y = env->obstacle_y[i];
     float w = env->obstacle_w[i];
     float h = env->obstacle_h[i];
-    bat_add_segment_reflectors(env, x, y, x + w, y, 0.55f);
-    bat_add_segment_reflectors(env, x, y + h, x + w, y + h, 0.55f);
-    bat_add_segment_reflectors(env, x, y, x, y + h, 0.55f);
-    bat_add_segment_reflectors(env, x + w, y, x + w, y + h, 0.55f);
+    bat_schedule_segment_reflectors(env, chirp, slice_ticks, freq, x, y, x + w, y, 0.55f);
+    bat_schedule_segment_reflectors(env, chirp, slice_ticks, freq, x, y + h, x + w, y + h, 0.55f);
+    bat_schedule_segment_reflectors(env, chirp, slice_ticks, freq, x, y, x, y + h, 0.55f);
+    bat_schedule_segment_reflectors(env, chirp, slice_ticks, freq, x + w, y, x + w, y + h, 0.55f);
+}
+
+static inline void bat_schedule_chirp_echoes(Bat* env, ChirpEvent* chirp) {
+    int slices = (int)ceilf(chirp->duration / BAT_TICK_RATE);
+    if (slices < 1) slices = 1;
+    if (slices > BAT_MAX_CHIRP_SLICES) slices = BAT_MAX_CHIRP_SLICES;
+
+    for (int i = 0; i < slices; i++) {
+        float t = (i + 0.5f) / (float)slices;
+        float slice_seconds = t * chirp->duration;
+        float slice_ticks = slice_seconds / BAT_TICK_RATE;
+        float freq = chirp->start_freq + t * (chirp->end_freq - chirp->start_freq);
+
+        bat_schedule_echo(env, chirp, slice_ticks, freq,
+            env->bug_x, env->bug_y, env->bug_vx, env->bug_vy, 8.0f, BAT_ECHO_BUG);
+        bat_schedule_segment_reflectors(env, chirp, slice_ticks, freq,
+            0.0f, 0.0f, (float)env->width, 0.0f, 0.12f);
+        bat_schedule_segment_reflectors(env, chirp, slice_ticks, freq,
+            0.0f, (float)env->height, (float)env->width, (float)env->height, 0.12f);
+        bat_schedule_segment_reflectors(env, chirp, slice_ticks, freq,
+            0.0f, 0.0f, 0.0f, (float)env->height, 0.12f);
+        bat_schedule_segment_reflectors(env, chirp, slice_ticks, freq,
+            (float)env->width, 0.0f, (float)env->width, (float)env->height, 0.12f);
+        for (int j = 0; j < env->num_obstacles; j++) {
+            bat_schedule_obstacle_echoes(env, chirp, slice_ticks, freq, j);
+        }
+    }
+}
+
+static inline void bat_process_echo_events(Bat* env) {
+    float start_tick = env->tick - 1.0f;
+    float end_tick = env->tick;
+    for (int i = 0; i < BAT_MAX_ECHO_EVENTS; i++) {
+        EchoEvent* event = &env->echo_events[i];
+        if (!event->active) continue;
+        if (event->receive_tick > start_tick && event->receive_tick <= end_tick) {
+            int offset = event->ear == 0 ? BAT_LEFT_FREQ_OFFSET : BAT_RIGHT_FREQ_OFFSET;
+            bat_add_freq_energy(env, offset, event->freq, event->intensity);
+            if (event->source == BAT_ECHO_BUG) {
+                env->tick_bug_echo_energy += event->intensity;
+                if (env->tick_bug_echo_path < 0.0f || event->path < env->tick_bug_echo_path) {
+                    env->tick_bug_echo_path = event->path;
+                }
+            }
+            event->active = 0;
+        } else if (event->receive_tick <= start_tick) {
+            event->active = 0;
+        }
+    }
 }
 
 void compute_observations(Bat* env) {
     memset(env->observations, 0, BAT_OBS_SIZE * sizeof(float));
+    env->tick_bug_echo_energy = 0.0f;
+    env->tick_bug_echo_path = -1.0f;
 
-    bat_add_echo(env, env->bug_x, env->bug_y, env->bug_vx, env->bug_vy, 8.0f);
-    bat_add_segment_reflectors(env, 0.0f, 0.0f, (float)env->width, 0.0f, 0.12f);
-    bat_add_segment_reflectors(env, 0.0f, (float)env->height, (float)env->width, (float)env->height, 0.12f);
-    bat_add_segment_reflectors(env, 0.0f, 0.0f, 0.0f, (float)env->height, 0.12f);
-    bat_add_segment_reflectors(env, (float)env->width, 0.0f, (float)env->width, (float)env->height, 0.12f);
-    for (int i = 0; i < env->num_obstacles; i++) {
-        bat_add_obstacle_echoes(env, i);
-    }
+    bat_process_echo_events(env);
 
     float left_energy = 0.0f;
     float right_energy = 0.0f;
-    for (int i = 0; i < BAT_RANGE_BINS; i++) {
-        env->observations[BAT_LEFT_RANGE_OFFSET + i] = bat_clampf(env->observations[BAT_LEFT_RANGE_OFFSET + i], 0.0f, 1.0f);
-        env->observations[BAT_RIGHT_RANGE_OFFSET + i] = bat_clampf(env->observations[BAT_RIGHT_RANGE_OFFSET + i], 0.0f, 1.0f);
-        env->observations[BAT_LEFT_DOPPLER_OFFSET + i] = bat_clampf(env->observations[BAT_LEFT_DOPPLER_OFFSET + i], -1.0f, 1.0f);
-        env->observations[BAT_RIGHT_DOPPLER_OFFSET + i] = bat_clampf(env->observations[BAT_RIGHT_DOPPLER_OFFSET + i], -1.0f, 1.0f);
-        left_energy += env->observations[BAT_LEFT_RANGE_OFFSET + i];
-        right_energy += env->observations[BAT_RIGHT_RANGE_OFFSET + i];
+    for (int i = 0; i < BAT_FREQ_BINS; i++) {
+        env->observations[BAT_LEFT_FREQ_OFFSET + i] = bat_clampf(env->observations[BAT_LEFT_FREQ_OFFSET + i], 0.0f, 1.0f);
+        env->observations[BAT_RIGHT_FREQ_OFFSET + i] = bat_clampf(env->observations[BAT_RIGHT_FREQ_OFFSET + i], 0.0f, 1.0f);
+        left_energy += env->observations[BAT_LEFT_FREQ_OFFSET + i];
+        right_energy += env->observations[BAT_RIGHT_FREQ_OFFSET + i];
     }
     env->echo_energy_left_sum += left_energy;
     env->echo_energy_right_sum += right_energy;
 
-    env->observations[BAT_CHIRP_AGE_OBS] = bat_clampf(env->chirp_age_ticks / (float)env->max_chirp_age_ticks, 0.0f, 1.0f);
+    float chirp_age_denom = bat_chirp_age_norm_denominator(env);
+    int chirp_age = env->tick - env->last_chirp_tick;
+    if (env->last_chirp_tick < 0) chirp_age = (int)ceilf(chirp_age_denom);
+    env->chirp_age_ticks = chirp_age;
+    int cooldown = env->chirp_cooldown_ticks - (env->tick - env->last_chirp_tick);
+    if (cooldown < 0) cooldown = 0;
+    env->observations[BAT_CHIRP_AGE_OBS] = bat_clampf(chirp_age / chirp_age_denom, 0.0f, 1.0f);
+    env->observations[BAT_CHIRP_COOLDOWN_OBS] = bat_clampf(cooldown / (float)env->chirp_cooldown_ticks, 0.0f, 1.0f);
     env->observations[BAT_CHIRP_START_OBS] = env->last_chirp_start_freq;
     env->observations[BAT_CHIRP_END_OBS] = env->last_chirp_end_freq;
     env->observations[BAT_CHIRP_DURATION_OBS] = env->last_chirp_duration;
@@ -528,7 +726,12 @@ static inline void bat_reset_episode(Bat* env) {
     env->bat_vy = 0.0f;
     env->bat_turn_velocity = 0.0f;
     env->bat_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
-    bat_sample_spawns(env);
+    bat_apply_curriculum(env);
+    if (env->curriculum_enabled) {
+        bat_sample_spawns_at_distance(env, bat_curriculum_bug_distance(env));
+    } else {
+        bat_sample_spawns(env);
+    }
     generate_obstacles(env);
     float bug_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
     env->bug_vx = cosf(bug_heading) * env->bug_speed;
@@ -540,6 +743,11 @@ static inline void bat_reset_episode(Bat* env) {
     env->last_chirp_tick = -env->chirp_cooldown_ticks;
     memset(env->chirps, 0, sizeof(env->chirps));
     env->chirp_head = 0;
+    memset(env->echo_events, 0, sizeof(env->echo_events));
+    env->echo_head = 0;
+    env->tick_bug_echo_energy = 0.0f;
+    env->tick_bug_echo_path = -1.0f;
+    env->last_bug_echo_path = -1.0f;
     env->chirps_emitted_episode = 0;
     env->chirp_duration_sum = 0.0f;
     env->chirp_bandwidth_sum = 0.0f;
@@ -663,17 +871,18 @@ static inline bool bat_try_emit_chirp(Bat* env) {
     chirp->birth_tick = env->tick;
     chirp->active = 1;
     env->chirp_head = (env->chirp_head + 1) % BAT_CHIRP_HISTORY;
+    bat_schedule_chirp_echoes(env, chirp);
     return true;
 }
 
-static inline bool bat_update_chirp(Bat* env) {
+static inline int bat_update_chirp(Bat* env) {
     int emit = bat_action_index(env->actions[5], BAT_CHIRP_EMIT_ACTIONS);
     if (emit) {
-        return bat_try_emit_chirp(env);
+        return bat_try_emit_chirp(env) ? 1 : -1;
     } else if (env->chirp_age_ticks < env->max_chirp_age_ticks) {
         env->chirp_age_ticks += 1;
     }
-    return false;
+    return 0;
 }
 
 static inline bool bat_caught_bug(Bat* env) {
@@ -684,11 +893,12 @@ void c_step(Bat* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
 
-    bool accepted_chirp = bat_update_chirp(env);
+    int chirp_status = bat_update_chirp(env);
     if (bat_caught_bug(env)) {
         env->rewards[0] = 1.0f;
         env->terminals[0] = 1.0f;
         env->episode_return += env->rewards[0];
+        bat_advance_curriculum(env);
         add_log(env, 1.0f, 0.0f, 0.0f);
         bat_reset_episode(env);
         return;
@@ -709,6 +919,7 @@ void c_step(Bat* env) {
             env->rewards[0] = 1.0f;
             env->terminals[0] = 1.0f;
             env->episode_return += env->rewards[0];
+            bat_advance_curriculum(env);
             add_log(env, 1.0f, 0.0f, 0.0f);
             bat_reset_episode(env);
             return;
@@ -720,8 +931,10 @@ void c_step(Bat* env) {
     float progress = env->prev_bug_dist - bug_dist;
     env->rewards[0] += env->progress_reward_scale * progress;
     env->rewards[0] -= env->step_cost;
-    if (accepted_chirp) {
-        env->rewards[0] -= env->chirp_cost;
+    if (chirp_status > 0) {
+        env->rewards[0] += env->valid_chirp_reward;
+    } else if (chirp_status < 0) {
+        env->rewards[0] -= env->early_chirp_penalty;
     }
     env->prev_bug_dist = bug_dist;
 
@@ -733,8 +946,15 @@ void c_step(Bat* env) {
         return;
     }
 
-    env->episode_return += env->rewards[0];
     compute_observations(env);
+    if (env->tick_bug_echo_path > 0.0f) {
+        if (env->last_bug_echo_path > 0.0f && env->tick_bug_echo_path < env->last_bug_echo_path) {
+            float echo_progress = (env->last_bug_echo_path - env->tick_bug_echo_path) / fmaxf(1.0f, env->max_echo_range);
+            env->rewards[0] += env->bug_echo_reward_scale * echo_progress;
+        }
+        env->last_bug_echo_path = env->tick_bug_echo_path;
+    }
+    env->episode_return += env->rewards[0];
 }
 
 #ifndef BAT_HEADLESS
