@@ -489,6 +489,7 @@ Config knobs:
 - `sound_speed`
 - `reflector_spacing`
 - `max_chirps_per_episode`
+- `chirp_cooldown_ticks`
 - `chirp_freq_bins`
 - `chirp_duration_bins`
 - `chirp_cost`

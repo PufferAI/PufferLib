@@ -38,6 +38,9 @@ Current near-term priorities for the Bat PufferLib environment.
 ## 3. Prepare the next sweep
 
 - Make sure the next sweep includes any new timing penalty coefficient ranges.
+- Sweep `chirp_cooldown_ticks` in a bounded range. Current range is `6..18`.
+- Keep `max_chirps_per_episode` fixed at `15` for this sweep so budget does
+  not confound timing penalty and cooldown effects.
 - Keep sweep ranges bounded so runs cannot become extremely slow from oversized
   policies or excessive env settings.
 - Watch `perf`, `base_perf`, `curriculum_perf`, `chirps_emitted`,
