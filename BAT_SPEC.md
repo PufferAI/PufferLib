@@ -256,6 +256,13 @@ Echo timing:
   corresponding ear frequency bins.
 - Multiple reflectors can contribute to the same bin on the same tick.
 - Echoes beyond `max_echo_range` are ignored.
+- Implementation should use a fixed future-tick accumulator, not a full active
+  event scan every env step. The current design buckets each echo by
+  `ceil(receive_tick)` into `BAT_ECHO_QUEUE_TICKS = 256`, sums by
+  `[ear][freq_bin]`, and processes only the current tick's bucket.
+- The accumulator is an implementation detail only. It must preserve the
+  observation semantics: current-tick per-ear frequency intensities are summed
+  and capped to `[0.0, 1.0]`; no range/delay axis is exposed.
 
 Chirp metadata:
 

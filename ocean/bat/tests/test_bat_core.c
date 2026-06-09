@@ -82,8 +82,7 @@ static int test_left_right_echo_asymmetry(void) {
     env.bug_y = 10.0f;
     env.bug_vx = 0.0f;
     env.bug_vy = 0.0f;
-    memset(env.echo_events, 0, sizeof(env.echo_events));
-    env.echo_head = 0;
+    bat_clear_echo_queue(&env);
     env.tick = 0;
 
     ChirpEvent chirp = {
@@ -100,12 +99,11 @@ static int test_left_right_echo_asymmetry(void) {
 
     float left_energy = 0.0f;
     float right_energy = 0.0f;
-    for (int i = 0; i < BAT_MAX_ECHO_EVENTS; i++) {
-        if (!env.echo_events[i].active) continue;
-        if (env.echo_events[i].ear == 0) {
-            left_energy += env.echo_events[i].intensity;
-        } else {
-            right_energy += env.echo_events[i].intensity;
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        if (env.echo_queue[i].tick < 0) continue;
+        for (int bin = 0; bin < BAT_FREQ_BINS; bin++) {
+            left_energy += env.echo_queue[i].energy[0][bin];
+            right_energy += env.echo_queue[i].energy[1][bin];
         }
     }
 
@@ -142,8 +140,7 @@ static int test_default_sound_speed_allows_one_tick_interaural_delay(void) {
     env.bat_vy = 0.0f;
     env.bat_heading = 0.0f;
     env.tick = 0;
-    memset(env.echo_events, 0, sizeof(env.echo_events));
-    env.echo_head = 0;
+    bat_clear_echo_queue(&env);
 
     ChirpEvent chirp = {
         .x = env.bat_x,
@@ -159,15 +156,40 @@ static int test_default_sound_speed_allows_one_tick_interaural_delay(void) {
 
     float left_tick = -1.0f;
     float right_tick = -1.0f;
-    for (int i = 0; i < BAT_MAX_ECHO_EVENTS; i++) {
-        if (!env.echo_events[i].active) continue;
-        if (env.echo_events[i].ear == 0) left_tick = env.echo_events[i].receive_tick;
-        if (env.echo_events[i].ear == 1) right_tick = env.echo_events[i].receive_tick;
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        if (env.echo_queue[i].tick < 0) continue;
+        float left_energy = 0.0f;
+        float right_energy = 0.0f;
+        for (int bin = 0; bin < BAT_FREQ_BINS; bin++) {
+            left_energy += env.echo_queue[i].energy[0][bin];
+            right_energy += env.echo_queue[i].energy[1][bin];
+        }
+        if (left_energy > 0.0f) left_tick = env.echo_queue[i].tick;
+        if (right_energy > 0.0f) right_tick = env.echo_queue[i].tick;
     }
 
     ASSERT_TRUE(left_tick > 0.0f);
     ASSERT_TRUE(right_tick > 0.0f);
     ASSERT_TRUE(fabsf(left_tick - right_tick) >= 1.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_echo_scheduling_uses_tick_bucket_accumulator(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    bat_clear_echo_queue(&env);
+    env.tick = 7;
+    bat_add_echo_event(&env, 0, 9.25f, 1.0f, 0.4f, 18.0f, BAT_ECHO_BUG);
+    bat_add_echo_event(&env, 0, 9.75f, 1.0f, 0.7f, 12.0f, BAT_ECHO_BUG);
+
+    int slot = 10 % BAT_ECHO_QUEUE_TICKS;
+    ASSERT_TRUE(env.echo_queue[slot].tick == 10);
+    ASSERT_FLOAT_NEAR(env.echo_queue[slot].energy[0][BAT_FREQ_BINS - 1], 1.1f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.echo_queue[slot].bug_energy, 1.1f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.echo_queue[slot].bug_path, 12.0f, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -184,8 +206,7 @@ static float test_side_echo_receive_tick_gap(float ear_separation_scale) {
     env.bat_vy = 0.0f;
     env.bat_heading = 0.0f;
     env.tick = 0;
-    memset(env.echo_events, 0, sizeof(env.echo_events));
-    env.echo_head = 0;
+    bat_clear_echo_queue(&env);
 
     ChirpEvent chirp = {
         .x = env.bat_x,
@@ -201,10 +222,16 @@ static float test_side_echo_receive_tick_gap(float ear_separation_scale) {
 
     float left_tick = -1.0f;
     float right_tick = -1.0f;
-    for (int i = 0; i < BAT_MAX_ECHO_EVENTS; i++) {
-        if (!env.echo_events[i].active) continue;
-        if (env.echo_events[i].ear == 0) left_tick = env.echo_events[i].receive_tick;
-        if (env.echo_events[i].ear == 1) right_tick = env.echo_events[i].receive_tick;
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        if (env.echo_queue[i].tick < 0) continue;
+        float left_energy = 0.0f;
+        float right_energy = 0.0f;
+        for (int bin = 0; bin < BAT_FREQ_BINS; bin++) {
+            left_energy += env.echo_queue[i].energy[0][bin];
+            right_energy += env.echo_queue[i].energy[1][bin];
+        }
+        if (left_energy > 0.0f) left_tick = env.echo_queue[i].tick;
+        if (right_energy > 0.0f) right_tick = env.echo_queue[i].tick;
     }
 
     ASSERT_TRUE(left_tick > 0.0f);
@@ -239,8 +266,7 @@ static int test_doppler_sign_for_approaching_bug(void) {
     env.bug_vy = 0.0f;
     env.bat_heading = 0.0f;
     memset(env.observations, 0, BAT_OBS_SIZE * sizeof(float));
-    memset(env.echo_events, 0, sizeof(env.echo_events));
-    env.echo_head = 0;
+    bat_clear_echo_queue(&env);
     env.tick = 0;
 
     ChirpEvent chirp = {
@@ -695,17 +721,8 @@ static int test_bug_echo_reward_is_added_when_bug_echo_is_closer(void) {
     env.bug_vy = 0.0f;
     env.bug_x = 50.0f;
     env.bug_y = 50.0f;
-    memset(env.echo_events, 0, sizeof(env.echo_events));
-
-    env.echo_events[0] = (EchoEvent){
-        .receive_tick = 1.0f,
-        .freq = 0.5f,
-        .intensity = 0.6f,
-        .ear = 0,
-        .source = BAT_ECHO_BUG,
-        .path = 15.0f,
-        .active = 1,
-    };
+    bat_clear_echo_queue(&env);
+    bat_add_echo_event(&env, 0, 1.0f, 0.5f, 0.6f, 15.0f, BAT_ECHO_BUG);
 
     c_step(&env);
 
@@ -732,17 +749,8 @@ static int test_bug_echo_reward_ignores_farther_bug_echo(void) {
     env.bug_vy = 0.0f;
     env.bug_x = 50.0f;
     env.bug_y = 50.0f;
-    memset(env.echo_events, 0, sizeof(env.echo_events));
-
-    env.echo_events[0] = (EchoEvent){
-        .receive_tick = 1.0f,
-        .freq = 0.5f,
-        .intensity = 0.6f,
-        .ear = 0,
-        .source = BAT_ECHO_BUG,
-        .path = 25.0f,
-        .active = 1,
-    };
+    bat_clear_echo_queue(&env);
+    bat_add_echo_event(&env, 0, 1.0f, 0.5f, 0.6f, 25.0f, BAT_ECHO_BUG);
 
     c_step(&env);
 
@@ -768,17 +776,8 @@ static int test_static_echo_does_not_get_bug_echo_reward(void) {
     env.bug_vy = 0.0f;
     env.bug_x = 50.0f;
     env.bug_y = 50.0f;
-    memset(env.echo_events, 0, sizeof(env.echo_events));
-
-    env.echo_events[0] = (EchoEvent){
-        .receive_tick = 1.0f,
-        .freq = 0.5f,
-        .intensity = 0.6f,
-        .ear = 0,
-        .source = BAT_ECHO_STATIC,
-        .path = 15.0f,
-        .active = 1,
-    };
+    bat_clear_echo_queue(&env);
+    bat_add_echo_event(&env, 0, 1.0f, 0.5f, 0.6f, 15.0f, BAT_ECHO_STATIC);
 
     c_step(&env);
 
@@ -884,6 +883,7 @@ int main(void) {
     if (test_chirp_metadata_and_observation_size()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
     if (test_default_sound_speed_allows_one_tick_interaural_delay()) return 1;
+    if (test_echo_scheduling_uses_tick_bucket_accumulator()) return 1;
     if (test_ear_separation_scale_controls_arrival_gap()) return 1;
     if (test_doppler_sign_for_approaching_bug()) return 1;
     if (test_wall_collision_is_terminal_minus_one()) return 1;

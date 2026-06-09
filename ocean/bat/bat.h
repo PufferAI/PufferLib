@@ -45,7 +45,7 @@
 #define BAT_CHIRP_HISTORY 4
 #define BAT_CHIRP_RINGS 5
 #define BAT_MAX_CHIRP_SLICES 16
-#define BAT_MAX_ECHO_EVENTS 4096
+#define BAT_ECHO_QUEUE_TICKS 256
 
 #define BAT_ECHO_STATIC 0
 #define BAT_ECHO_BUG 1
@@ -67,15 +67,12 @@ typedef struct ChirpEvent {
     int active;
 } ChirpEvent;
 
-typedef struct EchoEvent {
-    float receive_tick;
-    float freq;
-    float intensity;
-    float path;
-    int ear;
-    int source;
-    int active;
-} EchoEvent;
+typedef struct EchoBucket {
+    float energy[2][BAT_FREQ_BINS];
+    float bug_energy;
+    float bug_path;
+    int tick;
+} EchoBucket;
 
 typedef struct Log {
     float perf;
@@ -164,8 +161,7 @@ typedef struct Bat {
     float last_chirp_duration;
     ChirpEvent chirps[BAT_CHIRP_HISTORY];
     int chirp_head;
-    EchoEvent echo_events[BAT_MAX_ECHO_EVENTS];
-    int echo_head;
+    EchoBucket echo_queue[BAT_ECHO_QUEUE_TICKS];
     int chirps_emitted_episode;
     float chirp_duration_sum;
     float chirp_bandwidth_sum;
@@ -528,31 +524,58 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.n += 1.0f;
 }
 
-static inline void bat_add_freq_energy(Bat* env, int offset, float freq_norm,
-        float intensity) {
+static inline int bat_freq_bin_index(Bat* env, float freq_norm) {
     int bins = env->freq_bins_per_ear;
     if (bins <= 0) bins = BAT_FREQ_BINS;
     if (bins > BAT_FREQ_BINS) bins = BAT_FREQ_BINS;
     int bin = (int)(bat_clampf(freq_norm, 0.0f, 1.0f) * bins);
     if (bin < 0) bin = 0;
     if (bin >= bins) bin = bins - 1;
+    return bin;
+}
+
+static inline void bat_add_freq_energy(Bat* env, int offset, float freq_norm,
+        float intensity) {
+    int bin = bat_freq_bin_index(env, freq_norm);
     int idx = offset + bin;
     env->observations[idx] = bat_clampf(env->observations[idx] + intensity, 0.0f, 1.0f);
+}
+
+static inline void bat_clear_echo_bucket(EchoBucket* bucket) {
+    memset(bucket, 0, sizeof(*bucket));
+    bucket->bug_path = -1.0f;
+    bucket->tick = -1;
+}
+
+static inline void bat_clear_echo_queue(Bat* env) {
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        bat_clear_echo_bucket(&env->echo_queue[i]);
+    }
 }
 
 static inline void bat_add_echo_event(Bat* env, int ear, float receive_tick,
         float freq, float intensity, float path, int source) {
     if (receive_tick <= env->tick) return;
     if (intensity <= 0.000001f) return;
-    EchoEvent* event = &env->echo_events[env->echo_head];
-    event->receive_tick = receive_tick;
-    event->freq = bat_clampf(freq, 0.0f, 1.0f);
-    event->intensity = intensity;
-    event->path = path;
-    event->ear = ear;
-    event->source = source;
-    event->active = 1;
-    env->echo_head = (env->echo_head + 1) % BAT_MAX_ECHO_EVENTS;
+    int arrival_tick = (int)ceilf(receive_tick);
+    int delay = arrival_tick - env->tick;
+    if (delay <= 0 || delay >= BAT_ECHO_QUEUE_TICKS) return;
+    int slot = arrival_tick % BAT_ECHO_QUEUE_TICKS;
+    EchoBucket* bucket = &env->echo_queue[slot];
+    if (bucket->tick != arrival_tick) {
+        bat_clear_echo_bucket(bucket);
+        bucket->tick = arrival_tick;
+    }
+
+    int ear_idx = ear == 0 ? 0 : 1;
+    int bin = bat_freq_bin_index(env, freq);
+    bucket->energy[ear_idx][bin] += intensity;
+    if (source == BAT_ECHO_BUG) {
+        bucket->bug_energy += intensity;
+        if (bucket->bug_path < 0.0f || path < bucket->bug_path) {
+            bucket->bug_path = path;
+        }
+    }
 }
 
 static inline void bat_ear_positions(Bat* env, float* left_x, float* left_y,
@@ -665,25 +688,25 @@ static inline void bat_schedule_chirp_echoes(Bat* env, ChirpEvent* chirp) {
 }
 
 static inline void bat_process_echo_events(Bat* env) {
-    float start_tick = env->tick - 1.0f;
-    float end_tick = env->tick;
-    for (int i = 0; i < BAT_MAX_ECHO_EVENTS; i++) {
-        EchoEvent* event = &env->echo_events[i];
-        if (!event->active) continue;
-        if (event->receive_tick > start_tick && event->receive_tick <= end_tick) {
-            int offset = event->ear == 0 ? BAT_LEFT_FREQ_OFFSET : BAT_RIGHT_FREQ_OFFSET;
-            bat_add_freq_energy(env, offset, event->freq, event->intensity);
-            if (event->source == BAT_ECHO_BUG) {
-                env->tick_bug_echo_energy += event->intensity;
-                if (env->tick_bug_echo_path < 0.0f || event->path < env->tick_bug_echo_path) {
-                    env->tick_bug_echo_path = event->path;
-                }
-            }
-            event->active = 0;
-        } else if (event->receive_tick <= start_tick) {
-            event->active = 0;
+    int slot = env->tick % BAT_ECHO_QUEUE_TICKS;
+    EchoBucket* bucket = &env->echo_queue[slot];
+    if (bucket->tick != env->tick) return;
+
+    for (int i = 0; i < BAT_FREQ_BINS; i++) {
+        int left_idx = BAT_LEFT_FREQ_OFFSET + i;
+        int right_idx = BAT_RIGHT_FREQ_OFFSET + i;
+        env->observations[left_idx] = bat_clampf(
+            env->observations[left_idx] + bucket->energy[0][i], 0.0f, 1.0f);
+        env->observations[right_idx] = bat_clampf(
+            env->observations[right_idx] + bucket->energy[1][i], 0.0f, 1.0f);
+    }
+    if (bucket->bug_energy > 0.0f) {
+        env->tick_bug_echo_energy += bucket->bug_energy;
+        if (env->tick_bug_echo_path < 0.0f || bucket->bug_path < env->tick_bug_echo_path) {
+            env->tick_bug_echo_path = bucket->bug_path;
         }
     }
+    bat_clear_echo_bucket(bucket);
 }
 
 void compute_observations(Bat* env) {
@@ -743,8 +766,7 @@ static inline void bat_reset_episode(Bat* env) {
     env->last_chirp_tick = -env->chirp_cooldown_ticks;
     memset(env->chirps, 0, sizeof(env->chirps));
     env->chirp_head = 0;
-    memset(env->echo_events, 0, sizeof(env->echo_events));
-    env->echo_head = 0;
+    bat_clear_echo_queue(env);
     env->tick_bug_echo_energy = 0.0f;
     env->tick_bug_echo_path = -1.0f;
     env->last_bug_echo_path = -1.0f;
