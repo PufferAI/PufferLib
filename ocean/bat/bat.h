@@ -241,6 +241,7 @@ typedef struct Bat {
     float sound_speed;
     float reflector_spacing;
     int corner_reflectors;
+    float reflector_strength;
     int max_chirp_age_ticks;
     int chirp_cooldown_ticks;
     int max_chirps_per_episode;
@@ -609,8 +610,19 @@ static inline float bat_curriculum_bug_speed(Bat* env) {
 static inline float bat_curriculum_bug_maneuver_strength(Bat* env) {
     if (!env->curriculum_enabled) return 0.0f;
     if (env->curriculum_level < env->bug_maneuver_start_level) return 0.0f;
-    float ramp = (env->curriculum_level - env->bug_maneuver_start_level + 1) / 4.0f;
+    int extra_levels = env->curriculum_level - env->bug_maneuver_start_level;
+    float ramp = extra_levels <= 0 ? 0.25f : 0.75f + 0.25f * (extra_levels - 1);
     return env->bug_maneuver_strength * bat_clampf(ramp, 0.0f, 1.0f);
+}
+
+static inline float bat_curriculum_bug_maneuver_frequency(Bat* env) {
+    if (!env->curriculum_enabled) return env->bug_maneuver_frequency;
+    if (env->curriculum_level < env->bug_maneuver_start_level) {
+        return env->bug_maneuver_frequency;
+    }
+    int extra_levels = env->curriculum_level - env->bug_maneuver_start_level;
+    float multiplier = 1.0f + 0.50f * extra_levels;
+    return env->bug_maneuver_frequency * bat_clampf(multiplier, 1.0f, 2.5f);
 }
 
 static inline int bat_curriculum_chirp_budget(Bat* env) {
@@ -769,7 +781,7 @@ static inline void bat_reset_bug_motion(Bat* env) {
     float strength = bat_curriculum_bug_maneuver_strength(env);
     env->bug_maneuver_mode = strength > 0.000001f ? 1 + (int)(bat_rand(env) % 3u) : 0;
     env->bug_maneuver_phase = bat_randf(env) * 2.0f * BAT_PI;
-    env->bug_maneuver_rate = 2.0f * BAT_PI * env->bug_maneuver_frequency *
+    env->bug_maneuver_rate = 2.0f * BAT_PI * bat_curriculum_bug_maneuver_frequency(env) *
         (0.75f + 0.50f * bat_randf(env));
     env->bug_maneuver_sign = (bat_rand(env) & 1u) ? -1.0f : 1.0f;
 
@@ -872,6 +884,7 @@ void init(Bat* env) {
     if (env->sound_speed <= 0.0f) env->sound_speed = 60.0f;
     if (env->reflector_spacing <= 0.0f) env->reflector_spacing = 8.0f;
     env->corner_reflectors = env->corner_reflectors ? 1 : 0;
+    if (env->reflector_strength <= 0.0f) env->reflector_strength = 2.0f;
     env->record_video = env->record_video ? 1 : 0;
     env->record_video_fps = bat_record_video_fps(env);
     env->record_video_seconds = bat_record_video_seconds(env);
@@ -1179,7 +1192,7 @@ static inline void bat_schedule_corner_reflector_echoes(Bat* env, ChirpEvent* ch
     if (!env->corner_reflectors) return;
     float w = (float)env->width;
     float h = (float)env->height;
-    const float strength = 2.0f;
+    float strength = env->reflector_strength;
     bat_schedule_echo(env, chirp, slice_ticks, freq, 0.0f, 0.0f,
         0.0f, 0.0f, strength, BAT_ECHO_STATIC);
     bat_schedule_echo(env, chirp, slice_ticks, freq, w, 0.0f,
@@ -1187,6 +1200,14 @@ static inline void bat_schedule_corner_reflector_echoes(Bat* env, ChirpEvent* ch
     bat_schedule_echo(env, chirp, slice_ticks, freq, 0.0f, h,
         0.0f, 0.0f, strength, BAT_ECHO_STATIC);
     bat_schedule_echo(env, chirp, slice_ticks, freq, w, h,
+        0.0f, 0.0f, strength, BAT_ECHO_STATIC);
+    bat_schedule_echo(env, chirp, slice_ticks, freq, 0.5f * w, 0.0f,
+        0.0f, 0.0f, strength, BAT_ECHO_STATIC);
+    bat_schedule_echo(env, chirp, slice_ticks, freq, 0.5f * w, h,
+        0.0f, 0.0f, strength, BAT_ECHO_STATIC);
+    bat_schedule_echo(env, chirp, slice_ticks, freq, 0.0f, 0.5f * h,
+        0.0f, 0.0f, strength, BAT_ECHO_STATIC);
+    bat_schedule_echo(env, chirp, slice_ticks, freq, w, 0.5f * h,
         0.0f, 0.0f, strength, BAT_ECHO_STATIC);
 }
 
@@ -1782,11 +1803,15 @@ static inline void bat_draw_corner_reflector_echoes(Bat* env, ChirpEvent* chirp,
     if (!env->corner_reflectors) return;
     float w = (float)env->width;
     float h = (float)env->height;
-    const float strength = 2.0f;
+    float strength = env->reflector_strength;
     bat_draw_echo_flash(env, chirp, 0.0f, 0.0f, 0.0f, 0.0f, strength, sx, sy);
     bat_draw_echo_flash(env, chirp, w, 0.0f, 0.0f, 0.0f, strength, sx, sy);
     bat_draw_echo_flash(env, chirp, 0.0f, h, 0.0f, 0.0f, strength, sx, sy);
     bat_draw_echo_flash(env, chirp, w, h, 0.0f, 0.0f, strength, sx, sy);
+    bat_draw_echo_flash(env, chirp, 0.5f * w, 0.0f, 0.0f, 0.0f, strength, sx, sy);
+    bat_draw_echo_flash(env, chirp, 0.5f * w, h, 0.0f, 0.0f, strength, sx, sy);
+    bat_draw_echo_flash(env, chirp, 0.0f, 0.5f * h, 0.0f, 0.0f, strength, sx, sy);
+    bat_draw_echo_flash(env, chirp, w, 0.5f * h, 0.0f, 0.0f, strength, sx, sy);
 }
 
 static inline void bat_draw_corner_reflector_markers(Bat* env) {
@@ -1796,6 +1821,8 @@ static inline void bat_draw_corner_reflector_markers(Bat* env) {
     const Color outline = (Color){202, 202, 208, 255};
     int max_x = env->client->width - size;
     int max_y = env->client->height - size;
+    int mid_x = env->client->width / 2 - size / 2;
+    int mid_y = env->client->height / 2 - size / 2;
     DrawRectangle(0, 0, size, size, fill);
     DrawRectangleLines(0, 0, size, size, outline);
     DrawRectangle(max_x, 0, size, size, fill);
@@ -1804,6 +1831,14 @@ static inline void bat_draw_corner_reflector_markers(Bat* env) {
     DrawRectangleLines(0, max_y, size, size, outline);
     DrawRectangle(max_x, max_y, size, size, fill);
     DrawRectangleLines(max_x, max_y, size, size, outline);
+    DrawRectangle(mid_x, 0, size, size, fill);
+    DrawRectangleLines(mid_x, 0, size, size, outline);
+    DrawRectangle(mid_x, max_y, size, size, fill);
+    DrawRectangleLines(mid_x, max_y, size, size, outline);
+    DrawRectangle(0, mid_y, size, size, fill);
+    DrawRectangleLines(0, mid_y, size, size, outline);
+    DrawRectangle(max_x, mid_y, size, size, fill);
+    DrawRectangleLines(max_x, mid_y, size, size, outline);
 }
 
 static inline void bat_draw_echo_reflections(Bat* env, float sx, float sy) {
