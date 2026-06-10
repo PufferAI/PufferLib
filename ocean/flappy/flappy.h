@@ -6,7 +6,7 @@
 #include <string.h>
 #include "raylib.h"
 
-#define FLAPPY_OBS_SIZE 6
+#define FLAPPY_OBS_SIZE 7
 #define FLAPPY_NUM_PIPES 3
 
 #define FLAPPY_NOOP 0
@@ -88,30 +88,48 @@ static inline void flappy_init_pipe(Flappy* env, int i, float x) {
     env->pipes[i].passed = 0;
 }
 
-static inline Pipe* flappy_next_pipe(Flappy* env) {
-    Pipe* best = &env->pipes[0];
-    float best_dx = best->x + env->pipe_width - env->bird_x;
-    for (int i = 1; i < FLAPPY_NUM_PIPES; i++) {
-        float dx = env->pipes[i].x + env->pipe_width - env->bird_x;
-        if (dx >= 0.0f && (best_dx < 0.0f || dx < best_dx)) {
-            best = &env->pipes[i];
-            best_dx = dx;
+static inline void flappy_next_pipes(Flappy* env, Pipe** first, Pipe** second) {
+    *first = NULL;
+    *second = NULL;
+
+    for (int i = 0; i < FLAPPY_NUM_PIPES; i++) {
+        Pipe* pipe = &env->pipes[i];
+        float dx = pipe->x + env->pipe_width - env->bird_x;
+        if (dx < 0.0f) {
+            continue;
+        }
+
+        if (*first == NULL || pipe->x < (*first)->x) {
+            *second = *first;
+            *first = pipe;
+        } else if (*second == NULL || pipe->x < (*second)->x) {
+            *second = pipe;
         }
     }
-    return best;
 }
 
 static inline void flappy_compute_observations(Flappy* env) {
-    Pipe* pipe = flappy_next_pipe(env);
+    Pipe* pipe;
+    Pipe* next_pipe;
+    flappy_next_pipes(env, &pipe, &next_pipe);
+    if (pipe == NULL) {
+        pipe = &env->pipes[0];
+    }
+    if (next_pipe == NULL) {
+        next_pipe = pipe;
+    }
+
     float dx = (pipe->x + env->pipe_width - env->bird_x) / env->width;
     float dy = (env->bird_y - pipe->gap_y) / env->height;
+    float next_dx = (next_pipe->x + env->pipe_width - env->bird_x) / env->width;
 
     env->observations[0] = env->bird_y / env->height;
     env->observations[1] = flappy_clampf(env->bird_vy / 16.0f, -1.0f, 1.0f);
     env->observations[2] = flappy_clampf(dx, 0.0f, 1.5f);
     env->observations[3] = pipe->gap_y / env->height;
     env->observations[4] = flappy_clampf(dy, -1.0f, 1.0f);
-    env->observations[5] = flappy_clampf((float)env->score / 20.0f, 0.0f, 1.0f);
+    env->observations[5] = flappy_clampf(next_dx, 0.0f, 2.0f);
+    env->observations[6] = next_pipe->gap_y / env->height;
 }
 
 static inline void flappy_add_log(Flappy* env) {
@@ -191,7 +209,12 @@ void c_step(Flappy* env) {
         }
     }
 
-    Pipe* next = flappy_next_pipe(env);
+    Pipe* next;
+    Pipe* ignored;
+    flappy_next_pipes(env, &next, &ignored);
+    if (next == NULL) {
+        next = &env->pipes[0];
+    }
     float center_error = fabsf(env->bird_y - next->gap_y) / (env->height * 0.5f);
     env->rewards[0] += env->center_reward * (1.0f - flappy_clampf(center_error, 0.0f, 1.0f));
 
