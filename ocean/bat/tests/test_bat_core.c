@@ -29,8 +29,10 @@ static Bat make_test_env(void) {
         .height = 64,
         .num_obstacles = 1,
         .bat_radius = 2.0f,
+        .ear_separation_scale = 0.75f,
         .bug_radius = 1.5f,
         .bat_max_speed = 12.0f,
+        .bat_min_speed = 2.4f,
         .bat_accel = 30.0f,
         .bat_turn_rate = 3.1415926f,
         .bug_speed = 4.0f,
@@ -39,10 +41,33 @@ static Bat make_test_env(void) {
         .max_echo_range = 80.0f,
         .sound_speed = 100.0f,
         .reflector_spacing = 8.0f,
+        .reflector_strength = 2.0f,
+        .max_chirp_age_ticks = 30,
+        .chirp_cooldown_ticks = 12,
+        .max_chirps_per_episode = 20,
+        .min_chirps_per_episode = 10,
+        .chirp_budget_decay_levels = 4,
         .chirp_cost = 0.0005f,
+        .chirp_efficiency_reward = 1.0f,
         .step_cost = 0.001f,
         .progress_reward_scale = 0.05f,
         .collision_penalty = 1.0f,
+        .valid_chirp_reward = 0.0005f,
+        .early_chirp_penalty = 0.001f,
+        .bug_echo_farther_penalty_scale = 0.10f,
+        .bug_echo_min_displacement = 1.0f,
+        .curriculum_max_obstacles = 1,
+        .curriculum_obstacle_step = 8,
+        .curriculum_successes_per_level = 1,
+        .curriculum_start_bug_distance = 14.0f,
+        .curriculum_max_bug_distance = 44.8f,
+        .curriculum_bug_distance_step = 1.5f,
+        .curriculum_inbound_start_level = 8,
+        .curriculum_inbound_max_bug_distance = 44.8f,
+        .curriculum_inbound_bug_distance_step = 1.5f,
+        .inbound_bug_speed_multiplier = 1.5f,
+        .bug_maneuver_start_level = 7,
+        .bug_maneuver_frequency = 0.35f,
         .rng = 1,
     };
     allocate(&env);
@@ -90,6 +115,10 @@ static int test_chirp_budget_observation_tracks_used_chirps(void) {
     ASSERT_TRUE(env.chirps_emitted_episode == 1);
     ASSERT_FLOAT_NEAR(env.observations[BAT_CHIRPS_USED_OBS], 0.25f, 0.0001f);
 
+    env.chirps_emitted_episode = 12;
+    compute_observations(&env);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_CHIRPS_USED_OBS], 1.0f, 0.0001f);
+
     free_allocated(&env);
     return 0;
 }
@@ -115,7 +144,7 @@ static int test_chirping_after_budget_terminates_with_penalty(void) {
     env.max_chirps_per_episode = 1;
     env.min_chirps_per_episode = 1;
     env.chirp_budget_decay_levels = 4;
-    env.chirp_cooldown_ticks = 1;
+    env.chirp_cooldown_ticks = 5;
     env.early_chirp_penalty = 0.0f;
     c_reset(&env);
 
@@ -126,13 +155,57 @@ static int test_chirping_after_budget_terminates_with_penalty(void) {
     c_step(&env);
     ASSERT_TRUE(env.terminals[0] == 0.0f);
     ASSERT_TRUE(env.chirps_emitted_episode == 1);
+    ASSERT_FLOAT_NEAR(env.observations[BAT_CHIRPS_USED_OBS], 1.0f, 0.0001f);
 
-    env.tick = env.last_chirp_tick + env.chirp_cooldown_ticks;
     c_step(&env);
 
     ASSERT_TRUE(env.terminals[0] == 1.0f);
     ASSERT_FLOAT_NEAR(env.rewards[0], -1.0f, 0.0001f);
     ASSERT_TRUE(env.chirps_emitted_episode == 0);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_timer_observation_tracks_elapsed_fraction(void) {
+    Bat env = make_test_env();
+    env.max_steps = 512;
+    c_reset(&env);
+
+    ASSERT_TRUE(BAT_OBS_SIZE == 41);
+    ASSERT_FLOAT_NEAR(env.observations[40], 0.0f, 0.0001f);
+
+    env.actions[0] = BAT_NOOP;
+    env.actions[1] = BAT_TURN_NONE;
+    env.actions[5] = 0.0f;
+    c_step(&env);
+
+    ASSERT_FLOAT_NEAR(env.observations[40], 1.0f / 512.0f, 0.0001f);
+
+    env.tick = 256;
+    compute_observations(&env);
+    ASSERT_FLOAT_NEAR(env.observations[40], 0.5f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_timeout_terminates_with_minus_one_reward(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 0;
+    env.max_steps = 1;
+    env.progress_reward_scale = 0.0f;
+    env.step_cost = 0.0f;
+    c_reset(&env);
+
+    env.actions[0] = BAT_NOOP;
+    env.actions[1] = BAT_TURN_NONE;
+    env.actions[5] = 0.0f;
+    c_step(&env);
+
+    ASSERT_TRUE(env.terminals[0] == 1.0f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], -1.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.log.timeout, 1.0f, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -191,7 +264,7 @@ static int test_success_reward_includes_chirp_efficiency_bonus(void) {
     c_step(&env);
 
     ASSERT_FLOAT_NEAR(env.terminals[0], 1.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.rewards[0], 1.90f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], 0.90f, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -388,6 +461,7 @@ static int test_default_sound_speed_allows_one_tick_interaural_delay(void) {
         .height = 64,
         .num_obstacles = 0,
         .bat_radius = 2.0f,
+        .ear_separation_scale = 0.75f,
         .bug_radius = 1.5f,
         .bat_max_speed = 12.0f,
         .bat_accel = 30.0f,
@@ -396,6 +470,7 @@ static int test_default_sound_speed_allows_one_tick_interaural_delay(void) {
         .max_steps = 512,
         .freq_bins_per_ear = BAT_FREQ_BINS,
         .max_echo_range = 80.0f,
+        .sound_speed = 60.0f,
         .reflector_spacing = 8.0f,
         .rng = 1,
     };
@@ -1063,7 +1138,7 @@ static float test_sum_obs(Bat* env, int offset, int count) {
 }
 
 static int test_bins_only_observation_layout(void) {
-    ASSERT_TRUE(BAT_OBS_SIZE == 40);
+    ASSERT_TRUE(BAT_OBS_SIZE == 41);
     ASSERT_TRUE(BAT_FREQ_BINS == 16);
     ASSERT_TRUE(BAT_LEFT_FREQ_OFFSET == 0);
     ASSERT_TRUE(BAT_RIGHT_FREQ_OFFSET == 16);
@@ -1363,6 +1438,7 @@ static int test_default_echo_range_reaches_curriculum_max_bug_distance(void) {
         .bat_accel = 45.0f,
         .bat_turn_rate = 9.424778f,
         .bug_speed = 4.0f,
+        .max_echo_range = 128.0f,
         .sound_speed = 180.0f,
         .curriculum_max_bug_distance = 56.0f,
         .rng = 1,
@@ -1758,6 +1834,8 @@ int main(void) {
     if (test_chirp_budget_observation_tracks_used_chirps()) return 1;
     if (test_chirp_budget_stays_fixed_with_curriculum_level()) return 1;
     if (test_chirping_after_budget_terminates_with_penalty()) return 1;
+    if (test_timer_observation_tracks_elapsed_fraction()) return 1;
+    if (test_timeout_terminates_with_minus_one_reward()) return 1;
     if (test_chirp_efficiency_scores_low_usage_above_full_budget()) return 1;
     if (test_chirp_perf_uses_fixed_fifteen_chirp_reference()) return 1;
     if (test_success_reward_includes_chirp_efficiency_bonus()) return 1;

@@ -11,7 +11,7 @@
 #include "raylib.h"
 #endif
 
-#define BAT_OBS_SIZE 40
+#define BAT_OBS_SIZE 41
 #define BAT_NUM_ACTIONS 6
 #define BAT_MOVE_ACTIONS 3
 #define BAT_TURN_ACTIONS 3
@@ -41,6 +41,8 @@
 
 #define BAT_MAX_OBSTACLES 16
 #define BAT_TICK_RATE (1.0f/60.0f)
+#define BAT_DEFAULT_MAX_STEPS 512
+#define BAT_DEFAULT_MAX_STEPS_INV (1.0f / (float)BAT_DEFAULT_MAX_STEPS)
 #define BAT_PI 3.14159265358979323846f
 #define BAT_CHIRP_HISTORY 4
 #define BAT_CHIRP_RINGS 5
@@ -713,7 +715,8 @@ static inline float bat_budget_difficulty(Bat* env) {
 }
 
 static inline float bat_success_reward(Bat* env) {
-    return 1.0f + env->chirp_efficiency_reward * bat_chirp_efficiency(env);
+    //return 1.0f + env->chirp_efficiency_reward * bat_chirp_efficiency(env); // old retarded and gay code
+    return env->chirp_efficiency_reward * bat_chirp_efficiency(env);
 }
 
 static inline float bat_current_distance_ratio(Bat* env) {
@@ -864,84 +867,6 @@ static inline void generate_obstacles(Bat* env) {
 
 void init(Bat* env) {
     env->tick = 0;
-    if (env->num_agents <= 0) env->num_agents = 1;
-    if (env->frameskip <= 0) env->frameskip = 1;
-    if (env->width <= 0) env->width = 64;
-    if (env->height <= 0) env->height = 64;
-    if (env->max_steps <= 0) env->max_steps = 512;
-    if (env->bat_radius <= 0.0f) env->bat_radius = 2.0f;
-    if (env->ear_separation_scale <= 0.0f) env->ear_separation_scale = 0.75f;
-    env->ear_separation_scale = bat_clampf(env->ear_separation_scale, 0.25f, 2.0f);
-    if (env->bug_radius <= 0.0f) env->bug_radius = 1.5f;
-    if (env->bat_max_speed <= 0.0f) env->bat_max_speed = 12.0f;
-    if (env->bat_min_speed <= 0.0f) env->bat_min_speed = 0.20f * env->bat_max_speed;
-    env->bat_min_speed = bat_min_forward_speed(env);
-    if (env->bat_accel <= 0.0f) env->bat_accel = 30.0f;
-    if (env->bat_turn_rate <= 0.0f) env->bat_turn_rate = BAT_PI;
-    if (env->bug_speed <= 0.0f) env->bug_speed = 4.0f;
-    if (env->freq_bins_per_ear <= 0) env->freq_bins_per_ear = BAT_FREQ_BINS;
-    if (env->max_echo_range <= 0.0f) env->max_echo_range = 128.0f;
-    if (env->sound_speed <= 0.0f) env->sound_speed = 60.0f;
-    if (env->reflector_spacing <= 0.0f) env->reflector_spacing = 8.0f;
-    env->corner_reflectors = env->corner_reflectors ? 1 : 0;
-    if (env->reflector_strength <= 0.0f) env->reflector_strength = 2.0f;
-    env->record_video = env->record_video ? 1 : 0;
-    env->record_video_fps = bat_record_video_fps(env);
-    env->record_video_seconds = bat_record_video_seconds(env);
-    env->record_video_audio = env->record_video_audio ? 1 : 0;
-    if (env->max_chirp_age_ticks <= 0) env->max_chirp_age_ticks = 30;
-    if (env->chirp_cooldown_ticks <= 0) env->chirp_cooldown_ticks = 12;
-    if (env->max_chirps_per_episode <= 0) env->max_chirps_per_episode = 20;
-    if (env->min_chirps_per_episode <= 0) env->min_chirps_per_episode = 10;
-    if (env->min_chirps_per_episode > env->max_chirps_per_episode) {
-        env->min_chirps_per_episode = env->max_chirps_per_episode;
-    }
-    if (env->chirp_budget_decay_levels <= 0) env->chirp_budget_decay_levels = 4;
-    if (env->step_cost <= 0.0f) env->step_cost = 0.001f;
-    if (env->progress_reward_scale <= 0.0f) env->progress_reward_scale = 0.05f;
-    if (env->collision_penalty <= 0.0f) env->collision_penalty = 1.0f;
-    if (env->chirp_cost < 0.0f) env->chirp_cost = 0.0f;
-    if (env->chirp_efficiency_reward < 0.0f) env->chirp_efficiency_reward = 0.0f;
-    if (env->valid_chirp_reward <= 0.0f) env->valid_chirp_reward = 0.0005f;
-    if (env->early_chirp_penalty <= 0.0f) env->early_chirp_penalty = 0.001f;
-    if (env->chirp_overlap_penalty < 0.0f) env->chirp_overlap_penalty = 0.0f;
-    if (env->bug_echo_reward_scale <= 0.0f) env->bug_echo_reward_scale = 0.0f;
-    if (env->bug_echo_farther_penalty_scale <= 0.0f) env->bug_echo_farther_penalty_scale = 0.10f;
-    env->bug_echo_farther_penalty_scale = bat_clampf(env->bug_echo_farther_penalty_scale, 0.0f, 1.0f);
-    if (env->bug_echo_min_displacement <= 0.0f) env->bug_echo_min_displacement = 1.0f;
-    if (env->rng == 0) env->rng = 1;
-
-    if (env->num_obstacles < 0) env->num_obstacles = 0;
-    if (env->num_obstacles > BAT_MAX_OBSTACLES) env->num_obstacles = BAT_MAX_OBSTACLES;
-    if (env->curriculum_start_obstacles < 0) env->curriculum_start_obstacles = 0;
-    if (env->curriculum_max_obstacles <= 0) env->curriculum_max_obstacles = env->num_obstacles;
-    if (env->curriculum_max_obstacles > BAT_MAX_OBSTACLES) env->curriculum_max_obstacles = BAT_MAX_OBSTACLES;
-    if (env->curriculum_start_obstacles > env->curriculum_max_obstacles) {
-        env->curriculum_start_obstacles = env->curriculum_max_obstacles;
-    }
-    if (env->curriculum_initial_level < 0) env->curriculum_initial_level = 0;
-    if (env->curriculum_obstacle_step <= 0) env->curriculum_obstacle_step = 8;
-    if (env->curriculum_successes_per_level <= 0) env->curriculum_successes_per_level = 1;
-    if (env->curriculum_start_bug_distance <= 0.0f) env->curriculum_start_bug_distance = 14.0f;
-    if (env->curriculum_max_bug_distance <= 0.0f) {
-        env->curriculum_max_bug_distance = fminf(env->width, env->height) * 0.70f;
-    }
-    if (env->curriculum_bug_distance_step <= 0.0f) env->curriculum_bug_distance_step = 1.5f;
-    if (env->curriculum_inbound_start_level <= 0) env->curriculum_inbound_start_level = 8;
-    if (env->curriculum_inbound_max_bug_distance <= env->curriculum_max_bug_distance) {
-        env->curriculum_inbound_max_bug_distance = env->curriculum_max_bug_distance;
-    }
-    if (env->curriculum_inbound_bug_distance_step <= 0.0f) {
-        env->curriculum_inbound_bug_distance_step = env->curriculum_bug_distance_step;
-    }
-    if (env->inbound_bug_speed_multiplier <= 0.0f) env->inbound_bug_speed_multiplier = 1.5f;
-    env->inbound_bug_speed_multiplier = bat_clampf(env->inbound_bug_speed_multiplier, 1.0f, 4.0f);
-    if (env->inbound_heading_noise_degrees < 0.0f) env->inbound_heading_noise_degrees = 0.0f;
-    env->inbound_heading_noise_degrees = bat_clampf(env->inbound_heading_noise_degrees, 0.0f, 60.0f);
-    if (env->bug_maneuver_start_level <= 0) env->bug_maneuver_start_level = 7;
-    if (env->bug_maneuver_strength < 0.0f) env->bug_maneuver_strength = 0.0f;
-    env->bug_maneuver_strength = bat_clampf(env->bug_maneuver_strength, 0.0f, 0.75f);
-    if (env->bug_maneuver_frequency <= 0.0f) env->bug_maneuver_frequency = 0.35f;
     env->obstacle_x = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
     env->obstacle_y = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
     env->obstacle_w = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
@@ -1349,6 +1274,10 @@ void compute_observations(Bat* env) {
     float fwd_speed = env->bat_vx * cosf(env->bat_heading) + env->bat_vy * sinf(env->bat_heading);
     env->observations[BAT_FORWARD_SPEED_OBS] = bat_clampf(fwd_speed / env->bat_max_speed, 0.0f, 1.0f);
     env->observations[BAT_TURN_RATE_OBS] = bat_clampf(env->bat_turn_velocity / env->bat_turn_rate, -1.0f, 1.0f);
+    float timer_norm = env->max_steps == BAT_DEFAULT_MAX_STEPS
+        ? env->tick * BAT_DEFAULT_MAX_STEPS_INV
+        : env->tick / fmaxf(1.0f, (float)env->max_steps);
+    env->observations[40] = bat_clampf(timer_norm, 0.0f, 1.0f);
 }
 
 static inline void bat_reset_episode(Bat* env) {
@@ -1589,8 +1518,7 @@ static inline float bat_next_chirp_overlap_fraction(Bat* env) {
 static inline int bat_update_chirp(Bat* env) {
     int emit = bat_action_index(env->actions[5], BAT_CHIRP_EMIT_ACTIONS);
     if (emit) {
-        if (env->tick - env->last_chirp_tick >= env->chirp_cooldown_ticks &&
-                env->chirps_emitted_episode >= env->chirp_budget) {
+        if (env->chirps_emitted_episode >= env->chirp_budget) {
             return -2;
         }
         return bat_try_emit_chirp(env) ? 1 : -1;
@@ -1669,6 +1597,7 @@ void c_step(Bat* env) {
     env->prev_bug_dist = bug_dist;
 
     if (env->tick >= env->max_steps) {
+        env->rewards[0] = -1.0f;
         env->terminals[0] = 1.0f;
         env->episode_return += env->rewards[0];
         add_log(env, 0.0f, 0.0f, 1.0f);

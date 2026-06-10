@@ -246,10 +246,20 @@ Observation layout:
 8. `chirps_used_norm = chirps_used / chirp_budget`
 9. `forward_speed_norm`
 10. `turn_rate_norm`
+11. `timer_norm = elapsed_steps / max_steps`, clamped to `[0, 1]`
 
 Initial observation size:
 
-- `OBS_SIZE = 40`
+- `OBS_SIZE = 41`
+
+Timer normalization:
+
+- The timer starts at `0.0` on reset.
+- With the default `max_steps = 512`, after step `N` the observation is
+  `N * BAT_DEFAULT_MAX_STEPS_INV`, where
+  `BAT_DEFAULT_MAX_STEPS_INV = 1.0 / 512.0`.
+- Non-default `max_steps` values use `N / max_steps`.
+- The observed timer is clamped to `[0.0, 1.0]`.
 
 Echo bins:
 
@@ -321,6 +331,9 @@ Default reward model:
 - Small negative step cost to encourage efficient pursuit.
 - Dense progress reward based on reduction in true bat-to-bug distance.
 - `-1.0` for hitting walls or obstacles, terminal.
+- `-1.0` for timeout, terminal.
+- `-1.0` for attempting a chirp after `chirps_used_norm` reaches `1.0`,
+  terminal.
 - Tiny chirp cost so constant chirping is not fully free without causing
   chirp collapse.
 - Chirping again before the prior chirp's expected bug reflection has returned
@@ -384,6 +397,7 @@ Termination:
 
 - Success: bat catches bug.
 - Failure: bat collides with a wall or obstacle.
+- Failure: bat attempts to chirp after exhausting the chirp budget.
 - Timeout: `tick >= max_steps`.
 
 Reset:
@@ -527,7 +541,7 @@ Follow the Breakout-style native env shape:
   - `Log log`
   - `unsigned int rng`
 - In `binding.c`, start with:
-  - `OBS_SIZE 70`
+  - `OBS_SIZE 41`
   - `NUM_ATNS 6`
   - `ACT_SIZES {5, 3, 8, 8, 4, 2}`
   - `OBS_TENSOR_T FloatTensor`
@@ -653,9 +667,9 @@ train/eval after each rung, and commit each known-good rung separately.
      clutter legitimately need reacquisition chirps, so budget decay made
      later levels fail for the wrong reason.
    - Track `chirps_used / chirp_budget` as a normalized `0..1` observation.
-   - When the budget is exhausted, terminate with a `-1` style failure penalty
-     if the policy attempts another chirp. Do not terminate immediately after
-     the last valid chirp, so the final echo can still matter.
+   - When the budget is exhausted, terminate with a `-1.0` failure penalty if
+     the policy attempts another chirp. Do not terminate immediately after the
+     last valid chirp, so the final echo can still matter.
    - Log chirp budget, used ratio, remaining ratio, and efficiency to W&B so
      sweeps can distinguish successful policies that waste every chirp from
      successful policies that catch the bug with useful chirp timing.

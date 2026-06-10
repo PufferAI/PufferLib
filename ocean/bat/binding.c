@@ -1,5 +1,5 @@
 #include "bat.h"
-#define OBS_SIZE 40
+#define OBS_SIZE 41
 #define NUM_ATNS 6
 #define ACT_SIZES {3, 3, 8, 8, 4, 2}
 #define OBS_TENSOR_T FloatTensor
@@ -69,9 +69,10 @@ void my_init(Env* env, Dict* kwargs) {
 
 void my_log(Log* log, Dict* out) {
     dict_set(out, "perf", log->perf);
-    dict_set(out, "base_perf", log->base_perf);
     dict_set(out, "score", log->score);
+    dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
+    dict_set(out, "base_perf", log->base_perf);
     dict_set(out, "collision", log->collision);
     dict_set(out, "timeout", log->timeout);
     dict_set(out, "curriculum_level", log->curriculum_level);
@@ -98,6 +99,4 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "mean_chirp_tick_norm", log->mean_chirp_tick_norm);
     dict_set(out, "mean_chirp_duration", log->mean_chirp_duration);
     dict_set(out, "mean_chirp_bandwidth", log->mean_chirp_bandwidth);
-    dict_set(out, "mean_echo_energy_left", log->mean_echo_energy_left);
-    dict_set(out, "mean_echo_energy_right", log->mean_echo_energy_right);
 }
