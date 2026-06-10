@@ -36,6 +36,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->max_echo_range = dict_get(kwargs, "max_echo_range")->value;
     env->sound_speed = dict_get(kwargs, "sound_speed")->value;
     env->reflector_spacing = dict_get(kwargs, "reflector_spacing")->value;
+    env->corner_reflectors = dict_get(kwargs, "corner_reflectors")->value;
     env->max_chirp_age_ticks = dict_get(kwargs, "max_chirp_age_ticks")->value;
     env->chirp_cooldown_ticks = dict_get(kwargs, "chirp_cooldown_ticks")->value;
     env->max_chirps_per_episode = dict_get(kwargs, "max_chirps_per_episode")->value;

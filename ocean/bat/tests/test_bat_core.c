@@ -1349,6 +1349,186 @@ static int test_chirp_echo_arrives_after_two_way_travel_not_immediately(void) {
     return 0;
 }
 
+static int test_default_echo_range_reaches_curriculum_max_bug_distance(void) {
+    Bat env = {
+        .num_agents = 1,
+        .frameskip = 1,
+        .width = 64,
+        .height = 64,
+        .num_obstacles = 0,
+        .bat_radius = 2.0f,
+        .bug_radius = 1.5f,
+        .bat_max_speed = 22.0f,
+        .bat_min_speed = 2.0f,
+        .bat_accel = 45.0f,
+        .bat_turn_rate = 9.424778f,
+        .bug_speed = 4.0f,
+        .sound_speed = 180.0f,
+        .curriculum_max_bug_distance = 56.0f,
+        .rng = 1,
+    };
+    allocate(&env);
+    c_reset(&env);
+
+    env.tick = 0;
+    env.bat_x = 4.0f;
+    env.bat_y = 32.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bat_heading = 0.0f;
+    env.bug_x = env.bat_x + env.curriculum_max_bug_distance;
+    env.bug_y = env.bat_y;
+    env.bug_vx = 0.0f;
+    env.bug_vy = 0.0f;
+    bat_clear_echo_queue(&env);
+
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 0.0f,
+        .end_freq = 1.0f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = env.tick,
+        .active = 1,
+    };
+    bat_schedule_chirp_echoes(&env, &chirp);
+
+    float bug_energy = 0.0f;
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        bug_energy += env.echo_queue[i].bug_energy;
+    }
+
+    ASSERT_TRUE(bug_energy > 0.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static float test_sum_queued_echo_energy(Bat* env) {
+    float energy = 0.0f;
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        for (int ear = 0; ear < 2; ear++) {
+            for (int bin = 0; bin < BAT_FREQ_BINS; bin++) {
+                energy += env->echo_queue[i].energy[ear][bin];
+            }
+        }
+    }
+    return energy;
+}
+
+static int test_corner_reflectors_disabled_schedule_no_static_events(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 0;
+    env.corner_reflectors = 0;
+    env.max_echo_range = 128.0f;
+    c_reset(&env);
+
+    env.tick = 0;
+    env.bat_x = 32.0f;
+    env.bat_y = 32.0f;
+    env.bat_heading = 0.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    bat_clear_echo_queue(&env);
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 0.0f,
+        .end_freq = 1.0f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = env.tick,
+        .active = 1,
+    };
+
+    bat_schedule_corner_reflector_echoes(&env, &chirp, 0.0f, 0.5f);
+
+    ASSERT_FLOAT_NEAR(test_sum_queued_echo_energy(&env), 0.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_corner_reflectors_enabled_schedule_stable_echo_events(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 0;
+    env.corner_reflectors = 1;
+    env.max_echo_range = 128.0f;
+    env.sound_speed = 180.0f;
+    c_reset(&env);
+
+    env.tick = 0;
+    env.bat_x = 32.0f;
+    env.bat_y = 32.0f;
+    env.bat_heading = 0.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    bat_clear_echo_queue(&env);
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 0.0f,
+        .end_freq = 1.0f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = env.tick,
+        .active = 1,
+    };
+
+    bat_schedule_corner_reflector_echoes(&env, &chirp, 0.0f, 0.5f);
+
+    ASSERT_TRUE(test_sum_queued_echo_energy(&env) > 0.0f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_corner_reflector_echo_observations_stay_normalized(void) {
+    Bat env = make_test_env();
+    env.num_obstacles = 0;
+    env.corner_reflectors = 1;
+    env.max_echo_range = 128.0f;
+    env.sound_speed = 180.0f;
+    c_reset(&env);
+
+    env.tick = 0;
+    env.bat_x = 32.0f;
+    env.bat_y = 32.0f;
+    env.bat_heading = 0.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    bat_clear_echo_queue(&env);
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 0.0f,
+        .end_freq = 1.0f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = env.tick,
+        .active = 1,
+    };
+    bat_schedule_corner_reflector_echoes(&env, &chirp, 0.0f, 0.5f);
+
+    int arrival_tick = -1;
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        if (env.echo_queue[i].tick > 0 && test_sum_queued_echo_energy(&env) > 0.0f) {
+            arrival_tick = env.echo_queue[i].tick;
+            break;
+        }
+    }
+    ASSERT_TRUE(arrival_tick > 0);
+
+    env.tick = arrival_tick;
+    compute_observations(&env);
+    ASSERT_TRUE(test_sum_obs(&env, BAT_LEFT_FREQ_OFFSET, BAT_FREQ_BINS) > 0.0f ||
+        test_sum_obs(&env, BAT_RIGHT_FREQ_OFFSET, BAT_FREQ_BINS) > 0.0f);
+    for (int i = 0; i < BAT_OBS_SIZE; i++) {
+        ASSERT_TRUE(env.observations[i] >= -1.0f);
+        ASSERT_TRUE(env.observations[i] <= 1.0f);
+    }
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_frequency_bin_energy_sums_and_caps(void) {
     Bat env = make_test_env();
     memset(env.observations, 0, BAT_OBS_SIZE * sizeof(float));
@@ -1623,6 +1803,10 @@ int main(void) {
     if (test_curriculum_initial_level_does_not_reset_progress()) return 1;
     if (test_bug_bounces_off_arena_walls()) return 1;
     if (test_chirp_echo_arrives_after_two_way_travel_not_immediately()) return 1;
+    if (test_default_echo_range_reaches_curriculum_max_bug_distance()) return 1;
+    if (test_corner_reflectors_disabled_schedule_no_static_events()) return 1;
+    if (test_corner_reflectors_enabled_schedule_stable_echo_events()) return 1;
+    if (test_corner_reflector_echo_observations_stay_normalized()) return 1;
     if (test_frequency_bin_energy_sums_and_caps()) return 1;
     if (test_bug_echo_reward_is_added_when_bug_echo_is_closer()) return 1;
     if (test_bug_echo_reward_requires_bat_displacement()) return 1;
