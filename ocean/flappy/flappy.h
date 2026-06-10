@@ -6,7 +6,7 @@
 #include <string.h>
 #include "raylib.h"
 
-#define FLAPPY_OBS_SIZE 7
+#define FLAPPY_OBS_SIZE 6
 #define FLAPPY_NUM_PIPES 3
 
 #define FLAPPY_NOOP 0
@@ -120,16 +120,14 @@ static inline void flappy_compute_observations(Flappy* env) {
     }
 
     float dx = (pipe->x + env->pipe_width - env->bird_x) / env->width;
-    float dy = (env->bird_y - pipe->gap_y) / env->height;
     float next_dx = (next_pipe->x + env->pipe_width - env->bird_x) / env->width;
 
     env->observations[0] = env->bird_y / env->height;
     env->observations[1] = flappy_clampf(env->bird_vy / 16.0f, -1.0f, 1.0f);
     env->observations[2] = flappy_clampf(dx, 0.0f, 1.5f);
     env->observations[3] = pipe->gap_y / env->height;
-    env->observations[4] = flappy_clampf(dy, -1.0f, 1.0f);
-    env->observations[5] = flappy_clampf(next_dx, 0.0f, 2.0f);
-    env->observations[6] = next_pipe->gap_y / env->height;
+    env->observations[4] = flappy_clampf(next_dx, 0.0f, 2.0f);
+    env->observations[5] = next_pipe->gap_y / env->height;
 }
 
 static inline void flappy_add_log(Flappy* env) {
