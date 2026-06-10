@@ -196,6 +196,14 @@ typedef struct Bat {
     float curriculum_start_bug_distance;
     float curriculum_max_bug_distance;
     float curriculum_bug_distance_step;
+    int curriculum_inbound_start_level;
+    float curriculum_inbound_max_bug_distance;
+    float curriculum_inbound_bug_distance_step;
+    float inbound_bug_speed_multiplier;
+    float inbound_heading_noise_degrees;
+    int bug_maneuver_start_level;
+    float bug_maneuver_strength;
+    float bug_maneuver_frequency;
 
     float bat_x;
     float bat_y;
@@ -216,6 +224,12 @@ typedef struct Bat {
     float bug_vy;
     float bug_radius;
     float bug_speed;
+    int bug_inbound;
+    int bug_maneuver_mode;
+    float bug_base_heading;
+    float bug_maneuver_phase;
+    float bug_maneuver_rate;
+    float bug_maneuver_sign;
 
     float* obstacle_x;
     float* obstacle_y;
@@ -523,7 +537,8 @@ static inline void bat_sample_in_quadrant(Bat* env, int quadrant, float radius,
 }
 
 static inline void bat_sample_spawns(Bat* env) {
-    int bat_quadrant = (int)(bat_rand(env) & 3u);
+    int bat_quadrant = (int)(bat_randf(env) * 4.0f);
+    if (bat_quadrant > 3) bat_quadrant = 3;
     int bug_quadrant = bat_quadrant ^ 3;
     float min_sep = fminf(env->width, env->height) * 0.31f;
 
@@ -563,6 +578,41 @@ static inline float bat_curriculum_bug_distance(Bat* env) {
         env->curriculum_max_bug_distance);
 }
 
+static inline bool bat_curriculum_inbound_enabled(Bat* env) {
+    if (!env->curriculum_enabled) return false;
+    return env->curriculum_level >= env->curriculum_inbound_start_level;
+}
+
+static inline float bat_curriculum_inbound_bug_distance(Bat* env) {
+    float base = env->curriculum_max_bug_distance;
+    int extra_levels = env->curriculum_level - env->curriculum_inbound_start_level + 1;
+    if (extra_levels < 1) extra_levels = 1;
+    float distance = base + env->curriculum_inbound_bug_distance_step * extra_levels;
+    return bat_clampf(distance, base, env->curriculum_inbound_max_bug_distance);
+}
+
+static inline float bat_curriculum_spawn_distance(Bat* env) {
+    if (bat_curriculum_inbound_enabled(env)) {
+        return bat_curriculum_inbound_bug_distance(env);
+    }
+    return bat_curriculum_bug_distance(env);
+}
+
+static inline float bat_curriculum_bug_speed(Bat* env) {
+    float speed = env->bug_speed;
+    if (bat_curriculum_inbound_enabled(env)) {
+        speed *= env->inbound_bug_speed_multiplier;
+    }
+    return fmaxf(0.0f, speed);
+}
+
+static inline float bat_curriculum_bug_maneuver_strength(Bat* env) {
+    if (!env->curriculum_enabled) return 0.0f;
+    if (env->curriculum_level < env->bug_maneuver_start_level) return 0.0f;
+    float ramp = (env->curriculum_level - env->bug_maneuver_start_level + 1) / 4.0f;
+    return env->bug_maneuver_strength * bat_clampf(ramp, 0.0f, 1.0f);
+}
+
 static inline int bat_curriculum_chirp_budget(Bat* env) {
     return env->max_chirps_per_episode > 0 ? env->max_chirps_per_episode : 1;
 }
@@ -597,8 +647,10 @@ static inline float bat_norm_range(float value, float lo, float hi) {
 }
 
 static inline float bat_curriculum_distance_difficulty(Bat* env) {
+    float max_distance = fmaxf(env->curriculum_max_bug_distance,
+        env->curriculum_inbound_max_bug_distance);
     return bat_norm_range(env->start_bug_dist,
-        env->curriculum_start_bug_distance, env->curriculum_max_bug_distance);
+        env->curriculum_start_bug_distance, max_distance);
 }
 
 static inline float bat_curriculum_obstacle_difficulty(Bat* env) {
@@ -612,8 +664,12 @@ static inline float bat_curriculum_chirp_budget_difficulty(Bat* env) {
 }
 
 static inline float bat_curriculum_motion_difficulty(Bat* env) {
-    (void)env;
-    return 0.0f;
+    if (!env->curriculum_enabled) return 0.0f;
+    if (env->curriculum_level < env->bug_maneuver_start_level) return 0.0f;
+    float span = fmaxf(1.0f,
+        (float)(env->curriculum_inbound_start_level + 4 - env->bug_maneuver_start_level));
+    return bat_clampf((env->curriculum_level - env->bug_maneuver_start_level + 1) / span,
+        0.0f, 1.0f);
 }
 
 static inline float bat_curriculum_difficulty(Bat* env) {
@@ -627,6 +683,11 @@ static inline float bat_curriculum_difficulty(Bat* env) {
     }
     if (env->curriculum_max_obstacles > env->curriculum_start_obstacles) {
         weighted += 0.5f * obstacles;
+        active_weight += 0.5f;
+    }
+    float motion = bat_curriculum_motion_difficulty(env);
+    if (env->bug_maneuver_strength > 0.0f) {
+        weighted += 0.5f * motion;
         active_weight += 0.5f;
     }
     if (active_weight <= 0.000001f) return 0.0f;
@@ -695,6 +756,34 @@ static inline void bat_sample_spawns_at_distance(Bat* env, float target_distance
     }
 
     bat_sample_spawns(env);
+}
+
+static inline void bat_set_bug_velocity(Bat* env, float heading, float speed) {
+    env->bug_base_heading = heading;
+    env->bug_vx = cosf(heading) * speed;
+    env->bug_vy = sinf(heading) * speed;
+}
+
+static inline void bat_reset_bug_motion(Bat* env) {
+    env->bug_inbound = bat_curriculum_inbound_enabled(env) ? 1 : 0;
+    float strength = bat_curriculum_bug_maneuver_strength(env);
+    env->bug_maneuver_mode = strength > 0.000001f ? 1 + (int)(bat_rand(env) % 3u) : 0;
+    env->bug_maneuver_phase = bat_randf(env) * 2.0f * BAT_PI;
+    env->bug_maneuver_rate = 2.0f * BAT_PI * env->bug_maneuver_frequency *
+        (0.75f + 0.50f * bat_randf(env));
+    env->bug_maneuver_sign = (bat_rand(env) & 1u) ? -1.0f : 1.0f;
+
+    float speed = bat_curriculum_bug_speed(env);
+    if (env->bug_inbound) {
+        float tx, ty;
+        bat_norm_vec(env->bat_x - env->bug_x, env->bat_y - env->bug_y, &tx, &ty);
+        float noise = env->inbound_heading_noise_degrees * (BAT_PI / 180.0f);
+        float heading = atan2f(ty, tx) + (2.0f * bat_randf(env) - 1.0f) * noise;
+        bat_set_bug_velocity(env, heading, speed);
+    } else {
+        float heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+        bat_set_bug_velocity(env, heading, speed);
+    }
 }
 
 static inline void bat_apply_curriculum(Bat* env) {
@@ -825,6 +914,21 @@ void init(Bat* env) {
         env->curriculum_max_bug_distance = fminf(env->width, env->height) * 0.70f;
     }
     if (env->curriculum_bug_distance_step <= 0.0f) env->curriculum_bug_distance_step = 1.5f;
+    if (env->curriculum_inbound_start_level <= 0) env->curriculum_inbound_start_level = 8;
+    if (env->curriculum_inbound_max_bug_distance <= env->curriculum_max_bug_distance) {
+        env->curriculum_inbound_max_bug_distance = env->curriculum_max_bug_distance;
+    }
+    if (env->curriculum_inbound_bug_distance_step <= 0.0f) {
+        env->curriculum_inbound_bug_distance_step = env->curriculum_bug_distance_step;
+    }
+    if (env->inbound_bug_speed_multiplier <= 0.0f) env->inbound_bug_speed_multiplier = 1.5f;
+    env->inbound_bug_speed_multiplier = bat_clampf(env->inbound_bug_speed_multiplier, 1.0f, 4.0f);
+    if (env->inbound_heading_noise_degrees < 0.0f) env->inbound_heading_noise_degrees = 0.0f;
+    env->inbound_heading_noise_degrees = bat_clampf(env->inbound_heading_noise_degrees, 0.0f, 60.0f);
+    if (env->bug_maneuver_start_level <= 0) env->bug_maneuver_start_level = 7;
+    if (env->bug_maneuver_strength < 0.0f) env->bug_maneuver_strength = 0.0f;
+    env->bug_maneuver_strength = bat_clampf(env->bug_maneuver_strength, 0.0f, 0.75f);
+    if (env->bug_maneuver_frequency <= 0.0f) env->bug_maneuver_frequency = 0.35f;
     env->obstacle_x = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
     env->obstacle_y = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
     env->obstacle_w = (float*)calloc(BAT_MAX_OBSTACLES, sizeof(float));
@@ -1238,14 +1342,12 @@ static inline void bat_reset_episode(Bat* env) {
     }
     bat_apply_curriculum(env);
     if (env->curriculum_enabled) {
-        bat_sample_spawns_at_distance(env, bat_curriculum_bug_distance(env));
+        bat_sample_spawns_at_distance(env, bat_curriculum_spawn_distance(env));
     } else {
         bat_sample_spawns(env);
     }
     generate_obstacles(env);
-    float bug_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
-    env->bug_vx = cosf(bug_heading) * env->bug_speed;
-    env->bug_vy = sinf(bug_heading) * env->bug_speed;
+    bat_reset_bug_motion(env);
     env->last_chirp_start_freq = 0.0f;
     env->last_chirp_end_freq = 1.0f;
     env->last_chirp_duration = 0.33333334f;
@@ -1305,23 +1407,80 @@ static inline bool bat_hits_wall(Bat* env) {
 }
 
 static inline void bat_update_bug(Bat* env, float dt) {
+    float speed = bat_curriculum_bug_speed(env);
+    float strength = bat_curriculum_bug_maneuver_strength(env);
+    if (env->bug_maneuver_mode > 0) {
+        env->bug_maneuver_phase += env->bug_maneuver_rate * dt;
+        if (env->bug_maneuver_phase > 2.0f * BAT_PI) {
+            env->bug_maneuver_phase -= 2.0f * BAT_PI;
+        }
+    }
+
+    if (env->bug_inbound) {
+        float tx, ty;
+        bat_norm_vec(env->bat_x - env->bug_x, env->bat_y - env->bug_y, &tx, &ty);
+        float px = -ty;
+        float py = tx;
+        float lateral = 0.0f;
+        if (env->bug_maneuver_mode > 0) {
+            lateral = strength * sinf(env->bug_maneuver_phase);
+            if (env->bug_maneuver_mode == 2) {
+                lateral += 0.5f * strength * env->bug_maneuver_sign;
+            } else if (env->bug_maneuver_mode == 3) {
+                lateral += 0.35f * strength * cosf(0.5f * env->bug_maneuver_phase);
+            }
+        }
+        lateral = bat_clampf(lateral, -0.50f, 0.50f);
+        float forward = sqrtf(fmaxf(0.0f, 1.0f - lateral * lateral));
+        env->bug_vx = (tx * forward + px * lateral) * speed;
+        env->bug_vy = (ty * forward + py * lateral) * speed;
+    } else if (env->bug_maneuver_mode > 0) {
+        float heading = env->bug_base_heading;
+        if (env->bug_maneuver_mode == 1) {
+            heading += strength * sinf(env->bug_maneuver_phase);
+        } else if (env->bug_maneuver_mode == 2) {
+            env->bug_base_heading += env->bug_maneuver_sign * strength * dt;
+            heading = env->bug_base_heading;
+        } else {
+            heading += strength * sinf(env->bug_maneuver_phase)
+                + 0.35f * strength * cosf(0.5f * env->bug_maneuver_phase);
+        }
+        env->bug_vx = cosf(heading) * speed;
+        env->bug_vy = sinf(heading) * speed;
+    }
+
     env->bug_x += env->bug_vx * dt;
     env->bug_y += env->bug_vy * dt;
+    bool bounced = false;
     if (env->bug_x - env->bug_radius < 0.0f) {
         env->bug_x = env->bug_radius;
         env->bug_vx = fabsf(env->bug_vx);
+        bounced = true;
     }
     if (env->bug_x + env->bug_radius > env->width) {
         env->bug_x = env->width - env->bug_radius;
         env->bug_vx = -fabsf(env->bug_vx);
+        bounced = true;
     }
     if (env->bug_y - env->bug_radius < 0.0f) {
         env->bug_y = env->bug_radius;
         env->bug_vy = fabsf(env->bug_vy);
+        bounced = true;
     }
     if (env->bug_y + env->bug_radius > env->height) {
         env->bug_y = env->height - env->bug_radius;
         env->bug_vy = -fabsf(env->bug_vy);
+        bounced = true;
+    }
+    if (bounced) {
+        env->bug_base_heading = atan2f(env->bug_vy, env->bug_vx);
+        if (env->bug_inbound) {
+            float tx, ty;
+            bat_norm_vec(env->bat_x - env->bug_x, env->bat_y - env->bug_y, &tx, &ty);
+            env->bug_vx = tx * speed;
+            env->bug_vy = ty * speed;
+            env->bug_base_heading = atan2f(env->bug_vy, env->bug_vx);
+        }
     }
 }
 

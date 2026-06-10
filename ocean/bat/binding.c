@@ -36,6 +36,14 @@ void my_init(Env* env, Dict* kwargs) {
     env->curriculum_start_bug_distance = dict_get(kwargs, "curriculum_start_bug_distance")->value;
     env->curriculum_max_bug_distance = dict_get(kwargs, "curriculum_max_bug_distance")->value;
     env->curriculum_bug_distance_step = dict_get(kwargs, "curriculum_bug_distance_step")->value;
+    env->curriculum_inbound_start_level = dict_get(kwargs, "curriculum_inbound_start_level")->value;
+    env->curriculum_inbound_max_bug_distance = dict_get(kwargs, "curriculum_inbound_max_bug_distance")->value;
+    env->curriculum_inbound_bug_distance_step = dict_get(kwargs, "curriculum_inbound_bug_distance_step")->value;
+    env->inbound_bug_speed_multiplier = dict_get(kwargs, "inbound_bug_speed_multiplier")->value;
+    env->inbound_heading_noise_degrees = dict_get(kwargs, "inbound_heading_noise_degrees")->value;
+    env->bug_maneuver_start_level = dict_get(kwargs, "bug_maneuver_start_level")->value;
+    env->bug_maneuver_strength = dict_get(kwargs, "bug_maneuver_strength")->value;
+    env->bug_maneuver_frequency = dict_get(kwargs, "bug_maneuver_frequency")->value;
     env->freq_bins_per_ear = dict_get(kwargs, "freq_bins_per_ear")->value;
     env->max_echo_range = dict_get(kwargs, "max_echo_range")->value;
     env->sound_speed = dict_get(kwargs, "sound_speed")->value;
@@ -71,6 +79,7 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "curriculum_distance_difficulty", log->curriculum_distance_difficulty);
     dict_set(out, "curriculum_obstacle_difficulty", log->curriculum_obstacle_difficulty);
     dict_set(out, "curriculum_chirp_budget_difficulty", log->curriculum_chirp_budget_difficulty);
+    dict_set(out, "curriculum_motion_difficulty", log->curriculum_motion_difficulty);
     dict_set(out, "num_obstacles", log->num_obstacles);
     dict_set(out, "bug_distance_start", log->bug_distance_start);
     dict_set(out, "bug_distance_final", log->bug_distance_final);
