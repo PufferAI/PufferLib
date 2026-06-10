@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
 #include <assert.h>
 #include <string.h>
@@ -50,6 +51,7 @@
 #define BAT_AUDIO_MIN_HZ 600.0f
 #define BAT_AUDIO_MAX_HZ 3600.0f
 #define BAT_AUDIO_VOLUME 0.22f
+#define BAT_RECORD_MAX_VOICES 16
 #define BAT_BUDGET_EASY_CHIRPS 15.0f
 #define BAT_BUDGET_EDGE_CHIRPS 5.0f
 #define BAT_CHIRP_PERF_REFERENCE_CHIRPS 15.0f
@@ -81,6 +83,14 @@ typedef struct EchoBucket {
     float bug_path;
     int tick;
 } EchoBucket;
+
+typedef struct BatRecordVoice {
+    int active;
+    int start_sample;
+    float start_freq;
+    float end_freq;
+    float duration;
+} BatRecordVoice;
 
 typedef struct Log {
     float perf;
@@ -133,6 +143,21 @@ typedef struct Client {
     int audio_voice_cursor;
     Sound chirp_sounds[BAT_AUDIO_VOICES];
     int chirp_sound_loaded[BAT_AUDIO_VOICES];
+    int recording_initialized;
+    int recording_finalized;
+    int record_frame;
+    int record_max_frames;
+    int record_fps;
+    int record_audio;
+    int record_last_audio_chirp_serial;
+    int record_audio_sample_cursor;
+    int record_audio_data_bytes;
+    int record_voice_cursor;
+    FILE* record_wav;
+    char record_frame_dir[256];
+    char record_wav_path[256];
+    char record_mp4_path[256];
+    BatRecordVoice record_voices[BAT_RECORD_MAX_VOICES];
 #endif
 } Client;
 
@@ -151,6 +176,10 @@ typedef struct Bat {
     int tick;
     int max_steps;
     int render_target_fps;
+    int record_video;
+    int record_video_fps;
+    int record_video_seconds;
+    int record_video_audio;
     int num_obstacles;
     int curriculum_enabled;
     int curriculum_level;
@@ -274,17 +303,49 @@ static inline int bat_render_target_fps(Bat* env) {
     return env->render_target_fps > 0 ? env->render_target_fps : 0;
 }
 
+static inline bool bat_record_video_enabled(Bat* env) {
+    return env->record_video != 0;
+}
+
+static inline int bat_record_video_fps(Bat* env) {
+    int fps = env->record_video_fps > 0 ? env->record_video_fps : 30;
+    if (fps < 1) fps = 1;
+    if (fps > 120) fps = 120;
+    return fps;
+}
+
+static inline int bat_record_video_seconds(Bat* env) {
+    int seconds = env->record_video_seconds > 0 ? env->record_video_seconds : 20;
+    if (seconds < 1) seconds = 1;
+    if (seconds > 600) seconds = 600;
+    return seconds;
+}
+
+static inline int bat_record_frame_samples(int fps) {
+    if (fps <= 0) fps = 30;
+    return BAT_AUDIO_SAMPLE_RATE / fps;
+}
+
+static inline int bat_record_max_frames(int fps, int seconds) {
+    if (fps <= 0) fps = 30;
+    if (seconds <= 0) seconds = 20;
+    return fps * seconds;
+}
+
 static inline float bat_chirp_duration_seconds(float duration_norm) {
     return 0.04f + 0.18f * bat_clampf(duration_norm, 0.0f, 1.0f);
 }
 
-static inline float bat_chirp_audio_duration_seconds(Bat* env, float duration_norm) {
+static inline float bat_chirp_audio_duration_at_fps(float duration_norm, int fps) {
     float duration = bat_chirp_duration_seconds(duration_norm);
-    int fps = bat_render_target_fps(env);
     if (fps <= 0) return duration;
     float scale = 60.0f / (float)fps;
     if (scale < 1.0f) scale = 1.0f;
     return duration * scale;
+}
+
+static inline float bat_chirp_audio_duration_seconds(Bat* env, float duration_norm) {
+    return bat_chirp_audio_duration_at_fps(duration_norm, bat_render_target_fps(env));
 }
 
 static inline float bat_chirp_audio_frequency_hz(float freq_norm) {
@@ -677,6 +738,10 @@ void init(Bat* env) {
     if (env->sound_speed <= 0.0f) env->sound_speed = 60.0f;
     if (env->reflector_spacing <= 0.0f) env->reflector_spacing = 8.0f;
     env->corner_reflectors = env->corner_reflectors ? 1 : 0;
+    env->record_video = env->record_video ? 1 : 0;
+    env->record_video_fps = bat_record_video_fps(env);
+    env->record_video_seconds = bat_record_video_seconds(env);
+    env->record_video_audio = env->record_video_audio ? 1 : 0;
     if (env->max_chirp_age_ticks <= 0) env->max_chirp_age_ticks = 30;
     if (env->chirp_cooldown_ticks <= 0) env->chirp_cooldown_ticks = 12;
     if (env->max_chirps_per_episode <= 0) env->max_chirps_per_episode = 20;
@@ -1560,6 +1625,167 @@ static inline void bat_play_chirp_audio(Bat* env) {
     PlaySound(client->chirp_sounds[voice]);
 }
 
+static inline void bat_record_write_le16(FILE* f, unsigned int v) {
+    fputc((int)(v & 0xffu), f);
+    fputc((int)((v >> 8) & 0xffu), f);
+}
+
+static inline void bat_record_write_le32(FILE* f, unsigned int v) {
+    fputc((int)(v & 0xffu), f);
+    fputc((int)((v >> 8) & 0xffu), f);
+    fputc((int)((v >> 16) & 0xffu), f);
+    fputc((int)((v >> 24) & 0xffu), f);
+}
+
+static inline void bat_record_write_wav_header(FILE* f, int data_bytes) {
+    int byte_rate = BAT_AUDIO_SAMPLE_RATE * 2;
+    fwrite("RIFF", 1, 4, f);
+    bat_record_write_le32(f, 36u + (unsigned int)data_bytes);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    bat_record_write_le32(f, 16);
+    bat_record_write_le16(f, 1);
+    bat_record_write_le16(f, 1);
+    bat_record_write_le32(f, BAT_AUDIO_SAMPLE_RATE);
+    bat_record_write_le32(f, (unsigned int)byte_rate);
+    bat_record_write_le16(f, 2);
+    bat_record_write_le16(f, 16);
+    fwrite("data", 1, 4, f);
+    bat_record_write_le32(f, (unsigned int)data_bytes);
+}
+
+static inline void bat_record_init(Bat* env, Client* client) {
+    if (!bat_record_video_enabled(env) || client->recording_initialized) return;
+    client->recording_initialized = 1;
+    client->record_fps = bat_record_video_fps(env);
+    client->record_audio = env->record_video_audio ? 1 : 0;
+    client->record_max_frames = bat_record_max_frames(
+        client->record_fps, bat_record_video_seconds(env));
+    snprintf(client->record_frame_dir, sizeof(client->record_frame_dir),
+        "recordings/bat_recording_frames");
+    snprintf(client->record_wav_path, sizeof(client->record_wav_path),
+        "recordings/bat_recording.wav");
+    snprintf(client->record_mp4_path, sizeof(client->record_mp4_path),
+        "recordings/bat_recording.mp4");
+    system("mkdir -p recordings recordings/bat_recording_frames");
+    if (client->record_audio) {
+        client->record_wav = fopen(client->record_wav_path, "wb");
+        if (client->record_wav != NULL) {
+            bat_record_write_wav_header(client->record_wav, 0);
+        }
+    }
+    printf("Bat recording enabled: %s (%d fps, %d frames)\n",
+        client->record_mp4_path, client->record_fps, client->record_max_frames);
+}
+
+static inline void bat_record_enqueue_chirp(Bat* env) {
+    Client* client = env->client;
+    if (client == NULL || !client->recording_initialized ||
+            client->recording_finalized || !client->record_audio) {
+        return;
+    }
+    if (env->audio_chirp_serial <= 0 ||
+            env->audio_chirp_serial == client->record_last_audio_chirp_serial) {
+        return;
+    }
+    client->record_last_audio_chirp_serial = env->audio_chirp_serial;
+    int voice_idx = client->record_voice_cursor;
+    client->record_voice_cursor = (client->record_voice_cursor + 1) % BAT_RECORD_MAX_VOICES;
+    BatRecordVoice* voice = &client->record_voices[voice_idx];
+    voice->active = 1;
+    voice->start_sample = client->record_audio_sample_cursor;
+    voice->start_freq = env->last_chirp_start_freq;
+    voice->end_freq = env->last_chirp_end_freq;
+    voice->duration = bat_chirp_audio_duration_at_fps(
+        env->last_chirp_duration, client->record_fps);
+}
+
+static inline void bat_record_append_audio_frame(Bat* env) {
+    Client* client = env->client;
+    if (client == NULL || !client->record_audio || client->record_wav == NULL) return;
+    int frame_samples = bat_record_frame_samples(client->record_fps);
+    for (int i = 0; i < frame_samples; i++) {
+        int sample_index = client->record_audio_sample_cursor + i;
+        float mixed = 0.0f;
+        for (int v = 0; v < BAT_RECORD_MAX_VOICES; v++) {
+            BatRecordVoice* voice = &client->record_voices[v];
+            if (!voice->active) continue;
+            int local_sample = sample_index - voice->start_sample;
+            int voice_samples = (int)ceilf(voice->duration * BAT_AUDIO_SAMPLE_RATE);
+            if (local_sample < 0) continue;
+            if (local_sample >= voice_samples) {
+                voice->active = 0;
+                continue;
+            }
+            mixed += bat_chirp_audio_sample_f32(voice->start_freq, voice->end_freq,
+                voice->duration, local_sample, BAT_AUDIO_SAMPLE_RATE);
+        }
+        short pcm = (short)(bat_clampf(mixed, -1.0f, 1.0f) * 32767.0f);
+        fwrite(&pcm, sizeof(short), 1, client->record_wav);
+        client->record_audio_data_bytes += (int)sizeof(short);
+    }
+    client->record_audio_sample_cursor += frame_samples;
+}
+
+static inline void bat_record_finalize(Client* client) {
+    if (client == NULL || !client->recording_initialized ||
+            client->recording_finalized) {
+        return;
+    }
+    client->recording_finalized = 1;
+    if (client->record_wav != NULL) {
+        fseek(client->record_wav, 0, SEEK_SET);
+        bat_record_write_wav_header(client->record_wav, client->record_audio_data_bytes);
+        fclose(client->record_wav);
+        client->record_wav = NULL;
+    }
+
+    char cmd[1024];
+    if (client->record_audio) {
+        snprintf(cmd, sizeof(cmd),
+            "ffmpeg -y -framerate %d -i %s/%%06d.png -i %s -frames:v %d "
+            "-c:v libx264 -pix_fmt yuv420p -c:a aac -shortest %s",
+            client->record_fps, client->record_frame_dir, client->record_wav_path,
+            client->record_frame, client->record_mp4_path);
+    } else {
+        snprintf(cmd, sizeof(cmd),
+            "ffmpeg -y -framerate %d -i %s/%%06d.png -frames:v %d "
+            "-c:v libx264 -pix_fmt yuv420p %s",
+            client->record_fps, client->record_frame_dir, client->record_frame,
+            client->record_mp4_path);
+    }
+    int status = system(cmd);
+    if (status == 0) {
+        printf("Bat recording saved: %s\n", client->record_mp4_path);
+    } else {
+        printf("Bat recording ffmpeg command failed with status %d\n", status);
+    }
+}
+
+static inline void bat_record_capture_frame(Bat* env) {
+    Client* client = env->client;
+    if (client == NULL || !client->recording_initialized ||
+            client->recording_finalized) {
+        return;
+    }
+    if (client->record_frame >= client->record_max_frames) {
+        bat_record_finalize(client);
+        return;
+    }
+    bat_record_enqueue_chirp(env);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%06d.png", client->record_frame_dir,
+        client->record_frame);
+    Image image = LoadImageFromScreen();
+    ExportImage(image, path);
+    UnloadImage(image);
+    bat_record_append_audio_frame(env);
+    client->record_frame += 1;
+    if (client->record_frame >= client->record_max_frames) {
+        bat_record_finalize(client);
+    }
+}
+
 Client* make_client(Bat* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = env->width * 10;
@@ -1571,10 +1797,12 @@ Client* make_client(Bat* env) {
     }
     InitAudioDevice();
     client->audio_ready = IsAudioDeviceReady();
+    bat_record_init(env, client);
     return client;
 }
 
 void close_client(Client* client) {
+    bat_record_finalize(client);
     if (client->audio_ready) {
         for (int i = 0; i < BAT_AUDIO_VOICES; i++) {
             bat_unload_chirp_sound(client, i);
@@ -1621,6 +1849,7 @@ void c_render(Bat* env) {
     DrawText(TextFormat("reward %.3f tick %d chirps %d cooldown %d ESC exits", env->rewards[0], env->tick,
         env->chirps_emitted_episode, cooldown), 10, 10, 20, RAYWHITE);
     EndDrawing();
+    bat_record_capture_frame(env);
 }
 #else
 Client* make_client(Bat* env) {
