@@ -30,6 +30,9 @@ static Bat make_test_env(void) {
         .num_obstacles = 1,
         .bat_radius = 2.0f,
         .ear_separation_scale = 0.75f,
+        .ear_rear_gain = 0.20f,
+        .ear_front_gain = 0.55f,
+        .ear_side_gain = 0.35f,
         .bug_radius = 1.5f,
         .bat_max_speed = 12.0f,
         .bat_min_speed = 2.4f,
@@ -427,6 +430,161 @@ static int test_left_right_echo_asymmetry(void) {
     return 0;
 }
 
+typedef struct BatEchoProbe {
+    float left_energy;
+    float right_energy;
+    float left_tick;
+    float right_tick;
+} BatEchoProbe;
+
+static BatEchoProbe test_probe_echo_from_relative_source(float dx, float dy) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.bat_x = 24.0f;
+    env.bat_y = 24.0f;
+    env.bat_vx = 0.0f;
+    env.bat_vy = 0.0f;
+    env.bat_heading = 0.0f;
+    env.sound_speed = 40.0f;
+    env.ear_separation_scale = 2.0f;
+    env.max_echo_range = 128.0f;
+    env.ear_rear_gain = 0.20f;
+    env.ear_front_gain = 0.55f;
+    env.ear_side_gain = 0.35f;
+    env.tick = 0;
+    bat_clear_echo_queue(&env);
+
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 0.5f,
+        .end_freq = 0.5f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = 0,
+        .active = 1,
+    };
+    bat_schedule_echo(&env, &chirp, 0.0f, 0.5f,
+        env.bat_x + dx, env.bat_y + dy, 0.0f, 0.0f, 8.0f, BAT_ECHO_BUG);
+
+    BatEchoProbe probe = {
+        .left_tick = -1.0f,
+        .right_tick = -1.0f,
+    };
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        if (env.echo_queue[i].tick < 0) continue;
+        float left_energy = 0.0f;
+        float right_energy = 0.0f;
+        for (int bin = 0; bin < BAT_FREQ_BINS; bin++) {
+            left_energy += env.echo_queue[i].energy[0][bin];
+            right_energy += env.echo_queue[i].energy[1][bin];
+        }
+        if (left_energy > 0.0f) {
+            probe.left_energy += left_energy;
+            probe.left_tick = env.echo_queue[i].tick;
+        }
+        if (right_energy > 0.0f) {
+            probe.right_energy += right_energy;
+            probe.right_tick = env.echo_queue[i].tick;
+        }
+    }
+
+    free_allocated(&env);
+    return probe;
+}
+
+static int test_directional_echo_arrival_and_gain_by_side(void) {
+    const float left_sources[3][2] = {
+        {0.0f, -18.0f},
+        {18.0f, -18.0f},
+        {24.0f, -8.0f},
+    };
+    const float right_sources[3][2] = {
+        {0.0f, 18.0f},
+        {18.0f, 18.0f},
+        {24.0f, 8.0f},
+    };
+
+    for (int i = 0; i < 3; i++) {
+        BatEchoProbe left = test_probe_echo_from_relative_source(
+            left_sources[i][0], left_sources[i][1]);
+        ASSERT_TRUE(left.left_tick > 0.0f);
+        ASSERT_TRUE(left.right_tick > 0.0f);
+        ASSERT_TRUE(left.left_tick < left.right_tick);
+        ASSERT_TRUE(left.left_energy > left.right_energy);
+
+        BatEchoProbe right = test_probe_echo_from_relative_source(
+            right_sources[i][0], right_sources[i][1]);
+        ASSERT_TRUE(right.left_tick > 0.0f);
+        ASSERT_TRUE(right.right_tick > 0.0f);
+        ASSERT_TRUE(right.right_tick < right.left_tick);
+        ASSERT_TRUE(right.right_energy > right.left_energy);
+    }
+
+    BatEchoProbe front = test_probe_echo_from_relative_source(18.0f, 0.0f);
+    ASSERT_TRUE(front.left_tick > 0.0f);
+    ASSERT_TRUE(front.right_tick > 0.0f);
+    ASSERT_FLOAT_NEAR(front.left_tick, front.right_tick, 0.0001f);
+    ASSERT_FLOAT_NEAR(front.left_energy, front.right_energy, 0.0001f);
+
+    return 0;
+}
+
+static int test_ear_directivity_gains_control_echo_energy(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.bat_x = 20.0f;
+    env.bat_y = 20.0f;
+    env.bat_heading = 0.0f;
+    env.bug_vx = 0.0f;
+    env.bug_vy = 0.0f;
+    env.ear_rear_gain = 0.0f;
+    env.ear_front_gain = 1.0f;
+    env.ear_side_gain = 0.0f;
+    env.tick = 0;
+
+    ChirpEvent chirp = {
+        .x = env.bat_x,
+        .y = env.bat_y,
+        .start_freq = 1.0f,
+        .end_freq = 1.0f,
+        .duration = bat_chirp_duration_seconds(0.0f),
+        .birth_tick = 0,
+        .active = 1,
+    };
+
+    bat_clear_echo_queue(&env);
+    bat_schedule_echo(&env, &chirp, 0.0f, 1.0f,
+        env.bat_x + 16.0f, env.bat_y, 0.0f, 0.0f, 8.0f, BAT_ECHO_BUG);
+    float front_energy = 0.0f;
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        for (int ear = 0; ear < 2; ear++) {
+            for (int bin = 0; bin < BAT_FREQ_BINS; bin++) {
+                front_energy += env.echo_queue[i].energy[ear][bin];
+            }
+        }
+    }
+
+    bat_clear_echo_queue(&env);
+    bat_schedule_echo(&env, &chirp, 0.0f, 1.0f,
+        env.bat_x, env.bat_y - 16.0f, 0.0f, 0.0f, 8.0f, BAT_ECHO_BUG);
+    float side_energy = 0.0f;
+    for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
+        for (int ear = 0; ear < 2; ear++) {
+            for (int bin = 0; bin < BAT_FREQ_BINS; bin++) {
+                side_energy += env.echo_queue[i].energy[ear][bin];
+            }
+        }
+    }
+
+    ASSERT_TRUE(front_energy > 0.0f);
+    ASSERT_FLOAT_NEAR(side_energy, 0.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
 static int test_default_sound_speed_allows_one_tick_interaural_delay(void) {
     Bat env = {
         .num_agents = 1,
@@ -436,6 +594,9 @@ static int test_default_sound_speed_allows_one_tick_interaural_delay(void) {
         .num_obstacles = 0,
         .bat_radius = 2.0f,
         .ear_separation_scale = 0.75f,
+        .ear_rear_gain = 0.20f,
+        .ear_front_gain = 0.55f,
+        .ear_side_gain = 0.35f,
         .bug_radius = 1.5f,
         .bat_max_speed = 12.0f,
         .bat_accel = 30.0f,
@@ -1384,6 +1545,9 @@ static int test_default_echo_range_reaches_curriculum_max_bug_distance(void) {
         .bat_turn_rate = 9.424778f,
         .bug_speed = 4.0f,
         .max_echo_range = 128.0f,
+        .ear_rear_gain = 0.20f,
+        .ear_front_gain = 0.55f,
+        .ear_side_gain = 0.35f,
         .sound_speed = 180.0f,
         .curriculum_max_bug_distance = 56.0f,
         .rng = 1,
@@ -1799,6 +1963,8 @@ int main(void) {
     if (test_perf_composes_base_perf_curriculum_difficulty_and_chirp_perf()) return 1;
     if (test_chirp_tempo_logs_far_and_near_rates()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
+    if (test_directional_echo_arrival_and_gain_by_side()) return 1;
+    if (test_ear_directivity_gains_control_echo_energy()) return 1;
     if (test_default_sound_speed_allows_one_tick_interaural_delay()) return 1;
     if (test_echo_scheduling_uses_tick_bucket_accumulator()) return 1;
     if (test_ear_separation_scale_controls_arrival_gap()) return 1;

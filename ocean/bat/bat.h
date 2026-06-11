@@ -199,6 +199,9 @@ typedef struct Bat {
     float bat_turn_velocity;
     float bat_radius;
     float ear_separation_scale;
+    float ear_rear_gain;
+    float ear_front_gain;
+    float ear_side_gain;
     float bat_max_speed;
     float bat_min_speed;
     float bat_accel;
@@ -878,8 +881,16 @@ static inline void bat_schedule_echo(Bat* env, ChirpEvent* chirp,
     float left_dir_y = -ly;
     float right_dir_x = lx;
     float right_dir_y = ly;
-    float left_gain = bat_clampf(0.75f + 0.25f * (ux * left_dir_x + uy * left_dir_y), 0.1f, 1.0f);
-    float right_gain = bat_clampf(0.75f + 0.25f * (ux * right_dir_x + uy * right_dir_y), 0.1f, 1.0f);
+    float front_gain = bat_clampf(forward, 0.0f, 1.0f);
+    float left_side_gain = bat_clampf(ux * left_dir_x + uy * left_dir_y, 0.0f, 1.0f);
+    float right_side_gain = bat_clampf(ux * right_dir_x + uy * right_dir_y, 0.0f, 1.0f);
+    front_gain *= front_gain;
+    left_side_gain *= left_side_gain;
+    right_side_gain *= right_side_gain;
+    float left_gain = env->ear_rear_gain + env->ear_front_gain * front_gain +
+        env->ear_side_gain * left_side_gain;
+    float right_gain = env->ear_rear_gain + env->ear_front_gain * front_gain +
+        env->ear_side_gain * right_side_gain;
 
     float source_path = bat_dist(chirp->x, chirp->y, rx, ry);
     float left_path = source_path + bat_dist(rx, ry, left_ear_x, left_ear_y);

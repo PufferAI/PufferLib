@@ -15,6 +15,9 @@ void my_init(Env* env, Dict* kwargs) {
     env->num_obstacles = dict_get(kwargs, "num_obstacles")->value;
     env->bat_radius = dict_get(kwargs, "bat_radius")->value;
     env->ear_separation_scale = dict_get(kwargs, "ear_separation_scale")->value;
+    env->ear_rear_gain = dict_get(kwargs, "ear_rear_gain")->value;
+    env->ear_front_gain = dict_get(kwargs, "ear_front_gain")->value;
+    env->ear_side_gain = dict_get(kwargs, "ear_side_gain")->value;
     env->bug_radius = dict_get(kwargs, "bug_radius")->value;
     env->bat_max_speed = dict_get(kwargs, "bat_max_speed")->value;
     env->bat_min_speed = dict_get(kwargs, "bat_min_speed")->value;
