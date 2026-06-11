@@ -4,6 +4,7 @@
 #define ACT_SIZES {26}
 #define OBS_TENSOR_T ByteTensor
 
+#define MY_STATE
 #define Env MMO
 #include "vecenv.h"
 
@@ -28,6 +29,55 @@ void my_init(Env* env, Dict* kwargs) {
     env->reward_market = dict_get(kwargs, "reward_market")->value;
     env->reward_death = dict_get(kwargs, "reward_death")->value;
     init(env);
+}
+
+#define NMMO3_STATE_COLS 10
+
+// Exports terrain, packed entity rows, and the tick counter for rendering
+// and telemetry. Rows are players first, then enemies:
+// (kind, r, c, hp, hp_max, comb_lvl, prof_lvl, dir, anim, in_combat),
+// kind 0 = player, 1 = enemy. Terrain is allocated once in init and only
+// rewritten by c_reset, so it is exported zero-copy; positions and tick
+// live in scratch valid until the next my_state call and are copied by
+// the binding layer.
+int my_state(void* e, StateField* fields, int max_fields) {
+    if (max_fields < 3) {
+        return 0;
+    }
+    MMO* env = (MMO*)e;
+    int num_entities = env->num_agents + env->num_enemies;
+
+    static int* positions = NULL;
+    static int positions_cap = 0;
+    if (num_entities * NMMO3_STATE_COLS > positions_cap) {
+        positions_cap = num_entities * NMMO3_STATE_COLS;
+        positions = realloc(positions, positions_cap * sizeof(int));
+    }
+    for (int i = 0; i < num_entities; i++) {
+        int kind = i >= env->num_agents;
+        Entity* ent = kind ? &env->enemies[i - env->num_agents] : &env->players[i];
+        int* row = &positions[i * NMMO3_STATE_COLS];
+        row[0] = kind;
+        row[1] = ent->r;
+        row[2] = ent->c;
+        row[3] = ent->hp;
+        row[4] = ent->hp_max;
+        row[5] = ent->comb_lvl;
+        row[6] = ent->prof_lvl;
+        row[7] = ent->dir;
+        row[8] = ent->anim;
+        row[9] = ent->in_combat;
+    }
+
+    static int tick;
+    tick = env->tick;
+
+    fields[0] = (StateField){"terrain", env->terrain, "int8", 2,
+        {env->height, env->width}, PUFF_STATE_ZERO_COPY};
+    fields[1] = (StateField){"positions", positions, "int32", 2,
+        {num_entities, NMMO3_STATE_COLS}, 0};
+    fields[2] = (StateField){"tick", &tick, "int32", 1, {1}, 0};
+    return 3;
 }
 
 void my_log(Log* log, Dict* out) {
