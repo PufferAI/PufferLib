@@ -8,7 +8,7 @@
 #include "vecenv.h"
 
 void my_init(Env* env, Dict* kwargs) {
-    env->num_agents = 1;
+    env->num_agents = BAT_NUM_AGENTS;
     env->frameskip = dict_get(kwargs, "frameskip")->value;
     env->ear_separation_scale = dict_get(kwargs, "ear_separation_scale")->value;
     env->ear_rear_gain = dict_get(kwargs, "ear_rear_gain")->value;
@@ -18,7 +18,6 @@ void my_init(Env* env, Dict* kwargs) {
     env->bat_min_speed = dict_get(kwargs, "bat_min_speed")->value;
     env->bat_accel = dict_get(kwargs, "bat_accel")->value;
     env->bat_turn_rate = dict_get(kwargs, "bat_turn_rate")->value;
-    env->max_steps = dict_get(kwargs, "max_steps")->value;
     env->render_target_fps = dict_get(kwargs, "render_target_fps")->value;
     env->record_video = dict_get(kwargs, "record_video")->value;
     env->record_video_fps = dict_get(kwargs, "record_video_fps")->value;
@@ -28,14 +27,9 @@ void my_init(Env* env, Dict* kwargs) {
     env->curriculum_obstacle_step = dict_get(kwargs, "curriculum_obstacle_step")->value;
     env->curriculum_successes_per_level = dict_get(kwargs, "curriculum_successes_per_level")->value;
     env->curriculum_start_bug_distance = dict_get(kwargs, "curriculum_start_bug_distance")->value;
-    env->inbound_bug_speed_multiplier = dict_get(kwargs, "inbound_bug_speed_multiplier")->value;
-    env->inbound_heading_noise_degrees = dict_get(kwargs, "inbound_heading_noise_degrees")->value;
-    env->max_echo_range = dict_get(kwargs, "max_echo_range")->value;
     env->sound_speed = dict_get(kwargs, "sound_speed")->value;
     env->reflector_strength = dict_get(kwargs, "reflector_strength")->value;
-    env->max_chirp_age_ticks = dict_get(kwargs, "max_chirp_age_ticks")->value;
     env->chirp_cooldown_ticks = dict_get(kwargs, "chirp_cooldown_ticks")->value;
-    env->max_chirps_per_episode = dict_get(kwargs, "max_chirps_per_episode")->value;
     env->chirp_efficiency_reward = dict_get(kwargs, "chirp_efficiency_reward")->value;
     env->valid_chirp_reward = dict_get(kwargs, "valid_chirp_reward")->value;
     env->early_chirp_penalty = dict_get(kwargs, "early_chirp_penalty")->value;

@@ -15,13 +15,12 @@ static char* trim(char* s) {
 
 static void set_demo_defaults(Bat* env) {
     *env = (Bat){
-        .num_agents = 1,
+        .num_agents = BAT_NUM_AGENTS,
         .frameskip = 1,
         .bat_max_speed = 15.498233877318418f,
         .bat_min_speed = 2.6389946132676654f,
         .bat_accel = 53.02330161128345f,
         .bat_turn_rate = 8.371655963408276f,
-        .max_steps = 512,
         .render_target_fps = 60,
         .record_video = 0,
         .record_video_fps = 30,
@@ -39,11 +38,6 @@ static void set_demo_defaults(Bat* env) {
         .ear_front_gain = 0.6419214149115183f,
         .ear_side_gain = 0.28043867572747055f,
         .early_chirp_penalty = 0.006f,
-        .inbound_bug_speed_multiplier = 1.75f,
-        .inbound_heading_noise_degrees = 18.0f,
-        .max_chirp_age_ticks = 30,
-        .max_chirps_per_episode = 15,
-        .max_echo_range = 128.0f,
         .progress_reward_scale = 0.12f,
         .reflector_strength = 0.6f,
         .sound_speed = 180.0f,
@@ -62,7 +56,6 @@ static void apply_env_config_value(Bat* env, const char* key, float value) {
     else if (strcmp(key, "bat_min_speed") == 0) env->bat_min_speed = value;
     else if (strcmp(key, "bat_accel") == 0) env->bat_accel = value;
     else if (strcmp(key, "bat_turn_rate") == 0) env->bat_turn_rate = value;
-    else if (strcmp(key, "max_steps") == 0) env->max_steps = (int)value;
     else if (strcmp(key, "render_target_fps") == 0) env->render_target_fps = (int)value;
     else if (strcmp(key, "record_video") == 0) env->record_video = (int)value;
     else if (strcmp(key, "record_video_fps") == 0) env->record_video_fps = (int)value;
@@ -80,11 +73,6 @@ static void apply_env_config_value(Bat* env, const char* key, float value) {
     else if (strcmp(key, "ear_front_gain") == 0) env->ear_front_gain = value;
     else if (strcmp(key, "ear_side_gain") == 0) env->ear_side_gain = value;
     else if (strcmp(key, "early_chirp_penalty") == 0) env->early_chirp_penalty = value;
-    else if (strcmp(key, "inbound_bug_speed_multiplier") == 0) env->inbound_bug_speed_multiplier = value;
-    else if (strcmp(key, "inbound_heading_noise_degrees") == 0) env->inbound_heading_noise_degrees = value;
-    else if (strcmp(key, "max_chirp_age_ticks") == 0) env->max_chirp_age_ticks = (int)value;
-    else if (strcmp(key, "max_chirps_per_episode") == 0) env->max_chirps_per_episode = (int)value;
-    else if (strcmp(key, "max_echo_range") == 0) env->max_echo_range = value;
     else if (strcmp(key, "progress_reward_scale") == 0) env->progress_reward_scale = value;
     else if (strcmp(key, "reflector_strength") == 0) env->reflector_strength = value;
     else if (strcmp(key, "sound_speed") == 0) env->sound_speed = value;

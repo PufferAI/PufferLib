@@ -246,7 +246,7 @@ Observation layout:
 8. `chirps_used_norm = chirps_used / chirp_budget`
 9. `forward_speed_norm`
 10. `turn_rate_norm`
-11. `timer_norm = elapsed_steps / max_steps`, clamped to `[0, 1]`
+11. `timer_norm = elapsed_steps / BAT_MAX_STEPS`, clamped to `[0, 1]`
 
 Initial observation size:
 
@@ -255,10 +255,8 @@ Initial observation size:
 Timer normalization:
 
 - The timer starts at `0.0` on reset.
-- With the default `max_steps = 512`, after step `N` the observation is
-  `N * BAT_DEFAULT_MAX_STEPS_INV`, where
-  `BAT_DEFAULT_MAX_STEPS_INV = 1.0 / 512.0`.
-- Non-default `max_steps` values use `N / max_steps`.
+- With `BAT_MAX_STEPS = 512`, after step `N` the observation is
+  `N / 512.0`.
 - The observed timer is clamped to `[0.0, 1.0]`.
 
 Echo bins:
@@ -281,7 +279,7 @@ Echo timing:
 - On each tick, all events arriving in that tick window are summed into the
   corresponding ear frequency bins.
 - Multiple reflectors can contribute to the same bin on the same tick.
-- Echoes beyond `max_echo_range` are ignored.
+- Echoes beyond `BAT_MAX_ECHO_RANGE` are ignored.
 - Implementation should use a fixed future-tick accumulator, not a full active
   event scan every env step. The current design buckets each echo by
   `ceil(receive_tick)` into `BAT_ECHO_QUEUE_TICKS = 256`, sums by
@@ -373,11 +371,11 @@ Progress reward:
     chirp is emitted before the previous chirp's expected bug reflection has
     returned
   - `reward += chirp_efficiency_reward * chirp_efficiency` on catch
-  - `reward += bug_echo_reward_scale * echo_path_reduction / max_echo_range`
+  - `reward += bug_echo_reward_scale * echo_path_reduction / BAT_MAX_ECHO_RANGE`
     when a returning bug echo indicates the bug is closer than the previous bug
     echo and the bat has moved enough since that previous echo
   - `reward -= bug_echo_reward_scale * bug_echo_farther_penalty_scale *
-    echo_path_increase / max_echo_range` when a later moved-enough bug echo is
+    echo_path_increase / BAT_MAX_ECHO_RANGE` when a later moved-enough bug echo is
     farther away
 - Default starting values:
   - `progress_reward_scale = 0.05`
@@ -397,7 +395,7 @@ Termination:
 - Success: bat catches bug.
 - Failure: bat collides with a wall or obstacle.
 - Failure: bat attempts to chirp after exhausting the chirp budget.
-- Timeout: `tick >= max_steps`.
+- Timeout: `tick >= BAT_MAX_STEPS`.
 
 Reset:
 
@@ -490,10 +488,7 @@ Config knobs:
 - `bat_min_speed`
 - `bat_accel`
 - `bat_turn_rate`
-- `max_steps`
-- `max_echo_range`
 - `sound_speed`
-- `max_chirps_per_episode`
 - `chirp_cooldown_ticks`
 - `chirp_freq_bins`
 - `chirp_duration_bins`

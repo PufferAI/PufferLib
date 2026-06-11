@@ -421,7 +421,7 @@ half distance, half clutter.
 Current chirp handling:
 
 ```text
-max_chirps_per_episode = 15
+BAT_MAX_CHIRPS_PER_EPISODE = 15
 chirp_budget does not decrease with curriculum level
 chirp_budget_difficulty is removed from curriculum difficulty
 ```
