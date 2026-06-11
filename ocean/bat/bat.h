@@ -399,20 +399,9 @@ static inline float bat_chirp_ring_radius(float age_seconds, float slice,
     return sound_speed * ring_age;
 }
 
-static inline int bat_chirp_slice_count(float duration_seconds) {
-    int slices = (int)ceilf(duration_seconds / BAT_TICK_RATE);
-    return slices;
-}
-
-static inline float bat_chirp_slice_seconds(ChirpEvent* chirp, int slice_idx) {
-    int slices = chirp->slice_count > 0 ? chirp->slice_count :
-        bat_chirp_slice_count(chirp->duration);
-    if (slice_idx >= slices) slice_idx = slices - 1;
-    return ((slice_idx + 0.5f) / (float)slices) * chirp->duration;
-}
-
 static inline float bat_chirp_slice_ticks(ChirpEvent* chirp, int slice_idx) {
-    return bat_chirp_slice_seconds(chirp, slice_idx) / BAT_TICK_RATE;
+    return ((slice_idx + 0.5f) / (float)chirp->slice_count) *
+        chirp->duration / BAT_TICK_RATE;
 }
 
 static inline void bat_chirp_source_for_slice(ChirpEvent* chirp, int slice_idx,
@@ -430,8 +419,7 @@ static inline void bat_chirp_source_for_slice(ChirpEvent* chirp, int slice_idx,
 
 static inline void bat_chirp_source_for_fraction(ChirpEvent* chirp, float slice,
         float* source_x, float* source_y) {
-    int slices = chirp->slice_count > 0 ? chirp->slice_count :
-        bat_chirp_slice_count(chirp->duration);
+    int slices = chirp->slice_count;
     int slice_idx = (int)floorf(slice * (float)slices);
     if (slice_idx >= slices) slice_idx = slices - 1;
     bat_chirp_source_for_slice(chirp, slice_idx, source_x, source_y);
@@ -439,11 +427,6 @@ static inline void bat_chirp_source_for_fraction(ChirpEvent* chirp, float slice,
 
 static inline float bat_echo_time_seconds(float distance, float sound_speed) {
     return 2.0f * distance / sound_speed;
-}
-
-static inline bool bat_echo_is_arriving(float echo_time, float chirp_age,
-        float window) {
-    return fabsf(chirp_age - echo_time) <= window;
 }
 
 static inline float bat_chirp_age_norm_denominator(Bat* env) {
@@ -468,16 +451,14 @@ static inline float bat_norm_bin(int idx, int count) {
     return idx / (float)(count - 1);
 }
 
-static inline float bat_len(float x, float y) {
-    return sqrtf(x*x + y*y);
-}
-
 static inline float bat_dist(float ax, float ay, float bx, float by) {
-    return bat_len(bx - ax, by - ay);
+    float dx = bx - ax;
+    float dy = by - ay;
+    return sqrtf(dx*dx + dy*dy);
 }
 
 static inline void bat_norm_vec(float x, float y, float* ox, float* oy) {
-    float l = bat_len(x, y);
+    float l = sqrtf(x*x + y*y);
     if (l <= 0.000001f) {
         *ox = 1.0f;
         *oy = 0.0f;
@@ -602,10 +583,6 @@ static inline float bat_curriculum_bug_maneuver_frequency(Bat* env) {
     return env->bug_maneuver_frequency * bat_clampf(multiplier, 1.0f, 2.5f);
 }
 
-static inline int bat_curriculum_chirp_budget(Bat* env) {
-    return env->max_chirps_per_episode;
-}
-
 static inline float bat_chirps_used_ratio(Bat* env) {
     return bat_clampf(env->chirps_emitted_episode / (float)env->chirp_budget, 0.0f, 1.0f);
 }
@@ -617,10 +594,6 @@ static inline float bat_chirp_efficiency(Bat* env) {
 static inline float bat_chirp_perf(Bat* env) {
     float raw = 1.0f - env->chirps_emitted_episode / BAT_CHIRP_PERF_REFERENCE_CHIRPS;
     return bat_clampf(raw, BAT_CHIRP_PERF_FLOOR, 1.0f);
-}
-
-static inline float bat_min_forward_speed(Bat* env) {
-    return env->bat_min_speed;
 }
 
 static inline float bat_norm_range(float value, float lo, float hi) {
@@ -638,11 +611,6 @@ static inline float bat_curriculum_distance_difficulty(Bat* env) {
 static inline float bat_curriculum_obstacle_difficulty(Bat* env) {
     return bat_norm_range((float)env->num_obstacles,
         (float)env->curriculum_start_obstacles, (float)env->curriculum_max_obstacles);
-}
-
-static inline float bat_curriculum_chirp_budget_difficulty(Bat* env) {
-    (void)env;
-    return 0.0f;
 }
 
 static inline float bat_curriculum_motion_difficulty(Bat* env) {
@@ -864,7 +832,6 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     float curriculum_difficulty = bat_curriculum_difficulty(env);
     float distance_difficulty = bat_curriculum_distance_difficulty(env);
     float obstacle_difficulty = bat_curriculum_obstacle_difficulty(env);
-    float chirp_budget_difficulty = bat_curriculum_chirp_budget_difficulty(env);
     float motion_difficulty = bat_curriculum_motion_difficulty(env);
     float budget_difficulty = bat_budget_difficulty(env);
     float chirp_efficiency = bat_chirp_efficiency(env);
@@ -882,7 +849,7 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.curriculum_perf += success * curriculum_difficulty;
     env->log.curriculum_distance_difficulty += distance_difficulty;
     env->log.curriculum_obstacle_difficulty += obstacle_difficulty;
-    env->log.curriculum_chirp_budget_difficulty += chirp_budget_difficulty;
+    env->log.curriculum_chirp_budget_difficulty += 0.0f;
     env->log.curriculum_motion_difficulty += motion_difficulty;
     env->log.budget_difficulty += budget_difficulty;
     env->log.num_obstacles += env->num_obstacles;
@@ -1110,8 +1077,7 @@ static inline void bat_schedule_obstacle_echoes(Bat* env, ChirpEvent* chirp,
 
 static inline void bat_schedule_chirp_slice_echoes(Bat* env, ChirpEvent* chirp,
         int slice_idx) {
-    int slices = chirp->slice_count > 0 ? chirp->slice_count :
-        bat_chirp_slice_count(chirp->duration);
+    int slices = chirp->slice_count;
     if (slice_idx >= slices || slice_idx >= BAT_MAX_CHIRP_SLICES) {
         return;
     }
@@ -1143,9 +1109,7 @@ static inline void bat_schedule_chirp_slice_echoes(Bat* env, ChirpEvent* chirp,
 }
 
 static inline void bat_schedule_chirp_echoes(Bat* env, ChirpEvent* chirp) {
-    int slices = chirp->slice_count > 0 ? chirp->slice_count :
-        bat_chirp_slice_count(chirp->duration);
-    chirp->slice_count = slices;
+    int slices = chirp->slice_count;
     while (chirp->slices_scheduled < slices) {
         int slice_idx = chirp->slices_scheduled;
         bat_schedule_chirp_slice_echoes(env, chirp, slice_idx);
@@ -1157,8 +1121,7 @@ static inline void bat_schedule_due_chirp_slices(Bat* env) {
     for (int i = 0; i < BAT_CHIRP_HISTORY; i++) {
         ChirpEvent* chirp = &env->chirps[i];
         if (!chirp->active) continue;
-        int slices = chirp->slice_count > 0 ? chirp->slice_count :
-            bat_chirp_slice_count(chirp->duration);
+        int slices = chirp->slice_count;
 
         float age_ticks = (float)(env->tick - chirp->birth_tick);
         while (chirp->slices_scheduled < slices) {
@@ -1235,7 +1198,7 @@ static inline void bat_reset_episode(Bat* env) {
     env->tick = 0;
     env->bat_turn_velocity = 0.0f;
     env->bat_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
-    float initial_speed = bat_min_forward_speed(env);
+    float initial_speed = env->bat_min_speed;
     env->bat_vx = cosf(env->bat_heading) * initial_speed;
     env->bat_vy = sinf(env->bat_heading) * initial_speed;
     if (env->curriculum_enabled && env->curriculum_level < env->curriculum_initial_level) {
@@ -1257,7 +1220,7 @@ static inline void bat_reset_episode(Bat* env) {
     memset(env->chirps, 0, sizeof(env->chirps));
     env->chirp_head = 0;
     bat_clear_echo_queue(env);
-    env->chirp_budget = bat_curriculum_chirp_budget(env);
+    env->chirp_budget = env->max_chirps_per_episode;
     env->tick_bug_echo_energy = 0.0f;
     env->tick_bug_echo_path = -1.0f;
     env->last_bug_echo_path = -1.0f;
@@ -1391,7 +1354,7 @@ static inline void bat_update_motion(Bat* env, float dt) {
     float fx = cosf(env->bat_heading);
     float fy = sinf(env->bat_heading);
     float speed = env->bat_vx * fx + env->bat_vy * fy;
-    float min_speed = bat_min_forward_speed(env);
+    float min_speed = env->bat_min_speed;
     if (speed < min_speed) speed = min_speed;
 
     if (move == BAT_THRUST_FORWARD) speed += env->bat_accel * dt;
@@ -1444,7 +1407,7 @@ static inline bool bat_try_emit_chirp(Bat* env) {
     chirp->end_freq = env->last_chirp_end_freq;
     chirp->duration = bat_chirp_duration_seconds(env->last_chirp_duration);
     chirp->birth_tick = env->tick;
-    chirp->slice_count = bat_chirp_slice_count(chirp->duration);
+    chirp->slice_count = (int)ceilf(chirp->duration / BAT_TICK_RATE);
     chirp->slices_scheduled = 0;
     for (int i = 0; i < BAT_MAX_CHIRP_SLICES; i++) {
         chirp->source_x[i] = chirp->x;
@@ -1632,7 +1595,8 @@ static inline void bat_draw_echo_flash(Bat* env, ChirpEvent* chirp,
     float age_seconds = (env->tick - chirp->birth_tick) * BAT_TICK_RATE;
     float distance = bat_dist(chirp->x, chirp->y, rx, ry);
     float echo_time = bat_echo_time_seconds(distance, env->sound_speed);
-    if (!bat_echo_is_arriving(echo_time, age_seconds, 0.025f)) return;
+    bool echo_arriving_now = fabsf(age_seconds - echo_time) <= 0.025f;
+    if (!echo_arriving_now) return;
 
     float ux, uy;
     bat_norm_vec(rx - chirp->x, ry - chirp->y, &ux, &uy);

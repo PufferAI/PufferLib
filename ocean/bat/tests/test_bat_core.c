@@ -303,7 +303,6 @@ static int test_curriculum_perf_logs_distance_and_obstacle_difficulty_components
 
     ASSERT_FLOAT_NEAR(bat_curriculum_distance_difficulty(&env), 0.5000000f, 0.0001f);
     ASSERT_FLOAT_NEAR(bat_curriculum_obstacle_difficulty(&env), 0.5000000f, 0.0001f);
-    ASSERT_FLOAT_NEAR(bat_curriculum_chirp_budget_difficulty(&env), 0.0000000f, 0.0001f);
     ASSERT_FLOAT_NEAR(bat_curriculum_motion_difficulty(&env), 0.0000000f, 0.0001f);
     ASSERT_FLOAT_NEAR(bat_curriculum_difficulty(&env), 0.5000000f, 0.0001f);
     add_log(&env, 1.0f, 0.0f, 0.0f);
@@ -1123,8 +1122,8 @@ static int test_reflection_arrives_at_two_way_travel_time(void) {
     float echo_time = bat_echo_time_seconds(distance, sound_speed);
 
     ASSERT_FLOAT_NEAR(echo_time, 0.5f, 0.0001f);
-    ASSERT_TRUE(bat_echo_is_arriving(echo_time, echo_time + 0.005f, 0.02f));
-    ASSERT_TRUE(!bat_echo_is_arriving(echo_time, echo_time + 0.050f, 0.02f));
+    ASSERT_TRUE(fabsf((echo_time + 0.005f) - echo_time) <= 0.02f);
+    ASSERT_TRUE(fabsf((echo_time + 0.050f) - echo_time) > 0.02f);
 
     return 0;
 }
@@ -1467,6 +1466,7 @@ static int test_default_echo_range_reaches_curriculum_max_bug_distance(void) {
         .birth_tick = env.tick,
         .active = 1,
     };
+    chirp.slice_count = (int)ceilf(chirp.duration / BAT_TICK_RATE);
     bat_schedule_chirp_echoes(&env, &chirp);
 
     float bug_energy = 0.0f;
