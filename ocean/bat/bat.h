@@ -315,8 +315,6 @@ static inline float bat_clampf(float v, float lo, float hi) {
 
 static inline int bat_action_index(float v, int n) {
     int idx = (int)v;
-    if (idx < 0) return 0;
-    if (idx >= n) return n - 1;
     return idx;
 }
 
@@ -329,32 +327,23 @@ static inline bool bat_record_video_enabled(Bat* env) {
 }
 
 static inline int bat_record_video_fps(Bat* env) {
-    int fps = env->record_video_fps > 0 ? env->record_video_fps : 30;
-    if (fps < 1) fps = 1;
-    if (fps > 120) fps = 120;
-    return fps;
+    return env->record_video_fps;
 }
 
 static inline int bat_record_video_seconds(Bat* env) {
-    int seconds = env->record_video_seconds > 0 ? env->record_video_seconds : 20;
-    if (seconds < 1) seconds = 1;
-    if (seconds > 600) seconds = 600;
-    return seconds;
+    return env->record_video_seconds;
 }
 
 static inline int bat_record_frame_samples(int fps) {
-    if (fps <= 0) fps = 30;
     return BAT_AUDIO_SAMPLE_RATE / fps;
 }
 
 static inline int bat_record_max_frames(int fps, int seconds) {
-    if (fps <= 0) fps = 30;
-    if (seconds <= 0) seconds = 20;
     return fps * seconds;
 }
 
 static inline float bat_chirp_duration_seconds(float duration_norm) {
-    return 0.04f + 0.18f * bat_clampf(duration_norm, 0.0f, 1.0f);
+    return 0.04f + 0.18f * duration_norm;
 }
 
 static inline float bat_chirp_audio_duration_at_fps(float duration_norm, int fps) {
@@ -370,16 +359,13 @@ static inline float bat_chirp_audio_duration_seconds(Bat* env, float duration_no
 }
 
 static inline float bat_chirp_audio_frequency_hz(float freq_norm) {
-    return BAT_AUDIO_MIN_HZ + bat_clampf(freq_norm, 0.0f, 1.0f)
+    return BAT_AUDIO_MIN_HZ + freq_norm
         * (BAT_AUDIO_MAX_HZ - BAT_AUDIO_MIN_HZ);
 }
 
 static inline float bat_chirp_audio_instant_hz(float start_norm, float end_norm,
         float duration_seconds, float t_seconds) {
-    if (duration_seconds <= 0.0f) {
-        return bat_chirp_audio_frequency_hz(start_norm);
-    }
-    float t = bat_clampf(t_seconds / duration_seconds, 0.0f, 1.0f);
+    float t = t_seconds / duration_seconds;
     float start_hz = bat_chirp_audio_frequency_hz(start_norm);
     float end_hz = bat_chirp_audio_frequency_hz(end_norm);
     return start_hz + t * (end_hz - start_hz);
@@ -395,9 +381,8 @@ static inline float bat_chirp_audio_envelope(float t_norm) {
 
 static inline float bat_chirp_audio_sample_f32(float start_norm, float end_norm,
         float duration_seconds, int sample_index, int sample_rate) {
-    if (duration_seconds <= 0.0f || sample_index < 0 || sample_rate <= 0) return 0.0f;
     float t = sample_index / (float)sample_rate;
-    if (t < 0.0f || t >= duration_seconds) return 0.0f;
+    if (t >= duration_seconds) return 0.0f;
 
     float start_hz = bat_chirp_audio_frequency_hz(start_norm);
     float end_hz = bat_chirp_audio_frequency_hz(end_norm);
@@ -447,7 +432,7 @@ static inline void bat_chirp_source_for_fraction(ChirpEvent* chirp, float slice,
         float* source_x, float* source_y) {
     int slices = chirp->slice_count > 0 ? chirp->slice_count :
         bat_chirp_slice_count(chirp->duration);
-    int slice_idx = (int)floorf(bat_clampf(slice, 0.0f, 1.0f) * (float)slices);
+    int slice_idx = (int)floorf(slice * (float)slices);
     if (slice_idx >= slices) slice_idx = slices - 1;
     bat_chirp_source_for_slice(chirp, slice_idx, source_x, source_y);
 }
@@ -468,13 +453,13 @@ static inline float bat_chirp_age_norm_denominator(Bat* env) {
 }
 
 static inline BatColor bat_freq_color(float freq_norm, float alpha_norm) {
-    float f = bat_clampf(freq_norm, 0.0f, 1.0f);
+    float f = freq_norm;
     float mid = 1.0f - fabsf(2.0f * f - 1.0f);
     BatColor color = {
         .r = (unsigned char)(255.0f * (1.0f - f) + 45.0f * f),
         .g = (unsigned char)(45.0f + 180.0f * mid),
         .b = (unsigned char)(45.0f * (1.0f - f) + 255.0f * f),
-        .a = (unsigned char)(255.0f * bat_clampf(alpha_norm, 0.0f, 1.0f)),
+        .a = (unsigned char)(255.0f * alpha_norm),
     };
     return color;
 }
@@ -556,12 +541,11 @@ static inline void bat_sample_spawns(Bat* env) {
 
 static inline int bat_curriculum_obstacles(Bat* env) {
     if (!env->curriculum_enabled) return env->num_obstacles;
-    int step = env->curriculum_obstacle_step <= 0 ? 1 : env->curriculum_obstacle_step;
+    int step = env->curriculum_obstacle_step;
     int count = env->curriculum_start_obstacles;
     if (env->curriculum_level > 0) {
         count = env->curriculum_start_obstacles + 1 + (env->curriculum_level - 1) / step;
     }
-    if (count < 0) count = 0;
     if (count > env->curriculum_max_obstacles) count = env->curriculum_max_obstacles;
     if (count > BAT_MAX_OBSTACLES) count = BAT_MAX_OBSTACLES;
     return count;
@@ -945,7 +929,7 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
 
 static inline int bat_freq_bin_index(Bat* env, float freq_norm) {
     int bins = env->freq_bins_per_ear;
-    int bin = (int)(bat_clampf(freq_norm, 0.0f, 1.0f) * bins);
+    int bin = (int)(freq_norm * bins);
     if (bin >= bins) bin = bins - 1;
     return bin;
 }
@@ -1234,7 +1218,6 @@ void compute_observations(Bat* env) {
     if (env->last_chirp_tick < 0) chirp_age = (int)ceilf(chirp_age_denom);
     env->chirp_age_ticks = chirp_age;
     int cooldown = env->chirp_cooldown_ticks - (env->tick - env->last_chirp_tick);
-    if (cooldown < 0) cooldown = 0;
     env->observations[BAT_CHIRP_AGE_OBS] = bat_clampf(chirp_age / chirp_age_denom, 0.0f, 1.0f);
     env->observations[BAT_CHIRP_COOLDOWN_OBS] = bat_clampf(cooldown / (float)env->chirp_cooldown_ticks, 0.0f, 1.0f);
     env->observations[BAT_CHIRP_START_OBS] = env->last_chirp_start_freq;
@@ -1782,7 +1765,6 @@ static inline void bat_play_chirp_audio(Bat* env) {
 
     float duration = bat_chirp_audio_duration_seconds(env, env->last_chirp_duration);
     int sample_count = (int)ceilf(duration * BAT_AUDIO_SAMPLE_RATE);
-    if (sample_count <= 0) return;
 
     short* samples = (short*)malloc(sample_count * sizeof(short));
     if (samples == NULL) return;
@@ -2031,7 +2013,6 @@ void c_render(Bat* env) {
     float hy = env->bat_y + sinf(env->bat_heading) * env->bat_radius * 2.0f;
     DrawLine((int)(env->bat_x * sx), (int)(env->bat_y * sy), (int)(hx * sx), (int)(hy * sy), WHITE);
     int cooldown = env->chirp_cooldown_ticks - (env->tick - env->last_chirp_tick);
-    if (cooldown < 0) cooldown = 0;
     DrawText(TextFormat("reward %.3f tick %d chirps %d cooldown %d ESC exits", env->rewards[0], env->tick,
         env->chirps_emitted_episode, cooldown), 10, 10, 20, RAYWHITE);
     EndDrawing();
