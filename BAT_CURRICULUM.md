@@ -19,14 +19,14 @@ With the current defaults:
 
 ```ini
 curriculum_initial_level = 1
-BAT_CURRICULUM_START_OBSTACLES = 0
-BAT_CURRICULUM_MAX_OBSTACLES = 3
+CURRICULUM_START_OBSTACLES = 0
+CURRICULUM_MAX_OBSTACLES = 3
 curriculum_obstacle_step = 8
 curriculum_start_bug_distance = 8.438
-BAT_CURRICULUM_MAX_BUG_DISTANCE = 40.0
-BAT_CURRICULUM_BUG_DISTANCE_STEP = 2.0
-BAT_CURRICULUM_INBOUND_MAX_BUG_DISTANCE = 56.0
-BAT_CURRICULUM_INBOUND_BUG_DISTANCE_STEP = 4.0
+CURRICULUM_MAX_BUG_DISTANCE = 40.0
+CURRICULUM_BUG_DISTANCE_STEP = 2.0
+CURRICULUM_INBOUND_MAX_BUG_DISTANCE = 56.0
+CURRICULUM_INBOUND_BUG_DISTANCE_STEP = 4.0
 ```
 
 At `curriculum_level ~= 5`, the bug starts around distance `28`, giving:
@@ -173,7 +173,7 @@ start_bug_distance = 8 + level * distance_step
 
 Recommendation:
 
-- Keep `BAT_CURRICULUM_BUG_DISTANCE_STEP` hardcoded at `2.0`; Bat9's best runs
+- Keep `CURRICULUM_BUG_DISTANCE_STEP` hardcoded at `2.0`; Bat9's best runs
   clustered there, and the inbound curriculum already expands later distances.
 - Log `curriculum_distance_difficulty` directly.
 
@@ -421,7 +421,7 @@ half distance, half clutter.
 Current chirp handling:
 
 ```text
-BAT_MAX_CHIRPS_PER_EPISODE = 15
+MAX_CHIRPS_PER_EPISODE = 15
 chirp_budget does not decrease with curriculum level
 chirp_budget_difficulty is removed from curriculum difficulty
 ```

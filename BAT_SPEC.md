@@ -116,7 +116,7 @@ Acoustics:
   enough artificial time-of-arrival separation for one ear to be able to hear a
   return about one tick before the other.
 - `ear_separation_scale` controls the artificial distance between ears as a
-  multiple of `BAT_RADIUS`. Keep it bounded; the implementation clamps it to
+  multiple of `AGENT_RADIUS`. Keep it bounded; the implementation clamps it to
   `[0.25, 2.0]` and the default sweep range is `[0.5, 2.0]`.
 - Every echo contribution has:
   - two-way distance from mouth/source to reflector to each ear,
@@ -130,7 +130,7 @@ Point-reflector renderer:
 - v1 should represent walls and obstacle surfaces as stationary point
   reflectors.
 - Sample each wall and obstacle edge at fixed spacing,
-  `BAT_REFLECTOR_SPACING = 8.0` world units.
+  `REFLECTOR_SPACING = 8.0` world units.
 - The bug contributes one moving circular/point reflector at its center.
 - This avoids wavefront bookkeeping while preserving range, angle, and Doppler
   learning signals.
@@ -246,7 +246,7 @@ Observation layout:
 8. `chirps_used_norm = chirps_used / chirp_budget`
 9. `forward_speed_norm`
 10. `turn_rate_norm`
-11. `timer_norm = elapsed_steps / BAT_MAX_STEPS`, clamped to `[0, 1]`
+11. `timer_norm = elapsed_steps / MAX_STEPS`, clamped to `[0, 1]`
 
 Initial observation size:
 
@@ -255,7 +255,7 @@ Initial observation size:
 Timer normalization:
 
 - The timer starts at `0.0` on reset.
-- With `BAT_MAX_STEPS = 512`, after step `N` the observation is
+- With `MAX_STEPS = 512`, after step `N` the observation is
   `N / 512.0`.
 - The observed timer is clamped to `[0.0, 1.0]`.
 
@@ -279,10 +279,10 @@ Echo timing:
 - On each tick, all events arriving in that tick window are summed into the
   corresponding ear frequency bins.
 - Multiple reflectors can contribute to the same bin on the same tick.
-- Echoes beyond `BAT_MAX_ECHO_RANGE` are ignored.
+- Echoes beyond `MAX_ECHO_RANGE` are ignored.
 - Implementation should use a fixed future-tick accumulator, not a full active
   event scan every env step. The current design buckets each echo by
-  `ceil(receive_tick)` into `BAT_ECHO_QUEUE_TICKS = 256`, sums by
+  `ceil(receive_tick)` into `ECHO_QUEUE_TICKS = 256`, sums by
   `[ear][freq_bin]`, and processes only the current tick's bucket.
 - The accumulator is an implementation detail only. It must preserve the
   observation semantics: current-tick per-ear frequency intensities are summed
@@ -348,7 +348,7 @@ Default reward model:
   - when a bug echo returns with a shorter acoustic path than the previous bug
     echo, add a small shaped reward,
   - this reward only applies if the bat has moved at least
-    `BAT_BUG_ECHO_MIN_DISPLACEMENT` since the previous scored bug echo, so a
+    `BUG_ECHO_MIN_DISPLACEMENT` since the previous scored bug echo, so a
     stationary bat cannot farm reward from the bug moving closer by itself,
   - farther bug echoes update the previous bug echo path and receive a weaker
     penalty scaled by `bug_echo_farther_penalty_scale`, default `0.10`,
@@ -365,17 +365,17 @@ Progress reward:
 - Default formula:
   - `reward += progress_reward_scale * (prev_bug_dist - bug_dist)`
   - `reward -= step_cost`
-  - `reward -= BAT_CHIRP_COST` when a chirp is emitted; this is hardcoded to
+  - `reward -= CHIRP_COST` when a chirp is emitted; this is hardcoded to
     zero for the current Bat defaults
   - `reward -= chirp_overlap_penalty * bug_echo_wait_fraction` when a valid
     chirp is emitted before the previous chirp's expected bug reflection has
     returned
   - `reward += chirp_efficiency_reward * chirp_efficiency` on catch
-  - `reward += bug_echo_reward_scale * echo_path_reduction / BAT_MAX_ECHO_RANGE`
+  - `reward += bug_echo_reward_scale * echo_path_reduction / MAX_ECHO_RANGE`
     when a returning bug echo indicates the bug is closer than the previous bug
     echo and the bat has moved enough since that previous echo
   - `reward -= bug_echo_reward_scale * bug_echo_farther_penalty_scale *
-    echo_path_increase / BAT_MAX_ECHO_RANGE` when a later moved-enough bug echo is
+    echo_path_increase / MAX_ECHO_RANGE` when a later moved-enough bug echo is
     farther away
 - Default starting values:
   - `progress_reward_scale = 0.05`
@@ -395,7 +395,7 @@ Termination:
 - Success: bat catches bug.
 - Failure: bat collides with a wall or obstacle.
 - Failure: bat attempts to chirp after exhausting the chirp budget.
-- Timeout: `tick >= BAT_MAX_STEPS`.
+- Timeout: `tick >= MAX_STEPS`.
 
 Reset:
 

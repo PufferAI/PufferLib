@@ -1,23 +1,22 @@
 #include "bat.h"
-#define OBS_SIZE BAT_OBS_SIZE
-#define NUM_ATNS BAT_NUM_ACTIONS
-#define ACT_SIZES {BAT_MOVE_ACTIONS, BAT_TURN_ACTIONS, BAT_CHIRP_FREQ_BINS, BAT_CHIRP_FREQ_BINS, BAT_CHIRP_DURATION_BINS, BAT_CHIRP_EMIT_ACTIONS}
+#define NUM_ATNS NUM_ACTIONS
+#define ACT_SIZES {MOVE_ACTIONS, TURN_ACTIONS, CHIRP_FREQ_BINS, CHIRP_FREQ_BINS, CHIRP_DURATION_BINS, CHIRP_EMIT_ACTIONS}
 #define OBS_TENSOR_T FloatTensor
 
 #define Env Bat
 #include "vecenv.h"
 
 void my_init(Env* env, Dict* kwargs) {
-    env->num_agents = BAT_NUM_AGENTS;
+    env->num_agents = NUM_AGENTS;
     env->frameskip = dict_get(kwargs, "frameskip")->value;
     env->ear_separation_scale = dict_get(kwargs, "ear_separation_scale")->value;
     env->ear_rear_gain = dict_get(kwargs, "ear_rear_gain")->value;
     env->ear_front_gain = dict_get(kwargs, "ear_front_gain")->value;
     env->ear_side_gain = dict_get(kwargs, "ear_side_gain")->value;
-    env->bat_max_speed = dict_get(kwargs, "bat_max_speed")->value;
-    env->bat_min_speed = dict_get(kwargs, "bat_min_speed")->value;
-    env->bat_accel = dict_get(kwargs, "bat_accel")->value;
-    env->bat_turn_rate = dict_get(kwargs, "bat_turn_rate")->value;
+    env->max_speed = dict_get(kwargs, "bat_max_speed")->value;
+    env->min_speed = dict_get(kwargs, "bat_min_speed")->value;
+    env->accel = dict_get(kwargs, "bat_accel")->value;
+    env->turn_rate = dict_get(kwargs, "bat_turn_rate")->value;
     env->render_target_fps = dict_get(kwargs, "render_target_fps")->value;
     env->record_video = dict_get(kwargs, "record_video")->value;
     env->record_video_fps = dict_get(kwargs, "record_video_fps")->value;

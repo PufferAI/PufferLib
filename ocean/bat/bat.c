@@ -3,7 +3,7 @@
 #include <string.h>
 #include "bat.h"
 
-#define BAT_DEMO_CONFIG_PATH "config/bat.ini"
+#define DEMO_CONFIG_PATH "config/bat.ini"
 
 static char* trim(char* s) {
     while (isspace((unsigned char)*s)) s++;
@@ -15,12 +15,12 @@ static char* trim(char* s) {
 
 static void set_demo_defaults(Bat* env) {
     *env = (Bat){
-        .num_agents = BAT_NUM_AGENTS,
+        .num_agents = NUM_AGENTS,
         .frameskip = 1,
-        .bat_max_speed = 15.498233877318418f,
-        .bat_min_speed = 2.6389946132676654f,
-        .bat_accel = 53.02330161128345f,
-        .bat_turn_rate = 8.371655963408276f,
+        .max_speed = 15.498233877318418f,
+        .min_speed = 2.6389946132676654f,
+        .accel = 53.02330161128345f,
+        .turn_rate = 8.371655963408276f,
         .render_target_fps = 60,
         .record_video = 0,
         .record_video_fps = 30,
@@ -52,10 +52,10 @@ static void set_demo_defaults(Bat* env) {
 
 static void apply_env_config_value(Bat* env, const char* key, float value) {
     if (strcmp(key, "frameskip") == 0) env->frameskip = (int)value;
-    else if (strcmp(key, "bat_max_speed") == 0) env->bat_max_speed = value;
-    else if (strcmp(key, "bat_min_speed") == 0) env->bat_min_speed = value;
-    else if (strcmp(key, "bat_accel") == 0) env->bat_accel = value;
-    else if (strcmp(key, "bat_turn_rate") == 0) env->bat_turn_rate = value;
+    else if (strcmp(key, "bat_max_speed") == 0) env->max_speed = value;
+    else if (strcmp(key, "bat_min_speed") == 0) env->min_speed = value;
+    else if (strcmp(key, "bat_accel") == 0) env->accel = value;
+    else if (strcmp(key, "bat_turn_rate") == 0) env->turn_rate = value;
     else if (strcmp(key, "render_target_fps") == 0) env->render_target_fps = (int)value;
     else if (strcmp(key, "record_video") == 0) env->record_video = (int)value;
     else if (strcmp(key, "record_video_fps") == 0) env->record_video_fps = (int)value;
@@ -113,7 +113,7 @@ static void load_env_config(Bat* env, const char* path) {
 void demo() {
     Bat env;
     set_demo_defaults(&env);
-    load_env_config(&env, BAT_DEMO_CONFIG_PATH);
+    load_env_config(&env, DEMO_CONFIG_PATH);
     env.rng = (unsigned int)time(NULL);
     allocate(&env);
     env.client = make_client(&env);
@@ -121,13 +121,13 @@ void demo() {
 
     SetTargetFPS(60);
     while (!WindowShouldClose()) {
-        memset(env.actions, 0, sizeof(float) * BAT_NUM_ACTIONS);
-        env.actions[0] = BAT_NOOP;
-        env.actions[1] = BAT_TURN_NONE;
-        if (IsKeyDown(KEY_W)) env.actions[0] = BAT_THRUST_FORWARD;
-        if (IsKeyDown(KEY_S)) env.actions[0] = BAT_BRAKE;
-        if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) env.actions[1] = BAT_TURN_LEFT;
-        if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) env.actions[1] = BAT_TURN_RIGHT;
+        memset(env.actions, 0, sizeof(float) * NUM_ACTIONS);
+        env.actions[0] = NOOP;
+        env.actions[1] = TURN_NONE;
+        if (IsKeyDown(KEY_W)) env.actions[0] = THRUST_FORWARD;
+        if (IsKeyDown(KEY_S)) env.actions[0] = BRAKE;
+        if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) env.actions[1] = TURN_LEFT;
+        if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) env.actions[1] = TURN_RIGHT;
         env.actions[2] = 0;
         env.actions[3] = 7;
         env.actions[4] = 1;
