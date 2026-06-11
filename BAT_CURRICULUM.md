@@ -18,13 +18,15 @@ curriculum_perf = success * curriculum_difficulty
 With the current defaults:
 
 ```ini
-curriculum_initial_level = 3
-curriculum_start_obstacles = 1
-curriculum_max_obstacles = 3
-curriculum_obstacle_step = 18
-curriculum_start_bug_distance = 8.0
-curriculum_max_bug_distance = 56.0
-curriculum_bug_distance_step = 4.0
+curriculum_initial_level = 1
+BAT_CURRICULUM_START_OBSTACLES = 0
+BAT_CURRICULUM_MAX_OBSTACLES = 3
+curriculum_obstacle_step = 8
+curriculum_start_bug_distance = 8.438
+BAT_CURRICULUM_MAX_BUG_DISTANCE = 40.0
+BAT_CURRICULUM_BUG_DISTANCE_STEP = 2.0
+BAT_CURRICULUM_INBOUND_MAX_BUG_DISTANCE = 56.0
+BAT_CURRICULUM_INBOUND_BUG_DISTANCE_STEP = 4.0
 ```
 
 At `curriculum_level ~= 5`, the bug starts around distance `28`, giving:
@@ -171,7 +173,8 @@ start_bug_distance = 8 + level * distance_step
 
 Recommendation:
 
-- Keep `curriculum_bug_distance_step` in the current `2.0..5.0` sweep range.
+- Keep `BAT_CURRICULUM_BUG_DISTANCE_STEP` hardcoded at `2.0`; Bat9's best runs
+  clustered there, and the inbound curriculum already expands later distances.
 - Log `curriculum_distance_difficulty` directly.
 
 Gate:

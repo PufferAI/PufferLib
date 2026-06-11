@@ -116,7 +116,7 @@ Acoustics:
   enough artificial time-of-arrival separation for one ear to be able to hear a
   return about one tick before the other.
 - `ear_separation_scale` controls the artificial distance between ears as a
-  multiple of `bat_radius`. Keep it bounded; the implementation clamps it to
+  multiple of `BAT_RADIUS`. Keep it bounded; the implementation clamps it to
   `[0.25, 2.0]` and the default sweep range is `[0.5, 2.0]`.
 - Every echo contribution has:
   - two-way distance from mouth/source to reflector to each ear,
@@ -129,8 +129,8 @@ Point-reflector renderer:
 
 - v1 should represent walls and obstacle surfaces as stationary point
   reflectors.
-- Sample each wall and obstacle edge at a fixed spacing, default
-  `reflector_spacing = 1.0` world unit.
+- Sample each wall and obstacle edge at fixed spacing,
+  `BAT_REFLECTOR_SPACING = 8.0` world units.
 - The bug contributes one moving circular/point reflector at its center.
 - This avoids wavefront bookkeeping while preserving range, angle, and Doppler
   learning signals.
@@ -350,7 +350,7 @@ Default reward model:
   - when a bug echo returns with a shorter acoustic path than the previous bug
     echo, add a small shaped reward,
   - this reward only applies if the bat has moved at least
-    `bug_echo_min_displacement` since the previous scored bug echo, so a
+    `BAT_BUG_ECHO_MIN_DISPLACEMENT` since the previous scored bug echo, so a
     stationary bat cannot farm reward from the bug moving closer by itself,
   - farther bug echoes update the previous bug echo path and receive a weaker
     penalty scaled by `bug_echo_farther_penalty_scale`, default `0.10`,
@@ -367,7 +367,8 @@ Progress reward:
 - Default formula:
   - `reward += progress_reward_scale * (prev_bug_dist - bug_dist)`
   - `reward -= step_cost`
-  - `reward -= chirp_cost` when a chirp is emitted
+  - `reward -= BAT_CHIRP_COST` when a chirp is emitted; this is hardcoded to
+    zero for the current Bat defaults
   - `reward -= chirp_overlap_penalty * bug_echo_wait_fraction` when a valid
     chirp is emitted before the previous chirp's expected bug reflection has
     returned
@@ -382,10 +383,8 @@ Progress reward:
   - `progress_reward_scale = 0.05`
   - `step_cost = 0.001`
   - `chirp_efficiency_reward = 1.0`
-  - `chirp_cost = 0.00005`
   - `chirp_overlap_penalty = 0.004`
   - `bug_echo_reward_scale = 0.02`
-  - `chirp_cost = 0.0005`
 
 Important caveat:
 
@@ -484,37 +483,26 @@ Recommended stages:
 
 Config knobs:
 
-- `arena_width`
-- `arena_height`
-- `num_obstacles`
 - `obstacle_min_size`
 - `obstacle_max_size`
-- `bat_radius`
 - `ear_separation_scale`
-- `bug_radius`
 - `bat_max_speed`
 - `bat_min_speed`
 - `bat_accel`
 - `bat_turn_rate`
-- `bug_speed`
 - `max_steps`
-- `freq_bins_per_ear`
 - `max_echo_range`
 - `sound_speed`
-- `reflector_spacing`
 - `max_chirps_per_episode`
 - `chirp_cooldown_ticks`
 - `chirp_freq_bins`
 - `chirp_duration_bins`
-- `chirp_cost`
 - `chirp_efficiency_reward`
 - `chirp_overlap_penalty`
 - `bug_echo_farther_penalty_scale`
-- `bug_echo_min_displacement`
 - `step_cost`
 - `progress_reward_scale`
 - `collision_penalty`
-- `curriculum_enabled`
 - `curriculum_initial_level`
 - `curriculum_stage`
 
