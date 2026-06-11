@@ -59,6 +59,7 @@ static Bat make_test_env(void) {
         .early_chirp_penalty = 0.001f,
         .bug_echo_farther_penalty_scale = 0.10f,
         .bug_echo_min_displacement = 1.0f,
+        .bug_wing_sideband_gain = 0.10f,
         .curriculum_max_obstacles = 1,
         .curriculum_obstacle_step = 8,
         .curriculum_successes_per_level = 1,
@@ -667,6 +668,34 @@ static int test_echo_scheduling_uses_tick_bucket_accumulator(void) {
     ASSERT_FLOAT_NEAR(env.echo_queue[slot].energy[0][BAT_FREQ_BINS - 1], 1.1f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.echo_queue[slot].bug_energy, 1.1f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.echo_queue[slot].bug_path, 12.0f, 0.0001f);
+
+    free_allocated(&env);
+    return 0;
+}
+
+static int test_bug_wing_sidebands_spill_adjacent_bins_without_reward_inflation(void) {
+    Bat env = make_test_env();
+    c_reset(&env);
+
+    env.tick = 0;
+    env.bug_wing_sideband_gain = 0.25f;
+    bat_clear_echo_queue(&env);
+
+    int bin = bat_freq_bin_index(&env, 0.5f);
+    bat_add_echo_event(&env, 0, 1.0f, 0.5f, 0.4f, 12.0f, BAT_ECHO_BUG);
+    EchoBucket* bug_bucket = &env.echo_queue[1 % BAT_ECHO_QUEUE_TICKS];
+    ASSERT_FLOAT_NEAR(bug_bucket->energy[0][bin], 0.4f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bug_bucket->energy[0][bin - 1], 0.1f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bug_bucket->energy[0][bin + 1], 0.1f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bug_bucket->bug_energy, 0.4f, 0.0001f);
+
+    bat_clear_echo_queue(&env);
+    bat_add_echo_event(&env, 0, 1.0f, 0.5f, 0.4f, 12.0f, BAT_ECHO_STATIC);
+    EchoBucket* static_bucket = &env.echo_queue[1 % BAT_ECHO_QUEUE_TICKS];
+    ASSERT_FLOAT_NEAR(static_bucket->energy[0][bin], 0.4f, 0.0001f);
+    ASSERT_FLOAT_NEAR(static_bucket->energy[0][bin - 1], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(static_bucket->energy[0][bin + 1], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(static_bucket->bug_energy, 0.0f, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -1967,6 +1996,7 @@ int main(void) {
     if (test_ear_directivity_gains_control_echo_energy()) return 1;
     if (test_default_sound_speed_allows_one_tick_interaural_delay()) return 1;
     if (test_echo_scheduling_uses_tick_bucket_accumulator()) return 1;
+    if (test_bug_wing_sidebands_spill_adjacent_bins_without_reward_inflation()) return 1;
     if (test_ear_separation_scale_controls_arrival_gap()) return 1;
     if (test_doppler_sign_for_approaching_bug()) return 1;
     if (test_wall_collision_is_terminal_minus_one()) return 1;

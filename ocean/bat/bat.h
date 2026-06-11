@@ -269,6 +269,7 @@ typedef struct Bat {
     float bug_echo_reward_scale;
     float bug_echo_farther_penalty_scale;
     float bug_echo_min_displacement;
+    float bug_wing_sideband_gain;
     float tick_bug_echo_energy;
     float tick_bug_echo_path;
     float last_bug_echo_path;
@@ -818,6 +819,12 @@ static inline void bat_add_echo_event(Bat* env, int ear, float receive_tick,
     int bin = bat_freq_bin_index(env, freq);
     bucket->energy[ear_idx][bin] += intensity;
     if (source == BAT_ECHO_BUG) {
+        float sideband = intensity * env->bug_wing_sideband_gain;
+        int bins = env->freq_bins_per_ear;
+        if (sideband > 0.000001f) {
+            if (bin > 0) bucket->energy[ear_idx][bin - 1] += sideband;
+            if (bin + 1 < bins) bucket->energy[ear_idx][bin + 1] += sideband;
+        }
         bucket->bug_energy += intensity;
         if (bucket->bug_path < 0.0f || path < bucket->bug_path) {
             bucket->bug_path = path;

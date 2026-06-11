@@ -64,6 +64,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->bug_echo_reward_scale = dict_get(kwargs, "bug_echo_reward_scale")->value;
     env->bug_echo_farther_penalty_scale = dict_get(kwargs, "bug_echo_farther_penalty_scale")->value;
     env->bug_echo_min_displacement = dict_get(kwargs, "bug_echo_min_displacement")->value;
+    env->bug_wing_sideband_gain = dict_get(kwargs, "bug_wing_sideband_gain")->value;
     env->step_cost = dict_get(kwargs, "step_cost")->value;
     env->progress_reward_scale = dict_get(kwargs, "progress_reward_scale")->value;
     env->collision_penalty = dict_get(kwargs, "collision_penalty")->value;
