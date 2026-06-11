@@ -44,6 +44,7 @@
 #define BAT_DEFAULT_MAX_STEPS 512
 #define BAT_DEFAULT_MAX_STEPS_INV (1.0f / (float)BAT_DEFAULT_MAX_STEPS)
 #define BAT_PI 3.14159265358979323846f
+#define BAT_TWO_PI (2.0f * BAT_PI)
 #define BAT_CHIRP_HISTORY 4
 #define BAT_CHIRP_RINGS 5
 #define BAT_MAX_CHIRP_SLICES 16
@@ -54,20 +55,11 @@
 #define BAT_AUDIO_MAX_HZ 3600.0f
 #define BAT_AUDIO_VOLUME 0.22f
 #define BAT_RECORD_MAX_VOICES 16
-#define BAT_BUDGET_EASY_CHIRPS 15.0f
-#define BAT_BUDGET_EDGE_CHIRPS 5.0f
 #define BAT_CHIRP_PERF_REFERENCE_CHIRPS 15.0f
 #define BAT_CHIRP_PERF_FLOOR 0.05f
 
 #define BAT_ECHO_STATIC 0
 #define BAT_ECHO_BUG 1
-
-typedef struct BatColor {
-    unsigned char r;
-    unsigned char g;
-    unsigned char b;
-    unsigned char a;
-} BatColor;
 
 typedef struct ChirpEvent {
     float x;
@@ -104,7 +96,6 @@ typedef struct Log {
     float score;
     float episode_return;
     float episode_length;
-    float success;
     float collision;
     float timeout;
     float curriculum_level;
@@ -114,15 +105,10 @@ typedef struct Log {
     float curriculum_obstacle_difficulty;
     float curriculum_chirp_budget_difficulty;
     float curriculum_motion_difficulty;
-    float budget_difficulty;
     float num_obstacles;
-    float bug_distance_start;
-    float bug_distance_final;
-    float bug_distance_delta;
     float chirps_emitted;
     float chirp_budget;
     float chirps_used_ratio;
-    float chirps_remaining_ratio;
     float chirp_efficiency;
     float chirp_perf;
     float chirp_overlap_fraction;
@@ -135,8 +121,6 @@ typedef struct Log {
     float mean_chirp_tick_norm;
     float mean_chirp_duration;
     float mean_chirp_bandwidth;
-    float mean_echo_energy_left;
-    float mean_echo_energy_right;
     float n;
 } Log;
 
@@ -271,8 +255,6 @@ typedef struct Bat {
     float ticks_near;
     float first_chirp_tick;
     float chirp_tick_sum;
-    float echo_energy_left_sum;
-    float echo_energy_right_sum;
 
     float chirp_cost;
     float chirp_efficiency_reward;
@@ -318,30 +300,6 @@ static inline int bat_action_index(float v, int n) {
     return idx;
 }
 
-static inline int bat_render_target_fps(Bat* env) {
-    return env->render_target_fps > 0 ? env->render_target_fps : 0;
-}
-
-static inline bool bat_record_video_enabled(Bat* env) {
-    return env->record_video != 0;
-}
-
-static inline int bat_record_video_fps(Bat* env) {
-    return env->record_video_fps;
-}
-
-static inline int bat_record_video_seconds(Bat* env) {
-    return env->record_video_seconds;
-}
-
-static inline int bat_record_frame_samples(int fps) {
-    return BAT_AUDIO_SAMPLE_RATE / fps;
-}
-
-static inline int bat_record_max_frames(int fps, int seconds) {
-    return fps * seconds;
-}
-
 static inline float bat_chirp_duration_seconds(float duration_norm) {
     return 0.04f + 0.18f * duration_norm;
 }
@@ -355,7 +313,7 @@ static inline float bat_chirp_audio_duration_at_fps(float duration_norm, int fps
 }
 
 static inline float bat_chirp_audio_duration_seconds(Bat* env, float duration_norm) {
-    return bat_chirp_audio_duration_at_fps(duration_norm, bat_render_target_fps(env));
+    return bat_chirp_audio_duration_at_fps(duration_norm, env->render_target_fps);
 }
 
 static inline float bat_chirp_audio_frequency_hz(float freq_norm) {
@@ -387,7 +345,7 @@ static inline float bat_chirp_audio_sample_f32(float start_norm, float end_norm,
     float start_hz = bat_chirp_audio_frequency_hz(start_norm);
     float end_hz = bat_chirp_audio_frequency_hz(end_norm);
     float chirp_rate = (end_hz - start_hz) / duration_seconds;
-    float phase = 2.0f * BAT_PI * (start_hz * t + 0.5f * chirp_rate * t * t);
+    float phase = BAT_TWO_PI * (start_hz * t + 0.5f * chirp_rate * t * t);
     float envelope = bat_chirp_audio_envelope(t / duration_seconds);
     return BAT_AUDIO_VOLUME * envelope * sinf(phase);
 }
@@ -433,18 +391,6 @@ static inline float bat_chirp_age_norm_denominator(Bat* env) {
     float travel_ticks = env->max_echo_range / env->sound_speed / BAT_TICK_RATE;
     float chirp_ticks = bat_chirp_duration_seconds(1.0f) / BAT_TICK_RATE;
     return 1.25f * (travel_ticks + chirp_ticks);
-}
-
-static inline BatColor bat_freq_color(float freq_norm, float alpha_norm) {
-    float f = freq_norm;
-    float mid = 1.0f - fabsf(2.0f * f - 1.0f);
-    BatColor color = {
-        .r = (unsigned char)(255.0f * (1.0f - f) + 45.0f * f),
-        .g = (unsigned char)(45.0f + 180.0f * mid),
-        .b = (unsigned char)(45.0f * (1.0f - f) + 255.0f * f),
-        .a = (unsigned char)(255.0f * alpha_norm),
-    };
-    return color;
 }
 
 static inline float bat_norm_bin(int idx, int count) {
@@ -642,12 +588,6 @@ static inline float bat_curriculum_difficulty(Bat* env) {
     return bat_clampf(weighted / active_weight, 0.0f, 1.0f);
 }
 
-static inline float bat_budget_difficulty(Bat* env) {
-    float pressure = (BAT_BUDGET_EASY_CHIRPS - (float)env->max_chirps_per_episode)
-        / (BAT_BUDGET_EASY_CHIRPS - BAT_BUDGET_EDGE_CHIRPS);
-    return 0.5f + 0.5f * bat_clampf(pressure, 0.0f, 1.0f);
-}
-
 static inline float bat_success_reward(Bat* env) {
     return env->chirp_efficiency_reward * bat_chirp_efficiency(env);
 }
@@ -685,7 +625,7 @@ static inline void bat_record_chirp_timing(Bat* env) {
 static inline void bat_sample_spawns_at_distance(Bat* env, float target_distance) {
     float margin = fmaxf(6.0f, fmaxf(env->bat_radius, env->bug_radius) + 3.0f);
     for (int attempt = 0; attempt < 96; attempt++) {
-        float angle = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+        float angle = bat_randf(env) * BAT_TWO_PI - BAT_PI;
         float dx = cosf(angle) * target_distance;
         float dy = sinf(angle) * target_distance;
         float min_bat_x = fmaxf(margin, margin - dx);
@@ -714,8 +654,8 @@ static inline void bat_reset_bug_motion(Bat* env) {
     env->bug_inbound = bat_curriculum_inbound_enabled(env) ? 1 : 0;
     float strength = bat_curriculum_bug_maneuver_strength(env);
     env->bug_maneuver_mode = strength > 0.000001f ? 1 + (int)(bat_rand(env) % 3u) : 0;
-    env->bug_maneuver_phase = bat_randf(env) * 2.0f * BAT_PI;
-    env->bug_maneuver_rate = 2.0f * BAT_PI * bat_curriculum_bug_maneuver_frequency(env) *
+    env->bug_maneuver_phase = bat_randf(env) * BAT_TWO_PI;
+    env->bug_maneuver_rate = BAT_TWO_PI * bat_curriculum_bug_maneuver_frequency(env) *
         (0.75f + 0.50f * bat_randf(env));
     env->bug_maneuver_sign = (bat_rand(env) & 1u) ? -1.0f : 1.0f;
 
@@ -727,7 +667,7 @@ static inline void bat_reset_bug_motion(Bat* env) {
         float heading = atan2f(ty, tx) + (2.0f * bat_randf(env) - 1.0f) * noise;
         bat_set_bug_velocity(env, heading, speed);
     } else {
-        float heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+        float heading = bat_randf(env) * BAT_TWO_PI - BAT_PI;
         bat_set_bug_velocity(env, heading, speed);
     }
 }
@@ -828,12 +768,10 @@ void free_allocated(Bat* env) {
 }
 
 static inline void add_log(Bat* env, float success, float collision, float timeout) {
-    float final_dist = bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y);
     float curriculum_difficulty = bat_curriculum_difficulty(env);
     float distance_difficulty = bat_curriculum_distance_difficulty(env);
     float obstacle_difficulty = bat_curriculum_obstacle_difficulty(env);
     float motion_difficulty = bat_curriculum_motion_difficulty(env);
-    float budget_difficulty = bat_budget_difficulty(env);
     float chirp_efficiency = bat_chirp_efficiency(env);
     float chirp_perf = bat_chirp_perf(env);
     env->log.perf += success * curriculum_difficulty * chirp_perf;
@@ -841,7 +779,6 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.score += env->episode_return;
     env->log.episode_return += env->episode_return;
     env->log.episode_length += env->tick;
-    env->log.success += success;
     env->log.collision += collision;
     env->log.timeout += timeout;
     env->log.curriculum_level += env->curriculum_level;
@@ -851,15 +788,10 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.curriculum_obstacle_difficulty += obstacle_difficulty;
     env->log.curriculum_chirp_budget_difficulty += 0.0f;
     env->log.curriculum_motion_difficulty += motion_difficulty;
-    env->log.budget_difficulty += budget_difficulty;
     env->log.num_obstacles += env->num_obstacles;
-    env->log.bug_distance_start += env->start_bug_dist;
-    env->log.bug_distance_final += final_dist;
-    env->log.bug_distance_delta += env->start_bug_dist - final_dist;
     env->log.chirps_emitted += env->chirps_emitted_episode;
     env->log.chirp_budget += env->chirp_budget;
     env->log.chirps_used_ratio += bat_chirps_used_ratio(env);
-    env->log.chirps_remaining_ratio += 1.0f - bat_chirps_used_ratio(env);
     env->log.chirp_efficiency += chirp_efficiency;
     env->log.chirp_perf += chirp_perf;
     float chirps = fmaxf(1.0f, (float)env->chirps_emitted_episode);
@@ -887,8 +819,6 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
         env->log.mean_chirp_duration += env->chirp_duration_sum / env->chirps_emitted_episode;
         env->log.mean_chirp_bandwidth += env->chirp_bandwidth_sum / env->chirps_emitted_episode;
     }
-    env->log.mean_echo_energy_left += env->echo_energy_left_sum / (float)(env->tick + 1);
-    env->log.mean_echo_energy_right += env->echo_energy_right_sum / (float)(env->tick + 1);
     env->log.n += 1.0f;
 }
 
@@ -897,13 +827,6 @@ static inline int bat_freq_bin_index(Bat* env, float freq_norm) {
     int bin = (int)(freq_norm * bins);
     if (bin >= bins) bin = bins - 1;
     return bin;
-}
-
-static inline void bat_add_freq_energy(Bat* env, int offset, float freq_norm,
-        float intensity) {
-    int bin = bat_freq_bin_index(env, freq_norm);
-    int idx = offset + bin;
-    env->observations[idx] = bat_clampf(env->observations[idx] + intensity, 0.0f, 1.0f);
 }
 
 static inline void bat_clear_echo_bucket(EchoBucket* bucket) {
@@ -1108,15 +1031,6 @@ static inline void bat_schedule_chirp_slice_echoes(Bat* env, ChirpEvent* chirp,
     }
 }
 
-static inline void bat_schedule_chirp_echoes(Bat* env, ChirpEvent* chirp) {
-    int slices = chirp->slice_count;
-    while (chirp->slices_scheduled < slices) {
-        int slice_idx = chirp->slices_scheduled;
-        bat_schedule_chirp_slice_echoes(env, chirp, slice_idx);
-        chirp->slices_scheduled += 1;
-    }
-}
-
 static inline void bat_schedule_due_chirp_slices(Bat* env) {
     for (int i = 0; i < BAT_CHIRP_HISTORY; i++) {
         ChirpEvent* chirp = &env->chirps[i];
@@ -1163,16 +1077,10 @@ void compute_observations(Bat* env) {
 
     bat_process_echo_events(env);
 
-    float left_energy = 0.0f;
-    float right_energy = 0.0f;
     for (int i = 0; i < BAT_FREQ_BINS; i++) {
         env->observations[BAT_LEFT_FREQ_OFFSET + i] = bat_clampf(env->observations[BAT_LEFT_FREQ_OFFSET + i], 0.0f, 1.0f);
         env->observations[BAT_RIGHT_FREQ_OFFSET + i] = bat_clampf(env->observations[BAT_RIGHT_FREQ_OFFSET + i], 0.0f, 1.0f);
-        left_energy += env->observations[BAT_LEFT_FREQ_OFFSET + i];
-        right_energy += env->observations[BAT_RIGHT_FREQ_OFFSET + i];
     }
-    env->echo_energy_left_sum += left_energy;
-    env->echo_energy_right_sum += right_energy;
 
     float chirp_age_denom = bat_chirp_age_norm_denominator(env);
     int chirp_age = env->tick - env->last_chirp_tick;
@@ -1197,7 +1105,7 @@ void compute_observations(Bat* env) {
 static inline void bat_reset_episode(Bat* env) {
     env->tick = 0;
     env->bat_turn_velocity = 0.0f;
-    env->bat_heading = bat_randf(env) * 2.0f * BAT_PI - BAT_PI;
+    env->bat_heading = bat_randf(env) * BAT_TWO_PI - BAT_PI;
     float initial_speed = env->bat_min_speed;
     env->bat_vx = cosf(env->bat_heading) * initial_speed;
     env->bat_vy = sinf(env->bat_heading) * initial_speed;
@@ -1237,8 +1145,6 @@ static inline void bat_reset_episode(Bat* env) {
     env->ticks_near = 0.0f;
     env->first_chirp_tick = -1.0f;
     env->chirp_tick_sum = 0.0f;
-    env->echo_energy_left_sum = 0.0f;
-    env->echo_energy_right_sum = 0.0f;
     env->episode_return = 0.0f;
     env->start_bug_dist = bat_dist(env->bat_x, env->bat_y, env->bug_x, env->bug_y);
     env->prev_bug_dist = env->start_bug_dist;
@@ -1275,8 +1181,8 @@ static inline void bat_update_bug(Bat* env, float dt) {
     float strength = bat_curriculum_bug_maneuver_strength(env);
     if (env->bug_maneuver_mode > 0) {
         env->bug_maneuver_phase += env->bug_maneuver_rate * dt;
-        if (env->bug_maneuver_phase > 2.0f * BAT_PI) {
-            env->bug_maneuver_phase -= 2.0f * BAT_PI;
+        if (env->bug_maneuver_phase > BAT_TWO_PI) {
+            env->bug_maneuver_phase -= BAT_TWO_PI;
         }
     }
 
@@ -1367,8 +1273,8 @@ static inline void bat_update_motion(Bat* env, float dt) {
     float speed_ratio = env->bat_max_speed > 0.0f ? speed / env->bat_max_speed : 0.0f;
     env->bat_turn_velocity = turn_command * env->bat_turn_rate * bat_clampf(speed_ratio, 0.0f, 1.0f);
     env->bat_heading += env->bat_turn_velocity * dt;
-    if (env->bat_heading > BAT_PI) env->bat_heading -= 2.0f * BAT_PI;
-    if (env->bat_heading < -BAT_PI) env->bat_heading += 2.0f * BAT_PI;
+    if (env->bat_heading > BAT_PI) env->bat_heading -= BAT_TWO_PI;
+    if (env->bat_heading < -BAT_PI) env->bat_heading += BAT_TWO_PI;
 
     float heading_fx = cosf(env->bat_heading);
     float heading_fy = sinf(env->bat_heading);
@@ -1541,8 +1447,15 @@ void c_step(Bat* env) {
 }
 
 #ifndef BAT_HEADLESS
-static inline Color bat_ray_color(BatColor c) {
-    return (Color){c.r, c.g, c.b, c.a};
+static inline Color bat_freq_color(float freq_norm, float alpha_norm) {
+    float f = freq_norm;
+    float mid = 1.0f - fabsf(2.0f * f - 1.0f);
+    return (Color){
+        (unsigned char)(255.0f * (1.0f - f) + 45.0f * f),
+        (unsigned char)(45.0f + 180.0f * mid),
+        (unsigned char)(45.0f * (1.0f - f) + 255.0f * f),
+        (unsigned char)(255.0f * alpha_norm),
+    };
 }
 
 static inline void bat_draw_chirp_rings(Bat* env, float sx, float sy) {
@@ -1572,21 +1485,19 @@ static inline void bat_draw_chirp_rings(Bat* env, float sx, float sy) {
                 (int)(source_x * sx),
                 (int)(source_y * sy),
                 radius * scale,
-                bat_ray_color(bat_freq_color(freq, alpha)));
+                bat_freq_color(freq, alpha));
         }
     }
 }
 
 static inline Color bat_doppler_ray_color(float doppler, float alpha) {
-    BatColor c;
     if (doppler > 0.05f) {
-        c = bat_freq_color(1.0f, alpha);
+        return bat_freq_color(1.0f, alpha);
     } else if (doppler < -0.05f) {
-        c = bat_freq_color(0.0f, alpha);
-    } else {
-        c = (BatColor){210, 210, 220, (unsigned char)(255.0f * bat_clampf(alpha, 0.0f, 1.0f))};
+        return bat_freq_color(0.0f, alpha);
     }
-    return bat_ray_color(c);
+    return (Color){210, 210, 220,
+        (unsigned char)(255.0f * bat_clampf(alpha, 0.0f, 1.0f))};
 }
 
 static inline void bat_draw_echo_flash(Bat* env, ChirpEvent* chirp,
@@ -1755,173 +1666,14 @@ static inline void bat_play_chirp_audio(Bat* env) {
     PlaySound(client->chirp_sounds[voice]);
 }
 
-static inline void bat_record_write_le16(FILE* f, unsigned int v) {
-    fputc((int)(v & 0xffu), f);
-    fputc((int)((v >> 8) & 0xffu), f);
-}
-
-static inline void bat_record_write_le32(FILE* f, unsigned int v) {
-    fputc((int)(v & 0xffu), f);
-    fputc((int)((v >> 8) & 0xffu), f);
-    fputc((int)((v >> 16) & 0xffu), f);
-    fputc((int)((v >> 24) & 0xffu), f);
-}
-
-static inline void bat_record_write_wav_header(FILE* f, int data_bytes) {
-    int byte_rate = BAT_AUDIO_SAMPLE_RATE * 2;
-    fwrite("RIFF", 1, 4, f);
-    bat_record_write_le32(f, 36u + (unsigned int)data_bytes);
-    fwrite("WAVE", 1, 4, f);
-    fwrite("fmt ", 1, 4, f);
-    bat_record_write_le32(f, 16);
-    bat_record_write_le16(f, 1);
-    bat_record_write_le16(f, 1);
-    bat_record_write_le32(f, BAT_AUDIO_SAMPLE_RATE);
-    bat_record_write_le32(f, (unsigned int)byte_rate);
-    bat_record_write_le16(f, 2);
-    bat_record_write_le16(f, 16);
-    fwrite("data", 1, 4, f);
-    bat_record_write_le32(f, (unsigned int)data_bytes);
-}
-
-static inline void bat_record_init(Bat* env, Client* client) {
-    if (!bat_record_video_enabled(env) || client->recording_initialized) return;
-    client->recording_initialized = 1;
-    client->record_fps = bat_record_video_fps(env);
-    client->record_audio = env->record_video_audio ? 1 : 0;
-    client->record_max_frames = bat_record_max_frames(
-        client->record_fps, bat_record_video_seconds(env));
-    snprintf(client->record_frame_dir, sizeof(client->record_frame_dir),
-        "recordings/bat_recording_frames");
-    snprintf(client->record_wav_path, sizeof(client->record_wav_path),
-        "recordings/bat_recording.wav");
-    snprintf(client->record_mp4_path, sizeof(client->record_mp4_path),
-        "recordings/bat_recording.mp4");
-    system("mkdir -p recordings recordings/bat_recording_frames");
-    if (client->record_audio) {
-        client->record_wav = fopen(client->record_wav_path, "wb");
-        if (client->record_wav != NULL) {
-            bat_record_write_wav_header(client->record_wav, 0);
-        }
-    }
-    printf("Bat recording enabled: %s (%d fps, %d frames)\n",
-        client->record_mp4_path, client->record_fps, client->record_max_frames);
-}
-
-static inline void bat_record_enqueue_chirp(Bat* env) {
-    Client* client = env->client;
-    if (client == NULL || !client->recording_initialized ||
-            client->recording_finalized || !client->record_audio) {
-        return;
-    }
-    if (env->audio_chirp_serial <= 0 ||
-            env->audio_chirp_serial == client->record_last_audio_chirp_serial) {
-        return;
-    }
-    client->record_last_audio_chirp_serial = env->audio_chirp_serial;
-    int voice_idx = client->record_voice_cursor;
-    client->record_voice_cursor = (client->record_voice_cursor + 1) % BAT_RECORD_MAX_VOICES;
-    BatRecordVoice* voice = &client->record_voices[voice_idx];
-    voice->active = 1;
-    voice->start_sample = client->record_audio_sample_cursor;
-    voice->start_freq = env->last_chirp_start_freq;
-    voice->end_freq = env->last_chirp_end_freq;
-    voice->duration = bat_chirp_audio_duration_at_fps(
-        env->last_chirp_duration, client->record_fps);
-}
-
-static inline void bat_record_append_audio_frame(Bat* env) {
-    Client* client = env->client;
-    if (client == NULL || !client->record_audio || client->record_wav == NULL) return;
-    int frame_samples = bat_record_frame_samples(client->record_fps);
-    for (int i = 0; i < frame_samples; i++) {
-        int sample_index = client->record_audio_sample_cursor + i;
-        float mixed = 0.0f;
-        for (int v = 0; v < BAT_RECORD_MAX_VOICES; v++) {
-            BatRecordVoice* voice = &client->record_voices[v];
-            if (!voice->active) continue;
-            int local_sample = sample_index - voice->start_sample;
-            int voice_samples = (int)ceilf(voice->duration * BAT_AUDIO_SAMPLE_RATE);
-            if (local_sample < 0) continue;
-            if (local_sample >= voice_samples) {
-                voice->active = 0;
-                continue;
-            }
-            mixed += bat_chirp_audio_sample_f32(voice->start_freq, voice->end_freq,
-                voice->duration, local_sample, BAT_AUDIO_SAMPLE_RATE);
-        }
-        short pcm = (short)(bat_clampf(mixed, -1.0f, 1.0f) * 32767.0f);
-        fwrite(&pcm, sizeof(short), 1, client->record_wav);
-        client->record_audio_data_bytes += (int)sizeof(short);
-    }
-    client->record_audio_sample_cursor += frame_samples;
-}
-
-static inline void bat_record_finalize(Client* client) {
-    if (client == NULL || !client->recording_initialized ||
-            client->recording_finalized) {
-        return;
-    }
-    client->recording_finalized = 1;
-    if (client->record_wav != NULL) {
-        fseek(client->record_wav, 0, SEEK_SET);
-        bat_record_write_wav_header(client->record_wav, client->record_audio_data_bytes);
-        fclose(client->record_wav);
-        client->record_wav = NULL;
-    }
-
-    char cmd[1024];
-    if (client->record_audio) {
-        snprintf(cmd, sizeof(cmd),
-            "ffmpeg -y -framerate %d -i %s/%%06d.png -i %s -frames:v %d "
-            "-c:v libx264 -pix_fmt yuv420p -c:a aac -shortest %s",
-            client->record_fps, client->record_frame_dir, client->record_wav_path,
-            client->record_frame, client->record_mp4_path);
-    } else {
-        snprintf(cmd, sizeof(cmd),
-            "ffmpeg -y -framerate %d -i %s/%%06d.png -frames:v %d "
-            "-c:v libx264 -pix_fmt yuv420p %s",
-            client->record_fps, client->record_frame_dir, client->record_frame,
-            client->record_mp4_path);
-    }
-    int status = system(cmd);
-    if (status == 0) {
-        printf("Bat recording saved: %s\n", client->record_mp4_path);
-    } else {
-        printf("Bat recording ffmpeg command failed with status %d\n", status);
-    }
-}
-
-static inline void bat_record_capture_frame(Bat* env) {
-    Client* client = env->client;
-    if (client == NULL || !client->recording_initialized ||
-            client->recording_finalized) {
-        return;
-    }
-    if (client->record_frame >= client->record_max_frames) {
-        bat_record_finalize(client);
-        return;
-    }
-    bat_record_enqueue_chirp(env);
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%06d.png", client->record_frame_dir,
-        client->record_frame);
-    Image image = LoadImageFromScreen();
-    ExportImage(image, path);
-    UnloadImage(image);
-    bat_record_append_audio_frame(env);
-    client->record_frame += 1;
-    if (client->record_frame >= client->record_max_frames) {
-        bat_record_finalize(client);
-    }
-}
+#include "bat_record.h"
 
 Client* make_client(Bat* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = env->width * 10;
     client->height = env->height * 10;
     InitWindow(client->width, client->height, "Bat");
-    int target_fps = bat_render_target_fps(env);
+    int target_fps = env->render_target_fps;
     if (target_fps > 0) {
         SetTargetFPS(target_fps);
     }

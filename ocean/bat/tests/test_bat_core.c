@@ -280,7 +280,6 @@ static int test_chirp_budget_logs_ratios_for_wandb(void) {
 
     ASSERT_FLOAT_NEAR(env.log.chirp_budget, 10.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.chirps_used_ratio, 0.40f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.chirps_remaining_ratio, 0.60f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.chirp_efficiency, 0.80f, 0.0001f);
 
     free_allocated(&env);
@@ -325,29 +324,6 @@ static int test_curriculum_perf_logs_distance_and_obstacle_difficulty_components
     return 0;
 }
 
-static int test_budget_difficulty_uses_hard_edge_below_six_chirps(void) {
-    Bat env = make_test_env();
-    c_reset(&env);
-
-    env.max_chirps_per_episode = 15;
-    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.50f, 0.0001f);
-
-    env.max_chirps_per_episode = 10;
-    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.75f, 0.0001f);
-
-    env.max_chirps_per_episode = 6;
-    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 0.95f, 0.0001f);
-
-    env.max_chirps_per_episode = 5;
-    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 1.0f, 0.0001f);
-
-    env.max_chirps_per_episode = 4;
-    ASSERT_FLOAT_NEAR(bat_budget_difficulty(&env), 1.0f, 0.0001f);
-
-    free_allocated(&env);
-    return 0;
-}
-
 static int test_perf_composes_base_perf_curriculum_difficulty_and_chirp_perf(void) {
     Bat env = make_test_env();
     c_reset(&env);
@@ -366,7 +342,6 @@ static int test_perf_composes_base_perf_curriculum_difficulty_and_chirp_perf(voi
     add_log(&env, 1.0f, 0.0f, 0.0f);
 
     ASSERT_FLOAT_NEAR(env.log.base_perf, 1.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.budget_difficulty, 0.55f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.chirp_efficiency, 0.75f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.chirp_perf, 0.5333334f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.5000000f, 0.0001f);
@@ -903,19 +878,6 @@ static int test_chirp_ring_physical_ordering(void) {
     return 0;
 }
 
-static int test_chirp_color_maps_low_to_red_high_to_blue(void) {
-    BatColor low = bat_freq_color(0.0f, 1.0f);
-    BatColor mid = bat_freq_color(0.5f, 1.0f);
-    BatColor high = bat_freq_color(1.0f, 1.0f);
-
-    ASSERT_TRUE(low.r > low.b);
-    ASSERT_TRUE(high.b > high.r);
-    ASSERT_TRUE(mid.g >= low.g);
-    ASSERT_TRUE(mid.g >= high.g);
-
-    return 0;
-}
-
 static int test_chirp_audio_maps_norm_freq_to_audible_sweep(void) {
     ASSERT_FLOAT_NEAR(bat_chirp_audio_frequency_hz(0.0f), 600.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(bat_chirp_audio_frequency_hz(1.0f), 3600.0f, 0.0001f);
@@ -926,20 +888,6 @@ static int test_chirp_audio_maps_norm_freq_to_audible_sweep(void) {
     float sample = bat_chirp_audio_sample_f32(0.0f, 1.0f, 0.20f, 2400, 48000);
     ASSERT_TRUE(sample >= -0.25f);
     ASSERT_TRUE(sample <= 0.25f);
-    return 0;
-}
-
-static int test_render_target_fps_is_eval_only_and_can_be_uncapped(void) {
-    Bat env = make_test_env();
-    env.render_target_fps = 60;
-    ASSERT_TRUE(bat_render_target_fps(&env) == 60);
-    env.render_target_fps = 15;
-    ASSERT_TRUE(bat_render_target_fps(&env) == 15);
-    env.render_target_fps = 0;
-    ASSERT_TRUE(bat_render_target_fps(&env) == 0);
-    env.render_target_fps = -1;
-    ASSERT_TRUE(bat_render_target_fps(&env) == 0);
-    free_allocated(&env);
     return 0;
 }
 
@@ -1467,7 +1415,11 @@ static int test_default_echo_range_reaches_curriculum_max_bug_distance(void) {
         .active = 1,
     };
     chirp.slice_count = (int)ceilf(chirp.duration / BAT_TICK_RATE);
-    bat_schedule_chirp_echoes(&env, &chirp);
+    while (chirp.slices_scheduled < chirp.slice_count) {
+        int slice_idx = chirp.slices_scheduled;
+        bat_schedule_chirp_slice_echoes(&env, &chirp, slice_idx);
+        chirp.slices_scheduled += 1;
+    }
 
     float bug_energy = 0.0f;
     for (int i = 0; i < BAT_ECHO_QUEUE_TICKS; i++) {
@@ -1609,9 +1561,14 @@ static int test_frequency_bin_energy_sums_and_caps(void) {
     Bat env = make_test_env();
     memset(env.observations, 0, BAT_OBS_SIZE * sizeof(float));
 
-    bat_add_freq_energy(&env, BAT_LEFT_FREQ_OFFSET, 1.0f, 0.75f);
-    bat_add_freq_energy(&env, BAT_LEFT_FREQ_OFFSET, 1.0f, 0.75f);
-    bat_add_freq_energy(&env, BAT_RIGHT_FREQ_OFFSET, 0.0f, 0.35f);
+    int high_bin = bat_freq_bin_index(&env, 1.0f);
+    int low_bin = bat_freq_bin_index(&env, 0.0f);
+    env.observations[BAT_LEFT_FREQ_OFFSET + high_bin] = bat_clampf(
+        env.observations[BAT_LEFT_FREQ_OFFSET + high_bin] + 0.75f, 0.0f, 1.0f);
+    env.observations[BAT_LEFT_FREQ_OFFSET + high_bin] = bat_clampf(
+        env.observations[BAT_LEFT_FREQ_OFFSET + high_bin] + 0.75f, 0.0f, 1.0f);
+    env.observations[BAT_RIGHT_FREQ_OFFSET + low_bin] = bat_clampf(
+        env.observations[BAT_RIGHT_FREQ_OFFSET + low_bin] + 0.35f, 0.0f, 1.0f);
 
     ASSERT_FLOAT_NEAR(env.observations[BAT_LEFT_FREQ_OFFSET + BAT_FREQ_BINS - 1], 1.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.observations[BAT_RIGHT_FREQ_OFFSET], 0.35f, 0.0001f);
@@ -1841,7 +1798,6 @@ int main(void) {
     if (test_success_reward_includes_chirp_efficiency_bonus()) return 1;
     if (test_chirp_budget_logs_ratios_for_wandb()) return 1;
     if (test_curriculum_perf_logs_distance_and_obstacle_difficulty_components()) return 1;
-    if (test_budget_difficulty_uses_hard_edge_below_six_chirps()) return 1;
     if (test_perf_composes_base_perf_curriculum_difficulty_and_chirp_perf()) return 1;
     if (test_chirp_tempo_logs_far_and_near_rates()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
@@ -1860,9 +1816,7 @@ int main(void) {
     if (test_bat_turn_rate_scales_with_forward_speed()) return 1;
     if (test_bat_speed_action_space_has_no_strafe()) return 1;
     if (test_chirp_ring_physical_ordering()) return 1;
-    if (test_chirp_color_maps_low_to_red_high_to_blue()) return 1;
     if (test_chirp_audio_maps_norm_freq_to_audible_sweep()) return 1;
-    if (test_render_target_fps_is_eval_only_and_can_be_uncapped()) return 1;
     if (test_chirp_audio_duration_scales_with_render_fps()) return 1;
     if (test_chirp_cooldown_accepts_only_after_delay()) return 1;
     if (test_valid_chirp_gets_reward_without_legacy_cost()) return 1;

@@ -1,7 +1,7 @@
 #include "bat.h"
-#define OBS_SIZE 41
-#define NUM_ATNS 6
-#define ACT_SIZES {3, 3, 8, 8, 4, 2}
+#define OBS_SIZE BAT_OBS_SIZE
+#define NUM_ATNS BAT_NUM_ACTIONS
+#define ACT_SIZES {BAT_MOVE_ACTIONS, BAT_TURN_ACTIONS, BAT_CHIRP_FREQ_BINS, BAT_CHIRP_FREQ_BINS, BAT_CHIRP_DURATION_BINS, BAT_CHIRP_EMIT_ACTIONS}
 #define OBS_TENSOR_T FloatTensor
 
 #define Env Bat
@@ -83,9 +83,6 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "curriculum_chirp_budget_difficulty", log->curriculum_chirp_budget_difficulty);
     dict_set(out, "curriculum_motion_difficulty", log->curriculum_motion_difficulty);
     dict_set(out, "num_obstacles", log->num_obstacles);
-    dict_set(out, "bug_distance_start", log->bug_distance_start);
-    dict_set(out, "bug_distance_final", log->bug_distance_final);
-    dict_set(out, "bug_distance_delta", log->bug_distance_delta);
     dict_set(out, "chirps_emitted", log->chirps_emitted);
     dict_set(out, "chirp_budget", log->chirp_budget);
     dict_set(out, "chirps_used_ratio", log->chirps_used_ratio);
