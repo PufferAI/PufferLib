@@ -590,6 +590,22 @@ class Protein:
         self.gp_cost_buffer = torch.empty(self.gp_max_obs, dtype=torch.float64, device=self.device)
         self.infer_batch_buffer = torch.empty(self.infer_batch_size, self.hyperparameters.num, dtype=torch.float64, device=self.device)
 
+    _CUDA_ATTRS = ('gp_score', 'gp_cost', 'score_opt', 'cost_opt',
+                    'gp_params_buffer', 'gp_score_buffer',
+                    'gp_cost_buffer', 'infer_batch_buffer')
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for attr in self._CUDA_ATTRS:
+            state.pop(attr, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        for attr in self._CUDA_ATTRS:
+            if attr not in self.__dict__:
+                self.__dict__[attr] = None
+
     def to(self, device):
         self.device = torch.device(device)
         for attr in ('gp_score', 'gp_cost',
