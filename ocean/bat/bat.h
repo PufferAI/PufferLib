@@ -519,7 +519,6 @@ static inline void bat_sample_in_quadrant(Bat* env, int quadrant, float radius,
 
 static inline void bat_sample_spawns(Bat* env) {
     int bat_quadrant = (int)(bat_randf(env) * 4.0f);
-    if (bat_quadrant > 3) bat_quadrant = 3;
     int bug_quadrant = bat_quadrant ^ 3;
     float min_sep = fminf(env->width, env->height) * 0.31f;
 
@@ -566,7 +565,6 @@ static inline bool bat_curriculum_inbound_enabled(Bat* env) {
 static inline float bat_curriculum_inbound_bug_distance(Bat* env) {
     float base = env->curriculum_max_bug_distance;
     int extra_levels = env->curriculum_level - env->curriculum_inbound_start_level + 1;
-    if (extra_levels < 1) extra_levels = 1;
     float distance = base + env->curriculum_inbound_bug_distance_step * extra_levels;
     return bat_clampf(distance, base, env->curriculum_inbound_max_bug_distance);
 }
