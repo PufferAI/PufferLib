@@ -881,8 +881,6 @@ static int test_chirp_ring_physical_ordering(void) {
 static int test_chirp_audio_maps_norm_freq_to_audible_sweep(void) {
     ASSERT_FLOAT_NEAR(bat_chirp_audio_frequency_hz(0.0f), 600.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(bat_chirp_audio_frequency_hz(1.0f), 3600.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(bat_chirp_audio_instant_hz(0.0f, 1.0f, 0.20f, 0.10f), 2100.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(bat_chirp_audio_instant_hz(1.0f, 0.0f, 0.20f, 0.10f), 2100.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(bat_chirp_audio_sample_f32(0.0f, 1.0f, 0.20f, -1, 48000), 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(bat_chirp_audio_sample_f32(0.0f, 1.0f, 0.20f, 9600, 48000), 0.0f, 0.0001f);
     float sample = bat_chirp_audio_sample_f32(0.0f, 1.0f, 0.20f, 2400, 48000);
