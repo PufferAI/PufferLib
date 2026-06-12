@@ -52,9 +52,6 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "curriculum_level", log->curriculum_level);
     dict_set(out, "curriculum_difficulty", log->curriculum_difficulty);
     dict_set(out, "curriculum_perf", log->curriculum_perf);
-    dict_set(out, "curriculum_distance_difficulty", log->curriculum_distance_difficulty);
-    dict_set(out, "curriculum_obstacle_difficulty", log->curriculum_obstacle_difficulty);
-    dict_set(out, "curriculum_motion_difficulty", log->curriculum_motion_difficulty);
     dict_set(out, "num_obstacles", log->num_obstacles);
     dict_set(out, "chirps_emitted", log->chirps_emitted);
     dict_set(out, "chirp_perf", log->chirp_perf);

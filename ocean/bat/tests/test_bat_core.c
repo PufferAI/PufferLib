@@ -241,7 +241,7 @@ static int test_success_reward_includes_chirp_efficiency_bonus(void) {
     return 0;
 }
 
-static int test_curriculum_perf_logs_distance_and_obstacle_difficulty_components(void) {
+static int test_curriculum_perf_uses_distance_and_obstacle_difficulty(void) {
     Bat env = make_test_env();
     c_reset(&env);
 
@@ -255,9 +255,6 @@ static int test_curriculum_perf_logs_distance_and_obstacle_difficulty_components
     ASSERT_FLOAT_NEAR(curriculum_difficulty(&env), 0.3888889f, 0.0001f);
     add_log(&env, 1.0f, 0.0f, 0.0f);
     ASSERT_FLOAT_NEAR(env.log.base_perf, 1.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.curriculum_distance_difficulty, 0.5000000f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.curriculum_obstacle_difficulty, 0.6666667f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.log.curriculum_motion_difficulty, 0.0000000f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.curriculum_difficulty, 0.3888889f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.curriculum_perf, 0.3888889f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.log.num_obstacles, 2.0f, 0.0001f);
@@ -1798,7 +1795,7 @@ int main(void) {
     if (test_chirp_efficiency_scores_low_usage_above_full_budget()) return 1;
     if (test_chirp_perf_uses_fixed_fifteen_chirp_reference()) return 1;
     if (test_success_reward_includes_chirp_efficiency_bonus()) return 1;
-    if (test_curriculum_perf_logs_distance_and_obstacle_difficulty_components()) return 1;
+    if (test_curriculum_perf_uses_distance_and_obstacle_difficulty()) return 1;
     if (test_perf_composes_base_perf_curriculum_difficulty_and_chirp_perf()) return 1;
     if (test_left_right_echo_asymmetry()) return 1;
     if (test_directional_echo_arrival_and_gain_by_side()) return 1;

@@ -129,9 +129,6 @@ typedef struct Log {
     float curriculum_level;
     float curriculum_difficulty;
     float curriculum_perf;
-    float curriculum_distance_difficulty;
-    float curriculum_obstacle_difficulty;
-    float curriculum_motion_difficulty;
     float num_obstacles;
     float chirps_emitted;
     float chirp_perf;
@@ -637,9 +634,6 @@ void free_allocated(Bat* env) {
 
 static inline void add_log(Bat* env, float success, float collision, float timeout) {
     float curriculum_difficulty_value = curriculum_difficulty(env);
-    float distance_difficulty = curriculum_distance_difficulty(env);
-    float obstacle_difficulty = curriculum_obstacle_difficulty(env);
-    float motion_difficulty = curriculum_motion_difficulty(env);
     float chirp_perf_value = chirp_perf(env);
     env->log.perf += success * curriculum_difficulty_value * chirp_perf_value;
     env->log.base_perf += success;
@@ -651,9 +645,6 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.curriculum_level += env->curriculum_level;
     env->log.curriculum_difficulty += curriculum_difficulty_value;
     env->log.curriculum_perf += success * curriculum_difficulty_value;
-    env->log.curriculum_distance_difficulty += distance_difficulty;
-    env->log.curriculum_obstacle_difficulty += obstacle_difficulty;
-    env->log.curriculum_motion_difficulty += motion_difficulty;
     env->log.num_obstacles += env->num_obstacles;
     env->log.chirps_emitted += env->chirps_emitted;
     env->log.chirp_perf += chirp_perf_value;
