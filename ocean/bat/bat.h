@@ -83,6 +83,9 @@
 #define AUDIO_VOLUME 0.22f
 #define AUDIO_ENVELOPE_FADE 0.08f
 #define RECORD_MAX_VOICES 16
+#define FREQ_HISTORY_TICKS 96
+#define FREQ_PANEL_WIDTH 192
+#define FREQ_PANEL_MARGIN 8
 #define CHIRP_PERF_FLOOR 0.05f
 #define CHIRP_MIN_DURATION_SECONDS 0.04f
 #define CHIRP_DURATION_RANGE_SECONDS 0.18f
@@ -162,6 +165,9 @@ typedef struct Client {
     char record_wav_path[256];
     char record_mp4_path[256];
     BatRecordVoice record_voices[RECORD_MAX_VOICES];
+    float freq_history[FREQ_HISTORY_TICKS][2][FREQ_BINS];
+    int freq_history_head;
+    int freq_history_last_tick;
 #endif
 } Client;
 
@@ -1249,6 +1255,85 @@ static inline Color doppler_ray_color(float doppler, float alpha) {
         (unsigned char)(255.0f * bat_clampf(alpha, 0.0f, 1.0f))};
 }
 
+static inline void clear_freq_history(Client* client) {
+    memset(client->freq_history, 0, sizeof(client->freq_history));
+    client->freq_history_head = 0;
+    client->freq_history_last_tick = -1;
+}
+
+static inline void capture_freq_history(Bat* env) {
+    Client* client = env->client;
+    if (env->tick < client->freq_history_last_tick) {
+        clear_freq_history(client);
+    }
+    if (env->tick == client->freq_history_last_tick) return;
+
+    float (*sample)[FREQ_BINS] = client->freq_history[client->freq_history_head];
+    for (int i = 0; i < FREQ_BINS; i++) {
+        sample[0][i] = env->observations[LEFT_FREQ_OFFSET + i];
+        sample[1][i] = env->observations[RIGHT_FREQ_OFFSET + i];
+    }
+
+    client->freq_history_head = (client->freq_history_head + 1) % FREQ_HISTORY_TICKS;
+    client->freq_history_last_tick = env->tick;
+}
+
+static inline Color freq_history_color(int bin, float energy) {
+    float e = sqrtf(bat_clampf(energy, 0.0f, 1.0f));
+    if (e <= 0.001f) return (Color){42, 46, 56, 255};
+
+    Color base = freq_color(bin / (float)(FREQ_BINS - 1), 1.0f);
+    float brightness = 0.25f + 0.75f * e;
+    return (Color){
+        (unsigned char)(36.0f + 219.0f * (base.r / 255.0f) * brightness),
+        (unsigned char)(36.0f + 219.0f * (base.g / 255.0f) * brightness),
+        (unsigned char)(36.0f + 219.0f * (base.b / 255.0f) * brightness),
+        255,
+    };
+}
+
+static inline void draw_freq_history_band(Client* client,
+        int ear, int x, int y, int width, int height) {
+    float col_width = width / (float)FREQ_HISTORY_TICKS;
+    float row_height = height / (float)FREQ_BINS;
+    for (int t = 0; t < FREQ_HISTORY_TICKS; t++) {
+        int history_idx = (client->freq_history_head + t) % FREQ_HISTORY_TICKS;
+        int x0 = x + (int)(t * col_width);
+        int x1 = x + (int)((t + 1) * col_width);
+        if (x1 <= x0) x1 = x0 + 1;
+
+        for (int row = 0; row < FREQ_BINS; row++) {
+            int bin = FREQ_BINS - 1 - row;
+            int y0 = y + (int)(row * row_height);
+            int y1 = y + (int)((row + 1) * row_height);
+            if (y1 <= y0) y1 = y0 + 1;
+            DrawRectangle(x0, y0, x1 - x0, y1 - y0,
+                freq_history_color(bin, client->freq_history[history_idx][ear][bin]));
+        }
+    }
+}
+
+static inline void draw_freq_history_panel(Bat* env, int x, int y, int width, int height) {
+    capture_freq_history(env);
+
+    DrawRectangle(x, y, width, height, (Color){32, 36, 46, 255});
+    int band_width = width - 2 * FREQ_PANEL_MARGIN;
+    int band_height = (height - 3 * FREQ_PANEL_MARGIN) / 2;
+    int left_y = y + FREQ_PANEL_MARGIN;
+    int right_y = left_y + band_height + FREQ_PANEL_MARGIN;
+
+    draw_freq_history_band(env->client, 0, x + FREQ_PANEL_MARGIN, left_y,
+        band_width, band_height);
+    draw_freq_history_band(env->client, 1, x + FREQ_PANEL_MARGIN, right_y,
+        band_width, band_height);
+
+    DrawRectangleLines(x, y, width, height, (Color){124, 132, 148, 255});
+    DrawRectangleLines(x + FREQ_PANEL_MARGIN, left_y, band_width, band_height,
+        (Color){102, 110, 126, 255});
+    DrawRectangleLines(x + FREQ_PANEL_MARGIN, right_y, band_width, band_height,
+        (Color){102, 110, 126, 255});
+}
+
 static inline void draw_echo_flash(Bat* env, ChirpEvent* chirp,
         float rx, float ry, float rvx, float rvy, float strength,
         float sx, float sy) {
@@ -1314,14 +1399,14 @@ static inline void draw_corner_reflector_echoes(Bat* env, ChirpEvent* chirp,
     draw_echo_flash(env, chirp, w, 0.5f * h, 0.0f, 0.0f, strength, sx, sy);
 }
 
-static inline void draw_corner_reflector_markers(Bat* env) {
+static inline void draw_corner_reflector_markers(int width, int height) {
     const int size = 8;
     const Color fill = (Color){128, 128, 132, 255};
     const Color outline = (Color){202, 202, 208, 255};
-    int max_x = env->client->width - size;
-    int max_y = env->client->height - size;
-    int mid_x = env->client->width / 2 - size / 2;
-    int mid_y = env->client->height / 2 - size / 2;
+    int max_x = width - size;
+    int max_y = height - size;
+    int mid_x = width / 2 - size / 2;
+    int mid_y = height / 2 - size / 2;
     DrawRectangle(0, 0, size, size, fill);
     DrawRectangleLines(0, 0, size, size, outline);
     DrawRectangle(max_x, 0, size, size, fill);
@@ -1361,8 +1446,9 @@ static inline void draw_echo_reflections(Bat* env, float sx, float sy) {
 
 Client* make_client(Bat* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
-    client->width = ARENA_WIDTH * 10;
+    client->width = ARENA_WIDTH * 10 + FREQ_PANEL_WIDTH;
     client->height = ARENA_HEIGHT * 10;
+    clear_freq_history(client);
     InitWindow(client->width, client->height, "Bat");
     SetTargetFPS(env->render_target_fps);
     InitAudioDevice();
@@ -1391,13 +1477,15 @@ void c_render(Bat* env) {
         env->client = make_client(env);
     }
     play_chirp_audio(env);
-    float sx = env->client->width / (float)ARENA_WIDTH;
+    int arena_width = env->client->width - FREQ_PANEL_WIDTH;
+    int arena_height = env->client->height;
+    float sx = arena_width / (float)ARENA_WIDTH;
     float sy = env->client->height / (float)ARENA_HEIGHT;
     BeginDrawing();
     ClearBackground((Color){18, 20, 24, 255});
     draw_chirp_rings(env, sx, sy);
     draw_echo_reflections(env, sx, sy);
-    DrawRectangleLines(0, 0, env->client->width, env->client->height, GRAY);
+    DrawRectangleLines(0, 0, arena_width, arena_height, GRAY);
     for (int i = 0; i < env->num_obstacles; i++) {
         DrawRectangle(
             (int)(env->obstacle_x[i] * sx),
@@ -1406,7 +1494,7 @@ void c_render(Bat* env) {
             (int)(env->obstacle_h[i] * sy),
             (Color){92, 92, 96, 255});
     }
-    draw_corner_reflector_markers(env);
+    draw_corner_reflector_markers(arena_width, arena_height);
     DrawCircle((int)(env->bug_x * sx), (int)(env->bug_y * sy),
         BUG_RADIUS * sx, GREEN);
     DrawCircle((int)(env->x * sx), (int)(env->y * sy),
@@ -1417,6 +1505,7 @@ void c_render(Bat* env) {
     int cooldown = env->chirp_cooldown_ticks - (env->tick - env->last_chirp_tick);
     DrawText(TextFormat("reward %.3f tick %d chirps %d cooldown %d ESC exits", env->rewards[0], env->tick,
         env->chirps_emitted, cooldown), 10, 10, 20, RAYWHITE);
+    draw_freq_history_panel(env, arena_width, 0, FREQ_PANEL_WIDTH, arena_height);
     EndDrawing();
     record_capture_frame(env);
 }
