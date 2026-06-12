@@ -8,7 +8,6 @@
 
 void my_init(Env* env, Dict* kwargs) {
     env->num_agents = NUM_AGENTS;
-    env->frameskip = dict_get(kwargs, "frameskip")->value;
     env->ear_separation_scale = dict_get(kwargs, "ear_separation_scale")->value;
     env->ear_rear_gain = dict_get(kwargs, "ear_rear_gain")->value;
     env->ear_front_gain = dict_get(kwargs, "ear_front_gain")->value;

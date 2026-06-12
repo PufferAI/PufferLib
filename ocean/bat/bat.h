@@ -161,6 +161,13 @@ typedef struct Client {
 #endif
 } Client;
 
+typedef enum ChirpStatus {
+    CHIRP_STATUS_OVER_BUDGET = -2,
+    CHIRP_STATUS_COOLDOWN = -1,
+    CHIRP_STATUS_NONE = 0,
+    CHIRP_STATUS_EMITTED = 1,
+} ChirpStatus;
+
 typedef struct Bat {
     Client* client;
     Log log;
@@ -170,7 +177,6 @@ typedef struct Bat {
     float* terminals;
     int num_agents;
 
-    int frameskip;
     int tick;
     int render_target_fps;
     int record_video;
@@ -228,7 +234,7 @@ typedef struct Bat {
     ChirpEvent chirps[CHIRP_HISTORY];
     int chirp_head;
     EchoBucket echo_queue[ECHO_QUEUE_TICKS];
-    int chirps_emitted_episode;
+    int chirps_emitted;
     int audio_chirp_serial;
     int chirps_overlapped;
 
@@ -457,7 +463,7 @@ static inline float curriculum_bug_maneuver_frequency(Bat* env) {
 }
 
 static inline float chirps_used_ratio(Bat* env) {
-    return bat_clampf(env->chirps_emitted_episode / (float)env->chirp_budget, 0.0f, 1.0f);
+    return bat_clampf(env->chirps_emitted / (float)env->chirp_budget, 0.0f, 1.0f);
 }
 
 static inline float chirp_efficiency(Bat* env) {
@@ -466,7 +472,7 @@ static inline float chirp_efficiency(Bat* env) {
 
 static inline float chirp_perf(Bat* env) {
     float reference_chirps = fmaxf(1.0f, (float)MAX_CHIRPS_PER_EPISODE);
-    float raw = 1.0f - env->chirps_emitted_episode / reference_chirps;
+    float raw = 1.0f - env->chirps_emitted / reference_chirps;
     return bat_clampf(raw, CHIRP_PERF_FLOOR, 1.0f);
 }
 
@@ -680,9 +686,9 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.curriculum_obstacle_difficulty += obstacle_difficulty;
     env->log.curriculum_motion_difficulty += motion_difficulty;
     env->log.num_obstacles += env->num_obstacles;
-    env->log.chirps_emitted += env->chirps_emitted_episode;
+    env->log.chirps_emitted += env->chirps_emitted;
     env->log.chirp_perf += chirp_perf_value;
-    float chirps = fmaxf(1.0f, (float)env->chirps_emitted_episode);
+    float chirps = fmaxf(1.0f, (float)env->chirps_emitted);
     env->log.chirp_overlap_fraction += env->chirps_overlapped / chirps;
     env->log.n += 1.0f;
 }
@@ -1012,7 +1018,7 @@ static inline void reset_episode(Bat* env) {
     env->tick_bug_echo_path = -1.0f;
     env->last_bug_echo_path = -1.0f;
     env->last_bug_echo_expected_tick = -1.0f;
-    env->chirps_emitted_episode = 0;
+    env->chirps_emitted = 0;
     env->chirps_overlapped = 0;
     env->episode_return = 0.0f;
     env->start_bug_dist = dist(env->x, env->y, env->bug_x, env->bug_y);
@@ -1154,24 +1160,20 @@ static inline void update_motion(Bat* env, float dt) {
 }
 
 static inline bool try_emit_chirp(Bat* env) {
-    int start_idx = action_index(env->actions[2], CHIRP_FREQ_BINS);
-    int end_idx = action_index(env->actions[3], CHIRP_FREQ_BINS);
-    int duration_idx = action_index(env->actions[4], CHIRP_DURATION_BINS);
-
     if (env->tick - env->last_chirp_tick < env->chirp_cooldown_ticks) {
         return false;
     }
 
-    if (env->chirps_emitted_episode >= env->chirp_budget) {
-        return false;
-    }
+    int start_idx = action_index(env->actions[2], CHIRP_FREQ_BINS);
+    int end_idx = action_index(env->actions[3], CHIRP_FREQ_BINS);
+    int duration_idx = action_index(env->actions[4], CHIRP_DURATION_BINS);
 
     env->last_chirp_start_freq = norm_bin(start_idx, CHIRP_FREQ_BINS);
     env->last_chirp_end_freq = norm_bin(end_idx, CHIRP_FREQ_BINS);
     env->last_chirp_duration = norm_bin(duration_idx, CHIRP_DURATION_BINS);
     env->chirp_age_ticks = 0;
     env->last_chirp_tick = env->tick;
-    env->chirps_emitted_episode += 1;
+    env->chirps_emitted += 1;
     ChirpEvent* chirp = &env->chirps[env->chirp_head];
     chirp->x = env->x;
     chirp->y = env->y;
@@ -1199,17 +1201,17 @@ static inline float next_chirp_overlap_fraction(Bat* env) {
     return bat_clampf(remaining_ticks / wait_ticks, 0.0f, 1.0f);
 }
 
-static inline int update_chirp(Bat* env) {
+static inline ChirpStatus update_chirp(Bat* env) {
     int emit = action_index(env->actions[5], CHIRP_EMIT_ACTIONS);
     if (emit) {
-        if (env->chirps_emitted_episode >= env->chirp_budget) {
-            return -2;
+        if (env->chirps_emitted >= env->chirp_budget) {
+            return CHIRP_STATUS_OVER_BUDGET;
         }
-        return try_emit_chirp(env) ? 1 : -1;
+        return try_emit_chirp(env) ? CHIRP_STATUS_EMITTED : CHIRP_STATUS_COOLDOWN;
     } else if (env->chirp_age_ticks < MAX_CHIRP_AGE_TICKS) {
         env->chirp_age_ticks += 1;
     }
-    return 0;
+    return CHIRP_STATUS_NONE;
 }
 
 static inline bool caught_bug(Bat* env) {
@@ -1219,72 +1221,59 @@ static inline bool caught_bug(Bat* env) {
 void c_step(Bat* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
+    float success = 0.0f;
+    float collision = 0.0f;
+    float timeout = 0.0f;
 
     float chirp_overlap_fraction = next_chirp_overlap_fraction(env);
-    int chirp_status = update_chirp(env);
-    if (chirp_status == -2) {
+    ChirpStatus chirp_status = update_chirp(env);
+    if (chirp_status == CHIRP_STATUS_OVER_BUDGET) {
+        env->tick += 1;
         env->rewards[0] = -1.0f;
-        env->terminals[0] = 1.0f;
-        env->episode_return += env->rewards[0];
-        add_log(env, 0.0f, 1.0f, 0.0f);
-        reset_episode(env);
-        return;
-    }
-    if (caught_bug(env)) {
-        env->rewards[0] = success_reward(env);
-        env->terminals[0] = 1.0f;
-        env->episode_return += env->rewards[0];
-        advance_curriculum(env);
-        add_log(env, 1.0f, 0.0f, 0.0f);
-        reset_episode(env);
-        return;
-    }
-    schedule_due_chirp_slices(env);
+        collision = 1.0f;
+    } else {
+        schedule_due_chirp_slices(env);
 
-    for (int i = 0; i < env->frameskip; i++) {
         update_motion(env, TICK_RATE);
         update_bug(env, TICK_RATE);
+        env->tick += 1;
         if (hits_wall(env) || hits_obstacle(env)) {
             env->rewards[0] = -env->collision_penalty;
-            env->terminals[0] = 1.0f;
-            env->episode_return += env->rewards[0];
-            add_log(env, 0.0f, 1.0f, 0.0f);
-            reset_episode(env);
-            return;
-        }
-        if (caught_bug(env)) {
+            collision = 1.0f;
+        } else if (caught_bug(env)) {
             env->rewards[0] = success_reward(env);
-            env->terminals[0] = 1.0f;
-            env->episode_return += env->rewards[0];
-            advance_curriculum(env);
-            add_log(env, 1.0f, 0.0f, 0.0f);
-            reset_episode(env);
-            return;
+            success = 1.0f;
+        } else {
+            float bug_dist = dist(env->x, env->y, env->bug_x, env->bug_y);
+            float progress = env->prev_bug_dist - bug_dist;
+            env->rewards[0] += env->progress_reward_scale * progress;
+            env->rewards[0] -= env->step_cost; // TODO: Fold this only when we are ready to break training determinism.
+            if (chirp_status == CHIRP_STATUS_EMITTED) {
+                env->rewards[0] += env->valid_chirp_reward; // TODO: Remove this; chirps should only pay when bug echoes improve.
+                env->rewards[0] -= CHIRP_COST;
+                if (chirp_overlap_fraction > 0.0f) {
+                    env->rewards[0] -= env->chirp_overlap_penalty * chirp_overlap_fraction;
+                    env->chirps_overlapped += 1;
+                }
+            } else if (chirp_status == CHIRP_STATUS_COOLDOWN) {
+                env->rewards[0] -= env->early_chirp_penalty;
+            }
+            env->prev_bug_dist = bug_dist;
+
+            if (env->tick >= MAX_STEPS) {
+                env->rewards[0] = -1.0f;
+                timeout = 1.0f;
+            }
         }
     }
 
-    env->tick += 1;
-    float bug_dist = dist(env->x, env->y, env->bug_x, env->bug_y);
-    float progress = env->prev_bug_dist - bug_dist;
-    env->rewards[0] += env->progress_reward_scale * progress;
-    env->rewards[0] -= env->step_cost;
-    if (chirp_status > 0) {
-        env->rewards[0] += env->valid_chirp_reward;
-        env->rewards[0] -= CHIRP_COST;
-        if (chirp_overlap_fraction > 0.0f) {
-            env->rewards[0] -= env->chirp_overlap_penalty * chirp_overlap_fraction;
-            env->chirps_overlapped += 1;
-        }
-    } else if (chirp_status < 0) {
-        env->rewards[0] -= env->early_chirp_penalty;
-    }
-    env->prev_bug_dist = bug_dist;
-
-    if (env->tick >= MAX_STEPS) {
-        env->rewards[0] = -1.0f;
+    if (success || collision || timeout) {
         env->terminals[0] = 1.0f;
         env->episode_return += env->rewards[0];
-        add_log(env, 0.0f, 0.0f, 1.0f);
+        if (success) {
+            advance_curriculum(env);
+        }
+        add_log(env, success, collision, timeout);
         reset_episode(env);
         return;
     }
@@ -1548,7 +1537,7 @@ void c_render(Bat* env) {
     DrawLine((int)(env->x * sx), (int)(env->y * sy), (int)(hx * sx), (int)(hy * sy), WHITE);
     int cooldown = env->chirp_cooldown_ticks - (env->tick - env->last_chirp_tick);
     DrawText(TextFormat("reward %.3f tick %d chirps %d cooldown %d ESC exits", env->rewards[0], env->tick,
-        env->chirps_emitted_episode, cooldown), 10, 10, 20, RAYWHITE);
+        env->chirps_emitted, cooldown), 10, 10, 20, RAYWHITE);
     EndDrawing();
     record_capture_frame(env);
 }

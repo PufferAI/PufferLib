@@ -16,7 +16,6 @@ static char* trim(char* s) {
 static void set_demo_defaults(Bat* env) {
     *env = (Bat){
         .num_agents = NUM_AGENTS,
-        .frameskip = 1,
         .max_speed = 15.498233877318418f,
         .min_speed = 2.6389946132676654f,
         .accel = 53.02330161128345f,
@@ -51,8 +50,7 @@ static void set_demo_defaults(Bat* env) {
 }
 
 static void apply_env_config_value(Bat* env, const char* key, float value) {
-    if (strcmp(key, "frameskip") == 0) env->frameskip = (int)value;
-    else if (strcmp(key, "bat_max_speed") == 0) env->max_speed = value;
+    if (strcmp(key, "bat_max_speed") == 0) env->max_speed = value;
     else if (strcmp(key, "bat_min_speed") == 0) env->min_speed = value;
     else if (strcmp(key, "bat_accel") == 0) env->accel = value;
     else if (strcmp(key, "bat_turn_rate") == 0) env->turn_rate = value;

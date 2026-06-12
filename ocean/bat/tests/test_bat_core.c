@@ -24,7 +24,6 @@
 static Bat make_test_env(void) {
     Bat env = {
         .num_agents = 1,
-        .frameskip = 1,
         .num_obstacles = 1,
         .ear_separation_scale = 0.75f,
         .ear_rear_gain = 0.20f,
@@ -89,11 +88,11 @@ static int test_chirp_budget_observation_tracks_used_chirps(void) {
     env.actions[5] = 1.0f;
     c_step(&env);
 
-    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+    ASSERT_TRUE(env.chirps_emitted == 1);
     ASSERT_FLOAT_NEAR(env.observations[CHIRPS_USED_OBS],
         1.0f / (float)MAX_CHIRPS_PER_EPISODE, 0.0001f);
 
-    env.chirps_emitted_episode = MAX_CHIRPS_PER_EPISODE + 1;
+    env.chirps_emitted = MAX_CHIRPS_PER_EPISODE + 1;
     compute_observations(&env);
     ASSERT_FLOAT_NEAR(env.observations[CHIRPS_USED_OBS], 1.0f, 0.0001f);
 
@@ -127,14 +126,14 @@ static int test_chirping_after_budget_terminates_with_penalty(void) {
     env.actions[5] = 1.0f;
     c_step(&env);
     ASSERT_TRUE(env.terminals[0] == 0.0f);
-    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+    ASSERT_TRUE(env.chirps_emitted == 1);
     ASSERT_FLOAT_NEAR(env.observations[CHIRPS_USED_OBS], 1.0f, 0.0001f);
 
     c_step(&env);
 
     ASSERT_TRUE(env.terminals[0] == 1.0f);
     ASSERT_FLOAT_NEAR(env.rewards[0], -1.0f, 0.0001f);
-    ASSERT_TRUE(env.chirps_emitted_episode == 0);
+    ASSERT_TRUE(env.chirps_emitted == 0);
 
     free_allocated(&env);
     return 0;
@@ -188,10 +187,10 @@ static int test_chirp_efficiency_scores_low_usage_above_full_budget(void) {
     c_reset(&env);
 
     env.chirp_budget = 10;
-    env.chirps_emitted_episode = 1;
+    env.chirps_emitted = 1;
     ASSERT_FLOAT_NEAR(chirp_efficiency(&env), 0.95f, 0.0001f);
 
-    env.chirps_emitted_episode = 10;
+    env.chirps_emitted = 10;
     ASSERT_FLOAT_NEAR(chirp_efficiency(&env), 0.50f, 0.0001f);
 
     free_allocated(&env);
@@ -202,19 +201,19 @@ static int test_chirp_perf_uses_fixed_fifteen_chirp_reference(void) {
     Bat env = make_test_env();
     c_reset(&env);
 
-    env.chirps_emitted_episode = 0;
+    env.chirps_emitted = 0;
     ASSERT_FLOAT_NEAR(chirp_perf(&env), 1.0f, 0.0001f);
 
-    env.chirps_emitted_episode = 6;
+    env.chirps_emitted = 6;
     ASSERT_FLOAT_NEAR(chirp_perf(&env), 0.60f, 0.0001f);
 
-    env.chirps_emitted_episode = 8;
+    env.chirps_emitted = 8;
     ASSERT_FLOAT_NEAR(chirp_perf(&env), 0.4666667f, 0.0001f);
 
-    env.chirps_emitted_episode = 15;
+    env.chirps_emitted = 15;
     ASSERT_FLOAT_NEAR(chirp_perf(&env), 0.05f, 0.0001f);
 
-    env.chirps_emitted_episode = 30;
+    env.chirps_emitted = 30;
     ASSERT_FLOAT_NEAR(chirp_perf(&env), 0.05f, 0.0001f);
 
     free_allocated(&env);
@@ -227,7 +226,7 @@ static int test_success_reward_includes_chirp_efficiency_bonus(void) {
     c_reset(&env);
 
     env.chirp_budget = 10;
-    env.chirps_emitted_episode = 2;
+    env.chirps_emitted = 2;
     env.x = 20.0f;
     env.y = 20.0f;
     env.bug_x = 20.5f;
@@ -281,7 +280,7 @@ static int test_perf_composes_base_perf_curriculum_difficulty_and_chirp_perf(voi
     env.curriculum_start_bug_distance = 8.0f;
     env.num_obstacles = 2;
     env.chirp_budget = 14;
-    env.chirps_emitted_episode = 7;
+    env.chirps_emitted = 7;
     env.start_bug_dist = 32.0f;
 
     add_log(&env, 1.0f, 0.0f, 0.0f);
@@ -499,7 +498,6 @@ static int test_ear_directivity_gains_control_echo_energy(void) {
 static int test_default_sound_speed_allows_one_tick_interaural_delay(void) {
     Bat env = {
         .num_agents = 1,
-        .frameskip = 1,
         .num_obstacles = 0,
         .ear_separation_scale = 0.75f,
         .ear_rear_gain = 0.20f,
@@ -1047,7 +1045,7 @@ static int test_valid_chirp_gets_reward(void) {
 
     ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.rewards[0], env.valid_chirp_reward, 0.0001f);
-    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+    ASSERT_TRUE(env.chirps_emitted == 1);
 
     free_allocated(&env);
     return 0;
@@ -1072,7 +1070,7 @@ static int test_early_chirp_gets_penalty_and_emits_nothing(void) {
 
     ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.rewards[0], -env.early_chirp_penalty, 0.0001f);
-    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+    ASSERT_TRUE(env.chirps_emitted == 1);
 
     free_allocated(&env);
     return 0;
@@ -1095,7 +1093,7 @@ static int test_chirp_before_bug_echo_arrives_gets_scaled_overlap_penalty(void) 
 
     ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.rewards[0], env.valid_chirp_reward, 0.0001f);
-    ASSERT_TRUE(env.chirps_emitted_episode == 1);
+    ASSERT_TRUE(env.chirps_emitted == 1);
     ASSERT_TRUE(env.chirps_overlapped == 0);
 
     env.last_chirp_tick = 0;
@@ -1108,7 +1106,7 @@ static int test_chirp_before_bug_echo_arrives_gets_scaled_overlap_penalty(void) 
     ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.rewards[0],
         env.valid_chirp_reward - 0.5f * env.chirp_overlap_penalty, 0.0001f);
-    ASSERT_TRUE(env.chirps_emitted_episode == 2);
+    ASSERT_TRUE(env.chirps_emitted == 2);
     ASSERT_TRUE(env.chirps_overlapped == 1);
 
     free_allocated(&env);
@@ -1126,7 +1124,7 @@ static int test_chirp_after_bug_echo_arrives_ignores_static_echo_window(void) {
     env.chirp_overlap_penalty = 0.0040f;
     env.chirp_cooldown_ticks = 1;
     env.chirp_budget = 10;
-    env.chirps_emitted_episode = 1;
+    env.chirps_emitted = 1;
     env.last_chirp_tick = 0;
     env.last_bug_echo_expected_tick = 3.0f;
     env.tick = 4;
@@ -1136,7 +1134,7 @@ static int test_chirp_after_bug_echo_arrives_ignores_static_echo_window(void) {
 
     ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.rewards[0], env.valid_chirp_reward, 0.0001f);
-    ASSERT_TRUE(env.chirps_emitted_episode == 2);
+    ASSERT_TRUE(env.chirps_emitted == 2);
     ASSERT_TRUE(env.chirps_overlapped == 0);
 
     free_allocated(&env);
@@ -1423,7 +1421,6 @@ static int test_chirp_echo_arrives_after_two_way_travel_not_immediately(void) {
 static int test_default_echo_range_reaches_curriculum_max_bug_distance(void) {
     Bat env = {
         .num_agents = 1,
-        .frameskip = 1,
         .num_obstacles = 0,
         .max_speed = 22.0f,
         .min_speed = 2.0f,
