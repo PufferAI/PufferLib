@@ -86,13 +86,10 @@ curriculum_perf
 curriculum_level
 curriculum_distance_difficulty
 curriculum_obstacle_difficulty
-curriculum_chirp_budget_difficulty (legacy fixed zero)
 curriculum_difficulty
 bug_motion_mode
 bug_motion_speed
 num_obstacles
-chirp_budget
-chirps_used_ratio
 chirp_overlap_fraction
 collision
 timeout
@@ -237,9 +234,9 @@ perf = base_perf * curriculum_difficulty * chirp_perf
 
 - Keep `chirp_overlap_penalty` small and sweepable.
 - Treat `chirp_overlap_fraction` as a diagnostic, not the main objective.
-- Keep `budget_difficulty` and `chirp_efficiency` as diagnostics, but do not
-  multiply them into `perf`; the fixed 15-chirp reference gives cleaner Protein
-  ranking pressure across 10, 8, and 6 chirp policies.
+- Keep chirp-budget ratio as an observation instead of an exported diagnostic;
+  the fixed 15-chirp reference gives cleaner Protein ranking pressure across
+  10, 8, and 6 chirp policies.
 
 ### Stage 4: Constant-velocity moving bug
 
@@ -263,7 +260,8 @@ bug_wall_bounce_enabled
 
 Gate:
 
-- Require maintained `base_perf` and non-collapsing `chirps_used_ratio`.
+- Require maintained `base_perf` and non-collapsing chirp behavior, checked
+  through `chirps_emitted` and `chirp_perf`.
 - Motion should not start before distance and obstacle rungs are stable.
 
 ### Stage 5: Simple bug maneuvers
@@ -360,7 +358,6 @@ Before adding maneuvers, do this:
 1. Add split difficulty logs:
    - `curriculum_distance_difficulty`
    - `curriculum_obstacle_difficulty`
-   - `curriculum_chirp_budget_difficulty`
    - `curriculum_motion_difficulty`
 
 2. Change obstacle schedule so it starts contributing around level `6`, not

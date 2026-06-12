@@ -58,16 +58,6 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "curriculum_motion_difficulty", log->curriculum_motion_difficulty);
     dict_set(out, "num_obstacles", log->num_obstacles);
     dict_set(out, "chirps_emitted", log->chirps_emitted);
-    dict_set(out, "chirp_budget", log->chirp_budget);
-    dict_set(out, "chirps_used_ratio", log->chirps_used_ratio);
-    dict_set(out, "chirp_efficiency", log->chirp_efficiency);
     dict_set(out, "chirp_perf", log->chirp_perf);
     dict_set(out, "chirp_overlap_fraction", log->chirp_overlap_fraction);
-    dict_set(out, "far_chirp_rate", log->far_chirp_rate);
-    dict_set(out, "near_chirp_rate", log->near_chirp_rate);
-    dict_set(out, "chirp_tempo_ratio", log->chirp_tempo_ratio);
-    dict_set(out, "first_chirp_tick_norm", log->first_chirp_tick_norm);
-    dict_set(out, "mean_chirp_tick_norm", log->mean_chirp_tick_norm);
-    dict_set(out, "mean_chirp_duration", log->mean_chirp_duration);
-    dict_set(out, "mean_chirp_bandwidth", log->mean_chirp_bandwidth);
 }

@@ -129,20 +129,8 @@ typedef struct Log {
     float curriculum_motion_difficulty;
     float num_obstacles;
     float chirps_emitted;
-    float chirp_budget;
-    float chirps_used_ratio;
-    float chirp_efficiency;
     float chirp_perf;
     float chirp_overlap_fraction;
-    float far_chirp_fraction;
-    float near_chirp_fraction;
-    float far_chirp_rate;
-    float near_chirp_rate;
-    float chirp_tempo_ratio;
-    float first_chirp_tick_norm;
-    float mean_chirp_tick_norm;
-    float mean_chirp_duration;
-    float mean_chirp_bandwidth;
     float n;
 } Log;
 
@@ -243,16 +231,6 @@ typedef struct Bat {
     int chirps_emitted_episode;
     int audio_chirp_serial;
     int chirps_overlapped;
-    float chirp_duration_sum;
-    float chirp_bandwidth_sum;
-    float chirps_far;
-    float chirps_mid;
-    float chirps_near;
-    float ticks_far;
-    float ticks_mid;
-    float ticks_near;
-    float first_chirp_tick;
-    float chirp_tick_sum;
 
     float chirp_efficiency_reward;
     float valid_chirp_reward;
@@ -541,36 +519,6 @@ static inline float success_reward(Bat* env) {
     return env->chirp_efficiency_reward * chirp_efficiency(env);
 }
 
-static inline float current_distance_ratio(Bat* env) {
-    float distance = dist(env->x, env->y, env->bug_x, env->bug_y);
-    return distance / env->start_bug_dist;
-}
-
-static inline void accumulate_distance_region(float ratio, float amount,
-        float* far, float* mid, float* near) {
-    if (ratio > 0.66f) {
-        *far += amount;
-    } else if (ratio < 0.33f) {
-        *near += amount;
-    } else {
-        *mid += amount;
-    }
-}
-
-static inline void record_distance_tick(Bat* env) {
-    accumulate_distance_region(current_distance_ratio(env), 1.0f,
-        &env->ticks_far, &env->ticks_mid, &env->ticks_near);
-}
-
-static inline void record_chirp_timing(Bat* env) {
-    if (env->first_chirp_tick < 0.0f) {
-        env->first_chirp_tick = (float)env->tick;
-    }
-    env->chirp_tick_sum += (float)env->tick;
-    accumulate_distance_region(current_distance_ratio(env), 1.0f,
-        &env->chirps_far, &env->chirps_mid, &env->chirps_near);
-}
-
 static inline void sample_spawns_at_distance(Bat* env, float target_distance) {
     float margin = fmaxf(6.0f, fmaxf(AGENT_RADIUS, BUG_RADIUS) + 3.0f);
     for (int attempt = 0; attempt < 96; attempt++) {
@@ -717,7 +665,6 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     float distance_difficulty = curriculum_distance_difficulty(env);
     float obstacle_difficulty = curriculum_obstacle_difficulty(env);
     float motion_difficulty = curriculum_motion_difficulty(env);
-    float chirp_efficiency_value = chirp_efficiency(env);
     float chirp_perf_value = chirp_perf(env);
     env->log.perf += success * curriculum_difficulty_value * chirp_perf_value;
     env->log.base_perf += success;
@@ -734,35 +681,9 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.curriculum_motion_difficulty += motion_difficulty;
     env->log.num_obstacles += env->num_obstacles;
     env->log.chirps_emitted += env->chirps_emitted_episode;
-    env->log.chirp_budget += env->chirp_budget;
-    env->log.chirps_used_ratio += chirps_used_ratio(env);
-    env->log.chirp_efficiency += chirp_efficiency_value;
     env->log.chirp_perf += chirp_perf_value;
     float chirps = fmaxf(1.0f, (float)env->chirps_emitted_episode);
     env->log.chirp_overlap_fraction += env->chirps_overlapped / chirps;
-    env->log.far_chirp_fraction += env->chirps_far / chirps;
-    env->log.near_chirp_fraction += env->chirps_near / chirps;
-    float far_rate = env->chirps_far / fmaxf(1.0f, env->ticks_far);
-    float near_rate = env->chirps_near / fmaxf(1.0f, env->ticks_near);
-    env->log.far_chirp_rate += far_rate;
-    env->log.near_chirp_rate += near_rate;
-    float tempo_ratio = 0.0f;
-    if (far_rate > 0.000001f) {
-        tempo_ratio = near_rate / far_rate;
-    } else if (near_rate > 0.000001f) {
-        tempo_ratio = 10.0f;
-    }
-    env->log.chirp_tempo_ratio += bat_clampf(tempo_ratio, 0.0f, 10.0f);
-    env->log.first_chirp_tick_norm += env->first_chirp_tick >= 0.0f
-        ? bat_clampf(env->first_chirp_tick / (float)MAX_STEPS, 0.0f, 1.0f)
-        : 1.0f;
-    env->log.mean_chirp_tick_norm += env->chirps_emitted_episode > 0
-        ? bat_clampf((env->chirp_tick_sum / chirps) / (float)MAX_STEPS, 0.0f, 1.0f)
-        : 1.0f;
-    if (env->chirps_emitted_episode > 0) {
-        env->log.mean_chirp_duration += env->chirp_duration_sum / env->chirps_emitted_episode;
-        env->log.mean_chirp_bandwidth += env->chirp_bandwidth_sum / env->chirps_emitted_episode;
-    }
     env->log.n += 1.0f;
 }
 
@@ -1093,16 +1014,6 @@ static inline void reset_episode(Bat* env) {
     env->last_bug_echo_expected_tick = -1.0f;
     env->chirps_emitted_episode = 0;
     env->chirps_overlapped = 0;
-    env->chirp_duration_sum = 0.0f;
-    env->chirp_bandwidth_sum = 0.0f;
-    env->chirps_far = 0.0f;
-    env->chirps_mid = 0.0f;
-    env->chirps_near = 0.0f;
-    env->ticks_far = 0.0f;
-    env->ticks_mid = 0.0f;
-    env->ticks_near = 0.0f;
-    env->first_chirp_tick = -1.0f;
-    env->chirp_tick_sum = 0.0f;
     env->episode_return = 0.0f;
     env->start_bug_dist = dist(env->x, env->y, env->bug_x, env->bug_y);
     env->prev_bug_dist = env->start_bug_dist;
@@ -1260,10 +1171,7 @@ static inline bool try_emit_chirp(Bat* env) {
     env->last_chirp_duration = norm_bin(duration_idx, CHIRP_DURATION_BINS);
     env->chirp_age_ticks = 0;
     env->last_chirp_tick = env->tick;
-    record_chirp_timing(env);
     env->chirps_emitted_episode += 1;
-    env->chirp_duration_sum += env->last_chirp_duration;
-    env->chirp_bandwidth_sum += fabsf(env->last_chirp_end_freq - env->last_chirp_start_freq);
     ChirpEvent* chirp = &env->chirps[env->chirp_head];
     chirp->x = env->x;
     chirp->y = env->y;
@@ -1356,7 +1264,6 @@ void c_step(Bat* env) {
     }
 
     env->tick += 1;
-    record_distance_tick(env);
     float bug_dist = dist(env->x, env->y, env->bug_x, env->bug_y);
     float progress = env->prev_bug_dist - bug_dist;
     env->rewards[0] += env->progress_reward_scale * progress;

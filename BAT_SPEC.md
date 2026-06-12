@@ -405,9 +405,9 @@ Reset:
 
 W&B exported metrics:
 
-- Export at most 31 explicit `dict_set(out, ...)` metrics from `binding.c`.
-  PufferLib appends `n`, giving the 32-key cap. Keep lower-value diagnostics
-  internal unless they are actively needed for sweep decisions.
+- Keep the explicit `dict_set(out, ...)` list in `binding.c` small. PufferLib
+  appends `n`, and lower-value diagnostics should stay internal unless they
+  are actively needed for sweep decisions.
 
 - `perf`
   - composite sweep objective:
@@ -422,25 +422,14 @@ W&B exported metrics:
     without chirp-budget weighting
 - `curriculum_distance_difficulty`
 - `curriculum_obstacle_difficulty`
-- `curriculum_chirp_budget_difficulty`
-  - legacy diagnostic; fixed at `0.0` because chirp budget no longer decays
-    with curriculum
 - `score`
   - required by PufferLib train worker; do not remove from `binding.c`
+- `episode_return`
 - `episode_length`
-- `success`
 - `collision`
 - `timeout`
-- `bug_distance_start`
-- `bug_distance_final`
-- `bug_distance_delta`
 - `num_obstacles`
 - `chirps_emitted`
-- `chirp_budget`
-- `chirps_used_ratio`
-- `chirp_efficiency`
-  - `0.5` if the full budget was spent, approaching `1.0` when few chirps were
-    used
 - `chirp_perf`
   - sweep-objective chirp multiplier:
     `clamp(1.0 - chirps_emitted / 15.0, 0.05, 1.0)`
@@ -449,17 +438,6 @@ W&B exported metrics:
 - `chirp_overlap_fraction`
   - fraction of emitted chirps that were sent before the previous chirp's max
     return window cleared
-- `far_chirp_rate`
-- `near_chirp_rate`
-- `chirp_tempo_ratio`
-  - `near_chirp_rate / far_chirp_rate`, clamped to `[0, 10]`; values above
-    `1.0` indicate chirps are denser near the bug than far away
-- `first_chirp_tick_norm`
-- `mean_chirp_tick_norm`
-- `mean_chirp_duration`
-- `mean_chirp_bandwidth`
-- `mean_echo_energy_left`
-- `mean_echo_energy_right`
 - `n`
 
 ## Curriculum
@@ -653,9 +631,9 @@ train/eval after each rung, and commit each known-good rung separately.
    - When the budget is exhausted, terminate with a `-1.0` failure penalty if
      the policy attempts another chirp. Do not terminate immediately after the
      last valid chirp, so the final echo can still matter.
-   - Log chirp budget, used ratio, remaining ratio, and efficiency to W&B so
-     sweeps can distinguish successful policies that waste every chirp from
-     successful policies that catch the bug with useful chirp timing.
+   - Keep chirp-use pressure visible through `chirps_emitted`, `chirp_perf`,
+     and the `chirps_used / chirp_budget` observation. Do not export duplicate
+     budget-ratio logs unless a future sweep needs them.
    - Add a sweepable solve-time efficiency reward where spending the full
      budget scores `0.5` on the efficiency component and using very few chirps
      approaches `1.0`.
