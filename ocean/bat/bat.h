@@ -36,6 +36,7 @@
 #define CHIRPS_USED_OBS 37
 #define FORWARD_SPEED_OBS 38
 #define TURN_RATE_OBS 39
+#define TIMER_OBS 40
 
 #define NOOP 0
 #define THRUST_FORWARD 1
@@ -45,7 +46,6 @@
 #define TURN_LEFT 1
 #define TURN_RIGHT 2
 
-#define MAX_OBSTACLES 16
 #define MAX_STEPS 512
 #define TICK_RATE (1.0f/60.0f)
 #define ARENA_WIDTH 64
@@ -81,7 +81,8 @@
 #define AUDIO_VOLUME 0.22f
 #define RECORD_MAX_VOICES 16
 #define CHIRP_PERF_FLOOR 0.05f
-#define CHIRP_COST 0.0f
+#define CHIRP_MIN_DURATION_SECONDS 0.04f
+#define CHIRP_DURATION_RANGE_SECONDS 0.18f
 #define MAX_CHIRP_AGE_TICKS 30
 #define MAX_CHIRPS_PER_EPISODE 15
 
@@ -105,7 +106,7 @@ typedef struct ChirpEvent {
 typedef struct EchoBucket {
     float energy[2][FREQ_BINS];
     float bug_energy;
-    float bug_path;
+    float closest_bug_echo_path;
     int tick;
 } EchoBucket;
 
@@ -281,7 +282,7 @@ static inline float bat_clampf(float v, float lo, float hi) {
 }
 
 static inline float chirp_duration_seconds(float duration_norm) {
-    return 0.04f + 0.18f * duration_norm;
+    return CHIRP_MIN_DURATION_SECONDS + CHIRP_DURATION_RANGE_SECONDS * duration_norm;
 }
 
 #include "bat_audio.h"
@@ -317,10 +318,6 @@ static inline void chirp_source_for_fraction(ChirpEvent* chirp, float slice,
     int slice_idx = (int)floorf(slice * (float)slices);
     if (slice_idx >= slices) slice_idx = slices - 1;
     chirp_source_for_slice(chirp, slice_idx, source_x, source_y);
-}
-
-static inline float echo_time_seconds(float distance, float sound_speed) {
-    return 2.0f * distance / sound_speed;
 }
 
 static inline float chirp_age_norm_denominator(Bat* env) {
@@ -408,7 +405,6 @@ static inline int curriculum_obstacles(Bat* env) {
         count = CURRICULUM_START_OBSTACLES + 1 + (env->curriculum_level - 1) / step;
     }
     if (count > CURRICULUM_MAX_OBSTACLES) count = CURRICULUM_MAX_OBSTACLES;
-    if (count > MAX_OBSTACLES) count = MAX_OBSTACLES;
     return count;
 }
 
@@ -419,30 +415,11 @@ static inline float curriculum_bug_distance(Bat* env) {
         CURRICULUM_MAX_BUG_DISTANCE);
 }
 
-static inline bool curriculum_inbound_enabled(Bat* env) {
-    return env->curriculum_level >= CURRICULUM_INBOUND_START_LEVEL;
-}
-
 static inline float curriculum_inbound_bug_distance(Bat* env) {
     float base = CURRICULUM_MAX_BUG_DISTANCE;
     int extra_levels = env->curriculum_level - CURRICULUM_INBOUND_START_LEVEL + 1;
     float distance = base + CURRICULUM_INBOUND_BUG_DISTANCE_STEP * extra_levels;
     return bat_clampf(distance, base, CURRICULUM_INBOUND_MAX_BUG_DISTANCE);
-}
-
-static inline float curriculum_spawn_distance(Bat* env) {
-    if (curriculum_inbound_enabled(env)) {
-        return curriculum_inbound_bug_distance(env);
-    }
-    return curriculum_bug_distance(env);
-}
-
-static inline float curriculum_bug_speed(Bat* env) {
-    float speed = BUG_SPEED;
-    if (curriculum_inbound_enabled(env)) {
-        speed *= INBOUND_BUG_SPEED_MULTIPLIER;
-    }
-    return speed;
 }
 
 static inline float curriculum_bug_maneuver_strength(Bat* env) {
@@ -480,6 +457,8 @@ static inline float norm_range(float value, float lo, float hi) {
     return bat_clampf((value - lo) / span, 0.0f, 1.0f);
 }
 
+// TODO: Revisit whether these curriculum difficulty diagnostics are worth logging;
+// they add a lot of code and may be removable before merge.
 static inline float curriculum_distance_difficulty(Bat* env) {
     float max_distance = fmaxf(CURRICULUM_MAX_BUG_DISTANCE,
         CURRICULUM_INBOUND_MAX_BUG_DISTANCE);
@@ -542,14 +521,7 @@ static inline void sample_spawns_at_distance(Bat* env, float target_distance) {
     sample_spawns(env);
 }
 
-static inline void set_bug_velocity(Bat* env, float heading, float speed) {
-    env->bug_base_heading = heading;
-    env->bug_vx = cosf(heading) * speed;
-    env->bug_vy = sinf(heading) * speed;
-}
-
 static inline void reset_bug_motion(Bat* env) {
-    env->bug_inbound = curriculum_inbound_enabled(env) ? 1 : 0;
     float strength = curriculum_bug_maneuver_strength(env);
     env->bug_maneuver_mode = strength > 0.000001f ? 1 + (int)(rng_next(env) % 3u) : 0;
     env->bug_maneuver_phase = randf(env) * TWO_PI;
@@ -557,21 +529,19 @@ static inline void reset_bug_motion(Bat* env) {
         (0.75f + 0.50f * randf(env));
     env->bug_maneuver_sign = (rng_next(env) & 1u) ? -1.0f : 1.0f;
 
-    float speed = curriculum_bug_speed(env);
+    float speed = env->bug_inbound ? BUG_SPEED * INBOUND_BUG_SPEED_MULTIPLIER : BUG_SPEED;
+    float heading;
     if (env->bug_inbound) {
         float tx, ty;
         norm_vec(env->x - env->bug_x, env->y - env->bug_y, &tx, &ty);
         float noise = INBOUND_HEADING_NOISE_DEGREES * (PI_F / 180.0f);
-        float heading = atan2f(ty, tx) + (2.0f * randf(env) - 1.0f) * noise;
-        set_bug_velocity(env, heading, speed);
+        heading = atan2f(ty, tx) + (2.0f * randf(env) - 1.0f) * noise;
     } else {
-        float heading = randf(env) * TWO_PI - PI_F;
-        set_bug_velocity(env, heading, speed);
+        heading = randf(env) * TWO_PI - PI_F;
     }
-}
-
-static inline void apply_curriculum(Bat* env) {
-    env->num_obstacles = curriculum_obstacles(env);
+    env->bug_base_heading = heading;
+    env->bug_vx = cosf(heading) * speed;
+    env->bug_vy = sinf(heading) * speed;
 }
 
 static inline void advance_curriculum(Bat* env) {
@@ -582,6 +552,9 @@ static inline void advance_curriculum(Bat* env) {
     }
 }
 
+// TODO: Revisit this when we are ready to break reset determinism. If overlapping
+// random obstacles are acceptable, remove rects_overlap(), obstacle_clear(), and
+// the attempt loop/fallback placement in generate_obstacles().
 static inline bool obstacle_clear(Bat* env, int idx, float x, float y,
         float w, float h) {
     if (circle_rect_collision(env->x, env->y, AGENT_RADIUS + 2.0f, x, y, w, h)) {
@@ -632,10 +605,10 @@ static inline void generate_obstacles(Bat* env) {
 
 void init(Bat* env) {
     env->tick = 0;
-    env->obstacle_x = (float*)calloc(MAX_OBSTACLES, sizeof(float));
-    env->obstacle_y = (float*)calloc(MAX_OBSTACLES, sizeof(float));
-    env->obstacle_w = (float*)calloc(MAX_OBSTACLES, sizeof(float));
-    env->obstacle_h = (float*)calloc(MAX_OBSTACLES, sizeof(float));
+    env->obstacle_x = (float*)calloc(CURRICULUM_MAX_OBSTACLES, sizeof(float));
+    env->obstacle_y = (float*)calloc(CURRICULUM_MAX_OBSTACLES, sizeof(float));
+    env->obstacle_w = (float*)calloc(CURRICULUM_MAX_OBSTACLES, sizeof(float));
+    env->obstacle_h = (float*)calloc(CURRICULUM_MAX_OBSTACLES, sizeof(float));
 }
 
 void allocate(Bat* env) {
@@ -696,7 +669,7 @@ static inline int freq_bin_index(float freq_norm) {
 
 static inline void clear_echo_bucket(EchoBucket* bucket) {
     memset(bucket, 0, sizeof(*bucket));
-    bucket->bug_path = -1.0f;
+    bucket->closest_bug_echo_path = -1.0f;
     bucket->tick = -1;
 }
 
@@ -730,8 +703,8 @@ static inline void add_echo_event(Bat* env, int ear, float receive_tick,
             if (bin + 1 < FREQ_BINS) bucket->energy[ear_idx][bin + 1] += sideband;
         }
         bucket->bug_energy += intensity;
-        if (bucket->bug_path < 0.0f || path < bucket->bug_path) {
-            bucket->bug_path = path;
+        if (bucket->closest_bug_echo_path < 0.0f || path < bucket->closest_bug_echo_path) {
+            bucket->closest_bug_echo_path = path;
         }
     }
 }
@@ -939,8 +912,9 @@ static inline void process_echo_events(Bat* env) {
     }
     if (bucket->bug_energy > 0.0f) {
         env->tick_bug_echo_energy += bucket->bug_energy;
-        if (env->tick_bug_echo_path < 0.0f || bucket->bug_path < env->tick_bug_echo_path) {
-            env->tick_bug_echo_path = bucket->bug_path;
+        if (env->tick_bug_echo_path < 0.0f
+                || bucket->closest_bug_echo_path < env->tick_bug_echo_path) {
+            env->tick_bug_echo_path = bucket->closest_bug_echo_path;
         }
     }
     clear_echo_bucket(bucket);
@@ -968,21 +942,24 @@ void compute_observations(Bat* env) {
     env->observations[FORWARD_SPEED_OBS] = bat_clampf(fwd_speed / env->max_speed, 0.0f, 1.0f);
     env->observations[TURN_RATE_OBS] = bat_clampf(env->turn_velocity / env->turn_rate, -1.0f, 1.0f);
     float timer_norm = env->tick / (float)MAX_STEPS;
-    env->observations[40] = bat_clampf(timer_norm, 0.0f, 1.0f);
+    env->observations[TIMER_OBS] = bat_clampf(timer_norm, 0.0f, 1.0f);
 }
 
 static inline void reset_episode(Bat* env) {
     env->tick = 0;
     env->turn_velocity = 0.0f;
     env->heading = randf(env) * TWO_PI - PI_F;
-    float initial_speed = env->min_speed;
-    env->vx = cosf(env->heading) * initial_speed;
-    env->vy = sinf(env->heading) * initial_speed;
+    env->vx = cosf(env->heading) * env->min_speed;
+    env->vy = sinf(env->heading) * env->min_speed;
     if (env->curriculum_level < env->curriculum_initial_level) {
         env->curriculum_level = env->curriculum_initial_level;
     }
-    apply_curriculum(env);
-    sample_spawns_at_distance(env, curriculum_spawn_distance(env));
+    env->num_obstacles = curriculum_obstacles(env);
+    env->bug_inbound = env->curriculum_level >= CURRICULUM_INBOUND_START_LEVEL;
+    float bug_distance = env->bug_inbound
+        ? curriculum_inbound_bug_distance(env)
+        : curriculum_bug_distance(env);
+    sample_spawns_at_distance(env, bug_distance);
     generate_obstacles(env);
     reset_bug_motion(env);
     env->last_chirp_start_freq = 0.0f;
@@ -1032,7 +1009,7 @@ static inline bool hits_wall(Bat* env) {
 }
 
 static inline void update_bug(Bat* env, float dt) {
-    float speed = curriculum_bug_speed(env);
+    float speed = env->bug_inbound ? BUG_SPEED * INBOUND_BUG_SPEED_MULTIPLIER : BUG_SPEED;
     float strength = curriculum_bug_maneuver_strength(env);
     if (env->bug_maneuver_mode > 0) {
         env->bug_maneuver_phase += env->bug_maneuver_rate * dt;
@@ -1228,7 +1205,6 @@ void c_step(Bat* env) {
             env->rewards[0] -= env->step_cost; // TODO: Fold this only when we are ready to break training determinism.
             if (chirp_status == CHIRP_STATUS_EMITTED) {
                 env->rewards[0] += env->valid_chirp_reward; // TODO: Remove this; chirps should only pay when bug echoes improve.
-                env->rewards[0] -= CHIRP_COST;
                 if (chirp_overlap_fraction > 0.0f) {
                     env->rewards[0] -= env->chirp_overlap_penalty * chirp_overlap_fraction;
                     env->chirps_overlapped += 1;
@@ -1338,7 +1314,7 @@ static inline void draw_echo_flash(Bat* env, ChirpEvent* chirp,
         float sx, float sy) {
     float age_seconds = (env->tick - chirp->birth_tick) * TICK_RATE;
     float distance = dist(chirp->x, chirp->y, rx, ry);
-    float echo_time = echo_time_seconds(distance, env->sound_speed);
+    float echo_time = 2.0f * distance / env->sound_speed;
     bool echo_arriving_now = fabsf(age_seconds - echo_time) <= 0.025f;
     if (!echo_arriving_now) return;
 

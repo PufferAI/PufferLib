@@ -144,18 +144,18 @@ static int test_timer_observation_tracks_elapsed_fraction(void) {
     c_reset(&env);
 
     ASSERT_TRUE(OBS_SIZE == 41);
-    ASSERT_FLOAT_NEAR(env.observations[40], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.observations[TIMER_OBS], 0.0f, 0.0001f);
 
     env.actions[0] = NOOP;
     env.actions[1] = TURN_NONE;
     env.actions[5] = 0.0f;
     c_step(&env);
 
-    ASSERT_FLOAT_NEAR(env.observations[40], 1.0f / (float)MAX_STEPS, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.observations[TIMER_OBS], 1.0f / (float)MAX_STEPS, 0.0001f);
 
     env.tick = MAX_STEPS / 2;
     compute_observations(&env);
-    ASSERT_FLOAT_NEAR(env.observations[40], 0.5f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.observations[TIMER_OBS], 0.5f, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -566,7 +566,7 @@ static int test_echo_scheduling_uses_tick_bucket_accumulator(void) {
     ASSERT_TRUE(env.echo_queue[slot].tick == 10);
     ASSERT_FLOAT_NEAR(env.echo_queue[slot].energy[0][FREQ_BINS - 1], 1.1f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.echo_queue[slot].bug_energy, 1.1f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.echo_queue[slot].bug_path, 12.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.echo_queue[slot].closest_bug_echo_path, 12.0f, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -1144,7 +1144,7 @@ static int test_chirp_after_bug_echo_arrives_ignores_static_echo_window(void) {
 static int test_reflection_arrives_at_two_way_travel_time(void) {
     float sound_speed = 100.0f;
     float distance = 25.0f;
-    float echo_time = echo_time_seconds(distance, sound_speed);
+    float echo_time = 2.0f * distance / sound_speed;
 
     ASSERT_FLOAT_NEAR(echo_time, 0.5f, 0.0001f);
     ASSERT_TRUE(fabsf((echo_time + 0.005f) - echo_time) <= 0.02f);
@@ -1174,6 +1174,7 @@ static int test_bins_only_observation_layout(void) {
     ASSERT_TRUE(CHIRPS_USED_OBS == 37);
     ASSERT_TRUE(FORWARD_SPEED_OBS == 38);
     ASSERT_TRUE(TURN_RATE_OBS == 39);
+    ASSERT_TRUE(TIMER_OBS == 40);
     return 0;
 }
 

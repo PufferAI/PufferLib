@@ -50,10 +50,10 @@ static void set_demo_defaults(Bat* env) {
 }
 
 static void apply_env_config_value(Bat* env, const char* key, float value) {
-    if (strcmp(key, "bat_max_speed") == 0) env->max_speed = value;
-    else if (strcmp(key, "bat_min_speed") == 0) env->min_speed = value;
-    else if (strcmp(key, "bat_accel") == 0) env->accel = value;
-    else if (strcmp(key, "bat_turn_rate") == 0) env->turn_rate = value;
+    if (strcmp(key, "max_speed") == 0) env->max_speed = value;
+    else if (strcmp(key, "min_speed") == 0) env->min_speed = value;
+    else if (strcmp(key, "accel") == 0) env->accel = value;
+    else if (strcmp(key, "turn_rate") == 0) env->turn_rate = value;
     else if (strcmp(key, "render_target_fps") == 0) env->render_target_fps = (int)value;
     else if (strcmp(key, "record_video") == 0) env->record_video = (int)value;
     else if (strcmp(key, "record_video_fps") == 0) env->record_video_fps = (int)value;

@@ -12,10 +12,10 @@ void my_init(Env* env, Dict* kwargs) {
     env->ear_rear_gain = dict_get(kwargs, "ear_rear_gain")->value;
     env->ear_front_gain = dict_get(kwargs, "ear_front_gain")->value;
     env->ear_side_gain = dict_get(kwargs, "ear_side_gain")->value;
-    env->max_speed = dict_get(kwargs, "bat_max_speed")->value;
-    env->min_speed = dict_get(kwargs, "bat_min_speed")->value;
-    env->accel = dict_get(kwargs, "bat_accel")->value;
-    env->turn_rate = dict_get(kwargs, "bat_turn_rate")->value;
+    env->max_speed = dict_get(kwargs, "max_speed")->value;
+    env->min_speed = dict_get(kwargs, "min_speed")->value;
+    env->accel = dict_get(kwargs, "accel")->value;
+    env->turn_rate = dict_get(kwargs, "turn_rate")->value;
     env->render_target_fps = dict_get(kwargs, "render_target_fps")->value;
     env->record_video = dict_get(kwargs, "record_video")->value;
     env->record_video_fps = dict_get(kwargs, "record_video_fps")->value;
