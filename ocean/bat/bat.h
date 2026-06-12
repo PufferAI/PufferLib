@@ -1092,7 +1092,7 @@ static inline void update_motion(Bat* env, float dt) {
     float turn_command = 0.0f;
     if (turn == TURN_LEFT) turn_command = -1.0f;
     if (turn == TURN_RIGHT) turn_command = 1.0f;
-    float speed_ratio = env->max_speed > 0.0f ? speed / env->max_speed : 0.0f;
+    float speed_ratio = speed / env->max_speed;
     env->turn_velocity = turn_command * env->turn_rate * bat_clampf(speed_ratio, 0.0f, 1.0f);
     env->heading += env->turn_velocity * dt;
     if (env->heading > PI_F) env->heading -= TWO_PI;
