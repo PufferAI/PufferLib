@@ -120,16 +120,16 @@ void demo() {
     SetTargetFPS(60);
     while (!WindowShouldClose()) {
         memset(env.actions, 0, sizeof(float) * NUM_ACTIONS);
-        env.actions[0] = NOOP;
-        env.actions[1] = TURN_NONE;
-        if (IsKeyDown(KEY_W)) env.actions[0] = THRUST_FORWARD;
-        if (IsKeyDown(KEY_S)) env.actions[0] = BRAKE;
-        if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) env.actions[1] = TURN_LEFT;
-        if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) env.actions[1] = TURN_RIGHT;
-        env.actions[2] = 0;
-        env.actions[3] = 7;
-        env.actions[4] = 1;
-        env.actions[5] = IsKeyDown(KEY_SPACE) ? 1.0f : 0.0f;
+        env.actions[ACTION_MOVE] = NOOP;
+        env.actions[ACTION_TURN] = TURN_NONE;
+        if (IsKeyDown(KEY_W)) env.actions[ACTION_MOVE] = THRUST_FORWARD;
+        if (IsKeyDown(KEY_S)) env.actions[ACTION_MOVE] = BRAKE;
+        if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) env.actions[ACTION_TURN] = TURN_LEFT;
+        if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) env.actions[ACTION_TURN] = TURN_RIGHT;
+        env.actions[ACTION_CHIRP_FREQ_START] = 0;
+        env.actions[ACTION_CHIRP_FREQ_END] = 7;
+        env.actions[ACTION_CHIRP_DURATION] = 1;
+        env.actions[ACTION_CHIRP_EMIT] = IsKeyDown(KEY_SPACE) ? 1.0f : 0.0f;
         c_step(&env);
         c_render(&env);
     }

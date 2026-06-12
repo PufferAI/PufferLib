@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-#include <assert.h>
 #include <string.h>
 #include <stdbool.h>
 
@@ -14,6 +13,12 @@
 #define OBS_SIZE 41
 #define NUM_AGENTS 1
 #define NUM_ACTIONS 6
+#define ACTION_MOVE 0
+#define ACTION_TURN 1
+#define ACTION_CHIRP_FREQ_START 2
+#define ACTION_CHIRP_FREQ_END 3
+#define ACTION_CHIRP_DURATION 4
+#define ACTION_CHIRP_EMIT 5
 #define MOVE_ACTIONS 3
 #define TURN_ACTIONS 3
 #define CHIRP_FREQ_BINS 8
@@ -69,7 +74,6 @@
 #define CHIRP_RINGS 5
 #define MAX_CHIRP_SLICES 16
 #define ECHO_QUEUE_TICKS 256
-#define CORNER_REFLECTORS 1
 #define AUDIO_VOICES 8
 #define AUDIO_SAMPLE_RATE 48000
 #define AUDIO_MIN_HZ 600.0f
@@ -274,11 +278,6 @@ static inline float bat_clampf(float v, float lo, float hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
     return v;
-}
-
-static inline int action_index(float v, int n) {
-    int idx = (int)v;
-    return idx;
 }
 
 static inline float chirp_duration_seconds(float duration_norm) {
@@ -521,10 +520,6 @@ static inline float curriculum_difficulty(Bat* env) {
     return bat_clampf(weighted / active_weight, 0.0f, 1.0f);
 }
 
-static inline float success_reward(Bat* env) {
-    return env->chirp_efficiency_reward * chirp_efficiency(env);
-}
-
 static inline void sample_spawns_at_distance(Bat* env, float target_distance) {
     float margin = fmaxf(6.0f, fmaxf(AGENT_RADIUS, BUG_RADIUS) + 3.0f);
     for (int attempt = 0; attempt < 96; attempt++) {
@@ -693,11 +688,9 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.n += 1.0f;
 }
 
-static inline int freq_bin_index(Bat* env, float freq_norm) {
-    (void)env;
-    int bins = FREQ_BINS;
-    int bin = (int)(freq_norm * bins);
-    if (bin >= bins) bin = bins - 1;
+static inline int freq_bin_index(float freq_norm) {
+    int bin = (int)(freq_norm * FREQ_BINS);
+    if (bin >= FREQ_BINS) bin = FREQ_BINS - 1;
     return bin;
 }
 
@@ -728,7 +721,7 @@ static inline void add_echo_event(Bat* env, int ear, float receive_tick,
     }
 
     int ear_idx = ear == 0 ? 0 : 1;
-    int bin = freq_bin_index(env, freq);
+    int bin = freq_bin_index(freq);
     bucket->energy[ear_idx][bin] += intensity;
     if (source == ECHO_BUG) {
         float sideband = intensity * env->bug_wing_sideband_gain;
@@ -838,9 +831,8 @@ static inline void schedule_segment_reflectors(Bat* env, ChirpEvent* chirp,
         float strength) {
     float len = dist(x1, y1, x2, y2);
     int count = (int)(len / REFLECTOR_SPACING) + 1;
-    if (count < 1) count = 1;
     for (int i = 0; i <= count; i++) {
-        float t = count == 0 ? 0.0f : i / (float)count;
+        float t = i / (float)count;
         float x = x1 + (x2 - x1) * t;
         float y = y1 + (y2 - y1) * t;
         schedule_echo(env, chirp, slice_ticks, freq, x, y, 0.0f, 0.0f, strength, ECHO_STATIC);
@@ -849,7 +841,6 @@ static inline void schedule_segment_reflectors(Bat* env, ChirpEvent* chirp,
 
 static inline void schedule_corner_reflector_echoes(Bat* env, ChirpEvent* chirp,
         float slice_ticks, float freq) {
-#if CORNER_REFLECTORS
     float w = (float)ARENA_WIDTH;
     float h = (float)ARENA_HEIGHT;
     float strength = env->reflector_strength;
@@ -869,12 +860,6 @@ static inline void schedule_corner_reflector_echoes(Bat* env, ChirpEvent* chirp,
         0.0f, 0.0f, strength, ECHO_STATIC);
     schedule_echo(env, chirp, slice_ticks, freq, w, 0.5f * h,
         0.0f, 0.0f, strength, ECHO_STATIC);
-#else
-    (void)env;
-    (void)chirp;
-    (void)slice_ticks;
-    (void)freq;
-#endif
 }
 
 static inline void schedule_obstacle_echoes(Bat* env, ChirpEvent* chirp,
@@ -967,11 +952,6 @@ void compute_observations(Bat* env) {
     env->tick_bug_echo_path = -1.0f;
 
     process_echo_events(env);
-
-    for (int i = 0; i < FREQ_BINS; i++) {
-        env->observations[LEFT_FREQ_OFFSET + i] = bat_clampf(env->observations[LEFT_FREQ_OFFSET + i], 0.0f, 1.0f);
-        env->observations[RIGHT_FREQ_OFFSET + i] = bat_clampf(env->observations[RIGHT_FREQ_OFFSET + i], 0.0f, 1.0f);
-    }
 
     float chirp_age_denom = chirp_age_norm_denominator(env);
     int chirp_age = env->tick - env->last_chirp_tick;
@@ -1130,8 +1110,8 @@ static inline void update_bug(Bat* env, float dt) {
 }
 
 static inline void update_motion(Bat* env, float dt) {
-    int move = action_index(env->actions[0], MOVE_ACTIONS);
-    int turn = action_index(env->actions[1], TURN_ACTIONS);
+    int move = (int)env->actions[ACTION_MOVE];
+    int turn = (int)env->actions[ACTION_TURN];
     float fx = cosf(env->heading);
     float fy = sinf(env->heading);
     float speed = env->vx * fx + env->vy * fy;
@@ -1164,9 +1144,9 @@ static inline bool try_emit_chirp(Bat* env) {
         return false;
     }
 
-    int start_idx = action_index(env->actions[2], CHIRP_FREQ_BINS);
-    int end_idx = action_index(env->actions[3], CHIRP_FREQ_BINS);
-    int duration_idx = action_index(env->actions[4], CHIRP_DURATION_BINS);
+    int start_idx = (int)env->actions[ACTION_CHIRP_FREQ_START];
+    int end_idx = (int)env->actions[ACTION_CHIRP_FREQ_END];
+    int duration_idx = (int)env->actions[ACTION_CHIRP_DURATION];
 
     env->last_chirp_start_freq = norm_bin(start_idx, CHIRP_FREQ_BINS);
     env->last_chirp_end_freq = norm_bin(end_idx, CHIRP_FREQ_BINS);
@@ -1202,20 +1182,18 @@ static inline float next_chirp_overlap_fraction(Bat* env) {
 }
 
 static inline ChirpStatus update_chirp(Bat* env) {
-    int emit = action_index(env->actions[5], CHIRP_EMIT_ACTIONS);
+    int emit = (int)env->actions[ACTION_CHIRP_EMIT];
     if (emit) {
         if (env->chirps_emitted >= env->chirp_budget) {
             return CHIRP_STATUS_OVER_BUDGET;
         }
         return try_emit_chirp(env) ? CHIRP_STATUS_EMITTED : CHIRP_STATUS_COOLDOWN;
-    } else if (env->chirp_age_ticks < MAX_CHIRP_AGE_TICKS) {
+    }
+
+    if (env->chirp_age_ticks < MAX_CHIRP_AGE_TICKS) {
         env->chirp_age_ticks += 1;
     }
     return CHIRP_STATUS_NONE;
-}
-
-static inline bool caught_bug(Bat* env) {
-    return dist(env->x, env->y, env->bug_x, env->bug_y) <= AGENT_RADIUS + BUG_RADIUS;
 }
 
 void c_step(Bat* env) {
@@ -1240,8 +1218,8 @@ void c_step(Bat* env) {
         if (hits_wall(env) || hits_obstacle(env)) {
             env->rewards[0] = -env->collision_penalty;
             collision = 1.0f;
-        } else if (caught_bug(env)) {
-            env->rewards[0] = success_reward(env);
+        } else if (dist(env->x, env->y, env->bug_x, env->bug_y) <= AGENT_RADIUS + BUG_RADIUS) {
+            env->rewards[0] = env->chirp_efficiency_reward * chirp_efficiency(env);
             success = 1.0f;
         } else {
             float bug_dist = dist(env->x, env->y, env->bug_x, env->bug_y);
@@ -1408,7 +1386,6 @@ static inline void draw_obstacle_echoes(Bat* env, ChirpEvent* chirp,
 
 static inline void draw_corner_reflector_echoes(Bat* env, ChirpEvent* chirp,
         float sx, float sy) {
-#if CORNER_REFLECTORS
     float w = (float)ARENA_WIDTH;
     float h = (float)ARENA_HEIGHT;
     float strength = env->reflector_strength;
@@ -1420,16 +1397,9 @@ static inline void draw_corner_reflector_echoes(Bat* env, ChirpEvent* chirp,
     draw_echo_flash(env, chirp, 0.5f * w, h, 0.0f, 0.0f, strength, sx, sy);
     draw_echo_flash(env, chirp, 0.0f, 0.5f * h, 0.0f, 0.0f, strength, sx, sy);
     draw_echo_flash(env, chirp, w, 0.5f * h, 0.0f, 0.0f, strength, sx, sy);
-#else
-    (void)env;
-    (void)chirp;
-    (void)sx;
-    (void)sy;
-#endif
 }
 
 static inline void draw_corner_reflector_markers(Bat* env) {
-#if CORNER_REFLECTORS
     const int size = 8;
     const Color fill = (Color){128, 128, 132, 255};
     const Color outline = (Color){202, 202, 208, 255};
@@ -1453,9 +1423,6 @@ static inline void draw_corner_reflector_markers(Bat* env) {
     DrawRectangleLines(0, mid_y, size, size, outline);
     DrawRectangle(max_x, mid_y, size, size, fill);
     DrawRectangleLines(max_x, mid_y, size, size, outline);
-#else
-    (void)env;
-#endif
 }
 
 static inline void draw_echo_reflections(Bat* env, float sx, float sy) {

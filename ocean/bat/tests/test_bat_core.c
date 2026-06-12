@@ -580,7 +580,7 @@ static int test_bug_wing_sidebands_spill_adjacent_bins_without_reward_inflation(
     env.bug_wing_sideband_gain = 0.25f;
     clear_echo_queue(&env);
 
-    int bin = freq_bin_index(&env, 0.5f);
+    int bin = freq_bin_index(0.5f);
     add_echo_event(&env, 0, 1.0f, 0.5f, 0.4f, 12.0f, ECHO_BUG);
     EchoBucket* bug_bucket = &env.echo_queue[1 % ECHO_QUEUE_TICKS];
     ASSERT_FLOAT_NEAR(bug_bucket->energy[0][bin], 0.4f, 0.0001f);
@@ -1567,8 +1567,8 @@ static int test_frequency_bin_energy_sums_and_caps(void) {
     Bat env = make_test_env();
     memset(env.observations, 0, OBS_SIZE * sizeof(float));
 
-    int high_bin = freq_bin_index(&env, 1.0f);
-    int low_bin = freq_bin_index(&env, 0.0f);
+    int high_bin = freq_bin_index(1.0f);
+    int low_bin = freq_bin_index(0.0f);
     env.observations[LEFT_FREQ_OFFSET + high_bin] = bat_clampf(
         env.observations[LEFT_FREQ_OFFSET + high_bin] + 0.75f, 0.0f, 1.0f);
     env.observations[LEFT_FREQ_OFFSET + high_bin] = bat_clampf(
