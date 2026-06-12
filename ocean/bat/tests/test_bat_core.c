@@ -945,18 +945,6 @@ static int test_bat_speed_action_space_has_no_strafe(void) {
     return 0;
 }
 
-static int test_chirp_ring_physical_ordering(void) {
-    float duration = chirp_duration_seconds(1.0f);
-    float outer = chirp_ring_radius(1.0f, 0.0f, duration, 100.0f);
-    float inner = chirp_ring_radius(1.0f, 1.0f, duration, 100.0f);
-
-    ASSERT_TRUE(outer > inner);
-    ASSERT_FLOAT_NEAR(outer, 100.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(inner, 100.0f * (1.0f - duration), 0.0001f);
-
-    return 0;
-}
-
 static int test_chirp_audio_maps_norm_freq_to_audible_sweep(void) {
     ASSERT_FLOAT_NEAR(chirp_audio_frequency_hz(0.0f), 600.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(chirp_audio_frequency_hz(1.0f), 3600.0f, 0.0001f);
@@ -977,8 +965,6 @@ static int test_chirp_audio_duration_scales_with_render_fps(void) {
     ASSERT_FLOAT_NEAR(chirp_audio_duration_seconds(&env, 0.0f), base_duration * 2.0f, 0.0001f);
     env.render_target_fps = 15;
     ASSERT_FLOAT_NEAR(chirp_audio_duration_seconds(&env, 0.0f), base_duration * 4.0f, 0.0001f);
-    env.render_target_fps = 0;
-    ASSERT_FLOAT_NEAR(chirp_audio_duration_seconds(&env, 0.0f), base_duration, 0.0001f);
     free_allocated(&env);
     return 0;
 }
@@ -1089,7 +1075,6 @@ static int test_chirp_before_bug_echo_arrives_gets_scaled_overlap_penalty(void) 
     ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.rewards[0], env.valid_chirp_reward, 0.0001f);
     ASSERT_TRUE(env.chirps_emitted == 1);
-    ASSERT_TRUE(env.chirps_overlapped == 0);
 
     env.last_chirp_tick = 0;
     env.last_bug_echo_expected_tick = 10.0f;
@@ -1102,7 +1087,6 @@ static int test_chirp_before_bug_echo_arrives_gets_scaled_overlap_penalty(void) 
     ASSERT_FLOAT_NEAR(env.rewards[0],
         env.valid_chirp_reward - 0.5f * env.chirp_overlap_penalty, 0.0001f);
     ASSERT_TRUE(env.chirps_emitted == 2);
-    ASSERT_TRUE(env.chirps_overlapped == 1);
 
     free_allocated(&env);
     return 0;
@@ -1129,7 +1113,6 @@ static int test_chirp_after_bug_echo_arrives_ignores_static_echo_window(void) {
     ASSERT_FLOAT_NEAR(env.terminals[0], 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.rewards[0], env.valid_chirp_reward, 0.0001f);
     ASSERT_TRUE(env.chirps_emitted == 2);
-    ASSERT_TRUE(env.chirps_overlapped == 0);
 
     free_allocated(&env);
     return 0;
@@ -1815,7 +1798,6 @@ int main(void) {
     if (test_bat_zero_speed_recovers_to_forward_arc()) return 1;
     if (test_bat_turn_rate_scales_with_forward_speed()) return 1;
     if (test_bat_speed_action_space_has_no_strafe()) return 1;
-    if (test_chirp_ring_physical_ordering()) return 1;
     if (test_chirp_audio_maps_norm_freq_to_audible_sweep()) return 1;
     if (test_chirp_audio_duration_scales_with_render_fps()) return 1;
     if (test_chirp_cooldown_accepts_only_after_delay()) return 1;

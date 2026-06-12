@@ -55,5 +55,4 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "num_obstacles", log->num_obstacles);
     dict_set(out, "chirps_emitted", log->chirps_emitted);
     dict_set(out, "chirp_perf", log->chirp_perf);
-    dict_set(out, "chirp_overlap_fraction", log->chirp_overlap_fraction);
 }

@@ -3,7 +3,6 @@
 
 static inline float chirp_audio_duration_at_fps(float duration_norm, int fps) {
     float duration = chirp_duration_seconds(duration_norm);
-    if (fps <= 0) return duration;
     float scale = 60.0f / (float)fps;
     if (scale < 1.0f) scale = 1.0f;
     return duration * scale;
@@ -20,10 +19,8 @@ static inline float chirp_audio_frequency_hz(float freq_norm) {
 
 static inline float chirp_audio_envelope(float t_norm) {
     if (t_norm <= 0.0f || t_norm >= 1.0f) return 0.0f;
-    const float fade = 0.08f;
-    float attack = t_norm / fade;
-    float release = (1.0f - t_norm) / fade;
-    return bat_clampf(fminf(attack, release), 0.0f, 1.0f);
+    return bat_clampf(fminf(t_norm / AUDIO_ENVELOPE_FADE,
+        (1.0f - t_norm) / AUDIO_ENVELOPE_FADE), 0.0f, 1.0f);
 }
 
 static inline float chirp_audio_sample_f32(float start_norm, float end_norm,
