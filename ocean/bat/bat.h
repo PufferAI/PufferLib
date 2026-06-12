@@ -230,7 +230,6 @@ typedef struct Bat {
     float sound_speed;
     float reflector_strength;
     int chirp_cooldown_ticks;
-    int chirp_budget;
     int chirp_age_ticks;
     int last_chirp_tick;
     float last_chirp_start_freq;
@@ -439,9 +438,11 @@ static inline float curriculum_bug_maneuver_frequency(Bat* env) {
 }
 
 static inline float chirps_used_ratio(Bat* env) {
-    return bat_clampf(env->chirps_emitted / (float)env->chirp_budget, 0.0f, 1.0f);
+    return bat_clampf(env->chirps_emitted / (float)MAX_CHIRPS_PER_EPISODE, 0.0f, 1.0f);
 }
 
+// TODO: Revisit this when we are ready to break reward determinism. The ratio is
+// still an observation, but this reward bonus may be removable before merge.
 static inline float chirp_efficiency(Bat* env) {
     return 0.5f + 0.5f * (1.0f - chirps_used_ratio(env));
 }
@@ -970,7 +971,6 @@ static inline void reset_episode(Bat* env) {
     memset(env->chirps, 0, sizeof(env->chirps));
     env->chirp_head = 0;
     clear_echo_queue(env);
-    env->chirp_budget = MAX_CHIRPS_PER_EPISODE;
     env->tick_bug_echo_energy = 0.0f;
     env->tick_bug_echo_path = -1.0f;
     env->last_bug_echo_path = -1.0f;
@@ -1161,7 +1161,7 @@ static inline float next_chirp_overlap_fraction(Bat* env) {
 static inline ChirpStatus update_chirp(Bat* env) {
     int emit = (int)env->actions[ACTION_CHIRP_EMIT];
     if (emit) {
-        if (env->chirps_emitted >= env->chirp_budget) {
+        if (env->chirps_emitted >= MAX_CHIRPS_PER_EPISODE) {
             return CHIRP_STATUS_OVER_BUDGET;
         }
         return try_emit_chirp(env) ? CHIRP_STATUS_EMITTED : CHIRP_STATUS_COOLDOWN;

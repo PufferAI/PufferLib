@@ -75,11 +75,10 @@ static int test_chirp_metadata_and_observation_size(void) {
     return 0;
 }
 
-static int test_chirp_budget_observation_tracks_used_chirps(void) {
+static int test_chirps_used_observation_tracks_emitted_chirps(void) {
     Bat env = make_test_env();
     c_reset(&env);
 
-    ASSERT_TRUE(env.chirp_budget == MAX_CHIRPS_PER_EPISODE);
     ASSERT_FLOAT_NEAR(env.observations[CHIRPS_USED_OBS], 0.0f, 0.0001f);
 
     env.actions[2] = 0.0f;
@@ -100,13 +99,16 @@ static int test_chirp_budget_observation_tracks_used_chirps(void) {
     return 0;
 }
 
-static int test_chirp_budget_stays_fixed_with_curriculum_level(void) {
+static int test_max_chirps_stays_fixed_with_curriculum_level(void) {
     Bat env = make_test_env();
     env.curriculum_initial_level = 8;
     c_reset(&env);
 
     ASSERT_TRUE(env.curriculum_level == 8);
-    ASSERT_TRUE(env.chirp_budget == MAX_CHIRPS_PER_EPISODE);
+    env.chirps_emitted = 1;
+    compute_observations(&env);
+    ASSERT_FLOAT_NEAR(env.observations[CHIRPS_USED_OBS],
+        1.0f / (float)MAX_CHIRPS_PER_EPISODE, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -117,7 +119,7 @@ static int test_chirping_after_budget_terminates_with_penalty(void) {
     env.chirp_cooldown_ticks = 5;
     env.early_chirp_penalty = 0.0f;
     c_reset(&env);
-    env.chirp_budget = 1;
+    env.chirps_emitted = MAX_CHIRPS_PER_EPISODE - 1;
     compute_observations(&env);
 
     env.actions[2] = 0.0f;
@@ -126,7 +128,7 @@ static int test_chirping_after_budget_terminates_with_penalty(void) {
     env.actions[5] = 1.0f;
     c_step(&env);
     ASSERT_TRUE(env.terminals[0] == 0.0f);
-    ASSERT_TRUE(env.chirps_emitted == 1);
+    ASSERT_TRUE(env.chirps_emitted == MAX_CHIRPS_PER_EPISODE);
     ASSERT_FLOAT_NEAR(env.observations[CHIRPS_USED_OBS], 1.0f, 0.0001f);
 
     c_step(&env);
@@ -186,11 +188,10 @@ static int test_chirp_efficiency_scores_low_usage_above_full_budget(void) {
     Bat env = make_test_env();
     c_reset(&env);
 
-    env.chirp_budget = 10;
     env.chirps_emitted = 1;
-    ASSERT_FLOAT_NEAR(chirp_efficiency(&env), 0.95f, 0.0001f);
+    ASSERT_FLOAT_NEAR(chirp_efficiency(&env), 0.9666667f, 0.0001f);
 
-    env.chirps_emitted = 10;
+    env.chirps_emitted = MAX_CHIRPS_PER_EPISODE;
     ASSERT_FLOAT_NEAR(chirp_efficiency(&env), 0.50f, 0.0001f);
 
     free_allocated(&env);
@@ -225,7 +226,6 @@ static int test_success_reward_includes_chirp_efficiency_bonus(void) {
     env.chirp_efficiency_reward = 1.0f;
     c_reset(&env);
 
-    env.chirp_budget = 10;
     env.chirps_emitted = 2;
     env.x = 20.0f;
     env.y = 20.0f;
@@ -235,7 +235,7 @@ static int test_success_reward_includes_chirp_efficiency_bonus(void) {
     c_step(&env);
 
     ASSERT_FLOAT_NEAR(env.terminals[0], 1.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.rewards[0], 0.90f, 0.0001f);
+    ASSERT_FLOAT_NEAR(env.rewards[0], 0.9333333f, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -247,7 +247,6 @@ static int test_curriculum_perf_logs_distance_and_obstacle_difficulty_components
 
     env.curriculum_start_bug_distance = 8.0f;
     env.num_obstacles = 2;
-    env.chirp_budget = 12;
     env.start_bug_dist = 32.0f;
 
     ASSERT_FLOAT_NEAR(curriculum_distance_difficulty(&env), 0.5000000f, 0.0001f);
@@ -279,7 +278,6 @@ static int test_perf_composes_base_perf_curriculum_difficulty_and_chirp_perf(voi
 
     env.curriculum_start_bug_distance = 8.0f;
     env.num_obstacles = 2;
-    env.chirp_budget = 14;
     env.chirps_emitted = 7;
     env.start_bug_dist = 32.0f;
 
@@ -1123,7 +1121,6 @@ static int test_chirp_after_bug_echo_arrives_ignores_static_echo_window(void) {
     env.valid_chirp_reward = 0.0005f;
     env.chirp_overlap_penalty = 0.0040f;
     env.chirp_cooldown_ticks = 1;
-    env.chirp_budget = 10;
     env.chirps_emitted = 1;
     env.last_chirp_tick = 0;
     env.last_bug_echo_expected_tick = 3.0f;
@@ -1793,8 +1790,8 @@ static int test_obstacles_are_small_enough_for_trainability(void) {
 
 int main(void) {
     if (test_chirp_metadata_and_observation_size()) return 1;
-    if (test_chirp_budget_observation_tracks_used_chirps()) return 1;
-    if (test_chirp_budget_stays_fixed_with_curriculum_level()) return 1;
+    if (test_chirps_used_observation_tracks_emitted_chirps()) return 1;
+    if (test_max_chirps_stays_fixed_with_curriculum_level()) return 1;
     if (test_chirping_after_budget_terminates_with_penalty()) return 1;
     if (test_timer_observation_tracks_elapsed_fraction()) return 1;
     if (test_timeout_terminates_with_minus_one_reward()) return 1;
