@@ -445,8 +445,7 @@ static inline float chirp_efficiency(Bat* env) {
 }
 
 static inline float chirp_perf(Bat* env) {
-    float reference_chirps = fmaxf(1.0f, (float)MAX_CHIRPS_PER_EPISODE);
-    float raw = 1.0f - env->chirps_emitted / reference_chirps;
+    float raw = 1.0f - env->chirps_emitted / (float)MAX_CHIRPS_PER_EPISODE;
     return bat_clampf(raw, CHIRP_PERF_FLOOR, 1.0f);
 }
 
