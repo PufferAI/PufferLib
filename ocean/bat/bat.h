@@ -248,7 +248,6 @@ typedef struct Bat {
     float bug_echo_reward_scale;
     float bug_echo_farther_penalty_scale;
     float bug_wing_sideband_gain;
-    float tick_bug_echo_energy;
     float tick_bug_echo_path;
     float last_bug_echo_path;
     float last_bug_echo_expected_tick;
@@ -902,7 +901,6 @@ static inline void process_echo_events(Bat* env) {
             env->observations[right_idx] + bucket->energy[1][i], 0.0f, 1.0f);
     }
     if (bucket->bug_energy > 0.0f) {
-        env->tick_bug_echo_energy += bucket->bug_energy;
         if (env->tick_bug_echo_path < 0.0f
                 || bucket->closest_bug_echo_path < env->tick_bug_echo_path) {
             env->tick_bug_echo_path = bucket->closest_bug_echo_path;
@@ -913,7 +911,6 @@ static inline void process_echo_events(Bat* env) {
 
 void compute_observations(Bat* env) {
     memset(env->observations, 0, OBS_SIZE * sizeof(float));
-    env->tick_bug_echo_energy = 0.0f;
     env->tick_bug_echo_path = -1.0f;
 
     process_echo_events(env);
@@ -961,7 +958,6 @@ static inline void reset_episode(Bat* env) {
     memset(env->chirps, 0, sizeof(env->chirps));
     env->chirp_head = 0;
     clear_echo_queue(env);
-    env->tick_bug_echo_energy = 0.0f;
     env->tick_bug_echo_path = -1.0f;
     env->last_bug_echo_path = -1.0f;
     env->last_bug_echo_expected_tick = -1.0f;
