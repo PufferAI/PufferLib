@@ -84,7 +84,8 @@
 #define AUDIO_ENVELOPE_FADE 0.08f
 #define RECORD_MAX_VOICES 16
 #define FREQ_HISTORY_TICKS 96
-#define FREQ_PANEL_WIDTH 192
+#define FREQ_PANEL_WIDTH 384
+#define FREQ_WATERFALL_WIDTH 192
 #define FREQ_PANEL_MARGIN 8
 #define CHIRP_PERF_FLOOR 0.05f
 #define CHIRP_MIN_DURATION_SECONDS 0.04f
@@ -1297,7 +1298,8 @@ static inline void draw_freq_history_band(Client* client,
     float col_width = width / (float)FREQ_HISTORY_TICKS;
     float row_height = height / (float)FREQ_BINS;
     for (int t = 0; t < FREQ_HISTORY_TICKS; t++) {
-        int history_idx = (client->freq_history_head + t) % FREQ_HISTORY_TICKS;
+        int history_idx = (client->freq_history_head + FREQ_HISTORY_TICKS - 1 - t)
+            % FREQ_HISTORY_TICKS;
         int x0 = x + (int)(t * col_width);
         int x1 = x + (int)((t + 1) * col_width);
         if (x1 <= x0) x1 = x0 + 1;
@@ -1313,25 +1315,138 @@ static inline void draw_freq_history_band(Client* client,
     }
 }
 
+typedef struct ObsBar {
+    const char* label;
+    int obs_idx;
+    Color color;
+    bool signed_value;
+} ObsBar;
+
+static inline void draw_obs_bar(int x, int y, int width,
+        const ObsBar* bar, const float* observations) {
+    const int label_width = 68;
+    const int bar_height = 12;
+    int bar_x = x + label_width;
+    int bar_width = width - label_width;
+    if (bar_width <= 0) return;
+
+    DrawText(bar->label, x, y - 1, 10, (Color){226, 230, 238, 255});
+    DrawRectangle(bar_x, y, bar_width, bar_height, (Color){48, 52, 62, 255});
+
+    if (bar->signed_value) {
+        int center = bar_x + bar_width / 2;
+        float value = bat_clampf(observations[bar->obs_idx], -1.0f, 1.0f);
+        int fill = (int)(fabsf(value) * bar_width * 0.5f);
+        if (value >= 0.0f) {
+            DrawRectangle(center, y, fill, bar_height, bar->color);
+        } else {
+            DrawRectangle(center - fill, y, fill, bar_height, bar->color);
+        }
+        DrawLine(center, y, center, y + bar_height, (Color){196, 200, 210, 255});
+    } else {
+        float value = bat_clampf(observations[bar->obs_idx], 0.0f, 1.0f);
+        DrawRectangle(bar_x, y, (int)(value * bar_width), bar_height, bar->color);
+    }
+
+    DrawRectangleLines(bar_x, y, bar_width, bar_height, (Color){118, 126, 142, 255});
+}
+
+static inline void draw_arrow_line(int x0, int y0, int x1, int y1, Color color) {
+    DrawLine(x0, y0, x1, y1, color);
+    float angle = atan2f((float)(y1 - y0), (float)(x1 - x0));
+    const float head = 7.0f;
+    DrawLine(x1, y1,
+        (int)(x1 - cosf(angle - 0.45f) * head),
+        (int)(y1 - sinf(angle - 0.45f) * head), color);
+    DrawLine(x1, y1,
+        (int)(x1 - cosf(angle + 0.45f) * head),
+        (int)(y1 - sinf(angle + 0.45f) * head), color);
+}
+
+static inline int draw_observation_bars(Bat* env, int x, int y, int width, int height) {
+    static const ObsBar chirp_bars[] = {
+        {"age", CHIRP_AGE_OBS, {112, 196, 255, 255}, false},
+        {"cooldown", CHIRP_COOLDOWN_OBS, {255, 206, 96, 255}, false},
+        {"start", CHIRP_START_OBS, {255, 112, 160, 255}, false},
+        {"end", CHIRP_END_OBS, {126, 224, 255, 255}, false},
+        {"duration", CHIRP_DURATION_OBS, {190, 154, 255, 255}, false},
+        {"used", CHIRPS_USED_OBS, {255, 150, 96, 255}, false},
+    };
+    static const ObsBar action_bars[] = {
+        {"speed", FORWARD_SPEED_OBS, {120, 226, 142, 255}, false},
+        {"turn", TURN_RATE_OBS, {255, 112, 112, 255}, true},
+    };
+    static const ObsBar episode_bars[] = {
+        {"timer", TIMER_OBS, {88, 164, 255, 255}, false},
+    };
+
+    const int row_step = 18;
+    const Color header = (Color){246, 248, 255, 255};
+    (void)height;
+
+    DrawText("Chirp", x, y, 12, header);
+    y += 18;
+    for (int i = 0; i < (int)(sizeof(chirp_bars) / sizeof(chirp_bars[0])); i++) {
+        draw_obs_bar(x, y + i * row_step, width, &chirp_bars[i], env->observations);
+    }
+    y += (int)(sizeof(chirp_bars) / sizeof(chirp_bars[0])) * row_step + 14;
+
+    DrawText("Actions", x, y, 12, header);
+    y += 18;
+    for (int i = 0; i < (int)(sizeof(action_bars) / sizeof(action_bars[0])); i++) {
+        draw_obs_bar(x, y + i * row_step, width, &action_bars[i], env->observations);
+    }
+    y += (int)(sizeof(action_bars) / sizeof(action_bars[0])) * row_step + 14;
+
+    DrawText("Episode", x, y, 12, header);
+    y += 18;
+    draw_obs_bar(x, y, width, &episode_bars[0], env->observations);
+    return y + row_step + 16;
+}
+
+static inline void draw_reflections_hint(int x, int y, int width,
+        int target_x, int left_target_y, int right_target_y) {
+    Color color = (Color){255, 96, 96, 255};
+    int text_x = x + 40;
+    int text_y = (left_target_y + right_target_y) / 2 - 6;
+    int source_x = text_x - 8;
+    int source_y = text_y + 8;
+    (void)y;
+    (void)width;
+    DrawText("Reflections L/R", text_x, text_y, 12, color);
+    draw_arrow_line(source_x, source_y, target_x, left_target_y, color);
+    draw_arrow_line(source_x, source_y + 10, target_x, right_target_y, color);
+}
+
 static inline void draw_freq_history_panel(Bat* env, int x, int y, int width, int height) {
     capture_freq_history(env);
 
     DrawRectangle(x, y, width, height, (Color){32, 36, 46, 255});
-    int band_width = width - 2 * FREQ_PANEL_MARGIN;
+    int band_width = FREQ_WATERFALL_WIDTH - 2 * FREQ_PANEL_MARGIN;
     int band_height = (height - 3 * FREQ_PANEL_MARGIN) / 2;
     int left_y = y + FREQ_PANEL_MARGIN;
     int right_y = left_y + band_height + FREQ_PANEL_MARGIN;
+    int obs_x = x + FREQ_WATERFALL_WIDTH + FREQ_PANEL_MARGIN;
+    int obs_width = width - FREQ_WATERFALL_WIDTH - 2 * FREQ_PANEL_MARGIN;
 
     draw_freq_history_band(env->client, 0, x + FREQ_PANEL_MARGIN, left_y,
         band_width, band_height);
     draw_freq_history_band(env->client, 1, x + FREQ_PANEL_MARGIN, right_y,
         band_width, band_height);
+    int hint_y = draw_observation_bars(env, obs_x, y + FREQ_PANEL_MARGIN,
+        obs_width, height - 2 * FREQ_PANEL_MARGIN);
+    draw_reflections_hint(obs_x, hint_y, obs_width,
+        x + FREQ_PANEL_MARGIN + band_width - 4,
+        left_y + band_height / 2,
+        right_y + band_height / 2);
 
     DrawRectangleLines(x, y, width, height, (Color){124, 132, 148, 255});
     DrawRectangleLines(x + FREQ_PANEL_MARGIN, left_y, band_width, band_height,
         (Color){102, 110, 126, 255});
     DrawRectangleLines(x + FREQ_PANEL_MARGIN, right_y, band_width, band_height,
         (Color){102, 110, 126, 255});
+    DrawLine(x + FREQ_WATERFALL_WIDTH, y, x + FREQ_WATERFALL_WIDTH, y + height,
+        (Color){86, 94, 110, 255});
 }
 
 static inline void draw_echo_flash(Bat* env, ChirpEvent* chirp,
