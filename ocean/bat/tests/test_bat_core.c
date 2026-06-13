@@ -560,7 +560,6 @@ static int test_echo_scheduling_uses_tick_bucket_accumulator(void) {
     int slot = 10 % ECHO_QUEUE_TICKS;
     ASSERT_TRUE(env.echo_queue[slot].tick == 10);
     ASSERT_FLOAT_NEAR(env.echo_queue[slot].energy[0][FREQ_BINS - 1], 1.1f, 0.0001f);
-    ASSERT_FLOAT_NEAR(env.echo_queue[slot].bug_energy, 1.1f, 0.0001f);
     ASSERT_FLOAT_NEAR(env.echo_queue[slot].closest_bug_echo_path, 12.0f, 0.0001f);
 
     free_allocated(&env);
@@ -575,13 +574,13 @@ static int test_bug_wing_sidebands_spill_adjacent_bins_without_reward_inflation(
     env.bug_wing_sideband_gain = 0.25f;
     clear_echo_queue(&env);
 
-    int bin = freq_bin_index(0.5f);
+    int bin = (int)(0.5f * FREQ_BINS);
     add_echo_event(&env, 0, 1.0f, 0.5f, 0.4f, 12.0f, ECHO_BUG);
     EchoBucket* bug_bucket = &env.echo_queue[1 % ECHO_QUEUE_TICKS];
     ASSERT_FLOAT_NEAR(bug_bucket->energy[0][bin], 0.4f, 0.0001f);
     ASSERT_FLOAT_NEAR(bug_bucket->energy[0][bin - 1], 0.1f, 0.0001f);
     ASSERT_FLOAT_NEAR(bug_bucket->energy[0][bin + 1], 0.1f, 0.0001f);
-    ASSERT_FLOAT_NEAR(bug_bucket->bug_energy, 0.4f, 0.0001f);
+    ASSERT_FLOAT_NEAR(bug_bucket->closest_bug_echo_path, 12.0f, 0.0001f);
 
     clear_echo_queue(&env);
     add_echo_event(&env, 0, 1.0f, 0.5f, 0.4f, 12.0f, ECHO_STATIC);
@@ -589,7 +588,7 @@ static int test_bug_wing_sidebands_spill_adjacent_bins_without_reward_inflation(
     ASSERT_FLOAT_NEAR(static_bucket->energy[0][bin], 0.4f, 0.0001f);
     ASSERT_FLOAT_NEAR(static_bucket->energy[0][bin - 1], 0.0f, 0.0001f);
     ASSERT_FLOAT_NEAR(static_bucket->energy[0][bin + 1], 0.0f, 0.0001f);
-    ASSERT_FLOAT_NEAR(static_bucket->bug_energy, 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(static_bucket->closest_bug_echo_path, -1.0f, 0.0001f);
 
     free_allocated(&env);
     return 0;
@@ -1441,12 +1440,14 @@ static int test_default_echo_range_reaches_curriculum_max_bug_distance(void) {
         chirp.slices_scheduled += 1;
     }
 
-    float bug_energy = 0.0f;
+    int bug_echo_buckets = 0;
     for (int i = 0; i < ECHO_QUEUE_TICKS; i++) {
-        bug_energy += env.echo_queue[i].bug_energy;
+        if (env.echo_queue[i].closest_bug_echo_path >= 0.0f) {
+            bug_echo_buckets += 1;
+        }
     }
 
-    ASSERT_TRUE(bug_energy > 0.0f);
+    ASSERT_TRUE(bug_echo_buckets > 0);
 
     free_allocated(&env);
     return 0;
@@ -1545,8 +1546,8 @@ static int test_frequency_bin_energy_sums_and_caps(void) {
     Bat env = make_test_env();
     memset(env.observations, 0, OBS_SIZE * sizeof(float));
 
-    int high_bin = freq_bin_index(1.0f);
-    int low_bin = freq_bin_index(0.0f);
+    int high_bin = FREQ_BINS - 1;
+    int low_bin = 0;
     env.observations[LEFT_FREQ_OFFSET + high_bin] = bat_clampf(
         env.observations[LEFT_FREQ_OFFSET + high_bin] + 0.75f, 0.0f, 1.0f);
     env.observations[LEFT_FREQ_OFFSET + high_bin] = bat_clampf(

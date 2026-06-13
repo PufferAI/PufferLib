@@ -10,7 +10,6 @@
 #include "raylib.h"
 #endif
 
-#define OBS_SIZE 41
 #define NUM_AGENTS 1
 #define NUM_ACTIONS 6
 #define ACTION_MOVE 0
@@ -27,16 +26,17 @@
 
 #define FREQ_BINS 16
 #define LEFT_FREQ_OFFSET 0
-#define RIGHT_FREQ_OFFSET 16
-#define CHIRP_AGE_OBS 32
-#define CHIRP_COOLDOWN_OBS 33
-#define CHIRP_START_OBS 34
-#define CHIRP_END_OBS 35
-#define CHIRP_DURATION_OBS 36
-#define CHIRPS_USED_OBS 37
-#define FORWARD_SPEED_OBS 38
-#define TURN_RATE_OBS 39
-#define TIMER_OBS 40
+#define RIGHT_FREQ_OFFSET FREQ_BINS
+#define CHIRP_AGE_OBS (RIGHT_FREQ_OFFSET + FREQ_BINS)
+#define CHIRP_COOLDOWN_OBS (CHIRP_AGE_OBS + 1)
+#define CHIRP_START_OBS (CHIRP_COOLDOWN_OBS + 1)
+#define CHIRP_END_OBS (CHIRP_START_OBS + 1)
+#define CHIRP_DURATION_OBS (CHIRP_END_OBS + 1)
+#define CHIRPS_USED_OBS (CHIRP_DURATION_OBS + 1)
+#define FORWARD_SPEED_OBS (CHIRPS_USED_OBS + 1)
+#define TURN_RATE_OBS (FORWARD_SPEED_OBS + 1)
+#define TIMER_OBS (TURN_RATE_OBS + 1)
+#define OBS_SIZE (TIMER_OBS + 1)
 
 #define NOOP 0
 #define THRUST_FORWARD 1
@@ -63,7 +63,6 @@
 #define MAX_ECHO_RANGE 128.0f
 #define ECHO_MIN_FORWARD -0.35f
 #define BUG_ECHO_MIN_DISPLACEMENT 1.0f
-#define CURRICULUM_START_OBSTACLES 0
 #define CURRICULUM_MAX_OBSTACLES 3
 #define CURRICULUM_BUG_DISTANCE_STEP 2.0f
 #define CURRICULUM_MAX_BUG_DISTANCE 40.0f
@@ -90,11 +89,14 @@
 #define CHIRP_PERF_FLOOR 0.05f
 #define CHIRP_MIN_DURATION_SECONDS 0.04f
 #define CHIRP_DURATION_RANGE_SECONDS 0.18f
-#define MAX_CHIRP_AGE_TICKS 30
 #define MAX_CHIRPS_PER_EPISODE 15
 
 #define ECHO_STATIC 0
 #define ECHO_BUG 1
+#define ARENA_REFLECTORS 8
+
+static const float ARENA_REFLECTOR_X[ARENA_REFLECTORS] = {0.0f, 1.0f, 0.0f, 1.0f, 0.5f, 0.5f, 0.0f, 1.0f};
+static const float ARENA_REFLECTOR_Y[ARENA_REFLECTORS] = {0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.5f, 0.5f};
 
 typedef struct ChirpEvent {
     float x;
@@ -112,7 +114,6 @@ typedef struct ChirpEvent {
 
 typedef struct EchoBucket {
     float energy[2][FREQ_BINS];
-    float bug_energy;
     float closest_bug_echo_path;
     int tick;
 } EchoBucket;
@@ -228,15 +229,14 @@ typedef struct Bat {
     float bug_maneuver_rate;
     float bug_maneuver_sign;
 
-    float* obstacle_x;
-    float* obstacle_y;
-    float* obstacle_w;
-    float* obstacle_h;
+    float obstacle_x[CURRICULUM_MAX_OBSTACLES];
+    float obstacle_y[CURRICULUM_MAX_OBSTACLES];
+    float obstacle_w[CURRICULUM_MAX_OBSTACLES];
+    float obstacle_h[CURRICULUM_MAX_OBSTACLES];
 
     float sound_speed;
     float reflector_strength;
     int chirp_cooldown_ticks;
-    int chirp_age_ticks;
     int last_chirp_tick;
     float last_chirp_start_freq;
     float last_chirp_end_freq;
@@ -297,23 +297,13 @@ static inline float chirp_slice_ticks(ChirpEvent* chirp, int slice_idx) {
 
 static inline void chirp_source_for_slice(ChirpEvent* chirp, int slice_idx,
         float* source_x, float* source_y) {
-    int scheduled = chirp->slices_scheduled;
-    if (slice_idx >= 0 && slice_idx < scheduled &&
-            slice_idx < MAX_CHIRP_SLICES) {
+    if (slice_idx < chirp->slices_scheduled) {
         *source_x = chirp->source_x[slice_idx];
         *source_y = chirp->source_y[slice_idx];
         return;
     }
     *source_x = chirp->x;
     *source_y = chirp->y;
-}
-
-static inline void chirp_source_for_fraction(ChirpEvent* chirp, float slice,
-        float* source_x, float* source_y) {
-    int slices = chirp->slice_count;
-    int slice_idx = (int)floorf(slice * (float)slices);
-    if (slice_idx >= slices) slice_idx = slices - 1;
-    chirp_source_for_slice(chirp, slice_idx, source_x, source_y);
 }
 
 static inline float chirp_age_norm_denominator(Bat* env) {
@@ -371,30 +361,9 @@ static inline void sample_in_quadrant(Bat* env, int quadrant, float* x, float* y
     *y = min_y + randf(env) * (max_y - min_y);
 }
 
-static inline void sample_spawns(Bat* env) {
-    int agent_quadrant = (int)(randf(env) * 4.0f);
-    int bug_quadrant = agent_quadrant ^ 3;
-    float min_sep = fminf(ARENA_WIDTH, ARENA_HEIGHT) * 0.31f;
-
-    for (int attempt = 0; attempt < 64; attempt++) {
-        sample_in_quadrant(env, agent_quadrant, &env->x, &env->y);
-        sample_in_quadrant(env, bug_quadrant, &env->bug_x, &env->bug_y);
-        if (dist(env->x, env->y, env->bug_x, env->bug_y) >= min_sep) {
-            return;
-        }
-    }
-
-    float qx[4] = {0.25f, 0.75f, 0.25f, 0.75f};
-    float qy[4] = {0.25f, 0.25f, 0.75f, 0.75f};
-    env->x = ARENA_WIDTH * qx[agent_quadrant];
-    env->y = ARENA_HEIGHT * qy[agent_quadrant];
-    env->bug_x = ARENA_WIDTH * qx[bug_quadrant];
-    env->bug_y = ARENA_HEIGHT * qy[bug_quadrant];
-}
-
 static inline int curriculum_obstacles(Bat* env) {
-    int count = CURRICULUM_START_OBSTACLES + (env->curriculum_level > 0
-        ? 1 + (env->curriculum_level - 1) / env->curriculum_obstacle_step : 0);
+    int count = env->curriculum_level > 0
+        ? 1 + (env->curriculum_level - 1) / env->curriculum_obstacle_step : 0;
     return count > CURRICULUM_MAX_OBSTACLES ? CURRICULUM_MAX_OBSTACLES : count;
 }
 
@@ -419,6 +388,9 @@ static inline float curriculum_bug_maneuver_strength(Bat* env) {
     return BUG_MANEUVER_STRENGTH * bat_clampf(ramp, 0.0f, 1.0f);
 }
 
+// TODO: When we are ready to break determinism, simplify bug maneuvering to one
+// always-active sine wave with curriculum-ramped amplitude, then remove the mode
+// and sign branches below.
 static inline float curriculum_bug_maneuver_frequency(Bat* env) {
     if (env->curriculum_level < BUG_MANEUVER_START_LEVEL) {
         return BUG_MANEUVER_FREQUENCY;
@@ -452,9 +424,7 @@ static inline float curriculum_distance_difficulty(Bat* env) {
 }
 
 static inline float curriculum_obstacle_difficulty(Bat* env) {
-    return bat_clampf((env->num_obstacles - CURRICULUM_START_OBSTACLES)
-        / (float)(CURRICULUM_MAX_OBSTACLES - CURRICULUM_START_OBSTACLES),
-        0.0f, 1.0f);
+    return bat_clampf(env->num_obstacles / (float)CURRICULUM_MAX_OBSTACLES, 0.0f, 1.0f);
 }
 
 static inline float curriculum_motion_difficulty(Bat* env) {
@@ -488,7 +458,21 @@ static inline void sample_spawns_at_distance(Bat* env, float target_distance) {
         return;
     }
 
-    sample_spawns(env);
+    int agent_quadrant = (int)(randf(env) * 4.0f);
+    int bug_quadrant = agent_quadrant ^ 3;
+    float min_sep = fminf(ARENA_WIDTH, ARENA_HEIGHT) * 0.31f;
+    for (int attempt = 0; attempt < 64; attempt++) {
+        sample_in_quadrant(env, agent_quadrant, &env->x, &env->y);
+        sample_in_quadrant(env, bug_quadrant, &env->bug_x, &env->bug_y);
+        if (dist(env->x, env->y, env->bug_x, env->bug_y) >= min_sep) {
+            return;
+        }
+    }
+
+    env->x = ARENA_WIDTH * ((agent_quadrant & 1) ? 0.75f : 0.25f);
+    env->y = ARENA_HEIGHT * ((agent_quadrant & 2) ? 0.75f : 0.25f);
+    env->bug_x = ARENA_WIDTH * ((bug_quadrant & 1) ? 0.75f : 0.25f);
+    env->bug_y = ARENA_HEIGHT * ((bug_quadrant & 2) ? 0.75f : 0.25f);
 }
 
 static inline void reset_bug_motion(Bat* env) {
@@ -574,11 +558,8 @@ static inline void generate_obstacles(Bat* env) {
 }
 
 void init(Bat* env) {
-    env->tick = 0;
-    env->obstacle_x = (float*)calloc(CURRICULUM_MAX_OBSTACLES, sizeof(float));
-    env->obstacle_y = (float*)calloc(CURRICULUM_MAX_OBSTACLES, sizeof(float));
-    env->obstacle_w = (float*)calloc(CURRICULUM_MAX_OBSTACLES, sizeof(float));
-    env->obstacle_h = (float*)calloc(CURRICULUM_MAX_OBSTACLES, sizeof(float));
+    env->curriculum_level = env->curriculum_initial_level;
+    env->curriculum_successes_at_level = 0;
 }
 
 void allocate(Bat* env) {
@@ -590,10 +571,7 @@ void allocate(Bat* env) {
 }
 
 void c_close(Bat* env) {
-    free(env->obstacle_x);
-    free(env->obstacle_y);
-    free(env->obstacle_w);
-    free(env->obstacle_h);
+    (void)env;
 }
 
 void free_allocated(Bat* env) {
@@ -623,11 +601,6 @@ static inline void add_log(Bat* env, float success, float collision, float timeo
     env->log.n += 1.0f;
 }
 
-static inline int freq_bin_index(float freq_norm) {
-    int bin = (int)(freq_norm * FREQ_BINS);
-    return bin >= FREQ_BINS ? FREQ_BINS - 1 : bin;
-}
-
 static inline void clear_echo_bucket(EchoBucket* bucket) {
     memset(bucket, 0, sizeof(*bucket));
     bucket->closest_bug_echo_path = -1.0f;
@@ -645,8 +618,7 @@ static inline void add_echo_event(Bat* env, int ear, float receive_tick,
     if (receive_tick <= env->tick) return;
     if (intensity <= 0.000001f) return;
     int arrival_tick = (int)ceilf(receive_tick);
-    int delay = arrival_tick - env->tick;
-    if (delay <= 0 || delay >= ECHO_QUEUE_TICKS) return;
+    if (arrival_tick - env->tick >= ECHO_QUEUE_TICKS) return;
     int slot = arrival_tick % ECHO_QUEUE_TICKS;
     EchoBucket* bucket = &env->echo_queue[slot];
     if (bucket->tick != arrival_tick) {
@@ -654,16 +626,15 @@ static inline void add_echo_event(Bat* env, int ear, float receive_tick,
         bucket->tick = arrival_tick;
     }
 
-    int ear_idx = ear == 0 ? 0 : 1;
-    int bin = freq_bin_index(freq);
-    bucket->energy[ear_idx][bin] += intensity;
+    int bin = (int)(freq * FREQ_BINS);
+    if (bin >= FREQ_BINS) bin = FREQ_BINS - 1;
+    bucket->energy[ear][bin] += intensity;
     if (source == ECHO_BUG) {
         float sideband = intensity * env->bug_wing_sideband_gain;
         if (sideband > 0.000001f) {
-            if (bin > 0) bucket->energy[ear_idx][bin - 1] += sideband;
-            if (bin + 1 < FREQ_BINS) bucket->energy[ear_idx][bin + 1] += sideband;
+            if (bin > 0) bucket->energy[ear][bin - 1] += sideband;
+            if (bin + 1 < FREQ_BINS) bucket->energy[ear][bin + 1] += sideband;
         }
-        bucket->bug_energy += intensity;
         if (bucket->closest_bug_echo_path < 0.0f || path < bucket->closest_bug_echo_path) {
             bucket->closest_bug_echo_path = path;
         }
@@ -681,27 +652,30 @@ static inline void ear_positions(Bat* env, float* left_x, float* left_y,
     *right_y = env->y + ly * ear_sep * 0.5f;
 }
 
+static inline void schedule_ear_echo(Bat* env, int birth_tick, int ear,
+        float slice_ticks, float freq, float strength, float path,
+        float gain, int source) {
+    if (path > MAX_ECHO_RANGE) return;
+    float attenuation = strength / (1.0f + 0.02f * path * path);
+    float receive_tick = birth_tick + slice_ticks + path / env->sound_speed / TICK_RATE;
+    add_echo_event(env, ear, receive_tick, freq, attenuation * gain, path, source);
+}
+
 static inline float expected_bug_echo_tick(Bat* env, ChirpEvent* chirp) {
     float fx = cosf(env->heading);
     float fy = sinf(env->heading);
-    float source_x, source_y;
-    chirp_source_for_slice(chirp, 0, &source_x, &source_y);
     float ux, uy;
-    norm_vec(env->bug_x - source_x, env->bug_y - source_y, &ux, &uy);
+    norm_vec(env->bug_x - chirp->x, env->bug_y - chirp->y, &ux, &uy);
     float forward = ux * fx + uy * fy;
     if (forward < ECHO_MIN_FORWARD) return -1.0f;
 
     float left_ear_x, left_ear_y, right_ear_x, right_ear_y;
     ear_positions(env, &left_ear_x, &left_ear_y, &right_ear_x, &right_ear_y);
-    float source_path = dist(source_x, source_y, env->bug_x, env->bug_y);
+    float source_path = dist(chirp->x, chirp->y, env->bug_x, env->bug_y);
     float left_path = source_path + dist(env->bug_x, env->bug_y, left_ear_x, left_ear_y);
     float right_path = source_path + dist(env->bug_x, env->bug_y, right_ear_x, right_ear_y);
-    float best_path = -1.0f;
-    if (left_path <= MAX_ECHO_RANGE) best_path = left_path;
-    if (right_path <= MAX_ECHO_RANGE && (best_path < 0.0f || right_path < best_path)) {
-        best_path = right_path;
-    }
-    if (best_path < 0.0f) return -1.0f;
+    float best_path = fminf(left_path, right_path);
+    if (best_path > MAX_ECHO_RANGE) return -1.0f;
 
     return chirp->birth_tick + chirp_slice_ticks(chirp, 0)
         + best_path / env->sound_speed / TICK_RATE;
@@ -712,8 +686,8 @@ static inline void schedule_echo(Bat* env, ChirpEvent* chirp,
         float strength, int source) {
     float fx = cosf(env->heading);
     float fy = sinf(env->heading);
-    float lateral_x = -sinf(env->heading);
-    float lateral_y = cosf(env->heading);
+    float lateral_x = -fy;
+    float lateral_y = fx;
     float left_ear_x, left_ear_y, right_ear_x, right_ear_y;
     ear_positions(env, &left_ear_x, &left_ear_y, &right_ear_x, &right_ear_y);
 
@@ -744,16 +718,10 @@ static inline void schedule_echo(Bat* env, ChirpEvent* chirp,
     float doppler = bat_clampf(-distance_rate / (env->max_speed + BUG_SPEED), -1.0f, 1.0f);
     float shifted_freq = bat_clampf(freq + 0.20f * doppler, 0.0f, 1.0f);
 
-    if (left_path <= MAX_ECHO_RANGE) {
-        float attenuation = strength / (1.0f + 0.02f * left_path * left_path);
-        float receive_tick = chirp->birth_tick + slice_ticks + left_path / env->sound_speed / TICK_RATE;
-        add_echo_event(env, 0, receive_tick, shifted_freq, attenuation * left_gain, left_path, source);
-    }
-    if (right_path <= MAX_ECHO_RANGE) {
-        float attenuation = strength / (1.0f + 0.02f * right_path * right_path);
-        float receive_tick = chirp->birth_tick + slice_ticks + right_path / env->sound_speed / TICK_RATE;
-        add_echo_event(env, 1, receive_tick, shifted_freq, attenuation * right_gain, right_path, source);
-    }
+    schedule_ear_echo(env, chirp->birth_tick, 0,
+        slice_ticks, shifted_freq, strength, left_path, left_gain, source);
+    schedule_ear_echo(env, chirp->birth_tick, 1,
+        slice_ticks, shifted_freq, strength, right_path, right_gain, source);
 }
 
 static inline void schedule_segment_reflectors(Bat* env, ChirpEvent* chirp,
@@ -773,23 +741,11 @@ static inline void schedule_corner_reflector_echoes(Bat* env, ChirpEvent* chirp,
         float slice_ticks, float freq) {
     float w = (float)ARENA_WIDTH;
     float h = (float)ARENA_HEIGHT;
-    float strength = env->reflector_strength;
-    schedule_echo(env, chirp, slice_ticks, freq, 0.0f, 0.0f,
-        0.0f, 0.0f, strength, ECHO_STATIC);
-    schedule_echo(env, chirp, slice_ticks, freq, w, 0.0f,
-        0.0f, 0.0f, strength, ECHO_STATIC);
-    schedule_echo(env, chirp, slice_ticks, freq, 0.0f, h,
-        0.0f, 0.0f, strength, ECHO_STATIC);
-    schedule_echo(env, chirp, slice_ticks, freq, w, h,
-        0.0f, 0.0f, strength, ECHO_STATIC);
-    schedule_echo(env, chirp, slice_ticks, freq, 0.5f * w, 0.0f,
-        0.0f, 0.0f, strength, ECHO_STATIC);
-    schedule_echo(env, chirp, slice_ticks, freq, 0.5f * w, h,
-        0.0f, 0.0f, strength, ECHO_STATIC);
-    schedule_echo(env, chirp, slice_ticks, freq, 0.0f, 0.5f * h,
-        0.0f, 0.0f, strength, ECHO_STATIC);
-    schedule_echo(env, chirp, slice_ticks, freq, w, 0.5f * h,
-        0.0f, 0.0f, strength, ECHO_STATIC);
+    for (int i = 0; i < ARENA_REFLECTORS; i++) {
+        schedule_echo(env, chirp, slice_ticks, freq,
+            ARENA_REFLECTOR_X[i] * w, ARENA_REFLECTOR_Y[i] * h,
+            0.0f, 0.0f, env->reflector_strength, ECHO_STATIC);
+    }
 }
 
 static inline void schedule_obstacle_echoes(Bat* env, ChirpEvent* chirp,
@@ -806,20 +762,21 @@ static inline void schedule_obstacle_echoes(Bat* env, ChirpEvent* chirp,
 
 static inline void schedule_chirp_slice_echoes(Bat* env, ChirpEvent* chirp,
         int slice_idx) {
-    int slices = chirp->slice_count;
-    if (slice_idx >= slices || slice_idx >= MAX_CHIRP_SLICES) {
+    if (slice_idx >= chirp->slice_count) {
         return;
     }
 
-    float t = (slice_idx + 0.5f) / (float)slices;
+    float t = (slice_idx + 0.5f) / (float)chirp->slice_count;
     float slice_ticks = chirp_slice_ticks(chirp, slice_idx);
     float freq = chirp->start_freq + t * (chirp->end_freq - chirp->start_freq);
 
-    chirp->source_x[slice_idx] = env->x;
-    chirp->source_y[slice_idx] = env->y;
-    ChirpEvent slice_chirp = *chirp;
-    slice_chirp.x = chirp->source_x[slice_idx];
-    slice_chirp.y = chirp->source_y[slice_idx];
+    ChirpEvent slice_chirp = {
+        .x = env->x,
+        .y = env->y,
+        .birth_tick = chirp->birth_tick,
+    };
+    chirp->source_x[slice_idx] = slice_chirp.x;
+    chirp->source_y[slice_idx] = slice_chirp.y;
 
     schedule_echo(env, &slice_chirp, slice_ticks, freq,
         env->bug_x, env->bug_y, env->bug_vx, env->bug_vy, 8.0f, ECHO_BUG);
@@ -841,10 +798,9 @@ static inline void schedule_due_chirp_slices(Bat* env) {
     for (int i = 0; i < CHIRP_HISTORY; i++) {
         ChirpEvent* chirp = &env->chirps[i];
         if (!chirp->active) continue;
-        int slices = chirp->slice_count;
 
         float age_ticks = (float)(env->tick - chirp->birth_tick);
-        while (chirp->slices_scheduled < slices) {
+        while (chirp->slices_scheduled < chirp->slice_count) {
             int slice_idx = chirp->slices_scheduled;
             float slice_ticks = chirp_slice_ticks(chirp, slice_idx);
             if (slice_ticks >= age_ticks + 1.0f) break;
@@ -854,38 +810,26 @@ static inline void schedule_due_chirp_slices(Bat* env) {
     }
 }
 
-static inline void process_echo_events(Bat* env) {
-    int slot = env->tick % ECHO_QUEUE_TICKS;
-    EchoBucket* bucket = &env->echo_queue[slot];
-    if (bucket->tick != env->tick) return;
-
-    for (int i = 0; i < FREQ_BINS; i++) {
-        int left_idx = LEFT_FREQ_OFFSET + i;
-        int right_idx = RIGHT_FREQ_OFFSET + i;
-        env->observations[left_idx] = bat_clampf(
-            env->observations[left_idx] + bucket->energy[0][i], 0.0f, 1.0f);
-        env->observations[right_idx] = bat_clampf(
-            env->observations[right_idx] + bucket->energy[1][i], 0.0f, 1.0f);
-    }
-    if (bucket->bug_energy > 0.0f) {
-        if (env->tick_bug_echo_path < 0.0f
-                || bucket->closest_bug_echo_path < env->tick_bug_echo_path) {
-            env->tick_bug_echo_path = bucket->closest_bug_echo_path;
-        }
-    }
-    clear_echo_bucket(bucket);
-}
-
 void compute_observations(Bat* env) {
     memset(env->observations, 0, OBS_SIZE * sizeof(float));
     env->tick_bug_echo_path = -1.0f;
 
-    process_echo_events(env);
+    int slot = env->tick % ECHO_QUEUE_TICKS;
+    EchoBucket* bucket = &env->echo_queue[slot];
+    if (bucket->tick == env->tick) {
+        for (int i = 0; i < FREQ_BINS; i++) {
+            env->observations[LEFT_FREQ_OFFSET + i] = bat_clampf(bucket->energy[0][i], 0.0f, 1.0f);
+            env->observations[RIGHT_FREQ_OFFSET + i] = bat_clampf(bucket->energy[1][i], 0.0f, 1.0f);
+        }
+        if (bucket->closest_bug_echo_path >= 0.0f) {
+            env->tick_bug_echo_path = bucket->closest_bug_echo_path;
+        }
+        clear_echo_bucket(bucket);
+    }
 
     float chirp_age_denom = chirp_age_norm_denominator(env);
     int chirp_age = env->tick - env->last_chirp_tick;
     if (env->last_chirp_tick < 0) chirp_age = (int)ceilf(chirp_age_denom);
-    env->chirp_age_ticks = chirp_age;
     int cooldown = env->chirp_cooldown_ticks - (env->tick - env->last_chirp_tick);
     env->observations[CHIRP_AGE_OBS] = bat_clampf(chirp_age / chirp_age_denom, 0.0f, 1.0f);
     env->observations[CHIRP_COOLDOWN_OBS] = bat_clampf(cooldown / (float)env->chirp_cooldown_ticks, 0.0f, 1.0f);
@@ -910,17 +854,15 @@ static inline void reset_episode(Bat* env) {
     }
     env->num_obstacles = curriculum_obstacles(env);
     env->bug_inbound = env->curriculum_level >= CURRICULUM_INBOUND_START_LEVEL;
-    float bug_distance = env->bug_inbound
+    sample_spawns_at_distance(env, env->bug_inbound
         ? curriculum_inbound_bug_distance(env)
-        : curriculum_bug_distance(env);
-    sample_spawns_at_distance(env, bug_distance);
+        : curriculum_bug_distance(env));
     generate_obstacles(env);
     reset_bug_motion(env);
     // TODO: Revisit these first-observation defaults when we are ready to break determinism.
     env->last_chirp_start_freq = 0.0f;
     env->last_chirp_end_freq = 1.0f;
     env->last_chirp_duration = 0.33333334f;
-    env->chirp_age_ticks = 0;
     env->last_chirp_tick = -env->chirp_cooldown_ticks;
     memset(env->chirps, 0, sizeof(env->chirps));
     env->chirp_head = 0;
@@ -1027,14 +969,13 @@ static inline void update_bug(Bat* env, float dt) {
         bounced = true;
     }
     if (bounced) {
-        env->bug_base_heading = atan2f(env->bug_vy, env->bug_vx);
         if (env->bug_inbound) {
             float tx, ty;
             norm_vec(env->x - env->bug_x, env->y - env->bug_y, &tx, &ty);
             env->bug_vx = tx * speed;
             env->bug_vy = ty * speed;
-            env->bug_base_heading = atan2f(env->bug_vy, env->bug_vx);
         }
+        env->bug_base_heading = atan2f(env->bug_vy, env->bug_vx);
     }
 }
 
@@ -1077,7 +1018,6 @@ static inline bool try_emit_chirp(Bat* env) {
     env->last_chirp_start_freq = norm_bin(start_idx, CHIRP_FREQ_BINS);
     env->last_chirp_end_freq = norm_bin(end_idx, CHIRP_FREQ_BINS);
     env->last_chirp_duration = norm_bin(duration_idx, CHIRP_DURATION_BINS);
-    env->chirp_age_ticks = 0;
     env->last_chirp_tick = env->tick;
     env->chirps_emitted += 1;
     ChirpEvent* chirp = &env->chirps[env->chirp_head];
@@ -1089,10 +1029,6 @@ static inline bool try_emit_chirp(Bat* env) {
     chirp->birth_tick = env->tick;
     chirp->slice_count = (int)ceilf(chirp->duration / TICK_RATE);
     chirp->slices_scheduled = 0;
-    for (int i = 0; i < MAX_CHIRP_SLICES; i++) {
-        chirp->source_x[i] = chirp->x;
-        chirp->source_y[i] = chirp->y;
-    }
     chirp->active = 1;
     env->chirp_head = (env->chirp_head + 1) % CHIRP_HISTORY;
     env->audio_chirp_serial += 1;
@@ -1116,9 +1052,6 @@ static inline ChirpStatus update_chirp(Bat* env) {
         return try_emit_chirp(env) ? CHIRP_STATUS_EMITTED : CHIRP_STATUS_COOLDOWN;
     }
 
-    if (env->chirp_age_ticks < MAX_CHIRP_AGE_TICKS) {
-        env->chirp_age_ticks += 1;
-    }
     return CHIRP_STATUS_NONE;
 }
 
@@ -1181,18 +1114,15 @@ void c_step(Bat* env) {
 
     compute_observations(env);
     if (env->tick_bug_echo_path > 0.0f) {
-        if (env->last_bug_echo_path > 0.0f) {
-            float echo_displacement = dist(env->last_bug_echo_x, env->last_bug_echo_y,
-                env->x, env->y);
-            if (echo_displacement >= BUG_ECHO_MIN_DISPLACEMENT) {
-                float echo_progress = (env->last_bug_echo_path - env->tick_bug_echo_path)
-                    / MAX_ECHO_RANGE;
-                if (echo_progress > 0.0f) {
-                    env->rewards[0] += env->bug_echo_reward_scale * echo_progress;
-                } else if (echo_progress < 0.0f) {
-                    env->rewards[0] += env->bug_echo_reward_scale
-                        * env->bug_echo_farther_penalty_scale * echo_progress;
-                }
+        if (env->last_bug_echo_path > 0.0f && dist(env->last_bug_echo_x, env->last_bug_echo_y,
+                env->x, env->y) >= BUG_ECHO_MIN_DISPLACEMENT) {
+            float echo_progress = (env->last_bug_echo_path - env->tick_bug_echo_path)
+                / MAX_ECHO_RANGE;
+            if (echo_progress > 0.0f) {
+                env->rewards[0] += env->bug_echo_reward_scale * echo_progress;
+            } else if (echo_progress < 0.0f) {
+                env->rewards[0] += env->bug_echo_reward_scale
+                    * env->bug_echo_farther_penalty_scale * echo_progress;
             }
         }
         env->last_bug_echo_path = env->tick_bug_echo_path;
@@ -1219,8 +1149,7 @@ static inline void draw_chirp_rings(Bat* env, float sx, float sy) {
         if (!chirp->active) continue;
 
         float age_seconds = (env->tick - chirp->birth_tick) * TICK_RATE;
-        if (age_seconds < 0.0f ||
-                age_seconds > MAX_ECHO_RANGE / env->sound_speed + chirp->duration) {
+        if (age_seconds > MAX_ECHO_RANGE / env->sound_speed + chirp->duration) {
             chirp->active = 0;
             continue;
         }
@@ -1236,7 +1165,9 @@ static inline void draw_chirp_rings(Bat* env, float sx, float sy) {
             float alpha = 0.18f + 0.42f * bat_clampf(
                 1.0f - radius / MAX_ECHO_RANGE, 0.0f, 1.0f);
             float source_x, source_y;
-            chirp_source_for_fraction(chirp, slice, &source_x, &source_y);
+            int slice_idx = (int)floorf(slice * (float)chirp->slice_count);
+            if (slice_idx >= chirp->slice_count) slice_idx = chirp->slice_count - 1;
+            chirp_source_for_slice(chirp, slice_idx, &source_x, &source_y);
             DrawCircleLines(
                 (int)(source_x * sx),
                 (int)(source_y * sy),
@@ -1328,7 +1259,6 @@ static inline void draw_obs_bar(int x, int y, int width,
     const int bar_height = 12;
     int bar_x = x + label_width;
     int bar_width = width - label_width;
-    if (bar_width <= 0) return;
 
     DrawText(bar->label, x, y - 1, 10, (Color){226, 230, 238, 255});
     DrawRectangle(bar_x, y, bar_width, bar_height, (Color){48, 52, 62, 255});
@@ -1363,7 +1293,7 @@ static inline void draw_arrow_line(int x0, int y0, int x1, int y1, Color color) 
         (int)(y1 - sinf(angle + 0.45f) * head), color);
 }
 
-static inline int draw_observation_bars(Bat* env, int x, int y, int width, int height) {
+static inline void draw_observation_bars(Bat* env, int x, int y, int width) {
     static const ObsBar chirp_bars[] = {
         {"age", CHIRP_AGE_OBS, {112, 196, 255, 255}, false},
         {"cooldown", CHIRP_COOLDOWN_OBS, {255, 206, 96, 255}, false},
@@ -1376,46 +1306,30 @@ static inline int draw_observation_bars(Bat* env, int x, int y, int width, int h
         {"speed", FORWARD_SPEED_OBS, {120, 226, 142, 255}, false},
         {"turn", TURN_RATE_OBS, {255, 112, 112, 255}, true},
     };
-    static const ObsBar episode_bars[] = {
-        {"timer", TIMER_OBS, {88, 164, 255, 255}, false},
-    };
+    static const ObsBar timer_bar = {"timer", TIMER_OBS, {88, 164, 255, 255}, false};
 
     const int row_step = 18;
     const Color header = (Color){246, 248, 255, 255};
-    (void)height;
+    int chirp_count = (int)(sizeof(chirp_bars) / sizeof(chirp_bars[0]));
+    int action_count = (int)(sizeof(action_bars) / sizeof(action_bars[0]));
 
     DrawText("Chirp", x, y, 12, header);
     y += 18;
-    for (int i = 0; i < (int)(sizeof(chirp_bars) / sizeof(chirp_bars[0])); i++) {
+    for (int i = 0; i < chirp_count; i++) {
         draw_obs_bar(x, y + i * row_step, width, &chirp_bars[i], env->observations);
     }
-    y += (int)(sizeof(chirp_bars) / sizeof(chirp_bars[0])) * row_step + 14;
+    y += chirp_count * row_step + 14;
 
     DrawText("Actions", x, y, 12, header);
     y += 18;
-    for (int i = 0; i < (int)(sizeof(action_bars) / sizeof(action_bars[0])); i++) {
+    for (int i = 0; i < action_count; i++) {
         draw_obs_bar(x, y + i * row_step, width, &action_bars[i], env->observations);
     }
-    y += (int)(sizeof(action_bars) / sizeof(action_bars[0])) * row_step + 14;
+    y += action_count * row_step + 14;
 
     DrawText("Episode", x, y, 12, header);
     y += 18;
-    draw_obs_bar(x, y, width, &episode_bars[0], env->observations);
-    return y + row_step + 16;
-}
-
-static inline void draw_reflections_hint(int x, int y, int width,
-        int target_x, int left_target_y, int right_target_y) {
-    Color color = (Color){255, 96, 96, 255};
-    int text_x = x + 40;
-    int text_y = (left_target_y + right_target_y) / 2 - 6;
-    int source_x = text_x - 8;
-    int source_y = text_y + 8;
-    (void)y;
-    (void)width;
-    DrawText("Reflections L/R", text_x, text_y, 12, color);
-    draw_arrow_line(source_x, source_y, target_x, left_target_y, color);
-    draw_arrow_line(source_x, source_y + 10, target_x, right_target_y, color);
+    draw_obs_bar(x, y, width, &timer_bar, env->observations);
 }
 
 static inline void draw_freq_history_panel(Bat* env, int x, int y, int width, int height) {
@@ -1433,12 +1347,18 @@ static inline void draw_freq_history_panel(Bat* env, int x, int y, int width, in
         band_width, band_height);
     draw_freq_history_band(env->client, 1, x + FREQ_PANEL_MARGIN, right_y,
         band_width, band_height);
-    int hint_y = draw_observation_bars(env, obs_x, y + FREQ_PANEL_MARGIN,
-        obs_width, height - 2 * FREQ_PANEL_MARGIN);
-    draw_reflections_hint(obs_x, hint_y, obs_width,
-        x + FREQ_PANEL_MARGIN + band_width - 4,
-        left_y + band_height / 2,
-        right_y + band_height / 2);
+    draw_observation_bars(env, obs_x, y + FREQ_PANEL_MARGIN, obs_width);
+    Color reflection_color = (Color){255, 96, 96, 255};
+    int reflection_text_x = obs_x + 40;
+    int reflection_text_y = (left_y + right_y + band_height) / 2 - 6;
+    int reflection_source_x = reflection_text_x - 8;
+    int reflection_source_y = reflection_text_y + 8;
+    int reflection_target_x = x + FREQ_PANEL_MARGIN + band_width - 4;
+    DrawText("Reflections L/R", reflection_text_x, reflection_text_y, 12, reflection_color);
+    draw_arrow_line(reflection_source_x, reflection_source_y,
+        reflection_target_x, left_y + band_height / 2, reflection_color);
+    draw_arrow_line(reflection_source_x, reflection_source_y + 10,
+        reflection_target_x, right_y + band_height / 2, reflection_color);
 
     DrawRectangleLines(x, y, width, height, (Color){124, 132, 148, 255});
     DrawRectangleLines(x + FREQ_PANEL_MARGIN, left_y, band_width, band_height,
@@ -1478,7 +1398,6 @@ static inline void draw_segment_echoes(Bat* env, ChirpEvent* chirp,
         float sx, float sy) {
     float len = dist(x1, y1, x2, y2);
     int count = (int)(len / REFLECTOR_SPACING) + 1;
-    if (count < 1) count = 1;
     for (int i = 0; i <= count; i++) {
         float t = i / (float)count;
         float x = x1 + (x2 - x1) * t;
@@ -1503,15 +1422,10 @@ static inline void draw_corner_reflector_echoes(Bat* env, ChirpEvent* chirp,
         float sx, float sy) {
     float w = (float)ARENA_WIDTH;
     float h = (float)ARENA_HEIGHT;
-    float strength = env->reflector_strength;
-    draw_echo_flash(env, chirp, 0.0f, 0.0f, 0.0f, 0.0f, strength, sx, sy);
-    draw_echo_flash(env, chirp, w, 0.0f, 0.0f, 0.0f, strength, sx, sy);
-    draw_echo_flash(env, chirp, 0.0f, h, 0.0f, 0.0f, strength, sx, sy);
-    draw_echo_flash(env, chirp, w, h, 0.0f, 0.0f, strength, sx, sy);
-    draw_echo_flash(env, chirp, 0.5f * w, 0.0f, 0.0f, 0.0f, strength, sx, sy);
-    draw_echo_flash(env, chirp, 0.5f * w, h, 0.0f, 0.0f, strength, sx, sy);
-    draw_echo_flash(env, chirp, 0.0f, 0.5f * h, 0.0f, 0.0f, strength, sx, sy);
-    draw_echo_flash(env, chirp, w, 0.5f * h, 0.0f, 0.0f, strength, sx, sy);
+    for (int i = 0; i < ARENA_REFLECTORS; i++) {
+        draw_echo_flash(env, chirp, ARENA_REFLECTOR_X[i] * w,
+            ARENA_REFLECTOR_Y[i] * h, 0.0f, 0.0f, env->reflector_strength, sx, sy);
+    }
 }
 
 static inline void draw_corner_reflector_markers(int width, int height) {
@@ -1520,24 +1434,12 @@ static inline void draw_corner_reflector_markers(int width, int height) {
     const Color outline = (Color){202, 202, 208, 255};
     int max_x = width - size;
     int max_y = height - size;
-    int mid_x = width / 2 - size / 2;
-    int mid_y = height / 2 - size / 2;
-    DrawRectangle(0, 0, size, size, fill);
-    DrawRectangleLines(0, 0, size, size, outline);
-    DrawRectangle(max_x, 0, size, size, fill);
-    DrawRectangleLines(max_x, 0, size, size, outline);
-    DrawRectangle(0, max_y, size, size, fill);
-    DrawRectangleLines(0, max_y, size, size, outline);
-    DrawRectangle(max_x, max_y, size, size, fill);
-    DrawRectangleLines(max_x, max_y, size, size, outline);
-    DrawRectangle(mid_x, 0, size, size, fill);
-    DrawRectangleLines(mid_x, 0, size, size, outline);
-    DrawRectangle(mid_x, max_y, size, size, fill);
-    DrawRectangleLines(mid_x, max_y, size, size, outline);
-    DrawRectangle(0, mid_y, size, size, fill);
-    DrawRectangleLines(0, mid_y, size, size, outline);
-    DrawRectangle(max_x, mid_y, size, size, fill);
-    DrawRectangleLines(max_x, mid_y, size, size, outline);
+    for (int i = 0; i < ARENA_REFLECTORS; i++) {
+        int x = (int)(ARENA_REFLECTOR_X[i] * max_x);
+        int y = (int)(ARENA_REFLECTOR_Y[i] * max_y);
+        DrawRectangle(x, y, size, size, fill);
+        DrawRectangleLines(x, y, size, size, outline);
+    }
 }
 
 static inline void draw_echo_reflections(Bat* env, float sx, float sy) {
