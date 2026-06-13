@@ -65,7 +65,7 @@ fi
 PLATFORM="$(uname -s)"
 if [ "$PLATFORM" = "Linux" ]; then
     RAYLIB_NAME='raylib-5.5_linux_amd64'
-    OMP_LIB=-lomp5
+    OMP_LIB=-lgomp
     OMP_CFLAGS=(-fopenmp)
     OMP_LDFLAGS=(-fopenmp "$OMP_LIB")
     SANITIZE_FLAGS=(-fsanitize=address,undefined,bounds,pointer-overflow,leak -fno-omit-frame-pointer)
@@ -79,8 +79,8 @@ else
         OMP_CFLAGS=(-I"$OMP_PREFIX/include" -Xclang -fopenmp)
         OMP_LDFLAGS=(-L"$OMP_PREFIX/lib" "$OMP_LIB")
     else
-        OMP_CFLAGS=(-Xclang -fopenmp)
-        OMP_LDFLAGS=("$OMP_LIB")
+        OMP_CFLAGS=()
+        OMP_LDFLAGS=()
     fi
     SANITIZE_FLAGS=()
     STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
@@ -103,7 +103,15 @@ download() {
     echo "Downloading $name..."
     case "$url" in
         *.zip) curl -sL "$url" -o "$name.zip" && unzip -q "$name.zip" && rm "$name.zip" ;;
-        *)     curl -sL "$url" -o "$name.tar.gz" && tar xf "$name.tar.gz" && rm "$name.tar.gz" ;;
+        *)
+            curl -sL "$url" -o "$name.tar.gz"
+            if tar --help 2>&1 | grep -q -- '--no-same-owner'; then
+                tar --no-same-owner -xf "$name.tar.gz"
+            else
+                tar xf "$name.tar.gz"
+            fi
+            rm "$name.tar.gz"
+            ;;
     esac
 }
 
@@ -150,6 +158,10 @@ fi
 CPU_STUB_INCLUDE=()
 if [ "$MODE" = "cpu" ] && [ -d "$SRC_DIR/cpu_stubs" ]; then
     CPU_STUB_INCLUDE=(-I"$SRC_DIR/cpu_stubs")
+fi
+if [ "$MODE" = "cpu" ] && [ "$PLATFORM" != "Linux" ] && [ -z "$OMP_PREFIX" ]; then
+    OMP_CFLAGS=()
+    OMP_LDFLAGS=()
 fi
 
 NVCC_ENV_HOST_FLAGS=()
@@ -206,7 +218,17 @@ elif [ "$MODE" = "web" ]; then
 fi
 
 # Find cuDNN path
-CUDA_HOME=${CUDA_HOME:-${CUDA_PATH:-$(dirname "$(dirname "$(which nvcc)")")}}
+if [ -z "$CUDA_HOME" ]; then
+    if [ -n "$CUDA_PATH" ]; then
+        CUDA_HOME="$CUDA_PATH"
+    elif command -v nvcc >/dev/null 2>&1; then
+        CUDA_HOME="$(dirname "$(dirname "$(command -v nvcc)")")"
+    elif [ -d /usr/local/cuda ]; then
+        CUDA_HOME=/usr/local/cuda
+    elif [ -d /usr/local/cuda-12.4 ]; then
+        CUDA_HOME=/usr/local/cuda-12.4
+    fi
+fi
 CUDNN_IFLAG=""
 CUDNN_LFLAG=""
 for dir in /usr/local/cuda/include /usr/include; do
@@ -255,8 +277,13 @@ done
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
 export CCACHE_BASEDIR="$(pwd)"
 export CCACHE_COMPILERCHECK=content
-NVCC="ccache $CUDA_HOME/bin/nvcc"
-CC="${CC:-$(command -v ccache >/dev/null && echo 'ccache clang' || echo 'clang')}"
+if command -v ccache >/dev/null 2>&1; then
+    NVCC="ccache $CUDA_HOME/bin/nvcc"
+    CC="${CC:-ccache clang}"
+else
+    NVCC="$CUDA_HOME/bin/nvcc"
+    CC="${CC:-clang}"
+fi
 ARCH=${NVCC_ARCH:-native}
 
 PYTHON_INCLUDE=$("$PYTHON_BIN" -c "import sysconfig; print(sysconfig.get_path('include'))")

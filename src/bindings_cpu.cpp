@@ -229,7 +229,7 @@ static void cpu_vec_step_py(VecEnv& ve, long long actions_ptr) {
 }
 
 static py::dict vec_log(VecEnv& ve) {
-    Dict* out = create_dict(32);
+    Dict* out = create_dict(128);
     static_vec_log(ve.vec, out);
     py::dict result;
     for (int i = 0; i < out->size; i++)
@@ -265,6 +265,8 @@ PYBIND11_MODULE(_C, m) {
         .def_readonly("obs_elem_size", &VecEnv::obs_elem_size)
         .def_property_readonly("gpu", [](VecEnv&) { return 0; })
         .def_property_readonly("obs_ptr", [](VecEnv& ve) { return (long long)ve.vec->observations.data; })
+        .def_property_readonly("action_mask_ptr", [](VecEnv& ve) { return (long long)ve.vec->action_mask; })
+        .def_property_readonly("action_mask_size", [](VecEnv& ve) { return ve.vec->action_mask_size; })
         .def_property_readonly("rewards_ptr", [](VecEnv& ve) { return (long long)ve.vec->rewards; })
         .def_property_readonly("terminals_ptr", [](VecEnv& ve) { return (long long)ve.vec->terminals; })
         .def("reset", &vec_reset)
