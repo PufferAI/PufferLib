@@ -4,6 +4,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include "pufferlib.cu"
+#include "gp_cuda.cu"
 
 #define _PUFFER_STRINGIFY(x) #x
 #define PUFFER_STRINGIFY(x) _PUFFER_STRINGIFY(x)
@@ -465,6 +466,157 @@ std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
     return pufferl;
 }
 
+// ---------------------------------------------------------------------------
+// CUDA GP wrapper
+// ---------------------------------------------------------------------------
+
+using gp_arr = py::array_t<float, py::array::c_style | py::array::forcecast>;
+
+class PyGP {
+    GaussianProcess *gp_;
+
+    void check() const {
+        if (!gp_) throw std::runtime_error("GaussianProcess object is invalid");
+    }
+
+    static int check_X(py::buffer_info &buf, int dim) {
+        if (buf.ndim == 1) {
+            if (dim != 1) throw std::invalid_argument("1-D X requires dim=1");
+            return (int)buf.shape[0];
+        }
+        if (buf.ndim == 2) {
+            if ((int)buf.shape[1] != dim)
+                throw std::invalid_argument(
+                    "X has " + std::to_string(buf.shape[1]) +
+                    " cols, expected " + std::to_string(dim));
+            return (int)buf.shape[0];
+        }
+        throw std::invalid_argument("X must be 1-D or 2-D");
+    }
+
+public:
+    PyGP(int dim, int capacity,
+           float lengthscale, float outputscale, float noise, float offset)
+        : gp_(gp_create(dim, capacity,
+                          gp_kernel_matern32_linear(dim, lengthscale, outputscale, offset),
+                          noise))
+    {
+        if (!gp_) throw std::runtime_error("gp_create failed");
+    }
+    explicit PyGP(GaussianProcess *raw) : gp_(raw) {}
+    ~PyGP() { if (gp_) gp_destroy(gp_); }
+    PyGP(const PyGP &)            = delete;
+    PyGP &operator=(const PyGP &) = delete;
+    PyGP(PyGP &&o) noexcept : gp_(o.gp_) { o.gp_ = nullptr; }
+    PyGP &operator=(PyGP &&o) noexcept {
+        if (gp_) gp_destroy(gp_); gp_ = o.gp_; o.gp_ = nullptr; return *this;
+    }
+
+    void fit(gp_arr X, gp_arr y) {
+        check();
+        auto xbuf = X.request(), ybuf = y.request();
+        int n = check_X(xbuf, gp_->dim);
+        if ((int)ybuf.shape[0] != n) throw std::invalid_argument("X and y length mismatch");
+        int rc = gp_fit(gp_, (const float *)xbuf.ptr, (const float *)ybuf.ptr, n, 0);
+        if (rc == -1) throw std::runtime_error("n exceeds capacity");
+        if (rc == -2) throw std::runtime_error("Cholesky factorisation failed");
+    }
+    void recompute() { check(); gp_recompute(gp_, 0); }
+
+    py::tuple predict(gp_arr X, bool noise = false) {
+        check();
+        auto buf = X.request();
+        int m = check_X(buf, gp_->dim);
+        auto means = py::array_t<float>(m);
+        auto vars  = py::array_t<float>(m);
+        gp_predict(gp_, (const float *)buf.ptr,
+                     (float *)means.request().ptr,
+                     (float *)vars.request().ptr, m, 0);
+        if (noise) {
+            float sn = gp_get_noise(gp_);
+            float *vp = (float *)vars.request().ptr;
+            for (int i = 0; i < m; i++) vp[i] += sn;
+        }
+        return py::make_tuple(means, vars);
+    }
+
+    float log_marginal_likelihood() const { check(); return gp_marginal_log_likelihood(gp_); }
+
+    py::tuple mll_grad() const {
+        check();
+        int np = gp_->kernel->n_params, d = gp_->dim;
+        float d_raw_noise;
+        std::vector<float> kg((size_t)np);
+        gp_mll_grad(gp_, &d_raw_noise, kg.data(), 0);
+        py::list lst;
+        for (int i = 0; i < d; i++) lst.append(kg[i]);
+        lst.append(kg[np - 2]);
+        lst.append(d_raw_noise);
+        lst.append(kg[np - 1]);
+        return py::tuple(lst);
+    }
+
+    py::array_t<float> lengthscale() const {
+        check(); int d = gp_->dim;
+        py::array_t<float> res(d);
+        auto buf = res.mutable_unchecked<1>();
+        for (int i = 0; i < d; i++) buf(i) = gp_kernel_get_lengthscale(gp_->kernel, i);
+        return res;
+    }
+    float outputscale() const { check(); return gp_kernel_get_outputscale(gp_->kernel); }
+    float gp_noise()    const { check(); return gp_get_noise(gp_); }
+    float offset()      const { check(); return gp_kernel_get_offset(gp_->kernel); }
+
+    void set_lengthscale(gp_arr v) {
+        check(); auto buf = v.request();
+        if ((int)buf.shape[0] != gp_->dim)
+            throw std::invalid_argument("wrong lengthscale size: expected " + std::to_string(gp_->dim));
+        const float *p = (const float *)buf.ptr;
+        for (int i = 0; i < gp_->dim; i++) gp_kernel_set_lengthscale(gp_->kernel, i, p[i]);
+    }
+    void set_outputscale(float v) { check(); gp_kernel_set_outputscale(gp_->kernel, v); }
+    void set_gp_noise   (float v) { check(); gp_set_noise(gp_, v); }
+    void set_offset     (float v) { check(); gp_kernel_set_offset(gp_->kernel, v); }
+
+    py::array_t<float> raw_lengthscale() const {
+        check(); int d = gp_->dim;
+        py::array_t<float> res(d);
+        auto buf = res.mutable_unchecked<1>();
+        for (int i = 0; i < d; i++) buf(i) = gp_->kernel->raw_params[i];
+        return res;
+    }
+    float raw_outputscale() const { check(); return gp_->kernel->raw_params[gp_->kernel->n_params - 2]; }
+    float raw_noise()       const { check(); return gp_->raw_noise; }
+    float raw_offset()      const { check(); return gp_->kernel->raw_params[gp_->kernel->n_params - 1]; }
+
+    void set_raw_lengthscale(gp_arr v) {
+        check(); auto buf = v.request();
+        if ((int)buf.shape[0] != gp_->dim)
+            throw std::invalid_argument("wrong lengthscale size: expected " + std::to_string(gp_->dim));
+        const float *p = (const float *)buf.ptr;
+        for (int i = 0; i < gp_->dim; i++) gp_->kernel->raw_params[i] = p[i];
+    }
+    void set_raw_outputscale(float v) { check(); gp_->kernel->raw_params[gp_->kernel->n_params - 2] = v; }
+    void set_raw_noise      (float v) { check(); gp_->raw_noise = v; }
+    void set_raw_offset     (float v) { check(); gp_->kernel->raw_params[gp_->kernel->n_params - 1] = v; }
+
+    int   n()               const { check(); return gp_->n; }
+    int   dim()             const { check(); return gp_->dim; }
+    int   capacity()        const { check(); return gp_->cap; }
+    float dedup_threshold() const { check(); return gp_->dedup_threshold; }
+    void set_dedup_threshold(float v) { check(); gp_->dedup_threshold = v; }
+
+    void save(const std::string &path) const {
+        check();
+        if (gp_save(gp_, path.c_str()) != 0) throw std::runtime_error("save failed: " + path);
+    }
+    static PyGP load(const std::string &path, int extra_cap = 0) {
+        GaussianProcess *raw = gp_load(path.c_str(), extra_cap);
+        if (!raw) throw std::runtime_error("load failed: " + path);
+        return PyGP(raw);
+    }
+};
+
 PYBIND11_MODULE(_C, m) {
     // Multi-GPU: generate NCCL unique ID (call on rank 0, pass bytes to all ranks)
     m.def("get_nccl_id", []() {
@@ -630,5 +782,92 @@ PYBIND11_MODULE(_C, m) {
         .def_readonly("last_log_time", &PuffeRL::last_log_time)
         .def("num_params", [](PuffeRL& self) -> int64_t {
             return numel(self.master_weights.shape);
+        });
+
+    // CUDA GP regression
+    py::class_<PyGP>(m, "GaussianProcess")
+        .def(py::init<int, int, float, float, float, float>(),
+             py::arg("dim"), py::arg("capacity"),
+             py::arg("lengthscale") = 1.0,
+             py::arg("outputscale") = 1.0,
+             py::arg("noise")       = 1e-2,
+             py::arg("offset")      = 1.0)
+        .def("fit",       &PyGP::fit,       py::arg("X"), py::arg("y"))
+        .def("recompute", &PyGP::recompute)
+        .def("predict",   &PyGP::predict,   py::arg("X"), py::arg("noise") = false)
+        .def("mll_grad",  &PyGP::mll_grad)
+        .def_property("lengthscale", &PyGP::lengthscale, &PyGP::set_lengthscale)
+        .def_property("outputscale", &PyGP::outputscale, &PyGP::set_outputscale)
+        .def_property("noise",       &PyGP::gp_noise,    &PyGP::set_gp_noise)
+        .def_property("offset",      &PyGP::offset,      &PyGP::set_offset)
+        .def_property("raw_lengthscale",  &PyGP::raw_lengthscale, &PyGP::set_raw_lengthscale)
+        .def_property("raw_outputscale",  &PyGP::raw_outputscale, &PyGP::set_raw_outputscale)
+        .def_property("raw_noise",        &PyGP::raw_noise,       &PyGP::set_raw_noise)
+        .def_property("raw_offset",       &PyGP::raw_offset,      &PyGP::set_raw_offset)
+        .def_property_readonly("log_marginal_likelihood", &PyGP::log_marginal_likelihood)
+        .def_property_readonly("n",        &PyGP::n)
+        .def_property_readonly("dim",      &PyGP::dim)
+        .def_property_readonly("capacity", &PyGP::capacity)
+        .def_property("dedup_threshold",   &PyGP::dedup_threshold, &PyGP::set_dedup_threshold)
+        .def("save",        &PyGP::save, py::arg("path"))
+        .def_static("load", &PyGP::load, py::arg("path"), py::arg("extra_cap") = 0)
+        .def(py::pickle(
+            [](const PyGP &g) {
+                py::dict state;
+                state["dim"] = g.dim();
+                state["capacity"] = g.capacity();
+                state["dedup_threshold"] = g.dedup_threshold();
+                state["raw_noise"] = g.raw_noise();
+                state["raw_lengthscale"] = g.raw_lengthscale();
+                state["raw_outputscale"] = g.raw_outputscale();
+                state["raw_offset"] = g.raw_offset();
+                if (g.n() > 0) {
+                    char tmppath[] = "/tmp/pufferlib_gp_XXXXXX";
+                    int fd = mkstemp(tmppath);
+                    if (fd < 0) throw std::runtime_error("pickle: mkstemp failed");
+                    close(fd);
+                    try { g.save(std::string(tmppath)); }
+                    catch (...) { remove(tmppath); throw; }
+                    FILE *fp = fopen(tmppath, "rb");
+                    if (!fp) { remove(tmppath); throw std::runtime_error("pickle: fopen failed"); }
+                    fseek(fp, 0, SEEK_END); long sz = ftell(fp); fseek(fp, 0, SEEK_SET);
+                    std::string buf((size_t)sz, '\0');
+                    fread(&buf[0], 1, (size_t)sz, fp); fclose(fp); remove(tmppath);
+                    state["data"] = py::bytes(buf.data(), (size_t)sz);
+                }
+                return state;
+            },
+            [](py::dict state) {
+                int dim = state["dim"].cast<int>();
+                int cap = state["capacity"].cast<int>();
+                float dedup = state["dedup_threshold"].cast<float>();
+                if (state.contains("data")) {
+                    py::bytes blob = state["data"].cast<py::bytes>();
+                    const char *ptr = PyBytes_AS_STRING(blob.ptr());
+                    Py_ssize_t len = PyBytes_GET_SIZE(blob.ptr());
+                    char tmppath[] = "/tmp/pufferlib_gp_XXXXXX";
+                    int fd = mkstemp(tmppath);
+                    if (fd < 0) throw std::runtime_error("unpickle: mkstemp failed");
+                    ssize_t written = write(fd, ptr, (size_t)len); close(fd);
+                    if (written != len) { remove(tmppath); throw std::runtime_error("unpickle: write failed"); }
+                    int n; memcpy(&n, ptr + 8, sizeof(int));
+                    int extra_cap = cap > n ? cap - n : 0;
+                    PyGP gp(nullptr);
+                    try { gp = PyGP::load(std::string(tmppath), extra_cap); }
+                    catch (...) { remove(tmppath); throw; }
+                    remove(tmppath); gp.set_dedup_threshold(dedup); return gp;
+                }
+                PyGP gp(dim, cap, 1.0f, 1.0f, 1e-2f, 1.0f);
+                gp.set_raw_noise(state["raw_noise"].cast<float>());
+                gp.set_raw_lengthscale(state["raw_lengthscale"].cast<gp_arr>());
+                gp.set_raw_outputscale(state["raw_outputscale"].cast<float>());
+                gp.set_raw_offset(state["raw_offset"].cast<float>());
+                gp.set_dedup_threshold(dedup); return gp;
+            }
+        ))
+        .def("__repr__", [](const PyGP &g) {
+            return "<GaussianProcess dim=" + std::to_string(g.dim()) +
+                   " n=" + std::to_string(g.n()) +
+                   " cap=" + std::to_string(g.capacity()) + ">";
         });
 }
