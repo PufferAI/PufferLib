@@ -596,16 +596,11 @@ def load_config(env_name):
         help='num_layers of the enemy checkpoint (defaults to primary)')
     parser.add_argument('--load-id', type=str,
         default=None, help='Kickstart/eval from from a finished Wandbrun')
-    parser.add_argument('--render-mode', type=str, default='auto',
-        choices=['auto', 'human', 'ansi', 'rgb_array', 'raylib', 'None'])
     parser.add_argument('--wandb', action='store_true', help='Use wandb for logging')
     parser.add_argument('--wandb-project', type=str, default='puffer4')
     parser.add_argument('--wandb-group', type=str, default='debug')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
     parser.add_argument('--slowly', action='store_true', help='Use PyTorch training backend')
-    parser.add_argument('--save-frames', type=int, default=0)
-    parser.add_argument('--gif-path', type=str, default='eval.gif')
-    parser.add_argument('--fps', type=float, default=15)
     parser.description = f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]' \
         ' demo options. Shows valid args for your env and policy'
 
