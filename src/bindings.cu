@@ -5,6 +5,7 @@
 #include <pybind11/numpy.h>
 #include "pufferlib.cu"
 #include "gp_cuda.cu"
+#include "protein.cu"
 
 #define _PUFFER_STRINGIFY(x) #x
 #define PUFFER_STRINGIFY(x) _PUFFER_STRINGIFY(x)
@@ -617,6 +618,304 @@ public:
     }
 };
 
+// ---------------------------------------------------------------------------
+// Protein sweep wrapper
+// ---------------------------------------------------------------------------
+
+static float resolve_scale(const std::string &dist, float min_v, float max_v,
+                           const py::object &scale_obj) {
+    if (py::isinstance<py::str>(scale_obj)) {
+        std::string s = scale_obj.cast<std::string>();
+        if (s == "time")
+            return 1.0f / (log2f(max_v) - log2f(min_v));
+        return 0.5f; // "auto"
+    }
+    return scale_obj.cast<float>();
+}
+
+struct FlatKey {
+    std::vector<std::string> path;
+};
+
+class PyProtein {
+    ProteinSweep *sw_;
+    std::vector<FlatKey> keys_;
+    std::vector<Space> spaces_;
+    int cost_idx_;
+
+    PyProtein() : sw_(nullptr), cost_idx_(-1) {}
+
+    void check() const {
+        if (!sw_ || !sw_->hypers)
+            throw std::runtime_error("Protein: suggest/observe unavailable (pickled stub)");
+    }
+
+    static py::object dict_get(py::dict d, const FlatKey &fk) {
+        py::object cur = d;
+        for (auto &seg : fk.path)
+            cur = cur.attr("__getitem__")(py::str(seg));
+        return cur;
+    }
+
+    static void dict_set(py::dict d, const FlatKey &fk, float val) {
+        py::object cur = d;
+        for (size_t i = 0; i + 1 < fk.path.size(); i++)
+            cur = cur.attr("__getitem__")(py::str(fk.path[i]));
+        cur.attr("__setitem__")(py::str(fk.path.back()), py::float_(val));
+    }
+
+    void build_spaces(py::dict param_dict, const std::set<std::string> &skip,
+                      const std::set<std::string> *only,
+                      std::vector<std::string> &prefix) {
+        for (auto item : param_dict) {
+            std::string name = item.first.cast<std::string>();
+            if (skip.count(name)) continue;
+            py::object val = item.second.cast<py::object>();
+            if (!py::isinstance<py::dict>(val)) continue;
+            py::dict pd = val.cast<py::dict>();
+
+            bool has_sub = false;
+            for (auto sub : pd)
+                if (py::isinstance<py::dict>(sub.second)) { has_sub = true; break; }
+            if (has_sub) {
+                prefix.push_back(name);
+                build_spaces(pd, skip, only, prefix);
+                prefix.pop_back();
+                continue;
+            }
+
+            if (only && !only->empty()) {
+                bool found = false;
+                for (auto &k : *only)
+                    if (name.find(k) != std::string::npos) { found = true; break; }
+                if (!found) continue;
+            }
+
+            std::string dist = pd["distribution"].cast<std::string>();
+            float mn = pd["min"].cast<float>();
+            float mx = pd["max"].cast<float>();
+            float sc = resolve_scale(dist, mn, mx, pd["scale"]);
+            int is_int = 0;
+
+            SpaceType st;
+            if (dist == "uniform") { st = SPACE_LINEAR; }
+            else if (dist == "int_uniform") { st = SPACE_LINEAR; is_int = 1; }
+            else if (dist == "uniform_pow2") { st = SPACE_POW2; is_int = 1; }
+            else if (dist == "log_normal") { st = SPACE_LOG; }
+            else if (dist == "logit_normal") { st = SPACE_LOGIT; }
+            else throw std::runtime_error("Unknown distribution: " + dist);
+
+            Space sp;
+            space_init(&sp, st, mn, mx, sc, is_int);
+            spaces_.push_back(sp);
+
+            FlatKey fk;
+            fk.path = prefix;
+            fk.path.push_back(name);
+            keys_.push_back(fk);
+        }
+    }
+
+public:
+    PyProtein(py::dict sweep_config) : sw_(nullptr), cost_idx_(-1) {
+        static const std::set<std::string> skip = {
+            "method", "metric", "metric_distribution", "goal",
+            "downsample", "use_gpu", "prune_pareto", "sweep_only",
+            "max_suggestion_cost", "early_stop_quantile", "gpus",
+            "max_runs", "match_enemy_model_path", "match_num_games",
+            "match_enemy_hidden_size", "match_enemy_num_layers"};
+
+        std::set<std::string> only_set;
+        const std::set<std::string> *only_ptr = nullptr;
+        if (sweep_config.contains("sweep_only")) {
+            std::string raw = sweep_config["sweep_only"].cast<std::string>();
+            std::istringstream ss(raw);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                size_t a = tok.find_first_not_of(' ');
+                size_t b = tok.find_last_not_of(' ');
+                if (a != std::string::npos) only_set.insert(tok.substr(a, b - a + 1));
+            }
+            only_ptr = &only_set;
+        }
+
+        std::vector<std::string> prefix;
+        build_spaces(sweep_config, skip, only_ptr, prefix);
+
+        int dim = (int)spaces_.size();
+        if (dim == 0) throw std::runtime_error("No sweep parameters found");
+
+        std::string goal = sweep_config.contains("goal")
+            ? sweep_config["goal"].cast<std::string>() : "maximize";
+        int opt_dir = (goal == "maximize") ? 1 : -1;
+
+        std::string cost_param = "train/total_timesteps";
+        for (int i = 0; i < dim; i++) {
+            std::string flat;
+            for (size_t j = 0; j < keys_[i].path.size(); j++) {
+                if (j) flat += "/";
+                flat += keys_[i].path[j];
+            }
+            if (flat == cost_param) { cost_idx_ = i; break; }
+        }
+
+        Hyperparameters *hypers = hyperparameters_create(
+            spaces_.data(), dim, cost_idx_, opt_dir);
+
+        bool prune_p = sweep_config.contains("prune_pareto")
+            ? sweep_config["prune_pareto"].cast<bool>() : true;
+        float max_cost = sweep_config.contains("max_suggestion_cost")
+            ? sweep_config["max_suggestion_cost"].cast<float>() : 3600.0f;
+        float eq = sweep_config.contains("early_stop_quantile")
+            ? sweep_config["early_stop_quantile"].cast<float>() : 0.3f;
+        int downsample = sweep_config.contains("downsample")
+            ? sweep_config["downsample"].cast<int>() : 5;
+        int max_runs = sweep_config.contains("max_runs")
+            ? sweep_config["max_runs"].cast<int>() : 1200;
+        std::string mdist = sweep_config.contains("metric_distribution")
+            ? sweep_config["metric_distribution"].cast<std::string>() : "linear";
+        int use_logit = (mdist == "percentile") ? 1 : 0;
+
+        int success_cap = max_runs * downsample * 2;
+        if (success_cap < 8192) success_cap = 8192;
+
+        sw_ = protein_sweep_create(hypers,
+            10, 256, 50, 0.001f, 50, 750, 4096,
+            downsample == 1, prune_p, use_logit,
+            1.0f, max_cost, 0.1f, -0.8f, eq,
+            success_cap, 1024, 5, 73ULL);
+    }
+
+    ~PyProtein() { if (sw_) protein_sweep_destroy(sw_); }
+    PyProtein(const PyProtein &) = delete;
+    PyProtein &operator=(const PyProtein &) = delete;
+    PyProtein(PyProtein &&o) noexcept
+        : sw_(o.sw_), keys_(std::move(o.keys_)),
+          spaces_(std::move(o.spaces_)), cost_idx_(o.cost_idx_) { o.sw_ = nullptr; }
+
+    py::tuple suggest(py::dict fill, py::object fixed_total_timesteps) {
+        check();
+        int dim = sw_->hypers->num;
+        float fixed_cost_norm = NAN;
+        if (!fixed_total_timesteps.is_none() && cost_idx_ >= 0) {
+            float ts = fixed_total_timesteps.cast<float>();
+            fixed_cost_norm = space_normalize(&spaces_[(size_t)cost_idx_], ts);
+        }
+
+        std::vector<float> out((size_t)dim);
+        ProteinSweepInfo info = protein_sweep_suggest(sw_, out.data(), fixed_cost_norm);
+
+        for (int i = 0; i < dim; i++) {
+            float val = space_unnormalize(&spaces_[(size_t)i], out[(size_t)i]);
+            dict_set(fill, keys_[(size_t)i], val);
+        }
+
+        py::dict info_dict;
+        if (!info.is_random) {
+            info_dict["score"] = info.predicted_score;
+            info_dict["cost"] = info.predicted_cost;
+            info_dict["rating"] = info.rating;
+            info_dict["score_loss"] = info.score_loss;
+            info_dict["cost_loss"] = info.cost_loss;
+        }
+        return py::make_tuple(fill, info_dict);
+    }
+
+    void observe(py::dict hypers, float score, float cost, bool is_failure) {
+        check();
+        int dim = sw_->hypers->num;
+        std::vector<float> norm((size_t)dim);
+        for (int i = 0; i < dim; i++) {
+            float val = dict_get(hypers, keys_[(size_t)i]).cast<float>();
+            norm[(size_t)i] = space_normalize(&spaces_[(size_t)i], val);
+        }
+        protein_sweep_observe(sw_, norm.data(), score, cost, is_failure ? 1 : 0);
+    }
+
+    bool early_stop(py::dict logs, const std::string &target_key) {
+        if (!sw_) throw std::runtime_error("Protein object not initialised");
+        if (logs.contains("loss")) {
+            py::dict loss = logs["loss"].cast<py::dict>();
+            for (auto item : loss) {
+                float v = item.second.cast<float>();
+                if (std::isnan(v)) {
+                    logs["is_loss_nan"] = true;
+                    return true;
+                }
+            }
+        }
+        if (!logs.contains("uptime")) return false;
+        py::dict env;
+        if (logs.contains("env")) env = logs["env"].cast<py::dict>();
+        std::string full_key = target_key;
+        if (full_key.substr(0, 4) == "env/") full_key = full_key.substr(4);
+        if (!env.contains(full_key.c_str())) return false;
+
+        float metric_val = env[full_key.c_str()].cast<float>();
+        float cost_val = logs["uptime"].cast<float>();
+
+        protein_sweep_add_running(sw_, metric_val);
+        float running_mean = protein_sweep_running_mean(sw_);
+
+        float threshold = protein_sweep_get_threshold(sw_, cost_val);
+        logs["early_stop_threshold"] = std::max(threshold, -5.0f);
+
+        float check_score = std::max(running_mean, metric_val);
+        if (protein_sweep_should_stop(sw_, check_score, cost_val)) {
+            logs["is_loss_nan"] = false;
+            return true;
+        }
+        return false;
+    }
+
+    py::dict getstate() const {
+        check();
+        py::dict state;
+        state["cost_model_A"] = sw_->cost_model.A;
+        state["cost_model_B"] = sw_->cost_model.B;
+        state["cost_model_max_score"] = sw_->cost_model.max_score;
+        state["cost_model_upper"] = sw_->cost_model.upper_cost_threshold;
+        state["cost_model_quantile"] = sw_->cost_model.quantile;
+        state["cost_model_min_samples"] = sw_->cost_model.min_samples;
+        state["cost_model_fitted"] = sw_->cost_model.is_fitted;
+        state["upper_cost_threshold"] = sw_->upper_cost_threshold;
+        state["use_logit"] = sw_->use_logit;
+        py::list buf;
+        for (int i = 0; i < sw_->running_len; i++) {
+            int idx = (sw_->running_pos - sw_->running_len + i + PROTEIN_RUNNING_BUF_CAP)
+                % PROTEIN_RUNNING_BUF_CAP;
+            buf.append(sw_->running_buf[idx]);
+        }
+        state["running_buf"] = buf;
+        return state;
+    }
+
+    void setstate(py::dict state) {
+        if (sw_) { protein_sweep_destroy(sw_); sw_ = nullptr; }
+        sw_ = (ProteinSweep*)calloc(1, sizeof(ProteinSweep));
+        sw_->cost_model.A = state["cost_model_A"].cast<float>();
+        sw_->cost_model.B = state["cost_model_B"].cast<float>();
+        sw_->cost_model.max_score = state["cost_model_max_score"].cast<float>();
+        sw_->cost_model.upper_cost_threshold = state["cost_model_upper"].cast<float>();
+        sw_->cost_model.quantile = state["cost_model_quantile"].cast<float>();
+        sw_->cost_model.min_samples = state["cost_model_min_samples"].cast<int>();
+        sw_->cost_model.is_fitted = state["cost_model_fitted"].cast<int>();
+        sw_->upper_cost_threshold = state["upper_cost_threshold"].cast<float>();
+        sw_->use_logit = state["use_logit"].cast<int>();
+        py::list buf = state["running_buf"].cast<py::list>();
+        sw_->running_len = (int)buf.size();
+        sw_->running_pos = sw_->running_len % PROTEIN_RUNNING_BUF_CAP;
+        for (int i = 0; i < sw_->running_len; i++)
+            sw_->running_buf[i] = buf[i].cast<float>();
+    }
+
+    static PyProtein from_pickle(py::dict state) {
+        PyProtein p;
+        p.setstate(state);
+        return p;
+    }
+};
+
 PYBIND11_MODULE(_C, m) {
     // Multi-GPU: generate NCCL unique ID (call on rank 0, pass bytes to all ranks)
     m.def("get_nccl_id", []() {
@@ -870,4 +1169,19 @@ PYBIND11_MODULE(_C, m) {
                    " n=" + std::to_string(g.n()) +
                    " cap=" + std::to_string(g.capacity()) + ">";
         });
+
+    // Protein sweep
+    py::class_<PyProtein>(m, "Protein")
+        .def(py::init<py::dict>(), py::arg("sweep_config"))
+        .def("suggest", &PyProtein::suggest,
+             py::arg("fill"), py::arg("fixed_total_timesteps") = py::none())
+        .def("observe", &PyProtein::observe,
+             py::arg("hypers"), py::arg("score"), py::arg("cost"),
+             py::arg("is_failure") = false)
+        .def("early_stop", &PyProtein::early_stop,
+             py::arg("logs"), py::arg("target_key"))
+        .def(py::pickle(
+            [](const PyProtein &p) { return p.getstate(); },
+            &PyProtein::from_pickle
+        ));
 }
