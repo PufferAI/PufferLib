@@ -65,21 +65,21 @@ GaussianProcess* gp_load(const char* path, int extra_cap);
 
 __global__ void gp_k_add_diag(float* A, int n, float val)
 {
-    int i = blockIdx.x * 256 + threadIdx.x;
+    int i = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     if (i < n)
         A[(size_t)i * (n + 1)] += val;
 }
 
 __global__ void gp_k_extract_diag(const float* A, float* d, int n)
 {
-    int i = blockIdx.x * 256 + threadIdx.x;
+    int i = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     if (i < n)
         d[i] = A[(size_t)i * (n + 1)];
 }
 
 __global__ void gp_k_col_sqnorms(const float* V, float* sqnorms, int n, int m)
 {
-    int j = blockIdx.x * 256 + threadIdx.x;
+    int j = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     if (j >= m)
         return;
     float sq = 0.0;
@@ -91,7 +91,7 @@ __global__ void gp_k_col_sqnorms(const float* V, float* sqnorms, int n, int m)
 
 __global__ void gp_k_var_subtract(float* vars, const float* sqnorms, int m)
 {
-    int j = blockIdx.x * 256 + threadIdx.x;
+    int j = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     if (j >= m)
         return;
     float v = vars[j] - sqnorms[j];
@@ -342,7 +342,7 @@ int gp_recompute(GaussianProcess* gp, cudaStream_t stream)
     if (info != 0) {
         gp->kernel->build_K(gp->kernel, gp->d_X, n, gp->dim, gp_get_noise(gp),
             gp->d_L, stream);
-        gp_k_add_diag<<<(n + 255) / 256, 256, 0, stream>>>(gp->d_L, n, 1e-8);
+        gp_k_add_diag<<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(gp->d_L, n, 1e-8);
         CUDA_CHECK(cudaGetLastError());
         info = run_potrf(gp, gp->d_L, n, stream);
         if (info != 0)
@@ -414,10 +414,10 @@ static void predict_dev(const GaussianProcess* gp, const float* d_Xte,
             CUBLAS_DIAG_NON_UNIT, n, m, &one, gp->d_L, n, d_Ks, n));
         float* d_sqnorms;
         CUDA_CHECK(cudaMallocAsync(&d_sqnorms, (size_t)m * sizeof(float), stream));
-        gp_k_col_sqnorms<<<(m + 255) / 256, 256, 0, stream>>>(d_Ks, d_sqnorms, n,
+        gp_k_col_sqnorms<<<(m + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(d_Ks, d_sqnorms, n,
             m);
         CUDA_CHECK(cudaGetLastError());
-        gp_k_var_subtract<<<(m + 255) / 256, 256, 0, stream>>>(d_vars, d_sqnorms,
+        gp_k_var_subtract<<<(m + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(d_vars, d_sqnorms,
             m);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaFreeAsync(d_sqnorms, stream));
@@ -479,7 +479,7 @@ float gp_marginal_log_likelihood(const GaussianProcess* gp)
 
     float* d_diag;
     CUDA_CHECK(cudaMalloc(&d_diag, (size_t)n * sizeof(float)));
-    gp_k_extract_diag<<<(n + 255) / 256, 256>>>(gp->d_L, d_diag, n);
+    gp_k_extract_diag<<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(gp->d_L, d_diag, n);
     CUDA_CHECK(cudaGetLastError());
 
     float* h_diag = (float*)malloc(n * sizeof(float));
@@ -514,7 +514,7 @@ void gp_mll_grad(const GaussianProcess* gp, float* d_raw_noise,
     float* d_Kinv;
     CUDA_CHECK(cudaMallocAsync(&d_Kinv, (size_t)n * n * sizeof(float), stream));
     CUDA_CHECK(cudaMemsetAsync(d_Kinv, 0, (size_t)n * n * sizeof(float), stream));
-    gp_k_add_diag<<<(n + 255) / 256, 256, 0, stream>>>(d_Kinv, n, 1.0);
+    gp_k_add_diag<<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(d_Kinv, n, 1.0);
     CUDA_CHECK(cudaGetLastError());
 
     CUSOLVER_CHECK(cusolverDnSpotrs(gp->cusolver, CUBLAS_FILL_MODE_LOWER, n, n,

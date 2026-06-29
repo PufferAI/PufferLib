@@ -79,6 +79,11 @@ void gp_kernel_set_offset(GPKernel* k, float v);
 #define OFF_IDX(np) ((np)-1)
 
 #define GP_BLOCK 16
+
+#ifndef BLOCK_SIZE
+#define BLOCK_SIZE 256
+#endif
+
 inline int gp_grid(int n)
 {
     return (n + GP_BLOCK - 1) / GP_BLOCK;
@@ -183,7 +188,7 @@ __global__ void matern32lin_k_dk_dell_d(
 
 __global__ void matern32lin_k_fill(float* v, int n, float val)
 {
-    int i = blockIdx.x * 256 + threadIdx.x;
+    int i = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     if (i < n)
         v[i] = val;
 }
@@ -192,7 +197,7 @@ __global__ void matern32lin_k_kself_batch(
     const float* __restrict__ X, float* __restrict__ out,
     int m, int d, float sigma_f, float offset)
 {
-    int row = blockIdx.x * 256 + threadIdx.x;
+    int row = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     if (row >= m)
         return;
     float norm2 = 0.0;
@@ -269,7 +274,7 @@ static void matern32lin_build_kself_batch(const GPKernel* k, const float* d_X,
     int np = k->n_params;
     float sigma_f = softplus(k->raw_params[SF_IDX(np)]);
     float offset = softplus(k->raw_params[OFF_IDX(np)]);
-    matern32lin_k_kself_batch<<<(m + 255) / 256, 256, 0, stream>>>(d_X, d_out, m, d, sigma_f, offset);
+    matern32lin_k_kself_batch<<<(m + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(d_X, d_out, m, d, sigma_f, offset);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -321,7 +326,7 @@ static void matern32lin_mll_grad(const GPKernel* k, const float* d_X, int n, int
         float *d_ones, *d_wrow;
         CUDA_CHECK(cudaMallocAsync(&d_ones, (size_t)n * sizeof(float), stream));
         CUDA_CHECK(cudaMallocAsync(&d_wrow, (size_t)n * sizeof(float), stream));
-        matern32lin_k_fill<<<(n + 255) / 256, 256, 0, stream>>>(d_ones, n, 1.0);
+        matern32lin_k_fill<<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(d_ones, n, 1.0);
         CUDA_CHECK(cudaGetLastError());
         float w_sum;
         CUBLAS_CHECK(cublasSgemv(cublas, CUBLAS_OP_N, n, n,
