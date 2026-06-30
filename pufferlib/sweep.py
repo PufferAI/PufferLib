@@ -618,6 +618,17 @@ class Protein:
             self.gp_cost_buffer = torch.empty(self.gp_max_obs, device=self.device)
             self.infer_batch_buffer = torch.empty(self.infer_batch_size, self.hyperparameters.num, device=self.device)
 
+    def to(self, device):
+        self.device = torch.device(device)
+        for attr in ('gp_score', 'gp_cost', 'likelihood_score', 'likelihood_cost',
+                     'mll_score', 'mll_cost', 'gp_params_buffer', 'gp_score_buffer',
+                     'gp_cost_buffer', 'infer_batch_buffer'):
+            setattr(self, attr, getattr(self, attr).to(self.device))
+        for opt in (self.score_opt, self.cost_opt):
+            for state in opt.state.values():
+                state.update({k: v.to(self.device) for k, v in state.items() if isinstance(v, torch.Tensor)})
+        return self
+
     def _filter_near_duplicates(self, inputs, duplicate_threshold=EPSILON):
         if len(inputs) < 2:
             return np.arange(len(inputs))

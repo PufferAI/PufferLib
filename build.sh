@@ -20,7 +20,6 @@ fi
 ENV=$1
 shift
 
-HEADLESS=0
 for arg in "$@"; do
     case $arg in
         --float) PRECISION="-DPRECISION_FLOAT" ;;
@@ -92,7 +91,7 @@ fi
 
 RAYLIB_PLATFORM="-DPLATFORM_DESKTOP"
 RAYLIB_LINK_LDFLAGS=("${STANDALONE_LDFLAGS[@]}")
-if [ "$HEADLESS" = "1" ]; then
+if [ -n "$HEADLESS" ]; then
     if [ "$MODE" = "web" ]; then
         echo "Error: --headless is not compatible with --web"
         exit 1
@@ -150,7 +149,7 @@ build_raylib_from_source() {
 
 RAYLIB_URL="https://github.com/raysan5/raylib/releases/download/${RAYLIB_RELEASE_PATH}"
 RAYLIB_SOURCE_URL="https://github.com/raysan5/raylib/archive/refs/tags/${RAYLIB_RELEASE_PATH}.tar.gz"
-if [ "$HEADLESS" = "1" ]; then
+if [ -n "$HEADLESS" ]; then
     build_raylib_from_source "$RAYLIB_NAME" PLATFORM_MEMORY
     RAYLIB_A="$RAYLIB_NAME/src/libraylib.a"
     INCLUDES=(-I./$RAYLIB_NAME/src -I./$RAYLIB_NAME/src/external -I./src -I./vendor)
@@ -178,6 +177,7 @@ fi
 
 LINK_ARCHIVES=("$RAYLIB_A")
 EXTRA_SRC=""
+EXTRA_LDFLAGS=()
 
 if [ "$ENV" = "constellation" ]; then
     SRC_DIR="constellation"
@@ -196,6 +196,21 @@ elif [ "$ENV" = "impulse_wars" ]; then
     download "$BOX2D_NAME" "$BOX2D_URL/$BOX2D_NAME.tar.gz"
     INCLUDES+=(-I./$BOX2D_NAME/include -I./$BOX2D_NAME/src)
     LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2d.a")
+elif [ "$ENV" = "nethack" ]; then
+    SRC_DIR="ocean/$ENV"
+    NLE_DIR="vendor/nle"
+    NLE_REPO="https://github.com/liujonathan24/NetHack.git"
+    if [ ! -d "$NLE_DIR/src" ]; then
+        echo "Cloning modified NLE from $NLE_REPO ..."
+        git clone --depth 1 "$NLE_REPO" "$NLE_DIR"
+    fi
+    NETHACK_LIB_DIR="$(pwd)/$NLE_DIR/src/build"
+    if [ ! -f "$NETHACK_LIB_DIR/libnethack.so" ]; then
+        echo "Building libnethack.so ..."
+        make -C "$NETHACK_LIB_DIR" nethack -j$(nproc)
+    fi
+    INCLUDES+=(-I./$NLE_DIR/include)
+    EXTRA_LDFLAGS+=(-L"$NETHACK_LIB_DIR" -lnethack -Wl,-rpath,"$NETHACK_LIB_DIR" -ldl)
 elif [ -d "ocean/$ENV" ]; then
     SRC_DIR="ocean/$ENV"
 else
@@ -205,12 +220,15 @@ fi
 OUTPUT_NAME=${OUTPUT_NAME:-$ENV}
 
 # Standalone environment build
+# -mavx2 enables AVX2 intrinsics (__m256, _mm256_*) which drive.h and
+# src/bf16.h use directly. x86_64 only — strip if porting to ARM/Apple Silicon.
+SIMD_FLAGS=(-mavx2 -mfma)
 if [ -n "$DEBUG" ] || [ "$MODE" = "local" ]; then
-    CLANG_OPT=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}")
+    CLANG_OPT=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}" "${SIMD_FLAGS[@]}")
     NVCC_OPT="-O0 -g"
     LINK_OPT="-g"
 else
-    CLANG_OPT=(-O2 -DNDEBUG "${CLANG_WARN[@]}")
+    CLANG_OPT=(-O2 -DNDEBUG "${CLANG_WARN[@]}" "${SIMD_FLAGS[@]}")
     NVCC_OPT="-O2 --threads 0"
     LINK_OPT="-O2"
 fi
@@ -220,6 +238,8 @@ if [ "$MODE" = "local" ] || [ "$MODE" = "fast" ]; then
         "$SRC_DIR/$ENV.c" $EXTRA_SRC -o "$OUTPUT_NAME"
         "${LINK_ARCHIVES[@]}"
         "${RAYLIB_LINK_LDFLAGS[@]}"
+        "${EXTRA_LDFLAGS[@]}"
+        "${STANDALONE_LDFLAGS[@]}"
         -lm -lpthread -fopenmp
         "$RAYLIB_PLATFORM"
     )
@@ -314,7 +334,8 @@ fi
 echo "Compiling static library for $ENV..."
 ${CC:-clang} -c "${CLANG_OPT[@]}" \
     -I. -Isrc -I$SRC_DIR -Ivendor \
-    "${INCLUDES[@]}" -I$CUDA_HOME/include \
+    "${INCLUDES[@]}" \
+    -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
     "$RAYLIB_PLATFORM" \
     -fno-semantic-interposition -fvisibility=hidden \
     -fPIC -fopenmp \
@@ -348,6 +369,8 @@ if [ -z "$MODE" ]; then
         ${CXX:-g++} -shared -fPIC -fopenmp
         build/bindings.o "$STATIC_LIB" "$RAYLIB_A"
         -L$CUDA_HOME/lib64 $CUDNN_LFLAG $NCCL_LFLAG
+        "${WHEEL_RPATH_FLAGS[@]}"
+        "${EXTRA_LDFLAGS[@]}"
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
         $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
@@ -372,6 +395,7 @@ elif [ "$MODE" = "cpu" ]; then
     LINK_CMD=(
         ${CXX:-g++} -shared -fPIC -fopenmp
         build/bindings_cpu.o "$STATIC_LIB" "$RAYLIB_A"
+        "${EXTRA_LDFLAGS[@]}"
         -lm -lpthread $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
         -o "$OUTPUT"

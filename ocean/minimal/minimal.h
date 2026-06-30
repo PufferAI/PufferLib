@@ -6,8 +6,8 @@
 
 #define AGENTS 8
 #define TARGETS 8
-const int WIDTH = 1080, HEIGHT = 720, COOLDOWN = 30, TYPES = 4, SPEED = 20.0f;
-const int MIN_TICKS = COOLDOWN*AGENTS/(float)TARGETS;
+const int WIDTH = 1080, HEIGHT = 720, COOLDOWN = 30, TYPES = 4;
+const float SPEED = 20.0f, MIN_TICKS = COOLDOWN*AGENTS/(float)TARGETS;
 float clip(float val, float min, float max) { return fmaxf(fminf(val, max), min); }
 
 // Required struct. Floats only, n last
