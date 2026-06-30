@@ -524,7 +524,7 @@ def eval(env_name, args=None, load_path=None):
                 else:
                     percent = 100.0 * frame_count / num_frames
                     print(f'Recorded {frame_count}/{num_frames} frames [{percent:.3f}%] to {args["gif_path"]}')
-            if num_frames is not None and frame_count >= num_frames:
+            if num_frames != -1 and frame_count >= num_frames:
                 break
             backend.rollouts(pufferl)
     finally:
