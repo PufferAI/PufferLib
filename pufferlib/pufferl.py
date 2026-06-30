@@ -435,7 +435,7 @@ def eval(env_name, args=None, load_path=None):
 
     frame_count = 0
     ffmpeg = None
-    save_frames = args.get('save_frames')
+    num_frames = args.get('num_frames')
     for name in ('pipe_frame_fd', 'screen_width', 'screen_height'):
         if not hasattr(_C, name):
             raise RuntimeError(f'Current native backend does not expose {name}; rebuild _C')
@@ -452,12 +452,12 @@ def eval(env_name, args=None, load_path=None):
             _C.pipe_frame_fd(ffmpeg.stdin.fileno())
             frame_count += 1
             if frame_count % 100 == 0:
-                if save_frames is None:
+                if num_frames == -1:
                     print(f'Recorded {frame_count} frames to {args["gif_path"]}')
                 else:
-                    percent = 100.0 * frame_count / save_frames
-                    print(f'Recorded {frame_count}/{save_frames} frames [{percent:.3f}%] to {args["gif_path"]}')
-            if save_frames is not None and frame_count >= save_frames:
+                    percent = 100.0 * frame_count / num_frames
+                    print(f'Recorded {frame_count}/{num_frames} frames [{percent:.3f}%] to {args["gif_path"]}')
+            if num_frames is not None and frame_count >= num_frames:
                 break
             backend.rollouts(pufferl)
     finally:
@@ -479,8 +479,8 @@ def load_config(env_name):
     parser.add_argument('--wandb-group', type=str, default='debug')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
     parser.add_argument('--slowly', action='store_true', help='Use PyTorch training backend')
-    parser.add_argument('--save-frames', type=int, default=None,
-        help='Number of rendered frames to save to --gif-path with ffmpeg. Omit to record until interrupted.')
+    parser.add_argument('--num-frames', type=int, default=300,
+        help='Number of rendered frames to save to --gif-path with ffmpeg. (Default 300, set to -1 to record until interrupted)')
     parser.add_argument('--gif-path', type=str, default='eval.gif')
     parser.add_argument('--fps', type=float, default=15)
     parser.description = f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]' \
