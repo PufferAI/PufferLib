@@ -1,7 +1,4 @@
-// protein_util.h -- Pure-C utilities for the Protein optimizer:
-//                   search space, Pareto front, cost model, numeric helpers.
-//
-// Included by protein.cu.  No CUDA dependency.
+// protein_util.h -- Pure-C utilities for the Protein optimizer.
 
 #ifndef PROTEIN_UTIL_H
 #define PROTEIN_UTIL_H
@@ -10,8 +7,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
-// -- search space (Space types) -----------------------------------------------
 
 enum SpaceType {
     SPACE_LINEAR,
@@ -27,33 +22,28 @@ typedef struct {
     int is_integer;
 } Space;
 
-static float space_normalize(const Space* s, float value)
-{
+static float space_normalize(const Space *s, float value) {
     float zero_one;
     switch (s->type) {
     case SPACE_LINEAR:
         zero_one = (value - s->min) / (s->max - s->min);
         break;
     case SPACE_LOG:
-        zero_one = (log10f(value) - log10f(s->min))
-            / (log10f(s->max) - log10f(s->min));
+        zero_one = (log10f(value) - log10f(s->min)) / (log10f(s->max) - log10f(s->min));
         break;
     case SPACE_POW2:
-        zero_one = (log2f(value) - log2f(s->min))
-            / (log2f(s->max) - log2f(s->min));
+        zero_one = (log2f(value) - log2f(s->min)) / (log2f(s->max) - log2f(s->min));
         break;
     case SPACE_LOGIT: {
         float clamped = fmaxf(s->min, fminf(value, s->max));
-        zero_one = (log10f(1.0f - clamped) - log10f(1.0f - s->min))
-            / (log10f(1.0f - s->max) - log10f(1.0f - s->min));
+        zero_one = (log10f(1.0f - clamped) - log10f(1.0f - s->min)) / (log10f(1.0f - s->max) - log10f(1.0f - s->min));
         break;
     }
     }
     return 2.0f * zero_one - 1.0f;
 }
 
-static float space_unnormalize(const Space* s, float norm)
-{
+static float space_unnormalize(const Space *s, float norm) {
     float zero_one = (norm + 1.0f) * 0.5f;
     float val;
     switch (s->type) {
@@ -63,22 +53,19 @@ static float space_unnormalize(const Space* s, float norm)
             val = roundf(val);
         break;
     case SPACE_LOG: {
-        float log_val = zero_one * (log10f(s->max) - log10f(s->min))
-            + log10f(s->min);
+        float log_val = zero_one * (log10f(s->max) - log10f(s->min)) + log10f(s->min);
         val = powf(10.0f, log_val);
         if (s->is_integer)
             val = roundf(val);
         break;
     }
     case SPACE_POW2: {
-        float log_val = zero_one * (log2f(s->max) - log2f(s->min))
-            + log2f(s->min);
+        float log_val = zero_one * (log2f(s->max) - log2f(s->min)) + log2f(s->min);
         val = powf(2.0f, roundf(log_val));
         break;
     }
     case SPACE_LOGIT: {
-        float log_val = zero_one * (log10f(1.0f - s->max) - log10f(1.0f - s->min))
-            + log10f(1.0f - s->min);
+        float log_val = zero_one * (log10f(1.0f - s->max) - log10f(1.0f - s->min)) + log10f(1.0f - s->min);
         val = 1.0f - powf(10.0f, log_val);
         break;
     }
@@ -86,9 +73,7 @@ static float space_unnormalize(const Space* s, float norm)
     return val;
 }
 
-static void space_init(Space* s, SpaceType type, float min, float max,
-    float scale, int is_integer)
-{
+static void space_init(Space *s, SpaceType type, float min, float max, float scale, int is_integer) {
     s->type = type;
     s->min = min;
     s->max = max;
@@ -98,29 +83,25 @@ static void space_init(Space* s, SpaceType type, float min, float max,
     s->norm_max = space_normalize(s, max);
 }
 
-// -- Hyperparameters ----------------------------------------------------------
-
 typedef struct {
-    Space* spaces; // [num]
-    float* bounds_min; // [num] normalised
-    float* bounds_max; // [num] normalised
-    float* scales; // [num]
+    Space *spaces;
+    float *bounds_min;
+    float *bounds_max;
+    float *scales;
     int num;
-    int cost_idx; // index of cost parameter (-1 if none)
-    int optimize_direction; // 1 = maximise, -1 = minimise
+    int cost_idx;
+    int optimize_direction;
 } Hyperparameters;
 
-Hyperparameters* hyperparameters_create(const Space* spaces, int num,
-    int cost_idx, int optimize_direction)
-{
-    Hyperparameters* h = (Hyperparameters*)calloc(1, sizeof(Hyperparameters));
+Hyperparameters *hyperparameters_create(const Space *spaces, int num, int cost_idx, int optimize_direction) {
+    Hyperparameters *h = (Hyperparameters *)calloc(1, sizeof(Hyperparameters));
     h->num = num;
     h->cost_idx = cost_idx;
     h->optimize_direction = optimize_direction;
-    h->spaces = (Space*)malloc((size_t)num * sizeof(Space));
-    h->bounds_min = (float*)malloc((size_t)num * sizeof(float));
-    h->bounds_max = (float*)malloc((size_t)num * sizeof(float));
-    h->scales = (float*)malloc((size_t)num * sizeof(float));
+    h->spaces = (Space *)malloc((size_t)num * sizeof(Space));
+    h->bounds_min = (float *)malloc((size_t)num * sizeof(float));
+    h->bounds_max = (float *)malloc((size_t)num * sizeof(float));
+    h->scales = (float *)malloc((size_t)num * sizeof(float));
     memcpy(h->spaces, spaces, (size_t)num * sizeof(Space));
     for (int i = 0; i < num; i++) {
         h->bounds_min[i] = h->spaces[i].norm_min;
@@ -130,8 +111,7 @@ Hyperparameters* hyperparameters_create(const Space* spaces, int num,
     return h;
 }
 
-void hyperparameters_destroy(Hyperparameters* h)
-{
+void hyperparameters_destroy(Hyperparameters *h) {
     if (!h)
         return;
     free(h->spaces);
@@ -141,17 +121,13 @@ void hyperparameters_destroy(Hyperparameters* h)
     free(h);
 }
 
-// -- numeric helpers ----------------------------------------------------------
-
-static int protein_float_cmp(const void* a, const void* b)
-{
-    float fa = *(const float*)a, fb = *(const float*)b;
+static int protein_float_cmp(const void *a, const void *b) {
+    float fa = *(const float *)a, fb = *(const float *)b;
     return (fa > fb) - (fa < fb);
 }
 
-static float protein_quantile(const float* data, int n, float q)
-{
-    float* sorted = (float*)malloc((size_t)n * sizeof(float));
+static float protein_quantile(const float *data, int n, float q) {
+    float *sorted = (float *)malloc((size_t)n * sizeof(float));
     memcpy(sorted, data, (size_t)n * sizeof(float));
     qsort(sorted, n, sizeof(float), protein_float_cmp);
     float idx = q * (float)(n - 1);
@@ -165,15 +141,14 @@ static float protein_quantile(const float* data, int n, float q)
 }
 
 typedef struct {
-    const float* x;
-    const float* y;
+    const float *x;
+    const float *y;
     int n;
     float q;
 } PinballData;
 
-static float pinball_loss(float a, float b, const void* data)
-{
-    const PinballData* pd = (const PinballData*)data;
+static float pinball_loss(float a, float b, const void *data) {
+    const PinballData *pd = (const PinballData *)data;
     float loss = 0.0f;
     for (int i = 0; i < pd->n; i++) {
         float r = pd->y[i] - (a + b * pd->x[i]);
@@ -182,13 +157,14 @@ static float pinball_loss(float a, float b, const void* data)
     return loss;
 }
 
-static void nelder_mead_2d(float (*f)(float, float, const void*),
-    const void* data,
-    float* out_a, float* out_b,
-    float a0, float b0, int max_iter, float tol)
-{
-    float sx[3] = { a0, a0 + 0.05f, a0 - 0.05f };
-    float sy[3] = { b0, b0 - 0.05f, b0 + 0.05f };
+// clang-format off
+#define SWAP_F(a, b) do { float _t = (a); (a) = (b); (b) = _t; } while (0)
+// clang-format on
+
+static void nelder_mead_2d(float (*f)(float, float, const void *), const void *data, float *out_a, float *out_b,
+                           float a0, float b0, int max_iter, float tol) {
+    float sx[3] = {a0, a0 + 0.05f, a0 - 0.05f};
+    float sy[3] = {b0, b0 - 0.05f, b0 + 0.05f};
     float sv[3];
     for (int i = 0; i < 3; i++)
         sv[i] = f(sx[i], sy[i], data);
@@ -197,16 +173,9 @@ static void nelder_mead_2d(float (*f)(float, float, const void*),
         for (int i = 0; i < 2; i++)
             for (int j = i + 1; j < 3; j++)
                 if (sv[j] < sv[i]) {
-                    float t;
-                    t = sx[i];
-                    sx[i] = sx[j];
-                    sx[j] = t;
-                    t = sy[i];
-                    sy[i] = sy[j];
-                    sy[j] = t;
-                    t = sv[i];
-                    sv[i] = sv[j];
-                    sv[j] = t;
+                    SWAP_F(sx[i], sx[j]);
+                    SWAP_F(sy[i], sy[j]);
+                    SWAP_F(sv[i], sv[j]);
                 }
 
         if (fabsf(sv[2] - sv[0]) < tol)
@@ -263,9 +232,9 @@ static void nelder_mead_2d(float (*f)(float, float, const void*),
     *out_b = sy[0];
 }
 
-static void polyfit_1d(const float* x, const float* y, int n,
-    float* intercept, float* slope)
-{
+#undef SWAP_F
+
+static void polyfit_1d(const float *x, const float *y, int n, float *intercept, float *slope) {
     float sx = 0, sy = 0, sxx = 0, sxy = 0;
     for (int i = 0; i < n; i++) {
         sx += x[i];
@@ -283,8 +252,6 @@ static void polyfit_1d(const float* x, const float* y, int n,
     *intercept = (sy - *slope * sx) / (float)n;
 }
 
-// -- cost model ---------------------------------------------------------------
-
 typedef struct {
     float A, B;
     float max_score;
@@ -294,17 +261,8 @@ typedef struct {
     int is_fitted;
 } ProteinCostModel;
 
-void protein_cost_model_init(ProteinCostModel* m, float quantile, int min_samples)
-{
-    memset(m, 0, sizeof(*m));
-    m->quantile = quantile;
-    m->min_samples = min_samples;
-}
-
-void protein_cost_model_fit(ProteinCostModel* m,
-    const float* scores, const float* costs, int n,
-    float upper_cost_threshold)
-{
+void protein_cost_model_fit(ProteinCostModel *m, const float *scores, const float *costs, int n,
+                            float upper_cost_threshold) {
     m->is_fitted = 0;
     if (n == 0)
         return;
@@ -324,8 +282,8 @@ void protein_cost_model_fit(ProteinCostModel* m,
     if (n_valid < m->min_samples)
         return;
 
-    float* x = (float*)malloc((size_t)n_valid * sizeof(float));
-    float* y = (float*)malloc((size_t)n_valid * sizeof(float));
+    float *x = (float *)malloc((size_t)n_valid * sizeof(float));
+    float *y = (float *)malloc((size_t)n_valid * sizeof(float));
     int j = 0;
     for (int i = 0; i < n; i++) {
         if (costs[i] > PROTEIN_EPSILON && isfinite(scores[i])) {
@@ -338,21 +296,17 @@ void protein_cost_model_fit(ProteinCostModel* m,
     float a_init, b_init;
     polyfit_1d(x, y, n_valid, &a_init, &b_init);
 
-    PinballData pd = { x, y, n_valid, m->quantile };
-    nelder_mead_2d(pinball_loss, &pd, &m->A, &m->B,
-        a_init, b_init, 500, 1e-7f);
+    PinballData pd = {x, y, n_valid, m->quantile};
+    nelder_mead_2d(pinball_loss, &pd, &m->A, &m->B, a_init, b_init, 500, 1e-7f);
 
     free(x);
     free(y);
     m->is_fitted = 1;
 }
 
-float protein_cost_model_threshold(const ProteinCostModel* m, float cost,
-    float min_cost_frac, float abs_min_cost)
-{
+float protein_cost_model_threshold(const ProteinCostModel *m, float cost, float min_cost_frac, float abs_min_cost) {
     if (!m->is_fitted)
         return -FLT_MAX;
-
     float min_allowed = m->upper_cost_threshold * min_cost_frac + abs_min_cost;
     if (cost < min_allowed)
         return -FLT_MAX;
@@ -361,24 +315,19 @@ float protein_cost_model_threshold(const ProteinCostModel* m, float cost,
     return m->A + m->B * logf(cost);
 }
 
-// -- Pareto utilities ---------------------------------------------------------
+static const float *g_protein_pareto_costs;
 
-static const float* g_protein_pareto_costs;
-
-static int protein_pareto_cmp(const void* a, const void* b)
-{
-    float ca = g_protein_pareto_costs[*(const int*)a];
-    float cb = g_protein_pareto_costs[*(const int*)b];
+static int protein_pareto_cmp(const void *a, const void *b) {
+    float ca = g_protein_pareto_costs[*(const int *)a];
+    float cb = g_protein_pareto_costs[*(const int *)b];
     return (ca > cb) - (ca < cb);
 }
 
-int protein_pareto_front(const float* scores, const float* costs, int n,
-    int* out_indices)
-{
+int protein_pareto_front(const float *scores, const float *costs, int n, int *out_indices) {
     if (n == 0)
         return 0;
 
-    int* sorted = (int*)malloc((size_t)n * sizeof(int));
+    int *sorted = (int *)malloc((size_t)n * sizeof(int));
     for (int i = 0; i < n; i++)
         sorted[i] = i;
     g_protein_pareto_costs = costs;
@@ -398,10 +347,8 @@ int protein_pareto_front(const float* scores, const float* costs, int n,
     return count;
 }
 
-int protein_prune_pareto(const float* scores, const float* costs,
-    int* indices, int n,
-    float eff_threshold, float stop_fraction)
-{
+int protein_prune_pareto(const float *scores, const float *costs, int *indices, int n, float eff_threshold,
+                         float stop_fraction) {
     if (n < 2)
         return n;
 
@@ -440,47 +387,36 @@ int protein_prune_pareto(const float* scores, const float* costs,
     return pruned;
 }
 
-int protein_build_search_centers(const float* obs_params, int dim,
-    const int* pareto_indices, int n_pareto,
-    const int* top_indices, int n_top,
-    int cost_dim, float* out_centers)
-{
+int protein_build_search_centers(const float *obs_params, int dim, const int *pareto_indices, int n_pareto,
+                                 const int *top_indices, int n_top, int cost_dim, float *out_centers) {
     int count = 0;
     for (int i = 0; i < n_pareto; i++) {
-        memcpy(&out_centers[(size_t)count * dim],
-            &obs_params[(size_t)pareto_indices[i] * dim],
-            (size_t)dim * sizeof(float));
+        memcpy(&out_centers[(size_t)count * dim], &obs_params[(size_t)pareto_indices[i] * dim],
+               (size_t)dim * sizeof(float));
         count++;
     }
     if (cost_dim >= 0) {
-        for (int i = 0; i < n_top; i++) {
-            const float* src = &obs_params[(size_t)top_indices[i] * dim];
-            float orig = src[cost_dim];
-            memcpy(&out_centers[(size_t)count * dim], src, (size_t)dim * sizeof(float));
-            out_centers[(size_t)count * dim + cost_dim] = orig - (orig + 1.0f) / 2.0f;
-            count++;
-        }
-        for (int i = 0; i < n_top; i++) {
-            const float* src = &obs_params[(size_t)top_indices[i] * dim];
-            float orig = src[cost_dim];
-            memcpy(&out_centers[(size_t)count * dim], src, (size_t)dim * sizeof(float));
-            out_centers[(size_t)count * dim + cost_dim] = orig - (orig + 1.0f) / 3.0f;
-            count++;
+        float divisors[] = {2.0f, 3.0f};
+        for (int r = 0; r < 2; r++) {
+            for (int i = 0; i < n_top; i++) {
+                const float *src = &obs_params[(size_t)top_indices[i] * dim];
+                float orig = src[cost_dim];
+                memcpy(&out_centers[(size_t)count * dim], src, (size_t)dim * sizeof(float));
+                out_centers[(size_t)count * dim + cost_dim] = orig - (orig + 1.0f) / divisors[r];
+                count++;
+            }
         }
     } else {
         for (int i = 0; i < n_top; i++) {
-            memcpy(&out_centers[(size_t)count * dim],
-                &obs_params[(size_t)top_indices[i] * dim],
-                (size_t)dim * sizeof(float));
+            memcpy(&out_centers[(size_t)count * dim], &obs_params[(size_t)top_indices[i] * dim],
+                   (size_t)dim * sizeof(float));
             count++;
         }
     }
     return count;
 }
 
-float protein_sample_target_cost(float* ratio_pool, int* pool_remaining,
-    int pool_total, float expansion_rate)
-{
+float protein_sample_target_cost(float *ratio_pool, int *pool_remaining, int pool_total, float expansion_rate) {
     if (*pool_remaining <= 0) {
         for (int i = pool_total - 1; i > 0; i--) {
             int j = rand() % (i + 1);
@@ -500,8 +436,7 @@ float protein_sample_target_cost(float* ratio_pool, int* pool_remaining,
     return (1.0f + expansion_rate) * ratio;
 }
 
-static float protein_logit_transform(float value)
-{
+static float protein_logit_transform(float value) {
     float epsilon = 1e-9f;
     value = fmaxf(epsilon, fminf(1.0f - epsilon, value));
     float logit = logf(value / (1.0f - value));

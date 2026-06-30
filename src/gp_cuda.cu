@@ -40,20 +40,6 @@ typedef struct {
     GPKernel *kernel;
 } GaussianProcess;
 
-GaussianProcess *gp_create(int dim, int cap, GPKernel *kernel, float noise);
-void gp_destroy(GaussianProcess *gp);
-float gp_get_noise(const GaussianProcess *gp);
-void gp_set_noise(GaussianProcess *gp, float v);
-int gp_fit(GaussianProcess *gp, const float *X, const float *y, int n, cudaStream_t stream);
-int gp_recompute(GaussianProcess *gp, cudaStream_t stream);
-void gp_predict(const GaussianProcess *gp, const float *Xs, float *means, float *vars, int m, cudaStream_t stream);
-void gp_predict_d(const GaussianProcess *gp, const float *d_Xs, float *d_means, float *d_vars, int m,
-                  cudaStream_t stream);
-float gp_marginal_log_likelihood(const GaussianProcess *gp);
-void gp_mll_grad(const GaussianProcess *gp, float *d_raw_noise, float *kernel_grads, cudaStream_t stream);
-int gp_save(const GaussianProcess *gp, const char *path);
-GaussianProcess *gp_load(const char *path, int extra_cap);
-
 __global__ void gp_k_add_diag(float *A, int n, float val) {
     int i = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     if (i < n)

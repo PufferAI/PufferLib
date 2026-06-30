@@ -15,6 +15,21 @@
 #include "gp_cuda.cu"
 #include "protein.cu"
 
+// Helpers inlined from protein.cu / protein_util.h (removed from production code)
+static void test_cost_model_init(ProteinCostModel *m, float quantile, int min_samples) {
+    memset(m, 0, sizeof(*m));
+    m->quantile = quantile;
+    m->min_samples = min_samples;
+}
+static void test_sobol_next(Sobol *sob, float *out) {
+    CURAND_CHECK(curandGenerateUniform(sob->gen, out, sob->dim));
+}
+static void test_acq_get_candidate(const ProteinAcq *acq, int idx, float *out, cudaStream_t stream) {
+    CUDA_CHECK(cudaMemcpyAsync(out, &acq->d_candidates[(size_t)idx * acq->dim],
+        (size_t)acq->dim * sizeof(float), cudaMemcpyDeviceToHost, stream));
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+}
+
 // -- default search space (21 dims, matches Python ordering) ------------------
 
 #define DIM 21
@@ -264,7 +279,7 @@ int main(int argc, char** argv)
     Sobol* sobol = sobol_create(DIM, 73);
 
     ProteinCostModel cost_model;
-    protein_cost_model_init(&cost_model, early_stop_quantile, 30);
+    test_cost_model_init(&cost_model, early_stop_quantile, 30);
     float upper_cost_threshold = -FLT_MAX;
 
     float ratio_pool[] = { 0.16f, 0.32f, 0.48f, 0.64f, 0.80f, 1.0f };
@@ -291,7 +306,7 @@ int main(int argc, char** argv)
         int is_random = (suggestion_idx <= num_random_samples);
 
         if (is_random) {
-            sobol_next(sobol, sobol_buf);
+            test_sobol_next(sobol, sobol_buf);
             for (int d = 0; d < DIM; d++)
                 suggestion[d] = 2.0f * sobol_buf[d] - 1.0f;
             float cost_s = cost_random_suggestion + 0.1f * randn();
@@ -348,7 +363,7 @@ int main(int argc, char** argv)
             int m = protein_acq_sample(acq, centers, nc, nc * suggestions_per_pareto,
                 1.0f, -1, NAN, PROTEIN_EPSILON, 0);
             if (m == 0) {
-                sobol_next(sobol, sobol_buf);
+                test_sobol_next(sobol, sobol_buf);
                 for (int d = 0; d < DIM; d++)
                     suggestion[d] = 2.0f * sobol_buf[d] - 1.0f;
             } else {
@@ -356,7 +371,7 @@ int main(int argc, char** argv)
                     acq, m, gp_s, gp_c, min_s, max_s, lc_min, lc_max,
                     max_suggestion_cost, target, 1, 0, NULL, 0);
 
-                protein_acq_get_candidate(acq, r.best_idx, suggestion, 0);
+                test_acq_get_candidate(acq, r.best_idx, suggestion, 0);
 
                 if (run % 50 == 0 || run == num_runs - 1) {
                     printf("  [%4d] loss_s=%.3f loss_c=%.3f pareto=%d "

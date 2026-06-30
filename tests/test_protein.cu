@@ -15,6 +15,41 @@
 #define T_PASS(...)  do { printf("  PASS: "); printf(__VA_ARGS__); printf("\n"); } while(0)
 #define T_FAIL(name, ...) do { printf("  FAIL: %s -- ", name); printf(__VA_ARGS__); printf("\n"); return 1; } while(0)
 
+// Helpers inlined from protein.cu / protein_util.h (removed from production code)
+static void test_cost_model_init(ProteinCostModel *m, float quantile, int min_samples) {
+    memset(m, 0, sizeof(*m));
+    m->quantile = quantile;
+    m->min_samples = min_samples;
+}
+static void test_acq_get_candidate(const ProteinAcq *acq, int idx, float *out, cudaStream_t stream) {
+    CUDA_CHECK(cudaMemcpyAsync(out, &acq->d_candidates[(size_t)idx * acq->dim],
+        (size_t)acq->dim * sizeof(float), cudaMemcpyDeviceToHost, stream));
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+}
+static ProteinAcqResult test_acq_score(ProteinAcq *acq, int m, float min_score, float max_score,
+    float log_c_min, float log_c_max, float max_suggestion_cost, float target_cost_ratio,
+    int optimize_direction, int fixed_cost, const float *d_success_prob, cudaStream_t stream) {
+    protein_k_score<<<(m + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream>>>(
+        acq->d_pred_y, acq->d_pred_c, d_success_prob, acq->d_scores, m, min_score, max_score,
+        log_c_min, log_c_max, max_suggestion_cost, target_cost_ratio, optimize_direction, fixed_cost);
+    CUDA_CHECK(cudaGetLastError());
+    protein_k_argmax<<<1, BLOCK_SIZE, 0, stream>>>(acq->d_scores, m, acq->d_best_idx);
+    CUDA_CHECK(cudaGetLastError());
+    int best;
+    CUDA_CHECK(cudaMemcpyAsync(&best, acq->d_best_idx, sizeof(int), cudaMemcpyDeviceToHost, stream));
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    float y_norm, c_norm, rating;
+    CUDA_CHECK(cudaMemcpy(&y_norm, &acq->d_pred_y[best], sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&c_norm, &acq->d_pred_c[best], sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&rating, &acq->d_scores[best], sizeof(float), cudaMemcpyDeviceToHost));
+    return (ProteinAcqResult){
+        .best_idx = best,
+        .predicted_score = y_norm * (max_score - min_score) + min_score,
+        .predicted_cost = expf(c_norm * (log_c_max - log_c_min) + log_c_min),
+        .rating = rating,
+    };
+}
+
 // -- test: Pareto front -------------------------------------------------------
 
 static int test_pareto()
@@ -120,7 +155,7 @@ static int test_cost_model()
     }
 
     ProteinCostModel model;
-    protein_cost_model_init(&model, 0.3f, 10);
+    test_cost_model_init(&model, 0.3f, 10);
     protein_cost_model_fit(&model, scores, costs, n, 100.0f);
     if (!model.is_fitted) T_FAIL("fit", "model not fitted");
 
@@ -241,7 +276,7 @@ static int test_scoring()
     cudaMemcpy(acq->d_pred_c, h_pred_c, (size_t)m * sizeof(float), cudaMemcpyHostToDevice);
 
     // Fixed cost mode → pure score maximization
-    ProteinAcqResult r = protein_acq_score(acq, m,
+    ProteinAcqResult r = test_acq_score(acq, m,
         0.0f, 10.0f, 0.0f, 5.0f,
         3600.0f, 0.5f,
         1, 1, NULL, 0);
@@ -251,7 +286,7 @@ static int test_scoring()
 
     // Cost-weighted mode
     // target_cost=0.5, candidate 1 has c_norm=0.5 (exact match) and highest score
-    r = protein_acq_score(acq, m,
+    r = test_acq_score(acq, m,
         0.0f, 10.0f, 0.0f, 5.0f,
         3600.0f, 0.5f,
         1, 0, NULL, 0);
@@ -264,7 +299,7 @@ static int test_scoring()
     float *d_sprob;
     cudaMalloc(&d_sprob, (size_t)m * sizeof(float));
     cudaMemcpy(d_sprob, h_sprob, (size_t)m * sizeof(float), cudaMemcpyHostToDevice);
-    r = protein_acq_score(acq, m,
+    r = test_acq_score(acq, m,
         0.0f, 10.0f, 0.0f, 5.0f,
         3600.0f, 0.5f,
         1, 1, d_sprob, 0);
@@ -361,7 +396,7 @@ static int test_full_pipeline()
            result.predicted_cost, result.rating);
 
     float best_params[2];
-    protein_acq_get_candidate(acq, result.best_idx, best_params, 0);
+    test_acq_get_candidate(acq, result.best_idx, best_params, 0);
     printf("  best params: [%.3f, %.3f]\n", best_params[0], best_params[1]);
 
     if (result.predicted_score < min_s || result.predicted_score > max_s * 1.5f)
@@ -369,7 +404,7 @@ static int test_full_pipeline()
 
     // Cost model
     ProteinCostModel cm;
-    protein_cost_model_init(&cm, 0.3f, 10);
+    test_cost_model_init(&cm, 0.3f, 10);
     protein_cost_model_fit(&cm, obs_scores, obs_costs, n_obs, obs_costs[0]);
     printf("  cost_model: fitted=%d A=%.3f B=%.3f\n", cm.is_fitted, cm.A, cm.B);
 
