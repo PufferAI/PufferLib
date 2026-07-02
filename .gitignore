@@ -7,6 +7,13 @@ logs/
 # Build dir
 build/
 
+# Dogfight test binaries (compiled from .c via gcc one-liners)
+ocean/dogfight/test_flight_dynamics
+ocean/dogfight/tests/test_*
+!ocean/dogfight/tests/test_*.c
+!ocean/dogfight/tests/test_*.h
+!ocean/dogfight/tests/test_*.py
+
 # hipified cuda extensions dir [HIP/ROCM]
 pufferlib/extensions/hip/
 
@@ -172,3 +179,8 @@ pufferlib/ocean/impulse_wars/benchmark/
 resources/drive/data/*
 resources/drive/binaries/*
 
+
+# Test/sweep binaries (build artifacts from gcc, not source)
+ocean/dogfight/tests/sweep_smoothness
+ocean/dogfight/tests/test_smoothness
+ocean/dogfight/tests/test_flight_physics
