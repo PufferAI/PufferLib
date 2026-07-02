@@ -1,0 +1,102 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-cmake:
+    name: linux cmake (cpu extension + standalone)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build libgl1-mesa-dev xorg-dev
+
+      - name: Install python build deps
+        run: pip install pybind11 numpy
+
+      - name: Build CPU extension (breakout)
+        run: |
+          cmake --preset cpu -DENV=breakout
+          cmake --build --preset cpu
+
+      - name: Import test
+        run: python -c "from pufferlib import _C; print(_C.env_name, _C.gpu, _C.precision_bytes)"
+
+      - name: Build standalone executable (breakout)
+        run: |
+          cmake --preset fast -DENV=breakout
+          cmake --build --preset fast
+          test -x ./breakout
+
+  windows-cmake:
+    name: windows cmake (cpu extension + standalone)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install python build deps
+        run: pip install pybind11 numpy ninja
+
+      - name: Build CPU extension (breakout)
+        run: |
+          cmake --preset windows-cpu -DENV=breakout
+          cmake --build --preset windows-cpu
+
+      - name: Import test
+        run: python -c "from pufferlib import _C; print(_C.env_name, _C.gpu, _C.precision_bytes)"
+
+      - name: Build standalone executable (breakout)
+        run: |
+          cmake --preset windows-fast -DENV=breakout
+          cmake --build --preset windows-fast
+          if (-not (Test-Path .\breakout.exe)) { exit 1 }
+
+  windows-cuda-compile:
+    # Compile-only check of the CUDA extension (no GPU on hosted runners).
+    # continue-on-error until proven stable: the CUDA toolkit install and the
+    # cuDNN redist download are heavyweight moving parts.
+    name: windows cmake (cuda extension, compile only)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: "12.8.0"
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas_dev", "cublas", "cusolver_dev", "cusolver", "curand_dev", "curand", "nvml_dev", "profiler_api"]'
+
+      - name: Install python build deps
+        run: pip install pybind11 numpy ninja
+
+      - name: Cache cuDNN redist
+        uses: actions/cache@v4
+        with:
+          path: build/cuda/_deps/cudnn_redist-*
+          key: cudnn-redist-windows-9.23.2.1
+
+      - name: Build CUDA extension (breakout, sm_89)
+        run: |
+          cmake --preset windows-cuda -DENV=breakout -DPUFFER_FETCH_CUDNN=ON -DCMAKE_CUDA_ARCHITECTURES=89
+          cmake --build --preset windows-cuda
