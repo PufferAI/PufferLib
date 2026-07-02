@@ -23,7 +23,15 @@ import pufferlib
 try:
     from pufferlib import _C
 except ImportError:
-    raise ImportError('Failed to import PufferLib C++ backend. If you have non-default PyTorch, try installing with --no-build-isolation')
+    _build_cmd = 'build.ps1 <env>' if sys.platform == 'win32' else './build.sh <env>'
+    _hint = ''
+    if sys.platform == 'win32':
+        _hint = (' On Windows, also check that CUDA_PATH is set and cuDNN is available'
+                 ' (pip install nvidia-cudnn-cu12).')
+    raise ImportError(
+        f'Failed to import the PufferLib C++ backend (pufferlib._C). '
+        f'Build it first with {_build_cmd}.'
+        f' If you have non-default PyTorch, try installing with --no-build-isolation.{_hint}')
 
 from pufferlib import selfplay
 
@@ -35,6 +43,13 @@ rich.traceback.install(show_locals=False)
 
 import signal # Aggressively exit on ctrl+c
 signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
+
+if sys.platform == 'win32':
+    # Windows consoles/pipes often default to cp1252, which cannot encode the
+    # dashboard's unicode (e.g. the pufferfish). Force UTF-8 output.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, 'reconfigure'):
+            _stream.reconfigure(encoding='utf-8', errors='replace')
 
 def unroll_nested_dict(d):
     if not isinstance(d, dict):
@@ -384,7 +399,13 @@ def train(env_name, args=None, gpus=None, **kwargs):
     gpus = list(gpus or range(args['train']['gpus']))
     args['train']['total_timesteps'] //= len(gpus)
     args['world_size'] = len(gpus)
-    args['nccl_id'] = _C.get_nccl_id() if len(gpus) > 1 else b''
+    if len(gpus) > 1:
+        try:
+            args['nccl_id'] = _C.get_nccl_id()
+        except RuntimeError as e:
+            raise RuntimeError('Multi-GPU training requires NCCL, which is only available on Linux') from e
+    else:
+        args['nccl_id'] = b''
 
     if not subprocess:
         gpus = gpus[-1:] + gpus[:-1]  # Main process gets rank 0
@@ -407,7 +428,7 @@ def sweep(env_name, args=None, pareto=False):
     '''Train entry point. Handles single-GPU, multi-GPU DDP, and sweeps.'''
     args = args or load_config(env_name)
     exp_gpus = args['train']['gpus']
-    sweep_gpus = args['sweep']['gpus'] or len(os.listdir('/proc/driver/nvidia/gpus'))
+    sweep_gpus = args['sweep']['gpus'] or torch.cuda.device_count()
     args['vec']['num_threads'] //= (sweep_gpus // exp_gpus)
     args['no_model_upload'] = True
 
