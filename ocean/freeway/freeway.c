@@ -1,7 +1,7 @@
 #include <time.h>
 #include "freeway.h"
 #include "puffernet.h"
-#include <unistd.h>
+#include "puffer_os.h"
 
 void demo() {
     Weights* weights = load_weights("resources/freeway/freeway_weights.bin");

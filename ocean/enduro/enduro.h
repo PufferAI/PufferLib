@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
-#include <unistd.h>
+#include "puffer_os.h"
 #include <time.h>
 #include <stddef.h>
 #include <limits.h>

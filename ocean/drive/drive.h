@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <unistd.h>
+#include "puffer_os.h"
 #include <math.h>
 #include <assert.h>
 #include <string.h>

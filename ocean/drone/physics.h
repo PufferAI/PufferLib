@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "dronelib.h"
+#include "puffer_os.h"  // puffer_aligned_alloc/free
 
 #define DRONE_LANES 8
 
@@ -246,10 +247,10 @@ static inline void physics_init(Physics* phys, int num_drones, int integrator) {
     phys->num_drones = num_drones;
     phys->integrator = integrator;
 
-    phys->params = (Paramsv*)aligned_alloc(32, num_blocks * sizeof(Paramsv));
+    phys->params = (Paramsv*)puffer_aligned_alloc(32, num_blocks * sizeof(Paramsv));
     memset(phys->params, 0, num_blocks * sizeof(Paramsv));
 
-    phys->state = (Statev*)aligned_alloc(32, num_blocks * sizeof(Statev));
+    phys->state = (Statev*)puffer_aligned_alloc(32, num_blocks * sizeof(Statev));
     memset(phys->state, 0, num_blocks * sizeof(Statev));
     for (int b = 0; b < num_blocks; b++)
         for (int l = 0; l < DRONE_LANES; l++)
@@ -257,8 +258,8 @@ static inline void physics_init(Physics* phys, int num_drones, int integrator) {
 }
 
 static inline void physics_close(Physics* phys) {
-    free(phys->params);
-    free(phys->state);
+    puffer_aligned_free(phys->params);
+    puffer_aligned_free(phys->state);
 }
 
 static inline void physics_set_drone(Physics* phys, int i, const Params* p, const State* st) {

@@ -1,5 +1,5 @@
 #include <time.h>
-#include <unistd.h>
+#include "puffer_os.h"
 #include "rware.h"
 #include "puffernet.h"
 #define MAP_TINY_WIDTH 640

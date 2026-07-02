@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
+#include "puffer_os.h"
 #include <time.h>
 #include <math.h>
 #include <limits.h>
