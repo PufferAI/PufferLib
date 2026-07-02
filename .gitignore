@@ -6,6 +6,10 @@ logs/
 
 # Build dir
 build/
+CMakeUserPresets.json
+*.pyd
+*.exe
+*.pdb
 
 # hipified cuda extensions dir [HIP/ROCM]
 pufferlib/extensions/hip/

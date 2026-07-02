@@ -1,0 +1,139 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "unix-clang",
+      "hidden": true,
+      "inherits": "base",
+      "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang"
+      }
+    },
+    {
+      "name": "win-toolchain",
+      "hidden": true,
+      "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CUDA_HOST_COMPILER": "cl"
+      }
+    },
+
+    {
+      "name": "cuda",
+      "displayName": "CUDA extension (Release)",
+      "inherits": "unix-clang",
+      "binaryDir": "${sourceDir}/build/cuda",
+      "cacheVariables": { "PUFFER_MODE": "cuda", "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "cuda-debug",
+      "displayName": "CUDA extension (Debug)",
+      "inherits": "cuda",
+      "binaryDir": "${sourceDir}/build/cuda-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "cpu",
+      "displayName": "CPU extension (Release, float32)",
+      "inherits": "unix-clang",
+      "binaryDir": "${sourceDir}/build/cpu",
+      "cacheVariables": { "PUFFER_MODE": "cpu", "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "fast",
+      "displayName": "Standalone executable (Release)",
+      "inherits": "unix-clang",
+      "binaryDir": "${sourceDir}/build/fast",
+      "cacheVariables": { "PUFFER_MODE": "standalone", "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "local",
+      "displayName": "Standalone executable (Debug + sanitizers)",
+      "inherits": "unix-clang",
+      "binaryDir": "${sourceDir}/build/local",
+      "cacheVariables": {
+        "PUFFER_MODE": "standalone",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PUFFER_SANITIZE": "ON"
+      }
+    },
+    {
+      "name": "profile",
+      "displayName": "Kernel profiling binary",
+      "inherits": "unix-clang",
+      "binaryDir": "${sourceDir}/build/profile",
+      "cacheVariables": { "PUFFER_MODE": "profile", "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "web",
+      "displayName": "Emscripten web build",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/web-build",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": { "PUFFER_MODE": "web", "CMAKE_BUILD_TYPE": "Release" }
+    },
+
+    {
+      "name": "windows-cuda",
+      "displayName": "Windows CUDA extension (Release)",
+      "inherits": "win-toolchain",
+      "binaryDir": "${sourceDir}/build/cuda",
+      "cacheVariables": { "PUFFER_MODE": "cuda", "CMAKE_BUILD_TYPE": "Release", "CMAKE_CUDA_COMPILER": "nvcc" }
+    },
+    {
+      "name": "windows-cuda-debug",
+      "displayName": "Windows CUDA extension (Debug)",
+      "inherits": "windows-cuda",
+      "binaryDir": "${sourceDir}/build/cuda-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "windows-cpu",
+      "displayName": "Windows CPU extension (Release, float32)",
+      "inherits": "win-toolchain",
+      "binaryDir": "${sourceDir}/build/cpu",
+      "cacheVariables": { "PUFFER_MODE": "cpu", "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "windows-fast",
+      "displayName": "Windows standalone executable (Release)",
+      "inherits": "win-toolchain",
+      "binaryDir": "${sourceDir}/build/fast",
+      "cacheVariables": { "PUFFER_MODE": "standalone", "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "windows-local",
+      "displayName": "Windows standalone executable (Debug)",
+      "inherits": "win-toolchain",
+      "binaryDir": "${sourceDir}/build/local",
+      "cacheVariables": { "PUFFER_MODE": "standalone", "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "cuda", "configurePreset": "cuda" },
+    { "name": "cuda-debug", "configurePreset": "cuda-debug" },
+    { "name": "cpu", "configurePreset": "cpu" },
+    { "name": "fast", "configurePreset": "fast" },
+    { "name": "local", "configurePreset": "local" },
+    { "name": "profile", "configurePreset": "profile" },
+    { "name": "web", "configurePreset": "web" },
+    { "name": "windows-cuda", "configurePreset": "windows-cuda" },
+    { "name": "windows-cuda-debug", "configurePreset": "windows-cuda-debug" },
+    { "name": "windows-cpu", "configurePreset": "windows-cpu" },
+    { "name": "windows-fast", "configurePreset": "windows-fast" },
+    { "name": "windows-local", "configurePreset": "windows-local" }
+  ]
+}
