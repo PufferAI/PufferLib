@@ -173,11 +173,9 @@ static inline size_t obs_element_size(void) {
 #define  STRINGIFY(x)  _STRINGIFY(x)
 const char dtype_symbol[] = STRINGIFY(OBS_TENSOR_T);
 
-#include <omp.h>
 #include <stdatomic.h>
-#include <pthread.h>
 #include <stdbool.h>
-#include <time.h>
+#include "puffer_os.h"  // pthreads, clock_gettime (POSIX passthrough / Windows shim)
 
 // Forward declare CUDA types and functions to avoid conflicts with raylib's float3
 typedef int cudaError_t;

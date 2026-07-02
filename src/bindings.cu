@@ -83,15 +83,7 @@ pybind11::dict puf_log(pybind11::object pufferl_obj) {
     util_dict["vram_used_gb"] = (float)(cuda_total - cuda_free) / (1024.0f * 1024.0f * 1024.0f);
     util_dict["vram_total_gb"] = (float)cuda_total / (1024.0f * 1024.0f * 1024.0f);
 
-    long rss_kb = 0;
-    FILE* f = fopen("/proc/self/status", "r");
-    if (f) {
-        char line[256];
-        while (fgets(line, sizeof(line), f)) {
-            if (sscanf(line, "VmRSS: %ld", &rss_kb) == 1) break;
-        }
-        fclose(f);
-    }
+    long rss_kb = puffer_resident_kb();
     util_dict["cpu_mem_gb"] = (float)rss_kb / (1024.0f * 1024.0f);
     result["util"] = util_dict;
 
@@ -468,9 +460,14 @@ std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
 PYBIND11_MODULE(_C, m) {
     // Multi-GPU: generate NCCL unique ID (call on rank 0, pass bytes to all ranks)
     m.def("get_nccl_id", []() {
+#ifdef PUFFER_HAS_NCCL
         ncclUniqueId id;
         ncclGetUniqueId(&id);
         return py::bytes(reinterpret_cast<char*>(&id), sizeof(id));
+#else
+        throw std::runtime_error("Multi-GPU training requires NCCL, which is unavailable on this platform (Linux only)");
+        return py::bytes();  // unreachable
+#endif
     });
     // Standalone utilization monitor (no PuffeRL instance needed)
     m.def("get_utilization", [](int gpu_id) {
@@ -494,15 +491,7 @@ PYBIND11_MODULE(_C, m) {
         util_dict["vram_used_gb"] = (float)(cuda_total - cuda_free) / (1024.0f * 1024.0f * 1024.0f);
         util_dict["vram_total_gb"] = (float)cuda_total / (1024.0f * 1024.0f * 1024.0f);
 
-        long rss_kb = 0;
-        FILE* f = fopen("/proc/self/status", "r");
-        if (f) {
-            char line[256];
-            while (fgets(line, sizeof(line), f)) {
-                if (sscanf(line, "VmRSS: %ld", &rss_kb) == 1) break;
-            }
-            fclose(f);
-        }
+        long rss_kb = puffer_resident_kb();
         util_dict["cpu_mem_gb"] = (float)rss_kb / (1024.0f * 1024.0f);
 
         return util_dict;

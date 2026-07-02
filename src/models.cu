@@ -440,7 +440,7 @@ static void encoder_reg_params(void* w, Allocator* alloc) {
 static void encoder_reg_train(void* w, void* activations, Allocator* acts, Allocator* grads, int B_TT) {
     EncoderWeights* ew = (EncoderWeights*)w;
     EncoderActivations* a = (EncoderActivations*)activations;
-    *a = (EncoderActivations){
+    *a = EncoderActivations{
         .out =              {.shape = {B_TT, ew->out_dim}},
         .saved_input =      {.shape = {B_TT, ew->in_dim}},
         .wgrad_scratch =    {.shape = {ew->out_dim, ew->in_dim}},
@@ -515,7 +515,7 @@ static void decoder_reg_train(void* w, void* activations, Allocator* acts, Alloc
     DecoderWeights* dw = (DecoderWeights*)w;
     DecoderActivations* a = (DecoderActivations*)activations;
     int od1 = dw->output_dim + 1;
-    *a = (DecoderActivations){
+    *a = DecoderActivations{
         .out =              {.shape = {B_TT, od1}},
         .grad_out =         {.shape = {B_TT, od1}},
         .saved_input =      {.shape = {B_TT, dw->hidden_dim}},

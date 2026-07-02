@@ -2,7 +2,8 @@
 #include <cuda_profiler_api.h>
 #include <nvtx3/nvToolsExt.h>
 #include <nvml.h>
-#include <nccl.h>
+#include "nccl_compat.h"
+#include "puffer_os.h"  // clock_gettime on Windows
 #include <vector>
 
 #include <time.h>
@@ -64,7 +65,7 @@ struct RolloutBuf {
 // stores the shape and data pointer. Memory is only allocated after all buffers are registered.
 void register_rollout_buffers(RolloutBuf& bufs, Allocator* alloc, int T, int B, int input_size,
         int num_atns, int mask_size) {
-    bufs = (RolloutBuf){
+    bufs = RolloutBuf{
         .observations = {.shape = {T, B, input_size}},
         .actions      = {.shape = {T, B, num_atns}},
         .values       = {.shape = {T, B}},
@@ -108,7 +109,7 @@ struct TrainGraph {
 
 void register_train_buffers(TrainGraph& bufs, Allocator* alloc, int B, int T, int input_size,
         int hidden_size, int num_atns, int num_layers, int mask_size) {
-    bufs = (TrainGraph){
+    bufs = TrainGraph{
         .mb_state =         {.shape = {num_layers, B, hidden_size}},
         .mb_obs =           {.shape = {B, T, input_size}},
         .mb_actions =       {.shape = {B, T, num_atns}},
@@ -178,7 +179,7 @@ struct PPOBuffersPuf {
 
 void register_ppo_buffers(PPOBuffersPuf& bufs, Allocator* alloc, int N, int T, int A_total, bool is_continuous) {
     long total = (long)N * T;
-    bufs = (PPOBuffersPuf){
+    bufs = PPOBuffersPuf{
         .loss_output = {.shape = {1}},
         .grad_loss = {.shape = {1}},
         .saved_for_bwd = {.shape = {total, 5}},
@@ -206,7 +207,7 @@ struct PrioBuffers {
 };
 
 void register_prio_buffers(PrioBuffers& bufs, Allocator* alloc, int B, int minibatch_segments) {
-    bufs = (PrioBuffers){
+    bufs = PrioBuffers{
         .prio_probs = {.shape = {B}},
         .cdf = {.shape = {B}},
         .mb_prio = {.shape = {minibatch_segments}},
@@ -1235,7 +1236,7 @@ __global__ void multinomial_sample(int* __restrict__ out_idx, const float* __res
 // whether it is important for your task
 void prio_replay_cuda(PrecisionTensor& advantages, float prio_alpha,
         int minibatch_segments, int total_agents, float anneal_beta,
-        PrioBuffers& bufs, ulong seed, long* offset_ptr, cudaStream_t stream) {
+        PrioBuffers& bufs, ulong seed, int64_t* offset_ptr, cudaStream_t stream) {
     int B = advantages.shape[0], T = advantages.shape[1];
     compute_prio_adv_reduction<<<B, PRIO_WARP_SIZE, 0, stream>>>(
         advantages.data, bufs.prio_probs.data, prio_alpha, T);
@@ -1585,7 +1586,7 @@ void train_impl(PuffeRL& pufferl) {
 
         profile_begin("compute_prio", hypers.profile);
         // Use the training RNG offset slot (last slot, index num_buffers)
-        long* train_rng_offset = pufferl.rng_offset_puf.data + hypers.num_buffers;
+        int64_t* train_rng_offset = pufferl.rng_offset_puf.data + hypers.num_buffers;
         prio_replay_cuda(advantages_puf, prio_alpha, minibatch_segments,
             hypers.total_agents, anneal_beta,
             pufferl.prio_bufs, pufferl.seed, train_rng_offset, train_stream);
@@ -1935,12 +1936,16 @@ std::unique_ptr<PuffeRL> create_pufferl_impl(HypersT& hypers,
 
     // Multi-GPU: initialize NCCL
     if (hypers.world_size > 1) {
+#ifdef PUFFER_HAS_NCCL
         if (hypers.nccl_id.size() != sizeof(ncclUniqueId))
             throw std::runtime_error("nccl_id must be " + std::to_string(sizeof(ncclUniqueId)) + " bytes");
         ncclUniqueId nccl_id;
         memcpy(&nccl_id, hypers.nccl_id.data(), sizeof(nccl_id));
         ncclCommInitRank(&pufferl->nccl_comm, hypers.world_size, nccl_id, hypers.rank);
         printf("Rank %d/%d: NCCL initialized\n", hypers.rank, hypers.world_size);
+#else
+        throw std::runtime_error("Multi-GPU training requires NCCL, which is unavailable on this platform (Linux only)");
+#endif
     }
 
     ulong seed = hypers.seed + hypers.rank;
@@ -2266,7 +2271,9 @@ void close_impl(PuffeRL& pufferl) {
     free(pufferl.frozen_banks);
     free(pufferl.bank_layout);
 
+#ifdef PUFFER_HAS_NCCL
     if (pufferl.nccl_comm != nullptr) {
         ncclCommDestroy(pufferl.nccl_comm);
     }
+#endif
 }

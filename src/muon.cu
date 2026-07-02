@@ -1,4 +1,4 @@
-#include <nccl.h>
+#include "nccl_compat.h"
 
 __global__ void muon_norm_reduce(float* __restrict__ out, const float* __restrict__ partials, int num_blocks) {
     __shared__ float sdata[256];
@@ -158,10 +158,12 @@ void muon_post_create(Muon* m) {
 
 void muon_step(Muon* m, FloatTensor weights, PrecisionTensor grads, float max_grad_norm, cudaStream_t stream = 0) {
     // Multi-GPU support: simple all-reduce over a contiguous grad buffer
+#ifdef PUFFER_HAS_NCCL
     if (m->nccl_comm != nullptr && m->world_size > 1) {
         ncclAllReduce(grads.data, grads.data, numel(grads.shape),
             NCCL_PRECISION, ncclAvg, m->nccl_comm, stream);
     }
+#endif
 
     // Clip gradients by norm
     int clip_blocks = min((int)grid_size(numel(grads.shape)), 256);

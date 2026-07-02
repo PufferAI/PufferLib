@@ -16,7 +16,7 @@ typedef struct {
 } ByteTensor;
 
 typedef struct {
-    long* data;
+    int64_t* data;
     int64_t shape[PUF_MAX_DIMS];
 } LongTensor;
 
