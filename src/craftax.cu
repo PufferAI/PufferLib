@@ -1,15 +1,5 @@
-// Craftax CUDA encoder: bag-of-embeddings over the packed symbolic map.
+// Craftax CUDA encoder: bag-of-embeddings, concat, projection
 // Included by ocean.cu — requires precision_t, PrecisionTensor, Allocator, puf_mm, etc.
-//
-// ---- Craftax encoder ----
-// The env emits a compact packed obs: CX_NUM_CELLS cells x CX_CHANNELS category
-// IDs (block, item+1, visibility, one mob-type+1 per mob class), then a tail of
-// CX_NUM_SCALARS scalar inventory/status floats. Feeding raw IDs into a Linear
-// imposes a meaningless magnitude ordering on categories, so we embed each
-// channel through one shared table (per-channel offsets) and sum per cell --
-// a bag-of-embeddings, exactly equivalent to one-hot @ W but far more compact,
-// keeping the rollout obs buffer small. Then concat the scalars and project to
-// hidden.
 
 static constexpr int CX_OBS_ROWS = 9, CX_OBS_COLS = 11;
 static constexpr int CX_NUM_CELLS = CX_OBS_ROWS * CX_OBS_COLS;   // 99
@@ -20,19 +10,19 @@ static constexpr int CX_EMB_DIM = 16;
 static constexpr int CX_VOCAB_TOTAL = 154;                       // sum of per-channel vocabs
 static constexpr int CX_MAP_EMB = CX_NUM_CELLS * CX_EMB_DIM;     // 1584
 static constexpr int CX_CONCAT = CX_MAP_EMB + CX_NUM_SCALARS;    // 1635
-// Per-channel base offset into the shared embedding table. Vocab capacities are
-// the C-side LUT sizes (worldgen.h): block<64, item+1<8, visible<2, mob+1<16.
+// Per-channel base offset into the shared embedding table (vocab caps from
+// worldgen.h: block<64, item+1<8, visible<2, mob+1<16).
 __constant__ int CX_OFFSETS[CX_CHANNELS] = {0, 64, 72, 74, 90, 106, 122, 138};
 
-// Cast a float accumulation buffer to precision_t.
+// Cast float accumulation buffer to precision_t.
 __global__ void craftax_float_to_precision_kernel(
         precision_t* __restrict__ dst, const float* __restrict__ src, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) dst[idx] = from_float(src[idx]);
 }
 
-// Bag-of-embeddings: sum the CX_CHANNELS channel embeddings per cell into the
-// first CX_MAP_EMB columns of concat.
+// Bag-of-embeddings: sum channel embeddings per cell into concat's first
+// CX_MAP_EMB columns.
 __global__ void craftax_embed_bag_kernel(
         precision_t* __restrict__ concat, const precision_t* __restrict__ obs,
         const precision_t* __restrict__ embed_w, int B, int obs_size) {
@@ -51,7 +41,7 @@ __global__ void craftax_embed_bag_kernel(
     concat[(int64_t)b * CX_CONCAT + cell * CX_EMB_DIM + d] = from_float(sum);
 }
 
-// Copy the scalar tail into the trailing CX_NUM_SCALARS columns of concat.
+// Copy scalar tail into concat's trailing CX_NUM_SCALARS columns.
 __global__ void craftax_copy_scalars_kernel(
         precision_t* __restrict__ concat, const precision_t* __restrict__ obs,
         int B, int obs_size) {
@@ -63,8 +53,8 @@ __global__ void craftax_copy_scalars_kernel(
         obs[(int64_t)b * obs_size + CX_MAP_FLOATS + j];
 }
 
-// Embedding backward: scatter-add the per-cell gradient back to every channel
-// row that fed the sum, accumulating in a float buffer to avoid bf16 atomics.
+// Embedding backward: scatter-add grad to every channel row that fed the sum
+// (float buffer avoids bf16 atomics).
 __global__ void craftax_embed_bag_backward_kernel(
         float* __restrict__ embed_wgrad_f, const precision_t* __restrict__ grad_concat,
         const precision_t* __restrict__ obs, int B, int obs_size) {

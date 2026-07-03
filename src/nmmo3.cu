@@ -1,6 +1,5 @@
-// NMMO3 CUDA encoder: multihot, cuDNN conv, embedding, concat, projection.
-// Also owns the shared im2col/conv/cast helpers used by this encoder.
-// Included by ocean.cu — requires precision_t, PrecisionTensor, Allocator, puf_mm, etc.
+// NMMO3 CUDA encoder: multihot, cuDNN conv, embedding, concat, projection
+// Included by pufferlib.cu — requires precision_t, PrecisionTensor, Allocator, puf_mm, etc.
 
 #include "cudnn_conv2d.cu"
 
