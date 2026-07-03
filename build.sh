@@ -238,8 +238,13 @@ done
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
 export CCACHE_BASEDIR="$(pwd)"
 export CCACHE_COMPILERCHECK=content
-NVCC="ccache $CUDA_HOME/bin/nvcc"
-CC="${CC:-$(command -v ccache >/dev/null && echo 'ccache clang' || echo 'clang')}"
+if command -v ccache >/dev/null 2>&1; then
+    NVCC="ccache $CUDA_HOME/bin/nvcc"
+    CC="${CC:-ccache clang}"
+else
+    NVCC="$CUDA_HOME/bin/nvcc"
+    CC="${CC:-clang}"
+fi
 ARCH=${NVCC_ARCH:-native}
 
 PYTHON_INCLUDE=$(python -c "import sysconfig; print(sysconfig.get_path('include'))")
