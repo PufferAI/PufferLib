@@ -34,6 +34,18 @@ _TORCH_TO_TYPESTR = {
     torch.float32: '<f4',
 }
 
+def _safe_multinomial(probs, num_samples, replacement=True):
+    '''torch.multinomial, hardened for MPS. The MPS kernel can intermittently
+    return indices outside [0, num_categories) (pytorch#136623; also observed
+    in long PufferLib runs as index ~2x num_categories surfacing as an
+    AcceleratorError at the next sync point). Clamp defensively — the cost is
+    one elementwise op, and out-of-range draws are ~1e-5 rare when they occur
+    at all.'''
+    idx = torch.multinomial(probs, num_samples, replacement=replacement)
+    if probs.device.type == 'mps':
+        idx = idx.clamp_(0, probs.shape[-1] - 1)
+    return idx
+
 def _log_prob(logits, value):
     value = value.long().unsqueeze(-1)
     value, log_pmf = torch.broadcast_tensors(value, logits)
@@ -69,7 +81,7 @@ def sample_logits(logits, action=None):
 
     if action is None:
         probs = torch.nan_to_num(probs, 1e-8, 1e-8, 1e-8)
-        action = torch.multinomial(probs.reshape(-1, probs.shape[-1]), 1, replacement=True).int()
+        action = _safe_multinomial(probs.reshape(-1, probs.shape[-1]), 1).int()
         action = action.reshape(probs.shape[:-1])
     else:
         batch = logits[0].shape[0]
@@ -300,8 +312,7 @@ class PuffeRL:
             adv = advantages.abs().sum(axis=1)
             prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
             prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6)
-            idx = torch.multinomial(prio_probs,
-                self.minibatch_segments, replacement=True)
+            idx = _safe_multinomial(prio_probs, self.minibatch_segments)
             mb_prio = (self.total_agents*prio_probs[idx, None])**-anneal_beta
 
             mb_obs = obs[idx]
