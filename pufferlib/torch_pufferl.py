@@ -496,7 +496,11 @@ class Profile:
 
 def load_policy(args, vec):
     import pufferlib.models
-    policy_kwargs = args['policy']
+    # Shipped configs carry sweep-produced floats (e.g. num_layers = 2.11327
+    # in cartpole.ini); the native backend truncates them on assignment to C
+    # ints. Match that here so nn.Linear and friends get real ints.
+    policy_kwargs = {k: int(v) if isinstance(v, float) else v
+        for k, v in args['policy'].items()}
     network_cls = getattr(pufferlib.models, args['torch']['network'])
     encoder_cls = getattr(pufferlib.models, args['torch']['encoder'])
     decoder_cls = getattr(pufferlib.models, args['torch']['decoder'])
