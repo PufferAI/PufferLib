@@ -99,6 +99,13 @@ _TORCH_TO_CTYPE = {
     torch.float32: ctypes.c_float,
 }
 
+def _default_device():
+    if _C.gpu:
+        return 'cuda'
+    if torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
+
 def _actions_for_vec_step(action):
     if action.dim() == 1:
         action = action.unsqueeze(-1)
@@ -116,7 +123,7 @@ def _cpu_tensor(ptr, shape, dtype):
 class PuffeRL:
     def __init__(self, args, vec, policy, verbose=True):
         config = args['train']
-        device = 'cuda' if _C.gpu else 'cpu'
+        device = _default_device()
         self.device = device
 
         torch.set_float32_matmul_precision('high')
@@ -238,6 +245,8 @@ class PuffeRL:
                 self._vec.gpu_step(actions_flat.data_ptr())
                 torch.cuda.synchronize()
             else:
+                # cpu_step memcpys from the raw pointer; actions must be in host memory
+                actions_flat = actions_flat.cpu()
                 self._vec.cpu_step(actions_flat.data_ptr())
 
             o, r, d = self.vec_obs, self.vec_rewards, self.vec_terminals
@@ -434,12 +443,25 @@ class PuffeRL:
 def compute_puff_advantage(values, rewards, terminals,
         ratio, advantages, gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip):
     num_steps, horizon = values.shape
+    device = values.device
+
+    # _C.puff_advantage_cpu reads raw host pointers; non-CUDA accelerators
+    # (e.g. MPS) round-trip through CPU memory
+    if not values.is_cuda and device.type != 'cpu':
+        values, rewards, terminals, ratio = (t.cpu().contiguous()
+            for t in (values, rewards, terminals, ratio))
+        advantages_out, advantages = advantages, torch.zeros_like(values)
+
     fn = _C.puff_advantage if values.is_cuda else _C.puff_advantage_cpu
     fn(
         values.data_ptr(), rewards.data_ptr(), terminals.data_ptr(),
         ratio.data_ptr(), advantages.data_ptr(),
         num_steps, horizon,
         gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip)
+
+    if advantages.device != device:
+        advantages_out.copy_(advantages.to(device))
+        return advantages_out
     return advantages
 
 class Profile:
@@ -484,7 +506,7 @@ def load_policy(args, vec):
     decoder = decoder_cls(vec.act_sizes, policy_kwargs['hidden_size'])
     policy = pufferlib.models.Policy(encoder, decoder, network)
 
-    device = 'cuda' if _C.gpu else 'cpu'
+    device = _default_device()
     policy = policy.to(device)
 
     load_id = args['load_id']

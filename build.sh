@@ -66,6 +66,31 @@ else
     SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup)
 fi
 
+# OpenMP: Apple clang has no -fopenmp driver support; use -Xpreprocessor with
+# Homebrew's omp.h. Link against torch's bundled libomp.dylib when available:
+# loading a second OpenMP runtime (e.g. Homebrew's) into a process that also
+# imports torch aborts at startup or segfaults in parallel regions.
+if [ "$PLATFORM" = "Darwin" ]; then
+    OMP_PREFIX="$(brew --prefix libomp 2>/dev/null || echo /opt/homebrew/opt/libomp)"
+    if [ ! -f "$OMP_PREFIX/include/omp.h" ]; then
+        echo "Error: omp.h not found. Install OpenMP headers with: brew install libomp"
+        exit 1
+    fi
+    TORCH_LIB="$(python -c 'import os, torch; print(os.path.join(os.path.dirname(torch.__file__), "lib"))' 2>/dev/null || echo "")"
+    if [ -n "$TORCH_LIB" ] && [ -f "$TORCH_LIB/libomp.dylib" ]; then
+        OMP_DIR="$TORCH_LIB"
+    else
+        OMP_DIR="$OMP_PREFIX/lib"
+    fi
+    OMP_CFLAGS=(-Xpreprocessor -fopenmp -I"$OMP_PREFIX/include")
+    OMP_LDFLAGS=(-L"$OMP_DIR" -Wl,-rpath,"$OMP_DIR")
+    OMP_STANDALONE_LIB=-lomp
+else
+    OMP_CFLAGS=(-fopenmp)
+    OMP_LDFLAGS=(-fopenmp)
+    OMP_STANDALONE_LIB=""
+fi
+
 CLANG_WARN=(
     -Wall
     -ferror-limit=3
@@ -142,8 +167,12 @@ OUTPUT_NAME=${OUTPUT_NAME:-$ENV}
 
 # Standalone environment build
 # -mavx2 enables AVX2 intrinsics (__m256, _mm256_*) which drive.h and
-# src/bf16.h use directly. x86_64 only — strip if porting to ARM/Apple Silicon.
-SIMD_FLAGS=(-mavx2 -mfma)
+# src/bf16.h use directly. x86_64 only; ARM builds rely on auto-vectorization.
+if [ "$(uname -m)" = "x86_64" ]; then
+    SIMD_FLAGS=(-mavx2 -mfma)
+else
+    SIMD_FLAGS=()
+fi
 if [ -n "$DEBUG" ] || [ "$MODE" = "local" ]; then
     CLANG_OPT=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}" "${SIMD_FLAGS[@]}")
     NVCC_OPT="-O0 -g"
@@ -160,7 +189,7 @@ if [ "$MODE" = "local" ] || [ "$MODE" = "fast" ]; then
         "${LINK_ARCHIVES[@]}"
         "${EXTRA_LDFLAGS[@]}"
         "${STANDALONE_LDFLAGS[@]}"
-        -lm -lpthread -fopenmp
+        -lm -lpthread "${OMP_CFLAGS[@]}" "${OMP_LDFLAGS[@]}" $OMP_STANDALONE_LIB
         -DPLATFORM_DESKTOP
     )
     echo "Compiling $ENV..."
@@ -265,7 +294,7 @@ ${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
     -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
     -DPLATFORM_DESKTOP \
     -fno-semantic-interposition -fvisibility=hidden \
-    -fPIC -fopenmp \
+    -fPIC "${OMP_CFLAGS[@]}" \
     "$BINDING_SRC" -o "$STATIC_OBJ"
 ar rcs "$STATIC_LIB" "$STATIC_OBJ"
 
@@ -308,7 +337,7 @@ if [ -z "$MODE" ]; then
 
 elif [ "$MODE" = "cpu" ]; then
     echo "Compiling CPU training backend..."
-    ${CXX:-g++} -c -fPIC -fopenmp \
+    ${CXX:-g++} -c -fPIC "${OMP_CFLAGS[@]}" \
         -D_GLIBCXX_USE_CXX11_ABI=1 \
         -DPLATFORM_DESKTOP \
         -std=c++17 \
@@ -319,10 +348,10 @@ elif [ "$MODE" = "cpu" ]; then
         $PRECISION $LINK_OPT \
         src/bindings_cpu.cpp -o build/bindings_cpu.o
     LINK_CMD=(
-        ${CXX:-g++} -shared -fPIC -fopenmp
+        ${CXX:-g++} -shared -fPIC
         build/bindings_cpu.o "$STATIC_LIB" "$RAYLIB_A"
         "${EXTRA_LDFLAGS[@]}"
-        -lm -lpthread $OMP_LIB $LINK_OPT
+        -lm -lpthread "${OMP_LDFLAGS[@]}" $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
         -o "$OUTPUT"
     )
