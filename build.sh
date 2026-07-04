@@ -50,6 +50,10 @@ if [ "$ENV" = "all" ]; then
     exit 0
 fi
 
+# Interpreter used to resolve include paths and the torch libomp. Overridable
+# via $PYTHON so ./build.sh works even when the target venv is not activated.
+PYTHON_BIN="${PYTHON:-$(command -v python || command -v python3)}"
+
 # Linux/mac
 PLATFORM="$(uname -s)"
 if [ "$PLATFORM" = "Linux" ]; then
@@ -76,7 +80,7 @@ if [ "$PLATFORM" = "Darwin" ]; then
         echo "Error: omp.h not found. Install OpenMP headers with: brew install libomp"
         exit 1
     fi
-    TORCH_LIB="$(python -c 'import os, torch; print(os.path.join(os.path.dirname(torch.__file__), "lib"))' 2>/dev/null || echo "")"
+    TORCH_LIB="$("$PYTHON_BIN" -c 'import os, torch; print(os.path.join(os.path.dirname(torch.__file__), "lib"))' 2>/dev/null || echo "")"
     if [ -n "$TORCH_LIB" ] && [ -f "$TORCH_LIB/libomp.dylib" ]; then
         OMP_DIR="$TORCH_LIB"
     else
@@ -234,10 +238,10 @@ for dir in /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu; do
     fi
 done
 if [ -z "$CUDNN_IFLAG" ]; then
-    CUDNN_IFLAG=$(python -c "import nvidia.cudnn, os; print('-I' + os.path.join(nvidia.cudnn.__path__[0], 'include'))" 2>/dev/null || echo "")
+    CUDNN_IFLAG=$("$PYTHON_BIN" -c "import nvidia.cudnn, os; print('-I' + os.path.join(nvidia.cudnn.__path__[0], 'include'))" 2>/dev/null || echo "")
 fi
 if [ -z "$CUDNN_LFLAG" ]; then
-    CUDNN_LFLAG=$(python -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
+    CUDNN_LFLAG=$("$PYTHON_BIN" -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
 fi
 
 # NCCL include/lib fallback (mirrors the cuDNN fallback above).
@@ -251,10 +255,10 @@ for dir in /usr/lib/x86_64-linux-gnu /usr/local/cuda/lib64; do
     if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then NCCL_LFLAG="-L$dir"; break; fi
 done
 if [ -z "$NCCL_IFLAG" ]; then
-    NCCL_IFLAG=$(python -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
+    NCCL_IFLAG=$("$PYTHON_BIN" -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
 fi
 if [ -z "$NCCL_LFLAG" ]; then
-    NCCL_LFLAG=$(python -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
+    NCCL_LFLAG=$("$PYTHON_BIN" -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
 fi
 
 WHEEL_RPATH_FLAGS=()
@@ -271,10 +275,10 @@ NVCC="ccache $CUDA_HOME/bin/nvcc"
 CC="${CC:-$(command -v ccache >/dev/null && echo 'ccache clang' || echo 'clang')}"
 ARCH=${NVCC_ARCH:-native}
 
-PYTHON_INCLUDE=$(python -c "import sysconfig; print(sysconfig.get_path('include'))")
-PYBIND_INCLUDE=$(python -c "import pybind11; print(pybind11.get_include())")
-NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())")
-EXT_SUFFIX=$(python -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
+PYTHON_INCLUDE=$("$PYTHON_BIN" -c "import sysconfig; print(sysconfig.get_path('include'))")
+PYBIND_INCLUDE=$("$PYTHON_BIN" -c "import pybind11; print(pybind11.get_include())")
+NUMPY_INCLUDE=$("$PYTHON_BIN" -c "import numpy; print(numpy.get_include())")
+EXT_SUFFIX=$("$PYTHON_BIN" -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 OUTPUT="pufferlib/_C${EXT_SUFFIX}"
 
 BINDING_SRC="$SRC_DIR/binding.c"
