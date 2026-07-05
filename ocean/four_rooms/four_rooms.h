@@ -23,7 +23,6 @@ enum {
     EMPTY = 1,
     WALL = 2,
     GOAL = 8,
-    AGENT = 10,
 };
 
 enum {
@@ -247,25 +246,23 @@ void create_four_rooms_grid(FourRooms* env) {
     env->grid[room_h * size + gap_x2] = EMPTY;
 }
 
-void place_goal(FourRooms* env) {
+void place_empty_cell(FourRooms* env, int* x, int* y, int exclude_agent) {
     do {
-        env->goal_x = 1 + four_rooms_rand(env, env->size - 2);
-        env->goal_y = 1 + four_rooms_rand(env, env->size - 2);
-    } while (env->grid[grid_idx(env, env->goal_x, env->goal_y)] != EMPTY ||
-             (env->goal_x == env->agent_x && env->goal_y == env->agent_y));
+        *x = 1 + four_rooms_rand(env, env->size - 2);
+        *y = 1 + four_rooms_rand(env, env->size - 2);
+    } while (env->grid[grid_idx(env, *x, *y)] != EMPTY ||
+             (exclude_agent && *x == env->agent_x && *y == env->agent_y));
+}
 
+void place_goal(FourRooms* env) {
+    place_empty_cell(env, &env->goal_x, &env->goal_y, 1);
     env->grid[grid_idx(env, env->goal_x, env->goal_y)] = GOAL;
 }
 
 void c_reset(FourRooms* env) {
     create_four_rooms_grid(env);
 
-    do {
-        env->agent_x = 1 + four_rooms_rand(env, env->size - 2);
-        env->agent_y = 1 + four_rooms_rand(env, env->size - 2);
-    } while (env->grid[grid_idx(env, env->agent_x, env->agent_y)] != EMPTY);
-
-    env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
+    place_empty_cell(env, &env->agent_x, &env->agent_y, 0);
     place_goal(env);
 
     env->agent_dir = four_rooms_rand(env, 4);
@@ -285,8 +282,6 @@ void c_step(FourRooms* env) {
     int action = (int)env->actions[0];
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
-
-    env->grid[grid_idx(env, env->agent_x, env->agent_y)] = EMPTY;
 
     int new_x = env->agent_x;
     int new_y = env->agent_y;
@@ -315,10 +310,8 @@ void c_step(FourRooms* env) {
         env->rewards[0] = 1.0f - 0.9f * (float)env->steps_since_goal / (float)env->max_steps;
         env->goals += 1;
         env->steps_since_goal = 0;
-        env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
+        env->grid[grid_idx(env, env->goal_x, env->goal_y)] = EMPTY;
         place_goal(env);
-    } else {
-        env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
     }
 
     if (env->tick >= env->episode_steps) {
@@ -359,7 +352,7 @@ void c_render(FourRooms* env) {
             if (cell == WALL) color = PUFF_BACKGROUND2;
             else if (cell == GOAL) color = PUFF_RED;
 
-            if (cell != EMPTY && cell != AGENT) {
+            if (cell != EMPTY) {
                 DrawRectangle(x*px, y*px, px, px, color);
             }
         }
