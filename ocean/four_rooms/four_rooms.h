@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <assert.h>
 #include <string.h>
 #include "raylib.h"
 
@@ -69,6 +70,25 @@ static inline int four_rooms_rand(FourRooms* env, int n) {
 
 static inline int grid_idx(FourRooms* env, int x, int y) {
     return y * env->size + x;
+}
+
+void init(FourRooms* env) {
+    assert(env->size >= 5);
+    if (env->max_steps <= 0) {
+        env->max_steps = FOUR_ROOMS_TIMEOUT_SCALE * env->size;
+    }
+    env->grid = (unsigned char*)calloc(env->size * env->size, sizeof(unsigned char));
+}
+
+void allocate(FourRooms* env) {
+    init(env);
+    env->observations = (unsigned char*)calloc(
+        FOUR_ROOMS_VIEW_SIZE * FOUR_ROOMS_VIEW_SIZE * FOUR_ROOMS_OBS_CHANNELS,
+        sizeof(unsigned char)
+    );
+    env->actions = (float*)calloc(1, sizeof(float));
+    env->rewards = (float*)calloc(1, sizeof(float));
+    env->terminals = (float*)calloc(1, sizeof(float));
 }
 
 void add_log(FourRooms* env) {
@@ -206,25 +226,21 @@ void create_four_rooms_grid(FourRooms* env) {
         env->grid[room_h * size + x] = WALL;
     }
 
-    // MiniGrid samples doorway positions from [start + 1, end).
+    // One doorway per half-wall, excluding the outer border.
     int gap_y1 = 1 + four_rooms_rand(env, room_h - 1);
     env->grid[gap_y1 * size + room_w] = EMPTY;
 
-    int gap_y2 = room_h + 1 + four_rooms_rand(env, room_h - 1);
+    int gap_y2 = room_h + 1 + four_rooms_rand(env, size - room_h - 2);
     env->grid[gap_y2 * size + room_w] = EMPTY;
 
     int gap_x1 = 1 + four_rooms_rand(env, room_w - 1);
     env->grid[room_h * size + gap_x1] = EMPTY;
 
-    int gap_x2 = room_w + 1 + four_rooms_rand(env, room_w - 1);
+    int gap_x2 = room_w + 1 + four_rooms_rand(env, size - room_w - 2);
     env->grid[room_h * size + gap_x2] = EMPTY;
 }
 
 void c_reset(FourRooms* env) {
-    if (env->max_steps <= 0) {
-        env->max_steps = FOUR_ROOMS_TIMEOUT_SCALE * env->size;
-    }
-
     create_four_rooms_grid(env);
 
     do {
@@ -373,11 +389,21 @@ void c_render(FourRooms* env) {
 void c_close(FourRooms* env) {
     if (env->texture_loaded) {
         UnloadTexture(env->puffers);
-        CloseWindow();
         env->texture_loaded = 0;
+    }
+    if (IsWindowReady()) {
+        CloseWindow();
     }
     if (env->grid) {
         free(env->grid);
         env->grid = NULL;
     }
+}
+
+void free_allocated(FourRooms* env) {
+    free(env->actions);
+    free(env->observations);
+    free(env->terminals);
+    free(env->rewards);
+    c_close(env);
 }

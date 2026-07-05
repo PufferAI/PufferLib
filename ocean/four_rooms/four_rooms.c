@@ -6,14 +6,7 @@ int main() {
     env.max_steps = 0;
     env.num_agents = 1;
     env.rng = 0;
-    env.observations = (unsigned char*)calloc(
-        FOUR_ROOMS_VIEW_SIZE * FOUR_ROOMS_VIEW_SIZE * FOUR_ROOMS_OBS_CHANNELS,
-        sizeof(unsigned char)
-    );
-    env.actions = (float*)calloc(1, sizeof(float));
-    env.rewards = (float*)calloc(1, sizeof(float));
-    env.terminals = (float*)calloc(1, sizeof(float));
-    env.grid = (unsigned char*)calloc(env.size * env.size, sizeof(unsigned char));
+    allocate(&env);
 
     c_reset(&env);
     c_render(&env);
@@ -29,10 +22,6 @@ int main() {
         c_step(&env);
         c_render(&env);
     }
-    free(env.observations);
-    free(env.actions);
-    free(env.rewards);
-    free(env.terminals);
-    c_close(&env);
+    free_allocated(&env);
     return 0;
 }

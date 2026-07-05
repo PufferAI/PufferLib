@@ -12,10 +12,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->num_agents = 1;
     env->size = (int)dict_get(kwargs, "size")->value;
     env->max_steps = (int)dict_get(kwargs, "max_steps")->value;
-    if (env->max_steps <= 0) {
-        env->max_steps = FOUR_ROOMS_TIMEOUT_SCALE * env->size;
-    }
-    env->grid = (unsigned char*)calloc(env->size * env->size, sizeof(unsigned char));
+    init(env);
 }
 
 void my_log(Log* log, Dict* out) {
