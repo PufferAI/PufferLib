@@ -12,6 +12,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->num_agents = 1;
     env->size = (int)dict_get(kwargs, "size")->value;
     env->max_steps = (int)dict_get(kwargs, "max_steps")->value;
+    env->min_steps = (int)dict_get(kwargs, "min_steps")->value;
     init(env);
 }
 

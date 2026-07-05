@@ -53,7 +53,11 @@ typedef struct {
     int num_agents;
     int size;
     int max_steps;
+    int min_steps;
+    int episode_steps;
     int tick;
+    int steps_since_goal;
+    int goals;
     float episode_return;
     int agent_x, agent_y;
     int agent_dir;
@@ -77,6 +81,9 @@ void init(FourRooms* env) {
     if (env->max_steps <= 0) {
         env->max_steps = FOUR_ROOMS_TIMEOUT_SCALE * env->size;
     }
+    if (env->min_steps <= 0 || env->min_steps > env->max_steps) {
+        env->min_steps = env->max_steps;
+    }
     env->grid = (unsigned char*)calloc(env->size * env->size, sizeof(unsigned char));
 }
 
@@ -92,8 +99,8 @@ void allocate(FourRooms* env) {
 }
 
 void add_log(FourRooms* env) {
-    env->log.perf += (env->rewards[0] > 0) ? 1.0f : 0.0f;
-    env->log.score += env->rewards[0];
+    env->log.perf += env->tick > 0 ? (float)env->goals / (float)env->tick : 0.0f;
+    env->log.score += env->goals;
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
     env->log.n++;
@@ -240,6 +247,16 @@ void create_four_rooms_grid(FourRooms* env) {
     env->grid[room_h * size + gap_x2] = EMPTY;
 }
 
+void place_goal(FourRooms* env) {
+    do {
+        env->goal_x = 1 + four_rooms_rand(env, env->size - 2);
+        env->goal_y = 1 + four_rooms_rand(env, env->size - 2);
+    } while (env->grid[grid_idx(env, env->goal_x, env->goal_y)] != EMPTY ||
+             (env->goal_x == env->agent_x && env->goal_y == env->agent_y));
+
+    env->grid[grid_idx(env, env->goal_x, env->goal_y)] = GOAL;
+}
+
 void c_reset(FourRooms* env) {
     create_four_rooms_grid(env);
 
@@ -248,17 +265,14 @@ void c_reset(FourRooms* env) {
         env->agent_y = 1 + four_rooms_rand(env, env->size - 2);
     } while (env->grid[grid_idx(env, env->agent_x, env->agent_y)] != EMPTY);
 
-    do {
-        env->goal_x = 1 + four_rooms_rand(env, env->size - 2);
-        env->goal_y = 1 + four_rooms_rand(env, env->size - 2);
-    } while (env->grid[grid_idx(env, env->goal_x, env->goal_y)] != EMPTY ||
-             (env->goal_x == env->agent_x && env->goal_y == env->agent_y));
-
     env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
-    env->grid[grid_idx(env, env->goal_x, env->goal_y)] = GOAL;
+    place_goal(env);
 
     env->agent_dir = four_rooms_rand(env, 4);
     env->tick = 0;
+    env->steps_since_goal = 0;
+    env->goals = 0;
+    env->episode_steps = env->min_steps + four_rooms_rand(env, env->max_steps - env->min_steps + 1);
     env->episode_return = 0.0f;
 
     generate_observation(env);
@@ -266,6 +280,7 @@ void c_reset(FourRooms* env) {
 
 void c_step(FourRooms* env) {
     env->tick += 1;
+    env->steps_since_goal += 1;
 
     int action = (int)env->actions[0];
     env->terminals[0] = 0;
@@ -297,17 +312,16 @@ void c_step(FourRooms* env) {
     env->agent_dir = new_dir;
 
     if (env->agent_x == env->goal_x && env->agent_y == env->goal_y) {
-        env->terminals[0] = 1;
-        env->rewards[0] = 1.0f - 0.9f * (float)env->tick / (float)env->max_steps;
-        env->episode_return += env->rewards[0];
-        add_log(env);
-        c_reset(env);
-        return;
+        env->rewards[0] = 1.0f - 0.9f * (float)env->steps_since_goal / (float)env->max_steps;
+        env->goals += 1;
+        env->steps_since_goal = 0;
+        env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
+        place_goal(env);
+    } else {
+        env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
     }
 
-    env->grid[grid_idx(env, env->agent_x, env->agent_y)] = AGENT;
-
-    if (env->tick >= env->max_steps) {
+    if (env->tick >= env->episode_steps) {
         env->terminals[0] = 1;
         env->rewards[0] = 0.0;
         env->episode_return += env->rewards[0];
