@@ -1,16 +1,21 @@
 #include "onlyfish.h"
 
-#define Env OnlyFish 
-#include "../env_binding.h"
+#define OBS_SIZE 21
+#define NUM_ATNS 2
+#define ACT_SIZES {9, 5}
+#define OBS_TENSOR_T FloatTensor
 
-static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->num_agents = unpack(kwargs, "num_agents");
+#define Env OnlyFish
+#include "vecenv.h"
+
+void my_init(Env* env, Dict* kwargs) {
+    env->num_agents = dict_get(kwargs, "num_agents")->value;
     init(env);
-    return 0;
 }
 
-static int my_log(PyObject* dict, Log* log) {
-    assign_to_dict(dict, "episode_return", log->episode_return);
-    assign_to_dict(dict, "episode_length", log->episode_length);
-    return 0;
+void my_log(Log* log, Dict* out) {
+    dict_set(out, "perf", log->perf);
+    dict_set(out, "score", log->score);
+    dict_set(out, "episode_return", log->episode_return);
+    dict_set(out, "episode_length", log->episode_length);
 }

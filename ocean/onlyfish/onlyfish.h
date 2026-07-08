@@ -106,9 +106,10 @@ typedef struct {
     Agent* agents;
     Goal* goals;
     float* observations;
-    int* actions;
+    float* actions;
     float* rewards;
-    unsigned char* terminals;
+    float* terminals;
+    unsigned int rng;
     int width;
     int height;
     int num_agents;
