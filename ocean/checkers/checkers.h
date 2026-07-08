@@ -30,9 +30,11 @@ typedef struct {
 typedef struct {
   Log log;
   unsigned char *observations;
-  int *actions;
+  float *actions;
   float *rewards;
-  unsigned char *terminals;
+  float *terminals;
+  int num_agents;
+  unsigned int rng;
   int size;
   int tick;
   int current_player;
