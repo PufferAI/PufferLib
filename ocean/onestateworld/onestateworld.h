@@ -44,10 +44,12 @@ typedef struct {
 // Recommended that you name it the same as the env file
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
-    unsigned char* observations; // Required. You can use any obs type, but make sure it matches in Python!
-    int* actions; // Required. int* for discrete/multidiscrete, float* for box
+    unsigned char* observations; // Required. You can use any obs type, but make sure it matches OBS_TENSOR_T
+    float* actions; // Required
     float* rewards; // Required
-    unsigned char* terminals; // Required. We don't yet have truncations as standard yet
+    float* terminals; // Required. We don't yet have truncations as standard yet
+    int num_agents; // Required
+    unsigned int rng; // Required
     int tick;
 
     float var_right;
@@ -62,7 +64,7 @@ World* allocate_World(World *env) {
     env->observations = calloc(1, sizeof(unsigned char));
     env->actions = calloc(1, sizeof(float));
     env->rewards = calloc(1, sizeof(float));
-    env->terminals = calloc(1, sizeof(unsigned char));
+    env->terminals = calloc(1, sizeof(float));
     return env;
 }
 
