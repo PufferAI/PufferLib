@@ -48,7 +48,9 @@ typedef struct {
     float* actions;
     // an array of shape (1) with the summed up reward for all boids
     float* rewards;
-    unsigned char* terminals; // Not being used but is required by env_binding.h
+    float* terminals; // Not being used but is required by vecenv.h
+    int num_agents; // Required by vecenv.h: agents in one env instance (== num_boids)
+    unsigned int rng; // Required by vecenv.h
     Boid* boids;
     unsigned int num_boids;
     float margin_turn_factor;
@@ -134,8 +136,10 @@ void c_step(Boids *env) {
             current_boid->velocity.x = flclip(current_boid->velocity.x + (mouse_x - current_boid->x), -VELOCITY_CAP, VELOCITY_CAP);
             current_boid->velocity.y = flclip(current_boid->velocity.y + (mouse_y - current_boid->y), -VELOCITY_CAP, VELOCITY_CAP);
         } else {
-            current_boid->velocity.x = flclip(current_boid->velocity.x + 2*env->actions[current_indx * 2 + 0], -VELOCITY_CAP, VELOCITY_CAP);
-            current_boid->velocity.y = flclip(current_boid->velocity.y + 2*env->actions[current_indx * 2 + 1], -VELOCITY_CAP, VELOCITY_CAP);
+            // Discrete actions 0..4 map to velocity deltas in [-1, 1]
+            // (the 3.x python wrapper scaled (a - 2)/4 and C applied 2*action)
+            current_boid->velocity.x = flclip(current_boid->velocity.x + 0.5f*(env->actions[current_indx * 2 + 0] - 2.0f), -VELOCITY_CAP, VELOCITY_CAP);
+            current_boid->velocity.y = flclip(current_boid->velocity.y + 0.5f*(env->actions[current_indx * 2 + 1] - 2.0f), -VELOCITY_CAP, VELOCITY_CAP);
         }
         current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH  - BOID_WIDTH);
         current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT - BOID_HEIGHT);
