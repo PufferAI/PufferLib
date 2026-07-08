@@ -21,10 +21,11 @@ struct Log {
 typedef struct Client Client;
 typedef struct CSnake CSnake;
 struct CSnake {
-    char* observations;
-    double* actions;
+    unsigned char* observations;
+    float* actions;
     float* rewards;
     float* terminals;
+    unsigned int rng;
     Log log;
     Log* snake_logs;
     char* grid;
@@ -89,8 +90,8 @@ void c_close(CSnake* env) {
 }
 void allocate_csnake(CSnake* env) {
     int obs_size = (2*env->vision + 1) * (2*env->vision + 1);
-    env->observations = (char*)calloc(env->num_agents*obs_size, sizeof(char));
-    env->actions = (double*)calloc(env->num_agents, sizeof(double));
+    env->observations = (unsigned char*)calloc(env->num_agents*obs_size, sizeof(unsigned char));
+    env->actions = (float*)calloc(env->num_agents, sizeof(float));
     env->rewards = (float*)calloc(env->num_agents, sizeof(float));
     env->terminals = (float*)calloc(env->num_agents, sizeof(float));
     init_csnake(env);
