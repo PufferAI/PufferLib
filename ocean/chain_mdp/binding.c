@@ -1,17 +1,21 @@
 #include "chain_mdp.h"
 
-#define Env Chain
-#include "../env_binding.h"
+#define OBS_SIZE 1
+#define NUM_ATNS 1
+#define ACT_SIZES {2}
+#define OBS_TENSOR_T ByteTensor
 
-static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->size = unpack(kwargs, "size");
-    return 0;
+#define Env Chain
+#include "vecenv.h"
+
+void my_init(Env* env, Dict* kwargs) {
+    env->num_agents = 1;
+    env->size = dict_get(kwargs, "size")->value;
 }
 
-static int my_log(PyObject* dict, Log* log) {
-    assign_to_dict(dict, "perf", log->perf);
-    assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "episode_return", log->episode_return);
-    assign_to_dict(dict, "episode_length", log->episode_length);
-    return 0;
+void my_log(Log* log, Dict* out) {
+    dict_set(out, "perf", log->perf);
+    dict_set(out, "score", log->score);
+    dict_set(out, "episode_return", log->episode_return);
+    dict_set(out, "episode_length", log->episode_length);
 }

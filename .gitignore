@@ -172,3 +172,11 @@ pufferlib/ocean/impulse_wars/benchmark/
 resources/drive/data/*
 resources/drive/binaries/*
 
+resources/boxoban/
+vendor/nle/
+drive_data/
+raylib-5.5_*
+box2d-*
+.venv/
+checkpoints/
+*.log

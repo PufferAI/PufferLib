@@ -28,7 +28,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+// AVX-512 fast path for the Perlin worldgen. On x86 the intrinsics are
+// enabled per-function via __attribute__((target(...))) even though the TU
+// is only compiled with -mavx2 (see build.sh), so gate on x86 + GCC/Clang
+// (or an explicit -mavx512f build). Other targets (e.g. Apple Silicon
+// arm64) have no <immintrin.h> and take the scalar fallback below.
+#if defined(__AVX512F__) || \
+    ((defined(__x86_64__) || defined(__i386__)) && \
+     (defined(__clang__) || defined(__GNUC__)))
+#define CRAFTAX_AVX512 1
 #include <immintrin.h>
+#endif
 #include "raylib.h"
 
 // ============================================================
@@ -280,11 +290,11 @@ static inline int get_damage(const CraftaxClassic* s) {
 }
 
 // ============================================================
-// Perlin worldgen (AVX-512, per-env)
+// Perlin worldgen (AVX-512 on x86, scalar elsewhere; per-env)
 // ============================================================
 static inline float perlin_interp(float t) { return t*t*t*(t*(t*6.0f-15.0f)+10.0f); }
 
-#if defined(__clang__) || defined(__GNUC__)
+#if defined(CRAFTAX_AVX512) && (defined(__clang__) || defined(__GNUC__))
 __attribute__((target("avx512f,avx512bw,avx512dq,avx512vl")))
 #endif
 static void generate_world(CraftaxClassic* s) {
@@ -317,6 +327,7 @@ static void generate_world(CraftaxClassic* s) {
     int center = MAP_SIZE / 2;
 
     _Alignas(64) float noise[4][MAP_SIZE][MAP_SIZE];
+#if defined(CRAFTAX_AVX512)
     {
         const __m512 c_lane = _mm512_setr_ps(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
         const __m512 one    = _mm512_set1_ps(1.0f);
@@ -382,6 +393,55 @@ static void generate_world(CraftaxClassic* s) {
             }
         }
     }
+#else
+    // Scalar fallback: lane-for-lane equivalent of the AVX-512 block above.
+    // Each vector lane corresponds to one column c = c_base + lane, so the
+    // per-lane math maps directly onto the inner loop body below. The
+    // _mm512_permutexvar_ps(yN_v, {cos,sin}_rM) loads pick element yN out of
+    // the 16 floats starting at &tab[k][rowM], i.e. tab[k][rowM + yN].
+    {
+        for (int r = 0; r < MAP_SIZE; r++) {
+            float nr = (float)r * inv_scale;
+            int x0 = (int)nr;
+            float fx = nr - x0;
+            float fx1 = fx - 1.0f;
+            float u = perlin_interp(fx);
+            int row0 = x0 * GRID, row1 = row0 + GRID;
+
+            for (int c = 0; c < MAP_SIZE; c++) {
+                float nc = (float)c * inv_scale;
+                int y0 = (int)nc;            // truncation, as _mm512_cvttps_epi32
+                float fy = nc - (float)y0;
+                float fy1 = fy - 1.0f;
+                // fy^3 * (fy*(fy*6 - 15) + 10): same polynomial the vector
+                // path builds with fmsub/fmadd, i.e. perlin_interp(fy).
+                float v = perlin_interp(fy);
+                int y1 = y0 + 1;
+
+                for (int k = 0; k < 4; k++) {
+                    float c00 = cos_a[k][row0 + y0];
+                    float c10 = cos_a[k][row1 + y0];
+                    float c01 = cos_a[k][row0 + y1];
+                    float c11 = cos_a[k][row1 + y1];
+                    float s00 = sin_a[k][row0 + y0];
+                    float s10 = sin_a[k][row1 + y0];
+                    float s01 = sin_a[k][row0 + y1];
+                    float s11 = sin_a[k][row1 + y1];
+
+                    float n00 = c00 * fx  + s00 * fy;
+                    float n10 = c10 * fx1 + s10 * fy;
+                    float n01 = c01 * fx  + s01 * fy1;
+                    float n11 = c11 * fx1 + s11 * fy1;
+
+                    float nx0 = n00 + u * (n10 - n00);
+                    float nx1 = n01 + u * (n11 - n01);
+                    float n   = nx0 + v * (nx1 - nx0);
+                    noise[k][r][c] = (n + 1.0f) * 0.5f;
+                }
+            }
+        }
+    }
+#endif
 
     // Tile-logic sweep -- reads precomputed noise, writes blocks
     for (int r = 0; r < MAP_SIZE; r++) {

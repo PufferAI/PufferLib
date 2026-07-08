@@ -60,9 +60,11 @@ typedef struct {
 typedef struct {
   Log log;
   float *observations;
-  int *actions;
+  float *actions;
   float *rewards;
-  unsigned char *terminals;
+  float *terminals;
+  int num_agents;
+  unsigned int rng;
   int size;
   Vector2 player_position;
   Vector2 player_vel;
@@ -395,6 +397,7 @@ void c_reset(Asteroids *env) {
   env->score = 0;
   env->episode_return = 0;
   env->last_shot = 0;
+  compute_observations(env);
 }
 
 void step_frame(Asteroids *env, int action) {

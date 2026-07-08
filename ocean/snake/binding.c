@@ -2,8 +2,7 @@
 #define OBS_SIZE 121
 #define NUM_ATNS 1
 #define ACT_SIZES {4}
-#define OBS_TYPE CHAR
-#define ACT_TYPE DOUBLE
+#define OBS_TENSOR_T ByteTensor
 
 #define Env CSnake
 #include "vecenv.h"

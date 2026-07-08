@@ -126,7 +126,7 @@ typedef struct {
     float* observations;
     float* actions;
     float* rewards;
-    unsigned char* terminals;
+    float* terminals;
     int width;
     int height;
     float size_x;
@@ -134,7 +134,9 @@ typedef struct {
     float size_z;
     int terrain_width;
     int terrain_height;
-    int num_agents;
+    int num_agents;   // Learner-controlled agents (vecenv buffer rows)
+    int num_entities; // All units: num_agents learners + num_agents scripted
+    unsigned int rng; // Required by vecenv.h
     int num_armies;
     float* terrain;
 } Battle;
@@ -198,7 +200,7 @@ void perlin_noise(float* map, int width, int height,
 }
 
 void init(Battle* env) {
-    env->agents = calloc(env->num_agents, sizeof(Entity));
+    env->agents = calloc(env->num_entities, sizeof(Entity));
     env->bases = calloc(env->num_armies, sizeof(Entity));
     env->terrain_width = 256*env->size_x;
     env->terrain_height = 256*env->size_z;
@@ -401,6 +403,7 @@ bool attack_aa(Entity *agent, Entity *target) {
     if (angle < PI/6) {
         return true;
     }
+    return false;
 }
 
 void move_basic(Battle* env, Entity* agent, float* actions) {
@@ -451,7 +454,7 @@ void move_ground(Battle* env, Entity* agent, float* actions) {
 Entity* nearest_enemy(Battle* env, Entity* agent) {
     Entity* nearest = NULL;
     float nearest_dist = 999999;
-    for (int i=0; i<env->num_agents; i++) {
+    for (int i=0; i<env->num_entities; i++) {
         Entity* other = &env->agents[i];
         if (other->army == agent->army) {
             continue;
@@ -631,11 +634,11 @@ int compare_agent_obs(const void* a, const void* b) {
 }
 
 void compute_observations(Battle* env) {
-    AgentObs agent_obs[env->num_agents];
+    AgentObs agent_obs[env->num_entities];
 
     int obs_idx = 0;
-    for (int a=0; a<env->num_agents/2; a++) {
-        assert(obs_idx == a*(6*env->num_armies + 19 + 8));
+    for (int a=0; a<env->num_agents; a++) {
+        assert(obs_idx == a*(3*env->num_armies + 4*AGENT_OBS + 22 + 8));
 
         // Distance to each base
         Entity* agent = &env->agents[a];
@@ -665,7 +668,7 @@ void compute_observations(Battle* env) {
         float x = agent->x;
         float y = agent->y;
         float z = agent->z;
-        for (int i=0; i<env->num_agents; i++) {
+        for (int i=0; i<env->num_entities; i++) {
             Entity* other = &env->agents[i];
             float dx = other->x - x;
             float dy = other->y - y;
@@ -684,7 +687,7 @@ void compute_observations(Battle* env) {
             }
             o->idx = i;
         }
-        qsort(agent_obs, env->num_agents, sizeof(AgentObs), compare_agent_obs);
+        qsort(agent_obs, env->num_entities, sizeof(AgentObs), compare_agent_obs);
 
         for (int i=0; i<AGENT_OBS; i++) {
             env->observations[obs_idx++] = agent_obs[i].dx;
@@ -726,7 +729,7 @@ void compute_observations(Battle* env) {
 
 // Required function
 void c_reset(Battle* env) {
-    int agents_per_army = env->num_agents / env->num_armies;
+    int agents_per_army = env->num_entities / env->num_armies;
     for (int i=0; i<env->num_armies; i++) {
         bool spawn = false;
         Entity* base = &env->bases[i];
@@ -782,10 +785,10 @@ void c_reset(Battle* env) {
 }
 
 void c_step(Battle* env) {
-    memset(env->rewards, 0, env->num_agents/2*sizeof(float));
-    memset(env->terminals, 0, env->num_agents/2*sizeof(unsigned char));
+    memset(env->rewards, 0, env->num_agents*sizeof(float));
+    memset(env->terminals, 0, env->num_agents*sizeof(float));
 
-    for (int i=0; i<env->num_agents; i++) {
+    for (int i=0; i<env->num_entities; i++) {
         Entity* agent = &env->agents[i];
         agent->episode_length += 1;
         agent->target = -1;
@@ -821,7 +824,7 @@ void c_step(Battle* env) {
             update_abilities(agent);
             respawn(env, i);
             agent->episode_return += reward;
-            if (i < env->num_agents/2) {
+            if (i < env->num_agents) {
                 env->rewards[i] = reward;
                 env->terminals[i] = 1;
                 env->log.score = env->log.episode_return;
@@ -838,13 +841,13 @@ void c_step(Battle* env) {
 
         //move_basic(env, agent, env->actions + 3*i);
         if (agent->unit == INFANTRY || agent->unit == TANK || agent->unit == ARTILLERY) {
-            if (i < env->num_agents/2) {
+            if (i < env->num_agents) {
                 move_ground(env, agent, env->actions + 3*i);
             } else {
                 scripted_move(env, agent, false);
             }
         } else {
-            if (i < env->num_agents/2) {
+            if (i < env->num_agents) {
                 move_ship(env, agent, env->actions + 3*i, i);
             } else {
                 scripted_move(env, agent, true);
@@ -852,9 +855,9 @@ void c_step(Battle* env) {
         }
     }
 
-    for (int i=0; i<env->num_agents; i++) {
+    for (int i=0; i<env->num_entities; i++) {
         Entity* agent = &env->agents[i];
-        for (int j=0; j<env->num_agents; j++) {
+        for (int j=0; j<env->num_entities; j++) {
             if (j == i) {
                 continue;
             }
@@ -876,7 +879,7 @@ void c_step(Battle* env) {
                 continue;
             }
             agent->target = j;
-            if (i < env->num_agents/2) {
+            if (i < env->num_agents) {
                 env->rewards[i] += 0.25f;
                 agent->episode_return += 0.25f;
             }
@@ -1136,7 +1139,7 @@ void c_render(Battle* env) {
             DrawModel(client->models[BASE], (Vector3){base->x, y, base->z}, 0.05f, COLORS[base->army]);
         }
 
-        for (int i=0; i<env->num_agents; i++) {
+        for (int i=0; i<env->num_entities; i++) {
             Entity* agent = &env->agents[i];
 
             Vector3 pos = {agent->x, agent->y, agent->z};

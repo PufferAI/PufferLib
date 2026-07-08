@@ -34,6 +34,18 @@ _TORCH_TO_TYPESTR = {
     torch.float32: '<f4',
 }
 
+def _safe_multinomial(probs, num_samples, replacement=True):
+    '''torch.multinomial, hardened for MPS. The MPS kernel can intermittently
+    return indices outside [0, num_categories) (pytorch#136623; also observed
+    in long PufferLib runs as index ~2x num_categories surfacing as an
+    AcceleratorError at the next sync point). Clamp defensively — the cost is
+    one elementwise op, and out-of-range draws are ~1e-5 rare when they occur
+    at all.'''
+    idx = torch.multinomial(probs, num_samples, replacement=replacement)
+    if probs.device.type == 'mps':
+        idx = idx.clamp_(0, probs.shape[-1] - 1)
+    return idx
+
 def _log_prob(logits, value):
     value = value.long().unsqueeze(-1)
     value, log_pmf = torch.broadcast_tensors(value, logits)
@@ -69,7 +81,7 @@ def sample_logits(logits, action=None):
 
     if action is None:
         probs = torch.nan_to_num(probs, 1e-8, 1e-8, 1e-8)
-        action = torch.multinomial(probs.reshape(-1, probs.shape[-1]), 1, replacement=True).int()
+        action = _safe_multinomial(probs.reshape(-1, probs.shape[-1]), 1).int()
         action = action.reshape(probs.shape[:-1])
     else:
         batch = logits[0].shape[0]
@@ -99,6 +111,13 @@ _TORCH_TO_CTYPE = {
     torch.float32: ctypes.c_float,
 }
 
+def _default_device():
+    if _C.gpu:
+        return 'cuda'
+    if torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
+
 def _actions_for_vec_step(action):
     if action.dim() == 1:
         action = action.unsqueeze(-1)
@@ -116,7 +135,7 @@ def _cpu_tensor(ptr, shape, dtype):
 class PuffeRL:
     def __init__(self, args, vec, policy, verbose=True):
         config = args['train']
-        device = 'cuda' if _C.gpu else 'cpu'
+        device = _default_device()
         self.device = device
 
         torch.set_float32_matmul_precision('high')
@@ -238,6 +257,8 @@ class PuffeRL:
                 self._vec.gpu_step(actions_flat.data_ptr())
                 torch.cuda.synchronize()
             else:
+                # cpu_step memcpys from the raw pointer; actions must be in host memory
+                actions_flat = actions_flat.cpu()
                 self._vec.cpu_step(actions_flat.data_ptr())
 
             o, r, d = self.vec_obs, self.vec_rewards, self.vec_terminals
@@ -291,8 +312,7 @@ class PuffeRL:
             adv = advantages.abs().sum(axis=1)
             prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
             prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6)
-            idx = torch.multinomial(prio_probs,
-                self.minibatch_segments, replacement=True)
+            idx = _safe_multinomial(prio_probs, self.minibatch_segments)
             mb_prio = (self.total_agents*prio_probs[idx, None])**-anneal_beta
 
             mb_obs = obs[idx]
@@ -434,12 +454,25 @@ class PuffeRL:
 def compute_puff_advantage(values, rewards, terminals,
         ratio, advantages, gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip):
     num_steps, horizon = values.shape
+    device = values.device
+
+    # _C.puff_advantage_cpu reads raw host pointers; non-CUDA accelerators
+    # (e.g. MPS) round-trip through CPU memory
+    if not values.is_cuda and device.type != 'cpu':
+        values, rewards, terminals, ratio = (t.cpu().contiguous()
+            for t in (values, rewards, terminals, ratio))
+        advantages_out, advantages = advantages, torch.zeros_like(values)
+
     fn = _C.puff_advantage if values.is_cuda else _C.puff_advantage_cpu
     fn(
         values.data_ptr(), rewards.data_ptr(), terminals.data_ptr(),
         ratio.data_ptr(), advantages.data_ptr(),
         num_steps, horizon,
         gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip)
+
+    if advantages.device != device:
+        advantages_out.copy_(advantages.to(device))
+        return advantages_out
     return advantages
 
 class Profile:
@@ -474,7 +507,11 @@ class Profile:
 
 def load_policy(args, vec):
     import pufferlib.models
-    policy_kwargs = args['policy']
+    # Shipped configs carry sweep-produced floats (e.g. num_layers = 2.11327
+    # in cartpole.ini); the native backend truncates them on assignment to C
+    # ints. Match that here so nn.Linear and friends get real ints.
+    policy_kwargs = {k: int(v) if isinstance(v, float) else v
+        for k, v in args['policy'].items()}
     network_cls = getattr(pufferlib.models, args['torch']['network'])
     encoder_cls = getattr(pufferlib.models, args['torch']['encoder'])
     decoder_cls = getattr(pufferlib.models, args['torch']['decoder'])
@@ -484,7 +521,7 @@ def load_policy(args, vec):
     decoder = decoder_cls(vec.act_sizes, policy_kwargs['hidden_size'])
     policy = pufferlib.models.Policy(encoder, decoder, network)
 
-    device = 'cuda' if _C.gpu else 'cpu'
+    device = _default_device()
     policy = policy.to(device)
 
     load_id = args['load_id']

@@ -2,8 +2,7 @@
 #define OBS_SIZE 512 // TODO: Current API forces you to edit this per obs size
 #define NUM_ATNS 1
 #define ACT_SIZES {2}
-#define OBS_TYPE UNSIGNED_CHAR
-#define ACT_TYPE DOUBLE
+#define OBS_TENSOR_T ByteTensor
 
 #define Env Benchmark
 #include "vecenv.h"

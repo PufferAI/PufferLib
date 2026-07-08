@@ -98,11 +98,12 @@ struct CCpr {
 
   unsigned char *grid;
   unsigned char *observations;
-  int *actions;
+  float *actions;
   float *rewards;
-  unsigned char *terminals;
+  float *terminals;
   unsigned char *truncations;
   unsigned char *masks;
+  unsigned int rng;
 
   Agent *agents;
 
@@ -142,10 +143,9 @@ void allocate_ccpr(CCpr *env) {
   int obs_size = (2 * env->vision + 1) * (2 * env->vision + 1); //+ 1;
   env->observations = (unsigned char *)calloc(env->num_agents * obs_size,
                                               sizeof(unsigned char));
-  env->actions = (int *)calloc(env->num_agents, sizeof(unsigned int));
+  env->actions = (float *)calloc(env->num_agents, sizeof(float));
   env->rewards = (float *)calloc(env->num_agents, sizeof(float));
-  env->terminals =
-      (unsigned char *)calloc(env->num_agents, sizeof(unsigned char));
+  env->terminals = (float *)calloc(env->num_agents, sizeof(float));
   env->truncations = (unsigned char*)calloc(env->num_agents, sizeof(unsigned char));
   init_ccpr(env);
 }
@@ -412,7 +412,7 @@ void c_reset(CCpr *env) {
   init_foods(env);
   memset(env->observations, 0, env->num_agents * env->obs_size * sizeof(unsigned char));
   //memset(env->truncations, 0, env->num_agents * sizeof(unsigned char));
-  memset(env->terminals, 0, env->num_agents * sizeof(unsigned char));
+  memset(env->terminals, 0, env->num_agents * sizeof(float));
   memset(env->masks, 1, env->num_agents * sizeof(unsigned char));
   compute_observations(env);
 }
@@ -597,7 +597,9 @@ void c_step(CCpr *env) {
   if (alive_agents == 0 || env->tick > 1000) {
     c_reset(env);
     if (alive_agents == 0) {
-      memset(env->terminals, 1, env->num_agents * sizeof(unsigned char)); 
+      for (int i = 0; i < env->num_agents; i++) {
+        env->terminals[i] = 1.0f;
+      }
     }
   }
 }

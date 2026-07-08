@@ -58,7 +58,7 @@ typedef struct WhiskerRacer {
     Client* client;
     Log log;
     float* observations;
-    double* actions;
+    float* actions;
     float* rewards;
     float* terminals;
     int num_agents;
@@ -949,7 +949,7 @@ void init(WhiskerRacer* env) {
 void allocate(WhiskerRacer* env) {
     init(env);
     env->observations = (float*)calloc(3, sizeof(float));
-    env->actions = (double*)calloc(1, sizeof(double));
+    env->actions = (float*)calloc(1, sizeof(float));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (float*)calloc(1, sizeof(float));
 }

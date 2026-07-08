@@ -62,10 +62,11 @@ typedef struct Tactical {
     Log log;
     Client* client;
     int num_agents;
+    unsigned int rng;
     unsigned char* observations;
-    int* actions;
+    float* actions;
     float* rewards;
-    unsigned char* terminals;
+    float* terminals;
     unsigned char* truncations;
 
     unsigned int n_entities;
@@ -1317,4 +1318,11 @@ void close_client(Client* client) {
     CloseWindow();
     free(client->movement_cells);
     free(client);
+}
+
+void c_close(Tactical* env) {
+    if (env->client != NULL) {
+        close_client(env->client);
+        env->client = NULL;
+    }
 }

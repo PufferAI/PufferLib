@@ -50,6 +50,10 @@ if [ "$ENV" = "all" ]; then
     exit 0
 fi
 
+# Interpreter used to resolve include paths and the torch libomp. Overridable
+# via $PYTHON so ./build.sh works even when the target venv is not activated.
+PYTHON_BIN="${PYTHON:-$(command -v python || command -v python3)}"
+
 # Linux/mac
 PLATFORM="$(uname -s)"
 if [ "$PLATFORM" = "Linux" ]; then
@@ -64,6 +68,31 @@ else
     SANITIZE_FLAGS=()
     STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
     SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup)
+fi
+
+# OpenMP: Apple clang has no -fopenmp driver support; use -Xpreprocessor with
+# Homebrew's omp.h. Link against torch's bundled libomp.dylib when available:
+# loading a second OpenMP runtime (e.g. Homebrew's) into a process that also
+# imports torch aborts at startup or segfaults in parallel regions.
+if [ "$PLATFORM" = "Darwin" ]; then
+    OMP_PREFIX="$(brew --prefix libomp 2>/dev/null || echo /opt/homebrew/opt/libomp)"
+    if [ ! -f "$OMP_PREFIX/include/omp.h" ]; then
+        echo "Error: omp.h not found. Install OpenMP headers with: brew install libomp"
+        exit 1
+    fi
+    TORCH_LIB="$("$PYTHON_BIN" -c 'import os, torch; print(os.path.join(os.path.dirname(torch.__file__), "lib"))' 2>/dev/null || echo "")"
+    if [ -n "$TORCH_LIB" ] && [ -f "$TORCH_LIB/libomp.dylib" ]; then
+        OMP_DIR="$TORCH_LIB"
+    else
+        OMP_DIR="$OMP_PREFIX/lib"
+    fi
+    OMP_CFLAGS=(-Xpreprocessor -fopenmp -I"$OMP_PREFIX/include")
+    OMP_LDFLAGS=(-L"$OMP_DIR" -Wl,-rpath,"$OMP_DIR")
+    OMP_STANDALONE_LIB=-lomp
+else
+    OMP_CFLAGS=(-fopenmp)
+    OMP_LDFLAGS=(-fopenmp)
+    OMP_STANDALONE_LIB=""
 fi
 
 CLANG_WARN=(
@@ -128,7 +157,7 @@ elif [ "$ENV" = "nethack" ]; then
     NETHACK_LIB_DIR="$(pwd)/$NLE_DIR/src/build"
     if [ ! -f "$NETHACK_LIB_DIR/libnethack.so" ]; then
         echo "Building libnethack.so ..."
-        make -C "$NETHACK_LIB_DIR" nethack -j$(nproc)
+        make -C "$NETHACK_LIB_DIR" nethack -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
     fi
     INCLUDES+=(-I./$NLE_DIR/include)
     EXTRA_LDFLAGS+=(-L"$NETHACK_LIB_DIR" -lnethack -Wl,-rpath,"$NETHACK_LIB_DIR" -ldl)
@@ -142,8 +171,12 @@ OUTPUT_NAME=${OUTPUT_NAME:-$ENV}
 
 # Standalone environment build
 # -mavx2 enables AVX2 intrinsics (__m256, _mm256_*) which drive.h and
-# src/bf16.h use directly. x86_64 only — strip if porting to ARM/Apple Silicon.
-SIMD_FLAGS=(-mavx2 -mfma)
+# src/bf16.h use directly. x86_64 only; ARM builds rely on auto-vectorization.
+if [ "$(uname -m)" = "x86_64" ]; then
+    SIMD_FLAGS=(-mavx2 -mfma)
+else
+    SIMD_FLAGS=()
+fi
 if [ -n "$DEBUG" ] || [ "$MODE" = "local" ]; then
     CLANG_OPT=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}" "${SIMD_FLAGS[@]}")
     NVCC_OPT="-O0 -g"
@@ -160,7 +193,7 @@ if [ "$MODE" = "local" ] || [ "$MODE" = "fast" ]; then
         "${LINK_ARCHIVES[@]}"
         "${EXTRA_LDFLAGS[@]}"
         "${STANDALONE_LDFLAGS[@]}"
-        -lm -lpthread -fopenmp
+        -lm -lpthread "${OMP_CFLAGS[@]}" "${OMP_LDFLAGS[@]}" $OMP_STANDALONE_LIB
         -DPLATFORM_DESKTOP
     )
     echo "Compiling $ENV..."
@@ -205,10 +238,10 @@ for dir in /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu; do
     fi
 done
 if [ -z "$CUDNN_IFLAG" ]; then
-    CUDNN_IFLAG=$(python -c "import nvidia.cudnn, os; print('-I' + os.path.join(nvidia.cudnn.__path__[0], 'include'))" 2>/dev/null || echo "")
+    CUDNN_IFLAG=$("$PYTHON_BIN" -c "import nvidia.cudnn, os; print('-I' + os.path.join(nvidia.cudnn.__path__[0], 'include'))" 2>/dev/null || echo "")
 fi
 if [ -z "$CUDNN_LFLAG" ]; then
-    CUDNN_LFLAG=$(python -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
+    CUDNN_LFLAG=$("$PYTHON_BIN" -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
 fi
 
 # NCCL include/lib fallback (mirrors the cuDNN fallback above).
@@ -222,10 +255,10 @@ for dir in /usr/lib/x86_64-linux-gnu /usr/local/cuda/lib64; do
     if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then NCCL_LFLAG="-L$dir"; break; fi
 done
 if [ -z "$NCCL_IFLAG" ]; then
-    NCCL_IFLAG=$(python -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
+    NCCL_IFLAG=$("$PYTHON_BIN" -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
 fi
 if [ -z "$NCCL_LFLAG" ]; then
-    NCCL_LFLAG=$(python -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
+    NCCL_LFLAG=$("$PYTHON_BIN" -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
 fi
 
 WHEEL_RPATH_FLAGS=()
@@ -242,10 +275,10 @@ NVCC="ccache $CUDA_HOME/bin/nvcc"
 CC="${CC:-$(command -v ccache >/dev/null && echo 'ccache clang' || echo 'clang')}"
 ARCH=${NVCC_ARCH:-native}
 
-PYTHON_INCLUDE=$(python -c "import sysconfig; print(sysconfig.get_path('include'))")
-PYBIND_INCLUDE=$(python -c "import pybind11; print(pybind11.get_include())")
-NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())")
-EXT_SUFFIX=$(python -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
+PYTHON_INCLUDE=$("$PYTHON_BIN" -c "import sysconfig; print(sysconfig.get_path('include'))")
+PYBIND_INCLUDE=$("$PYTHON_BIN" -c "import pybind11; print(pybind11.get_include())")
+NUMPY_INCLUDE=$("$PYTHON_BIN" -c "import numpy; print(numpy.get_include())")
+EXT_SUFFIX=$("$PYTHON_BIN" -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 OUTPUT="pufferlib/_C${EXT_SUFFIX}"
 
 BINDING_SRC="$SRC_DIR/binding.c"
@@ -265,7 +298,7 @@ ${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
     -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
     -DPLATFORM_DESKTOP \
     -fno-semantic-interposition -fvisibility=hidden \
-    -fPIC -fopenmp \
+    -fPIC "${OMP_CFLAGS[@]}" \
     "$BINDING_SRC" -o "$STATIC_OBJ"
 ar rcs "$STATIC_LIB" "$STATIC_OBJ"
 
@@ -308,7 +341,7 @@ if [ -z "$MODE" ]; then
 
 elif [ "$MODE" = "cpu" ]; then
     echo "Compiling CPU training backend..."
-    ${CXX:-g++} -c -fPIC -fopenmp \
+    ${CXX:-g++} -c -fPIC "${OMP_CFLAGS[@]}" \
         -D_GLIBCXX_USE_CXX11_ABI=1 \
         -DPLATFORM_DESKTOP \
         -std=c++17 \
@@ -319,10 +352,10 @@ elif [ "$MODE" = "cpu" ]; then
         $PRECISION $LINK_OPT \
         src/bindings_cpu.cpp -o build/bindings_cpu.o
     LINK_CMD=(
-        ${CXX:-g++} -shared -fPIC -fopenmp
+        ${CXX:-g++} -shared -fPIC
         build/bindings_cpu.o "$STATIC_LIB" "$RAYLIB_A"
         "${EXTRA_LDFLAGS[@]}"
-        -lm -lpthread $OMP_LIB $LINK_OPT
+        -lm -lpthread "${OMP_LDFLAGS[@]}" $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
         -o "$OUTPUT"
     )

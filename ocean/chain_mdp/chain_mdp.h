@@ -26,9 +26,11 @@ typedef struct {
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
     unsigned char* observations; // Required. You can use any obs type, but make sure it matches in Python!
-    int* actions; // Required. int* for discrete/multidiscrete, float* for box
+    float* actions; // Required. vecenv assigns float buffers
     float* rewards; // Required
-    unsigned char* terminals; // Required. We don't yet have truncations as standard yet
+    float* terminals; // Required. We don't yet have truncations as standard yet
+    int num_agents; // Required. Agents in one env instance
+    unsigned int rng; // Required. Seeded by vecenv
     int size;
     int tick;
     unsigned char state; 
@@ -41,7 +43,7 @@ Chain* allocate_chain(Chain *env) {
     env->observations = calloc(1, sizeof(unsigned char));
     env->actions = calloc(1, sizeof(float));
     env->rewards = calloc(1, sizeof(float));
-    env->terminals = calloc(1, sizeof(unsigned char));
+    env->terminals = calloc(1, sizeof(float));
     return env;
 }
 

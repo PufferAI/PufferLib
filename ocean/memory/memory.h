@@ -16,9 +16,11 @@ typedef struct {
 typedef struct {
     Log log;                     // Required field
     float* observations;         // Required field. Ensure type matches in .py and .c
-    int* actions;                // Required field. Ensure type matches in .py and .c
+    float* actions;              // Required field
     float* rewards;              // Required field
-    unsigned char* terminals;    // Required field
+    float* terminals;            // Required field
+    int num_agents;              // Required field
+    unsigned int rng;            // Required field
     int length;
     int goal;
     int tick;

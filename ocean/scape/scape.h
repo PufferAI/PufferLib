@@ -56,13 +56,15 @@ typedef struct {
     Entity* entities;
     Goal* goals;
     float* observations; // Required. You can use any obs type, but make sure it matches in Python!
-    double* actions; // Required. double* for discrete/multidiscrete, float* for box
+    float* actions; // Required
     float* rewards; // Required
     float* terminals; // Required. We don't yet have truncations as standard yet
+    unsigned int rng; // Required. Seeded by the vectorization code
     int width;
     int height;
     int num_agents;
     int num_npcs;
+    int num_goals;
 } Scape;
 
 Vector3 to_world(Vector2 pos) {

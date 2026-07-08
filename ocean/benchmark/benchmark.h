@@ -10,10 +10,11 @@ typedef struct {
 typedef struct {
     Log log;
     unsigned char* observations;
-    double* actions;
+    float* actions;
     float* rewards;
     float* terminals;
     int num_agents;
+    unsigned int rng;
     int bandwidth;
     int compute;
 } Benchmark;
