@@ -1,13 +1,20 @@
 #include "tactical.h"
+
+#define OBS_SIZE 10
+#define NUM_ATNS 1
+#define ACT_SIZES {4}
+#define OBS_TENSOR_T ByteTensor
+
 #define Env Tactical
-#include "../env_binding.h"
+#include "vecenv.h"
 
 // no init args needed
-static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    return 0;
+void my_init(Env* env, Dict* kwargs) {
+    (void)kwargs;
+    env->num_agents = 1;
 }
 
 // no logging implemented atm
-static int my_log(PyObject* dict, Log* log) {
-    return 0;
+void my_log(Log* log, Dict* out) {
+    dict_set(out, "score", log->score);
 }
