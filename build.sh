@@ -157,7 +157,7 @@ elif [ "$ENV" = "nethack" ]; then
     NETHACK_LIB_DIR="$(pwd)/$NLE_DIR/src/build"
     if [ ! -f "$NETHACK_LIB_DIR/libnethack.so" ]; then
         echo "Building libnethack.so ..."
-        make -C "$NETHACK_LIB_DIR" nethack -j$(nproc)
+        make -C "$NETHACK_LIB_DIR" nethack -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
     fi
     INCLUDES+=(-I./$NLE_DIR/include)
     EXTRA_LDFLAGS+=(-L"$NETHACK_LIB_DIR" -lnethack -Wl,-rpath,"$NETHACK_LIB_DIR" -ldl)
