@@ -85,10 +85,11 @@ typedef struct Blastar {
     Player player;
     Enemy enemy;
     float* observations;
-    double* actions;
+    float* actions;
     float* rewards;
     float* terminals;
     int num_agents;
+    unsigned int rng;
     Log log;
 } Blastar;
 
@@ -152,7 +153,7 @@ void init(Blastar* env, int num_obs) {
 void allocate(Blastar* env, int num_obs) {
     init(env, num_obs);
     env->observations = (float*)calloc(env->num_obs, sizeof(float));
-    env->actions = (double*)calloc(1, sizeof(double));
+    env->actions = (float*)calloc(1, sizeof(float));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (float*)calloc(1, sizeof(float));
 }
