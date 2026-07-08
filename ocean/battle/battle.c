@@ -25,7 +25,8 @@ int main() {
         .size_x = 8,
         .size_y = 2.0,
         .size_z = 8,
-        .num_agents = 1024,
+        .num_agents = 512,
+        .num_entities = 1024,
         .num_armies = 8,
     };
     init(&env);
@@ -33,9 +34,9 @@ int main() {
     // Allocate these manually since they aren't being passed from Python
     int num_obs = 3*env.num_armies + 4*16 + 22 + 8;
     env.observations = calloc(env.num_agents*num_obs, sizeof(float));
-    env.actions = calloc(3*env.num_agents, sizeof(int));
+    env.actions = calloc(3*env.num_agents, sizeof(float));
     env.rewards = calloc(env.num_agents, sizeof(float));
-    env.terminals = calloc(env.num_agents, sizeof(unsigned char));
+    env.terminals = calloc(env.num_agents, sizeof(float));
 
     // Always call reset and render first
     c_reset(&env);
