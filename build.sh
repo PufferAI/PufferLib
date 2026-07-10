@@ -10,6 +10,8 @@ set -e
 #   ./build.sh breakout --fast       # Standalone executable (optimized)
 #   ./build.sh breakout --web        # Emscripten web build
 #   ./build.sh breakout --profile    # Kernel profiling binary
+#   ./build.sh breakout --cuda-env-test # CUDA environment parity test
+#   ./build.sh breakout --cpu-env    # Force the legacy CPU environment path
 #   ./build.sh all                   # Build all envs native and native float32
 
 if [ -z "$1" ]; then
@@ -27,6 +29,8 @@ for arg in "$@"; do
         --fast)  MODE=fast ;;
         --web)   MODE=web ;;
         --profile) MODE=profile ;;
+        --cuda-env-test) MODE=cuda_env_test ;;
+        --cpu-env) CPU_ENV="-DPUFFER_CPU_ENV" ;;
         --cpu)   MODE=cpu ;;
         *) echo "Error: unknown argument '$arg'" && exit 1 ;;
     esac
@@ -220,7 +224,15 @@ elif [ "$MODE" = "cpu" ]; then
     exit 0
 fi
 
-CUDA_HOME=${CUDA_HOME:-${CUDA_PATH:-$(dirname "$(dirname "$(which nvcc)")")}}
+if [ -n "$CUDA_HOME" ]; then
+    :
+elif [ -n "$CUDA_PATH" ]; then
+    CUDA_HOME="$CUDA_PATH"
+elif [ -x /usr/local/cuda/bin/nvcc ]; then
+    CUDA_HOME=/usr/local/cuda
+else
+    CUDA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v nvcc)")")")
+fi
 # NCCL include/lib fallback.
 # Needed when NCCL is provided by the nvidia-nccl-cu12 wheel in the active venv.
 NCCL_IFLAG=""
@@ -231,11 +243,26 @@ done
 for dir in /usr/lib/x86_64-linux-gnu /usr/local/cuda/lib64; do
     if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then NCCL_LFLAG="-L$dir"; break; fi
 done
-if [ -z "$NCCL_IFLAG" ]; then
-    NCCL_IFLAG=$(python -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
+NCCL_PY_ROOT=""
+if [ -z "$NCCL_IFLAG" ] || [ -z "$NCCL_LFLAG" ]; then
+    # The training interpreter is not necessarily named `python` (for example,
+    # the CUDA wheels may be installed only for Python 3.12).
+    for python_bin in "${PYTHON:-python}" python3 python3.12; do
+        command -v "$python_bin" >/dev/null 2>&1 || continue
+        NCCL_PY_ROOT=$($python_bin -c \
+            "import nvidia.nccl; print(nvidia.nccl.__path__[0])" 2>/dev/null || true)
+        [ -n "$NCCL_PY_ROOT" ] && break
+    done
 fi
-if [ -z "$NCCL_LFLAG" ]; then
-    NCCL_LFLAG=$(python -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
+if [ -z "$NCCL_IFLAG" ] && [ -f "$NCCL_PY_ROOT/include/nccl.h" ]; then
+    NCCL_IFLAG="-I$NCCL_PY_ROOT/include"
+fi
+if [ -z "$NCCL_LFLAG" ] && [ -d "$NCCL_PY_ROOT/lib" ]; then
+    NCCL_LFLAG="-L$NCCL_PY_ROOT/lib"
+fi
+if [ -z "$NCCL_IFLAG" ]; then
+    echo "Error: nccl.h not found. Install NCCL or the nvidia-nccl-cu12 Python package."
+    exit 1
 fi
 
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
@@ -244,6 +271,14 @@ export CCACHE_COMPILERCHECK=content
 NVCC="ccache $CUDA_HOME/bin/nvcc"
 CC="${CC:-$(command -v ccache >/dev/null && echo 'ccache clang' || echo 'clang')}"
 ARCH=${NVCC_ARCH:-native}
+CUDA_HOST_COMPAT=()
+NVCC_MAJOR=$($CUDA_HOME/bin/nvcc --version | sed -n 's/.*release \([0-9][0-9]*\).*/\1/p' | head -1)
+if [ "${NVCC_MAJOR:-0}" -ge 13 ]; then
+    # CUDA 13.1 declares rsqrt before current glibc's GNU/C23 declaration.
+    # Default-source mode retains ulong/usleep without enabling the conflicting
+    # GNU math extension declarations.
+    CUDA_HOST_COMPAT+=(-U_GNU_SOURCE -D_DEFAULT_SOURCE)
+fi
 
 ENV_HEADER="$SRC_DIR/$ENV.h"
 mkdir -p build
@@ -267,6 +302,8 @@ if [ "$MODE" = "native" ]; then
 	    -Xcompiler=-DPLATFORM_DESKTOP \
 	    -Xcompiler=-fopenmp \
 	    $PRECISION \
+	    $CPU_ENV \
+	    "${CUDA_HOST_COMPAT[@]}" \
 	    src/pufferl.cu \
         "$RAYLIB_A" \
         -L$CUDA_HOME/lib64 $NCCL_LFLAG \
@@ -285,6 +322,8 @@ elif [ "$MODE" = "profile" ]; then
         -DENV_NAME=$ENV \
         -Xcompiler=-DPLATFORM_DESKTOP \
         $PRECISION \
+        $CPU_ENV \
+        "${CUDA_HOST_COMPAT[@]}" \
         -Xcompiler=-fopenmp \
         tests/profile_kernels.cu \
         "$RAYLIB_A" \
@@ -292,4 +331,26 @@ elif [ "$MODE" = "profile" ]; then
         -lGL -lm -lpthread $OMP_LIB \
         -o profile
     echo "Built: ./profile"
+elif [ "$MODE" = "cuda_env_test" ]; then
+    if [ "$ENV" != "breakout" ]; then
+        echo "Error: --cuda-env-test currently supports breakout only"
+        exit 1
+    fi
+    echo "Compiling CUDA environment parity test ($ARCH)..."
+    $NVCC $NVCC_OPT -arch=$ARCH -std=c++17 \
+        -I. -Isrc -I$SRC_DIR -Ivendor \
+        -I$CUDA_HOME/include $NCCL_IFLAG -I$RAYLIB_NAME/include \
+        "${ENV_COMPILE_FLAGS[@]}" \
+        -DENV_NAME=$ENV \
+        $PRECISION \
+        "${CUDA_HOST_COMPAT[@]}" \
+        -Xcompiler=-DPLATFORM_DESKTOP \
+        -Xcompiler=-fopenmp \
+        tests/test_breakout_cuda.cu \
+        "$RAYLIB_A" \
+        -L$CUDA_HOME/lib64 $NCCL_LFLAG \
+        -lnccl -lnvidia-ml -lcublas -lcurand \
+        -lGL -lm -lpthread $OMP_LIB \
+        -o test_cuda_env
+    echo "Built: ./test_cuda_env"
 fi

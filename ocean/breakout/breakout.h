@@ -20,6 +20,13 @@ typedef float obs_t;
 #define OBS_SIZE 118
 #define NUM_ATNS 1
 
+// fbr: Breakout uses the device-resident environment unless explicitly disabled.
+#ifndef PUFFER_CPU_ENV
+#define PUFFER_CUDA_ENV
+#define PUFFER_BREAKOUT_CUDA
+#define PUFFER_CUDA_ENV_IMPL "ocean/breakout/breakout_cuda.cuh"
+#endif
+
 #define BRICK_INDEX_NO_COLLISION -4
 #define BRICK_INDEX_SIDEWALL_COLLISION -3
 #define BRICK_INDEX_BACKWALL_COLLISION -2

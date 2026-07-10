@@ -241,7 +241,7 @@ void profile_logcoeffs(int B, int T, int H) {
 
 struct FusedScanProfile {
     PrefixScan scan;
-    PrecisionTensor grad_out, grad_next_state;
+    PrecisionTensor grad_out;
     Allocator alloc;
     int B, T, H;
 };
@@ -269,7 +269,6 @@ FusedScanProfile* create_fusedscan(int B, int T, int H) {
     s.grad_input     = {.shape = {B, T, H}};
 
     p->grad_out        = {.shape = {B, T, H}};
-    p->grad_next_state = {.shape = {B, H}};
 
     p->alloc = {};
     alloc_register(&p->alloc, &combined_t);
@@ -284,7 +283,6 @@ FusedScanProfile* create_fusedscan(int B, int T, int H) {
     alloc_register(&p->alloc, &s.grad_state);
     alloc_register(&p->alloc, &s.grad_input);
     alloc_register(&p->alloc, &p->grad_out);
-    alloc_register(&p->alloc, &p->grad_next_state);
     alloc_create(&p->alloc);
 
     s.combined_ptr = combined_t.data;
@@ -303,7 +301,6 @@ FusedScanProfile* create_fusedscan(int B, int T, int H) {
     float_to_device(s.input_ptr, buf, N_out);
     float_to_device(p->grad_out.data, buf, N_out);
     for (int i = 0; i < N_state; ++i) buf[i] = rand1();
-    float_to_device(p->grad_next_state.data, buf, N_state);
     free(buf);
     return p;
 }
@@ -313,8 +310,10 @@ void run_fusedscan_fwd(FusedScanProfile* p) {
 }
 
 void run_fusedscan_bwd(FusedScanProfile* p) {
+    // fbr: Training truncates the recurrent state boundary, so the production
+    // scan backward accepts only the timestep output gradient.
     mingru_scan_backward<<<grid_size(p->B * p->H), BLOCK_SIZE>>>(
-        p->scan, p->grad_out.data, p->grad_next_state.data);
+        p->scan, p->grad_out.data);
 }
 
 void profile_fusedscan(int B, int T, int H) {

@@ -276,9 +276,15 @@ __global__ void mingru_scan_forward(PrefixScan scan) {
 
 // Reads sparse checkpoints from forward pass
 // Recomputes intermediate values in chunks (faster on benchmarks)
-__global__ void mingru_scan_backward(PrefixScan scan,
-        const precision_t* __restrict__ grad_out,
-        const precision_t* __restrict__ grad_next_state) {
+__global__ __launch_bounds__(BLOCK_SIZE, 4) void mingru_scan_backward(PrefixScan scan,
+        const precision_t* __restrict__ grad_out) {
+    // fbr: Per-thread checkpoint arrays spill to local memory. Give each thread
+    // a four-value shared-memory slot to retain the recomputed scan chunk.
+    __shared__ float sm_chunk_a_star[BLOCK_SIZE * CHECKPOINT_INTERVAL];
+    __shared__ float sm_chunk_s[BLOCK_SIZE * CHECKPOINT_INTERVAL];
+    __shared__ float sm_chunk_log_values[BLOCK_SIZE * CHECKPOINT_INTERVAL];
+    __shared__ float sm_chunk_hidden[BLOCK_SIZE * CHECKPOINT_INTERVAL];
+    __shared__ float sm_chunk_gate[BLOCK_SIZE * CHECKPOINT_INTERVAL];
     int T_seq = scan.T, H = scan.H, B = scan.B;
     precision_t* __restrict__ grad_combined = scan.grad_combined.data;
     precision_t* __restrict__ grad_state = scan.grad_state.data;
@@ -304,6 +310,7 @@ __global__ void mingru_scan_backward(PrefixScan scan,
     int H2 = 2 * H;
     const int state_idx = b * H + h;
     const int out_base = bHT + h;
+    int shared_base = threadIdx.x * CHECKPOINT_INTERVAL;
 
     const precision_t* combined_h_base = &combined[cbase + h];
     const precision_t* combined_g_base = &combined[cbase + H + h];
@@ -323,13 +330,6 @@ __global__ void mingru_scan_backward(PrefixScan scan,
     for (int chunk_end = T_seq; chunk_end > 0; chunk_end -= CHECKPOINT_INTERVAL) {
         int chunk_start = (chunk_end > CHECKPOINT_INTERVAL) ? (chunk_end - CHECKPOINT_INTERVAL) : 0;
         int chunk_len = chunk_end - chunk_start;
-
-        // Chunk storage in registers
-        float chunk_a_star[CHECKPOINT_INTERVAL];
-        float chunk_s[CHECKPOINT_INTERVAL];
-        float chunk_log_values[CHECKPOINT_INTERVAL];
-        float chunk_hidden[CHECKPOINT_INTERVAL];
-        float chunk_gate[CHECKPOINT_INTERVAL];
 
         // Load checkpoint from global memory
         int ckpt_buf_idx = buf_base + chunk_start * H;
@@ -351,22 +351,22 @@ __global__ void mingru_scan_backward(PrefixScan scan,
             float z = recomp_log_value - recomp_a_star;
             recomp_s = logaddexp(recomp_s, z);
 
-            chunk_a_star[i] = recomp_a_star;
-            chunk_s[i] = recomp_s;
-            chunk_log_values[i] = recomp_log_value;
-            chunk_hidden[i] = hv;
-            chunk_gate[i] = gv;
+            sm_chunk_a_star[shared_base + i] = recomp_a_star;
+            sm_chunk_s[shared_base + i] = recomp_s;
+            sm_chunk_log_values[shared_base + i] = recomp_log_value;
+            sm_chunk_hidden[shared_base + i] = hv;
+            sm_chunk_gate[shared_base + i] = gv;
         }
 
         for (int i = chunk_len - 1; i >= 0; --i) {
             int t = chunk_start + 1 + i;
             int t_offset = (t - 1) * H3;
 
-            float a_star_t = chunk_a_star[i];
-            float s_t = chunk_s[i];
-            float log_value_t = chunk_log_values[i];
-            float hidden_val = chunk_hidden[i];
-            float gate_val = chunk_gate[i];
+            float a_star_t = sm_chunk_a_star[shared_base + i];
+            float s_t = sm_chunk_s[shared_base + i];
+            float log_value_t = sm_chunk_log_values[shared_base + i];
+            float hidden_val = sm_chunk_hidden[shared_base + i];
+            float gate_val = sm_chunk_gate[shared_base + i];
 
             float proj_val = to_float(combined_p_base[t_offset]);
             int input_idx = out_base + (t - 1) * H;
@@ -376,11 +376,10 @@ __global__ void mingru_scan_backward(PrefixScan scan,
             float z = log_value_t - a_star_t;
 
             float grad_out_val = to_float(grad_out[input_idx]);
-            float grad_scan_from_next = (t == T_seq) ? to_float(grad_next_state[state_idx]) : 0.0f;
             float proj_sigmoid = sigmoid(proj_val);
 
             // Highway gate gradients: out = sigmoid(proj) * scan_result + (1 - sigmoid(proj)) * x
-            float grad_scan_result = grad_scan_from_next + grad_out_val * proj_sigmoid;
+            float grad_scan_result = grad_out_val * proj_sigmoid;
             float grad_proj = grad_out_val * (scan_result - x_val) * proj_sigmoid * (1.0f - proj_sigmoid);
             grad_input[input_idx] = from_float(grad_out_val * (1.0f - proj_sigmoid));
 
@@ -452,7 +451,10 @@ __global__ void assemble_decoder_grad(
 static PrecisionTensor encoder_forward(void* w, void* activations, PrecisionTensor input, cudaStream_t stream) {
     EncoderWeights* ew = (EncoderWeights*)w;
     EncoderActivations* a = (EncoderActivations*)activations;
-    if (a->saved_input.data) puf_copy(&a->saved_input, &input, stream);
+    // fbr: Training inputs remain live through backward. Alias them instead of
+    // copying the full minibatch solely for the weight-gradient GEMM.
+    // fbr: Alias the live decoder input instead of materializing a training copy.
+    if (a->saved_input.shape[0]) a->saved_input.data = input.data;
     puf_mm(&input, &ew->weight, &a->out, stream);
     return a->out;
 }
@@ -486,7 +488,6 @@ static void encoder_reg_train(void* w, void* activations, Allocator* acts, Alloc
         .wgrad_scratch =    {.shape = {ew->out_dim, ew->in_dim}},
     };
     alloc_register(acts,&a->out);
-    alloc_register(acts,&a->saved_input);
     alloc_register(grads,&a->wgrad_scratch);
 }
 
@@ -525,9 +526,7 @@ struct DecoderActivations {
 static PrecisionTensor decoder_forward(void* w, void* activations, PrecisionTensor input, cudaStream_t stream) {
     DecoderWeights* dw = (DecoderWeights*)w;
     DecoderActivations* a = (DecoderActivations*)activations;
-    if (a->saved_input.data) {
-        puf_copy(&a->saved_input, &input, stream);
-    }
+    if (a->saved_input.shape[0]) a->saved_input.data = input.data;
     puf_mm(&input, &dw->weight, &a->out, stream);
     return a->out;
 }
@@ -564,7 +563,6 @@ static void decoder_reg_train(void* w, void* activations, Allocator* acts, Alloc
         .logstd_scratch =   {.shape = {1, dw->output_dim}},
     };
     alloc_register(acts,&a->out);
-    alloc_register(acts,&a->saved_input);
     alloc_register(acts,&a->grad_out);
     alloc_register(acts,&a->grad_input);
     alloc_register(grads,&a->wgrad_scratch);
@@ -622,7 +620,8 @@ struct MinGRUActivations {
     PrecisionTensor* combined_bufs;  // (B*TT, 3*T)[num_layers]
     PrecisionTensor* wgrad_scratch;  // (3*T, T)[num_layers]
     PrecisionTensor grad_input_buf;  // (B*TT, T)
-    PrecisionTensor grad_next_state; // (B, 1, T)
+    // fbr: There is no grad_next_state buffer: truncated minibatches never
+    // propagate a gradient across their initial recurrent-state boundary.
 };
 
 void mingru_activations_free(MinGRUActivations* a) {
@@ -672,9 +671,7 @@ static void mingru_reg_train(void* w, void* activations, Allocator* acts, Alloca
     a->combined_bufs = (PrecisionTensor*)calloc(m->num_layers, sizeof(PrecisionTensor));
     a->wgrad_scratch = (PrecisionTensor*)calloc(m->num_layers, sizeof(PrecisionTensor));
     a->grad_input_buf = {.shape = {B_TT, H}};
-    a->grad_next_state = {.shape = {B, 1, H}};
     alloc_register(acts,&a->grad_input_buf);
-    alloc_register(acts,&a->grad_next_state);
     for (int i = 0; i < m->num_layers; i++) {
         a->scan_bufs[i] = {
             .B = B, .T = TT, .H = H,
@@ -690,7 +687,6 @@ static void mingru_reg_train(void* w, void* activations, Allocator* acts, Alloca
         a->saved_inputs[i]  = {.shape = {B, TT, H}};
         a->combined_bufs[i] = {.shape = {B_TT, 3 * H}};
         a->wgrad_scratch[i] = {.shape = {3 * H, H}};
-        alloc_register(acts,&a->saved_inputs[i]);
         alloc_register(acts,&a->combined_bufs[i]);
         alloc_register(acts,&a->scan_bufs[i].out);
         alloc_register(acts,&a->scan_bufs[i].next_state);
@@ -699,7 +695,6 @@ static void mingru_reg_train(void* w, void* activations, Allocator* acts, Alloca
         alloc_register(acts,&a->scan_bufs[i].log_values_buf);
         alloc_register(acts,&a->scan_bufs[i].grad_combined);
         alloc_register(acts,&a->scan_bufs[i].grad_state);
-        alloc_register(acts,&a->scan_bufs[i].grad_input);
         alloc_register(grads,&a->wgrad_scratch[i]);
     }
 }
@@ -764,48 +759,33 @@ static PrecisionTensor mingru_forward_train(void* w, PrecisionTensor x, Precisio
     MinGRUActivations* a = (MinGRUActivations*)activations;
     int B = x.shape[0];
     for (int i = 0; i < m->num_layers; i++) {
-        puf_copy(&a->saved_inputs[i], &x, stream);
+        // fbr: Each layer input remains live until backward; retain its pointer.
+        a->saved_inputs[i].data = x.data;
         PrecisionTensor state_i = mingru_state_layer(m, state, i);
         puf_mm(&x, &m->weights[i], &a->combined_bufs[i], stream);
         a->scan_bufs[i].combined_ptr = a->combined_bufs[i].data;
         a->scan_bufs[i].state_ptr = state_i.data;
         a->scan_bufs[i].input_ptr = a->saved_inputs[i].data;
-        mingru_scan_forward<<<grid_size(B*m->hidden), BLOCK_SIZE, 0, stream>>>(a->scan_bufs[i]);
+        mingru_scan_forward<<<grid_size(B*m->hidden), BLOCK_SIZE, 0, stream>>>(
+            a->scan_bufs[i]);
         x = a->scan_bufs[i].out;
     }
     return x;
 }
-
-__global__ void add_kernel(float* __restrict__ dst,
-        const precision_t* __restrict__ src, int n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
-        dst[idx] += to_float(src[idx]);
-    }
-}
-
-#ifndef PRECISION_FLOAT
-__global__ void add_kernel(precision_t* __restrict__ dst,
-        const precision_t* __restrict__ src, int n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
-        dst[idx] = from_float(to_float(dst[idx]) + to_float(src[idx]));
-    }
-}
-#endif
 
 static PrecisionTensor mingru_backward(void* w, PrecisionTensor grad, void* activations, cudaStream_t stream) {
     MinGRUWeights* m = (MinGRUWeights*)w;
     MinGRUActivations* a = (MinGRUActivations*)activations;
     for (int i = m->num_layers - 1; i >= 0; i--) {
         PrefixScan& scan = a->scan_bufs[i];
+        // fbr: Write the highway branch into the GEMM destination. beta=1 then
+        // accumulates the projected recurrent gradient in the same pass.
+        scan.grad_input.data = a->grad_input_buf.data;
         mingru_scan_backward<<<grid_size(scan.B*scan.H), BLOCK_SIZE, 0, stream>>>(
-            scan, grad.data, a->grad_next_state.data);
+            scan, grad.data);
         puf_mm_tn(&scan.grad_combined, &a->saved_inputs[i], &a->wgrad_scratch[i], stream);
-        puf_mm_nn(&scan.grad_combined, &m->weights[i], &a->grad_input_buf, stream);
-        int n = numel(scan.grad_input.shape);
-        add_kernel<<<grid_size(n), BLOCK_SIZE, 0, stream>>>(
-            a->grad_input_buf.data, scan.grad_input.data, n);
+        puf_mm_nn(&scan.grad_combined, &m->weights[i], &a->grad_input_buf,
+            stream, 1.0f, 1.0f);
         grad = a->grad_input_buf;
     }
     return grad;
@@ -1013,6 +993,37 @@ __global__ void muon_norm_apply(precision_t* __restrict__ dst, const float* __re
     }
 }
 
+// fbr: Normalize one or more contiguous matrix slices in a single launch. Muon's
+// small matrices were previously paying three launches per slice (partials,
+// reduce, apply), which dominates the 4x64 decoder and the six packed GRU
+// slices. One block owns a slice and reuses its reduction result immediately.
+__global__ void muon_normalize_slices(precision_t* __restrict__ data,
+        int slice_elems, int slices, float eps) {
+    __shared__ float sum_data[256];
+    __shared__ float inv_norm;
+    int slice = blockIdx.x;
+    if (slice >= slices) return;
+    precision_t* base = data + (long)slice * slice_elems;
+    float sum = 0.0f;
+    for (int i = threadIdx.x; i < slice_elems; i += blockDim.x) {
+        float value = to_float(base[i]);
+        sum += value * value;
+    }
+    sum_data[threadIdx.x] = sum;
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.x < stride) {
+            sum_data[threadIdx.x] += sum_data[threadIdx.x + stride];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) inv_norm = 1.0f / fmaxf(sqrtf(sum_data[0]), eps);
+    __syncthreads();
+    for (int i = threadIdx.x; i < slice_elems; i += blockDim.x) {
+        base[i] = from_float(to_float(base[i]) * inv_norm);
+    }
+}
+
 // Nesterov with f32 momentum accumulator and precision_t gradients
 __global__ void muon_nesterov(float* __restrict__ mb, precision_t* __restrict__ gc, float mu, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1119,6 +1130,7 @@ void muon_init(Muon* m, Allocator* param_alloc, double lr_val,
     }
 }
 
+
 void muon_post_create(Muon* m) {
     m->lr_ptr = m->lr_puf.data;
     m->lr_derived_ptr = m->lr_derived_puf.data;
@@ -1142,6 +1154,7 @@ void muon_step(Muon* m, FloatTensor weights, PrecisionTensor grads, float max_gr
     muon_nesterov<<<grid_size(numel(m->mb_puf.shape)), BLOCK_SIZE, 0, stream>>>(
         m->mb_puf.data, grads.data, (float)m->momentum, numel(m->mb_puf.shape));
 
+
     long offset = 0;
     for (int _i = 0; _i < m->param_alloc->num_regs; _i++) {
         AllocEntry& e = m->param_alloc->regs[_i];
@@ -1154,37 +1167,37 @@ void muon_step(Muon* m, FloatTensor weights, PrecisionTensor grads, float max_gr
         // Orthogonalize the update
         if (ndim(e.shape) >= 2) {
             long R = e.shape[0], C = ne / R;
-            long M = min(R, C), N = max(R, C);
-            bool tall = R > C;
-            PrecisionTensor x = {.data = gc_ptr, .shape = {R, C}};
-            PrecisionTensor x_buf = {.data = m->x_buf.data, .shape = {R, C}};
-            PrecisionTensor gram = {.data = m->gram.data, .shape = {M, M}};
-            PrecisionTensor gram_buf = {.data = m->gram_buf.data, .shape = {M, M}};
+                long M = min(R, C), N = max(R, C);
+                bool tall = R > C;
+                PrecisionTensor x = {.data = gc_ptr, .shape = {R, C}};
+                PrecisionTensor x_buf = {.data = m->x_buf.data, .shape = {R, C}};
+                PrecisionTensor gram = {.data = m->gram.data, .shape = {M, M}};
+                PrecisionTensor gram_buf = {.data = m->gram_buf.data, .shape = {M, M}};
 
-            int nblk = min((int)grid_size(numel(x.shape)), 256);
-            muon_norm_partials<<<nblk, 256, 0, stream>>>(
-                m->norm_partials.data, x.data, numel(x.shape));
-            muon_norm_reduce<<<1, 256, 0, stream>>>(m->norm_ptr, m->norm_partials.data, nblk);
-            muon_norm_apply<<<grid_size(numel(x.shape)), BLOCK_SIZE, 0, stream>>>(
-                x.data, m->norm_ptr, 1e-7f, numel(x.shape));
+                muon_normalize_slices<<<1,256,0,stream>>>(
+                    x.data, numel(x.shape), 1, 1e-7f);
 
-            cublasOperation_t gram_op_a = tall ? CUBLAS_OP_T : CUBLAS_OP_N;
-            cublasOperation_t gram_op_b = tall ? CUBLAS_OP_N : CUBLAS_OP_T;
-            for (int i = 0; i < 5; ++i) {
-                PrecisionTensor& src = (i % 2 == 0) ? x : x_buf;
-                PrecisionTensor& dst = (i % 2 == 0) ? x_buf : x;
-                cublasGemmExDense(gram_op_a, gram_op_b, (int)M, (int)M, (int)N,
-                    src.data, src.data, gram.data, stream);
-                puf_copy(&gram_buf, &gram, stream);
-                puf_addmm_nn(&gram, &gram, &gram_buf, ns_coeffs[i][2], ns_coeffs[i][1], stream);
-                puf_copy(&dst, &src, stream);
-                cublasGemmExDense(CUBLAS_OP_N, CUBLAS_OP_N, (int)R, (int)C, (int)M,
-                    tall ? src.data : gram_buf.data, tall ? gram_buf.data : src.data, dst.data,
-                    stream, 1.0f, ns_coeffs[i][0]);
-            }
+                cublasOperation_t gram_op_a = tall ? CUBLAS_OP_T : CUBLAS_OP_N;
+                cublasOperation_t gram_op_b = tall ? CUBLAS_OP_N : CUBLAS_OP_T;
+                for (int i = 0; i < 5; ++i) {
+                    PrecisionTensor& src = (i % 2 == 0) ? x : x_buf;
+                    PrecisionTensor& dst = (i % 2 == 0) ? x_buf : x;
+                    cublasGemmExDense(gram_op_a, gram_op_b,
+                        (int)M, (int)M, (int)N,
+                        src.data, src.data, gram.data, stream);
+                    puf_copy(&gram_buf, &gram, stream);
+                    puf_addmm_nn(&gram, &gram, &gram_buf,
+                        ns_coeffs[i][2], ns_coeffs[i][1], stream);
+                    puf_copy(&dst, &src, stream);
+                    cublasGemmExDense(CUBLAS_OP_N, CUBLAS_OP_N,
+                        (int)R, (int)C, (int)M,
+                        tall ? src.data : gram_buf.data,
+                        tall ? gram_buf.data : src.data,
+                        dst.data, stream, 1.0f, ns_coeffs[i][0]);
+                }
 
-            update_ptr = x_buf.data;
-            scale = sqrtf(fmaxf(1.0f, (float)R / (float)C));
+                update_ptr = x_buf.data;
+                scale = sqrtf(fmaxf(1.0f, (float)R / (float)C));
         }
 
         muon_weight_update<<<grid_size(ne), BLOCK_SIZE, 0, stream>>>(
@@ -1490,6 +1503,8 @@ struct PPOBuffersPuf {
 
 void register_ppo_buffers(PPOBuffersPuf& bufs, Allocator* alloc, int N, int T, int A_total, bool is_continuous) {
     long total = (long)N * T;
+    // fbr: Reserve partial sums for a parallel mean/variance reduction.
+    int moment_blocks = min((int)grid_size(total), 256);
     bufs = (PPOBuffersPuf){
         .loss_output = {.shape = {1}},
         .grad_loss = {.shape = {1}},
@@ -1497,7 +1512,7 @@ void register_ppo_buffers(PPOBuffersPuf& bufs, Allocator* alloc, int N, int T, i
         .grad_logits = {.shape = {N, T, A_total}},
         .grad_values = {.shape = {N, T, 1}},
         .grad_logstd = {.shape = {N, T, A_total}},
-        .adv_scratch = {.shape = {2}},
+        .adv_scratch = {.shape = {2 + 2 * moment_blocks}},
     };
     alloc_register(alloc, &bufs.loss_output);
     alloc_register(alloc, &bufs.saved_for_bwd);
@@ -1789,42 +1804,58 @@ __global__ void ppo_loss_reduce(
     }
 }
 
-__global__ void ppo_var_mean(const precision_t* __restrict__ src,
-        float* __restrict__ var_out, float* __restrict__ mean_out, int n) {
-    __shared__ float sdata[256];
+// fbr: Replace the single-block two-pass advantage reduction with parallel
+// sum and square-sum partials followed by one deterministic final reduction.
+__global__ void ppo_moments_partials(const precision_t* __restrict__ src,
+        float* __restrict__ sum_out, float* __restrict__ sq_out, int n) {
+    __shared__ float sum_data[256];
+    __shared__ float sq_data[256];
     int tid = threadIdx.x;
     float sum = 0.0f;
-    for (int i = tid; i < n; i += blockDim.x) {
-        sum += to_float(src[i]);
+    float sum_sq = 0.0f;
+    for (int i = blockIdx.x * blockDim.x + tid; i < n;
+            i += blockDim.x * gridDim.x) {
+        float value = to_float(src[i]);
+        sum += value;
+        sum_sq += value * value;
     }
-    sdata[tid] = sum;
+    sum_data[tid] = sum;
+    sq_data[tid] = sum_sq;
     __syncthreads();
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {
-            sdata[tid] += sdata[tid + s];
+            sum_data[tid] += sum_data[tid + s];
+            sq_data[tid] += sq_data[tid + s];
         }
         __syncthreads();
     }
-    float mean = sdata[0] / (float)n;
     if (tid == 0) {
+        sum_out[blockIdx.x] = sum_data[0];
+        sq_out[blockIdx.x] = sq_data[0];
+    }
+}
+
+__global__ void ppo_moments_reduce(const float* __restrict__ sum_in,
+        const float* __restrict__ sq_in, float* __restrict__ var_out,
+        float* __restrict__ mean_out, int blocks, int n) {
+    __shared__ float sum_data[256];
+    __shared__ float sq_data[256];
+    int tid = threadIdx.x;
+    sum_data[tid] = tid < blocks ? sum_in[tid] : 0.0f;
+    sq_data[tid] = tid < blocks ? sq_in[tid] : 0.0f;
+    __syncthreads();
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            sum_data[tid] += sum_data[tid + s];
+            sq_data[tid] += sq_data[tid + s];
+        }
+        __syncthreads();
+    }
+    if (tid == 0) {
+        float sum = sum_data[0];
+        float mean = sum / (float)n;
         *mean_out = mean;
-    }
-    __syncthreads();
-    float ss = 0.0f;
-    for (int i = tid; i < n; i += blockDim.x) {
-        float d = to_float(src[i]) - mean;
-        ss += d * d;
-    }
-    sdata[tid] = ss;
-    __syncthreads();
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) {
-            sdata[tid] += sdata[tid + s];
-        }
-        __syncthreads();
-    }
-    if (tid == 0) {
-        *var_out = sdata[0] / (float)(n - 1);
+        *var_out = fmaxf(0.0f, (sq_data[0] - sum * mean) / (float)(n - 1));
     }
 }
 
@@ -1848,8 +1879,14 @@ void ppo_loss_fwd_bwd(
 
     float* adv_var_ptr = bufs.adv_scratch.data;
     float* adv_mean_ptr = adv_var_ptr + 1;
-    ppo_var_mean<<<1, 256, 0, stream>>>(
-        graph.mb_advantages.data, adv_var_ptr, adv_mean_ptr, numel(graph.mb_advantages.shape));
+    int adv_n = numel(graph.mb_advantages.shape);
+    int moment_blocks = min((int)grid_size(adv_n), 256);
+    float* moment_sums = adv_mean_ptr + 1;
+    float* moment_squares = moment_sums + moment_blocks;
+    ppo_moments_partials<<<moment_blocks, 256, 0, stream>>>(
+        graph.mb_advantages.data, moment_sums, moment_squares, adv_n);
+    ppo_moments_reduce<<<1, 256, 0, stream>>>(moment_sums, moment_squares,
+        adv_var_ptr, adv_mean_ptr, moment_blocks, adv_n);
 
     int ppo_grid = (total + PPO_THREADS - 1) / PPO_THREADS;
 

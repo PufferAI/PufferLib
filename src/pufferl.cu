@@ -147,12 +147,13 @@ void puf_mm_tn(PrecisionTensor* a, PrecisionTensor* b, PrecisionTensor* out, cud
 }
 
 // out(...,N) = a(...,K) @ b(K,N)  — leading dims folded into M
-void puf_mm_nn(PrecisionTensor* a, PrecisionTensor* b, PrecisionTensor* out, cudaStream_t stream) {
+void puf_mm_nn(PrecisionTensor* a, PrecisionTensor* b, PrecisionTensor* out,
+        cudaStream_t stream, float alpha = 1.0f, float beta = 0.0f) {
     int M = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
     int K = a->shape[ndim(a->shape)-1];
     int N = b->shape[ndim(b->shape)-1];
     cublasGemmExDense(CUBLAS_OP_N, CUBLAS_OP_N, M, N, K,
-        a->data, b->data, out->data, stream);
+        a->data, b->data, out->data, stream, alpha, beta);
 }
 
 __global__ void cast(precision_t* __restrict__ dst,
@@ -757,6 +758,9 @@ typedef int atomic_int;
 
 struct PuffeRL;
 void pufferl_forward(struct PuffeRL* pufferl, int buf, int t, cudaStream_t stream);
+#ifdef PUFFER_CUDA_ENV
+void pufferl_rollout_buffer(struct PuffeRL* pufferl, int buf, cudaStream_t stream);
+#endif
 
 typedef struct ObsTensor {
     obs_t* data;
@@ -810,7 +814,30 @@ typedef struct VecEnv {
     int action_mask_size;
     int num_banks;
     int* bank_layout;
+#ifdef PUFFER_CUDA_ENV
+    // fbr: Pointer-free environment state remains resident on the device.
+    void* gpu_env_state;
+#endif
 } VecEnv;
+
+#ifdef PUFFER_CUDA_ENV
+// fbr: CUDA environment callbacks enqueue device-only work on the rollout stream.
+static void puf_cuda_env_init(VecEnv* vec, cudaStream_t stream);
+static void puf_cuda_env_step(VecEnv* vec, int env_start, int env_count,
+    int agent_start, int agent_count, const precision_t* actions,
+    float* observations, float* rewards, float* terminals,
+    cudaStream_t stream);
+static void puf_cuda_env_step_direct(VecEnv* vec, int env_start, int env_count,
+    int agent_start, int agent_count, const precision_t* actions,
+    precision_t* observations, precision_t* rewards, precision_t* terminals,
+    cudaStream_t stream);
+static void puf_cuda_env_sync_logs(VecEnv* vec, int clear, cudaStream_t stream);
+static void puf_cuda_env_close(VecEnv* vec);
+#ifndef PUFFER_CUDA_ENV_IMPL
+#error "PUFFER_CUDA_ENV requires PUFFER_CUDA_ENV_IMPL to name its adapter implementation"
+#endif
+#include PUFFER_CUDA_ENV_IMPL
+#endif
 
 struct VecWorker {
     VecEnv* vec;
@@ -823,15 +850,18 @@ static void* vec_thread_main(void* arg) {
     VecWorker* worker_arg = (VecWorker*)arg;
     VecEnv* vec = worker_arg->vec;
     int buf = worker_arg->buf;
+#ifndef PUFFER_CUDA_ENV
     int horizon = worker_arg->horizon;
+#endif
     struct PuffeRL* pufferl = worker_arg->pufferl;
 
+#ifndef PUFFER_CUDA_ENV
     int agents_per_buffer = vec->agents_per_buffer;
     int agent_start = buf * agents_per_buffer;
     int env_start = vec->buffer_env_starts[buf];
     int env_count = vec->buffer_env_counts[buf];
-
     Env* envs = vec->envs;
+#endif
 
     while (true) {
         while (atomic_load(&vec->buffer_states[buf]) != OMP_RUNNING) {
@@ -844,6 +874,13 @@ static void* vec_thread_main(void* arg) {
         float* my_accum = &vec->accum[buf * NUM_VEC_PROF];
         struct timespec t0, t1;
 
+#ifdef PUFFER_CUDA_ENV
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        pufferl_rollout_buffer(pufferl, buf, stream);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        my_accum[VEC_GPU] += (t1.tv_sec - t0.tv_sec) * 1000.0f
+            + (t1.tv_nsec - t0.tv_nsec) / 1e6f;
+#else
         for (int t = 0; t < horizon; t++) {
             clock_gettime(CLOCK_MONOTONIC, &t0);
             pufferl_forward(pufferl, buf, t, stream);
@@ -890,6 +927,7 @@ static void* vec_thread_main(void* arg) {
                     cudaMemcpyHostToDevice, stream);
             }
         }
+#endif
         cudaStreamSynchronize(stream);
         atomic_store(&vec->buffer_states[buf], OMP_WAITING);
     }
@@ -1097,6 +1135,9 @@ void vec_reset(VecEnv* vec) {
             (size_t)vec->total_agents * vec->action_mask_size * sizeof(unsigned char),
             cudaMemcpyHostToDevice);
     }
+#ifdef PUFFER_CUDA_ENV
+    puf_cuda_env_init(vec, 0);
+#endif
     cudaDeviceSynchronize();
 }
 
@@ -1139,6 +1180,9 @@ void vec_close(VecEnv* vec) {
     free(vec->bank_layout);
 
     cudaDeviceSynchronize();
+#ifdef PUFFER_CUDA_ENV
+    puf_cuda_env_close(vec);
+#endif
     cudaFree(vec->gpu_observations);
     cudaFree(vec->gpu_actions);
     cudaFree(vec->gpu_rewards);
@@ -1157,6 +1201,10 @@ void vec_close(VecEnv* vec) {
 }
 
 void vec_log(VecEnv* vec, Dict* out, int clear) {
+#ifdef PUFFER_CUDA_ENV
+    puf_cuda_env_sync_logs(vec, clear, 0);
+    cudaStreamSynchronize(0);
+#endif
     Env* envs = vec->envs;
     Log aggregate;
     memset(&aggregate, 0, sizeof(Log));
@@ -1340,7 +1388,10 @@ typedef struct PuffeRL {
     EnvBuf env;
     TrainGraph train_buf;
     PrecisionTensor advantages_puf;  // Pre-allocated for train_impl (B, T)
-    cudaGraphExec_t* fused_rollout_cudagraphs;  // [horizon][num_buffers]
+    // fbr: CUDA environments capture one entire horizon per buffer. CPU environments
+    // retain one graph per timestep because host stepping separates inference
+    // calls and cannot be captured into a device-only horizon.
+    cudaGraphExec_t* fused_rollout_cudagraphs;
     cudaGraphExec_t train_cudagraph;
     cudaStream_t* streams;  // per-buffer raw CUDA streams
     cudaStream_t default_stream;  // main-thread stream (captured once at init)
@@ -1683,6 +1734,7 @@ __global__ void sample_logits(
 
 void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
     HypersT& hypers = pufferl->hypers;
+#ifndef PUFFER_CUDA_ENV
     int graph = t * hypers.num_buffers + buf;
     profile_begin("fused_rollout", hypers.profile);
 
@@ -1698,6 +1750,7 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
         assert(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal) == cudaSuccess
                 && "cudaStreamBeginCapture failed");
     }
+#endif
 
     RolloutBuf& rollouts = pufferl->rollouts;
     EnvBuf& env = pufferl->env;
@@ -1707,6 +1760,10 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
     ObsTensor& obs_env = env.obs;
     int n = block_size * obs_env.shape[1];
     PrecisionTensor obs_dst = puf_slice(rollouts.observations, t, start, block_size);
+#ifdef PUFFER_CUDA_ENV
+    // fbr: Later timesteps are written directly by the previous CUDA environment step.
+    if (t == 0) {
+#endif
     cast_dispatch(obs_dst.data, obs_env.data + (long)start*obs_env.shape[1], n, stream);
 
     PrecisionTensor rew_dst = puf_slice(rollouts.rewards, t, start, block_size);
@@ -1717,6 +1774,9 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
     PrecisionTensor term_dst = puf_slice(rollouts.terminals, t, start, block_size);
     cast<<<grid_size(n), BLOCK_SIZE, 0, stream>>>(
         term_dst.data, env.terminals.data + start, n);
+#ifdef PUFFER_CUDA_ENV
+    }
+#endif
 
     // Copy action mask from env into rollout buffer (if env opted in)
     PrecisionTensor mask_slice = {};
@@ -1737,7 +1797,9 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
     // per-buffer-relative so each worker writes only inside its own chunk.
     // Cudagraph capture absorbs the extra kernel launches.
     int num_banks = 1 + pufferl->num_frozen_banks;
+#ifndef PUFFER_CUDA_ENV
     long act_cols = env.actions.shape[1];
+#endif
     for (int b = 0; b < num_banks; b++) {
         int bank_off = pufferl->bank_layout ? pufferl->bank_layout[b] : 0;
         int bank_end = pufferl->bank_layout ? pufferl->bank_layout[b + 1] : block_size;
@@ -1788,11 +1850,40 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
             pufferl->rng_states[buf] + bank_off,
             mask_b.data, mask_stride_b);
 
+#ifndef PUFFER_CUDA_ENV
         cast<<<grid_size(numel(act_b.shape)), BLOCK_SIZE, 0, stream>>>(
-                env.actions.data + (long)sub_start * act_cols,
-                act_b.data, numel(act_b.shape));
+            env.actions.data + (long)sub_start * act_cols,
+            act_b.data, numel(act_b.shape));
+#endif
     }
 
+#ifdef PUFFER_CUDA_ENV
+    // fbr: Pass sampled precision_t actions straight into the device environment.
+    int env_start = pufferl->vec->buffer_env_starts[buf];
+    int env_count = pufferl->vec->buffer_env_counts[buf];
+    PrecisionTensor action_slice = puf_slice(
+        rollouts.actions, t, start, block_size);
+    const precision_t* action_src = action_slice.data;
+    if (t + 1 < hypers.horizon) {
+        PrecisionTensor next_obs = puf_slice(
+            rollouts.observations, t + 1, start, block_size);
+        PrecisionTensor next_rew = puf_slice(
+            rollouts.rewards, t + 1, start, block_size);
+        PrecisionTensor next_term = puf_slice(
+            rollouts.terminals, t + 1, start, block_size);
+        puf_cuda_env_step_direct(pufferl->vec, env_start, env_count,
+            start, block_size, action_src,
+            next_obs.data, next_rew.data, next_term.data, stream);
+    } else {
+        // fbr: Preserve the final state in the float buffers used by timestep zero.
+        puf_cuda_env_step(pufferl->vec, env_start, env_count,
+            start, block_size, action_src,
+            obs_env.data + (long)start * obs_env.shape[1],
+            env.rewards.data + start, env.terminals.data + start, stream);
+    }
+#endif
+
+#ifndef PUFFER_CUDA_ENV
     if (capturing) {
         cudaGraph_t _graph;
         assert(cudaStreamEndCapture(stream, &_graph) == cudaSuccess
@@ -1803,7 +1894,25 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
         cudaDeviceSynchronize();
     }
     profile_end(hypers.profile);
+#endif
 }
+
+#ifdef PUFFER_CUDA_ENV
+// fbr: Launch one captured 64-step rollout graph per CUDA environment buffer.
+void pufferl_rollout_buffer(PuffeRL* pufferl, int buf, cudaStream_t stream) {
+    HypersT& hypers = pufferl->hypers;
+    profile_begin("fused_rollout_horizon", hypers.profile);
+    if (pufferl->rollout_captured) {
+        assert(cudaGraphLaunch(pufferl->fused_rollout_cudagraphs[buf], stream)
+                == cudaSuccess && "full-horizon cudaGraphLaunch failed");
+    } else {
+        for (int t = 0; t < hypers.horizon; ++t) {
+            pufferl_forward(pufferl, buf, t, stream);
+        }
+    }
+    profile_end(hypers.profile);
+}
+#endif
 
 // Zero advantages on frozen-bank rows so prio_replay never samples them. Frozen
 // rollout rows hold actions/logprobs from the frozen policy; training the
@@ -2412,7 +2521,16 @@ PuffeRL* create_pufferl_impl(HypersT& hypers, Dict* vec_kwargs,
 
     // Cudagraph rolluts and entire training step
     if (hypers.cudagraphs >= 0) {
-        pufferl->fused_rollout_cudagraphs = (cudaGraphExec_t*)calloc(horizon*num_buffers, sizeof(cudaGraphExec_t));
+#ifdef PUFFER_CUDA_ENV
+        // fbr: Capture runs before the normal post-create reset, so seed the
+        // device state before recording the full-horizon graphs.
+        vec_reset(vec);
+        pufferl->fused_rollout_cudagraphs =
+            (cudaGraphExec_t*)calloc(num_buffers, sizeof(cudaGraphExec_t));
+#else
+        pufferl->fused_rollout_cudagraphs =
+            (cudaGraphExec_t*)calloc(horizon*num_buffers, sizeof(cudaGraphExec_t));
+#endif
         pufferl->train_warmup = 0;
 
         // Snapshot weights + optimizer state before init-time capture
@@ -2437,6 +2555,35 @@ PuffeRL* create_pufferl_impl(HypersT& hypers, Dict* vec_kwargs,
         cudaStreamCreate(&warmup_stream);
         pufferl->default_stream = warmup_stream;
 
+#ifdef PUFFER_CUDA_ENV
+        // fbr: Warm every library/kernel path before capture. Then record all
+        // horizon timesteps into one graph per buffer. Timestep-specific rollout
+        // pointers become fixed graph-node arguments, while stream ordering
+        // carries recurrent state and environment outputs through the horizon.
+        for (pufferl->epoch = 0; pufferl->epoch < hypers.cudagraphs; pufferl->epoch++) {
+            for (int buf = 0; buf < num_buffers; ++buf) {
+                pufferl_rollout_buffer(pufferl, buf, pufferl->streams[buf]);
+            }
+            cudaDeviceSynchronize();
+        }
+        for (int buf = 0; buf < num_buffers; ++buf) {
+            cudaStream_t stream = pufferl->streams[buf];
+            assert(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal)
+                    == cudaSuccess && "full-horizon cudaStreamBeginCapture failed");
+            for (int t = 0; t < horizon; ++t) {
+                pufferl_forward(pufferl, buf, t, stream);
+            }
+            cudaGraph_t graph;
+            assert(cudaStreamEndCapture(stream, &graph) == cudaSuccess
+                    && "full-horizon cudaStreamEndCapture failed");
+            assert(cudaGraphInstantiate(&pufferl->fused_rollout_cudagraphs[buf],
+                    graph, 0) == cudaSuccess
+                    && "full-horizon cudaGraphInstantiate failed");
+            assert(cudaGraphDestroy(graph) == cudaSuccess
+                    && "full-horizon cudaGraphDestroy failed");
+        }
+        cudaDeviceSynchronize();
+#else
         for (pufferl->epoch = 0; pufferl->epoch <= hypers.cudagraphs; pufferl->epoch++) {
             for (int i = 0; i < num_buffers * horizon; ++i) {
                 int buf = i % num_buffers;
@@ -2444,6 +2591,7 @@ PuffeRL* create_pufferl_impl(HypersT& hypers, Dict* vec_kwargs,
                 cudaDeviceSynchronize();
             }
         }
+#endif
         pufferl->rollout_captured = true;
 
         for (int i = 0; i <= hypers.cudagraphs; i++) {
@@ -2508,9 +2656,21 @@ void close_impl(PuffeRL& pufferl) {
         cudaProfilerStop();
     }
 
-    cudaGraphExecDestroy(pufferl.train_cudagraph);
-    for (int i = 0; i < pufferl.hypers.horizon * pufferl.hypers.num_buffers; i++) {
-        cudaGraphExecDestroy(pufferl.fused_rollout_cudagraphs[i]);
+    if (pufferl.train_cudagraph) {
+        cudaGraphExecDestroy(pufferl.train_cudagraph);
+    }
+    if (pufferl.fused_rollout_cudagraphs) {
+#ifdef PUFFER_CUDA_ENV
+        int rollout_graph_count = pufferl.hypers.num_buffers;
+#else
+        int rollout_graph_count =
+            pufferl.hypers.horizon * pufferl.hypers.num_buffers;
+#endif
+        for (int i = 0; i < rollout_graph_count; i++) {
+            if (pufferl.fused_rollout_cudagraphs[i]) {
+                cudaGraphExecDestroy(pufferl.fused_rollout_cudagraphs[i]);
+            }
+        }
     }
 
     policy_weights_free(&pufferl.policy, &pufferl.weights);
