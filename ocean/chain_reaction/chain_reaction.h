@@ -14,6 +14,7 @@
 #define CHAINENV_MAX_ACTIONS (CHAINENV_MAX_CELLS + 1)
 #define CHAINENV_NOOP_ACTION CHAINENV_MAX_CELLS
 #define CHAINENV_MAX_SLOTS 2
+#define CHAINENV_MAX_BANKS 8
 #define CHAINENV_OBS_CHANNELS 4
 #define CHAINENV_GLOBAL_OBS 5
 #define CHAINENV_OBS_SIZE (CHAINENV_MAX_CELLS * CHAINENV_OBS_CHANNELS + CHAINENV_GLOBAL_OBS)
@@ -24,7 +25,7 @@
 #define CHAINENV_OPPONENT_HEURISTIC 1
 #define CHAINENV_MAX_RENDER_TRANSFERS 768
 #define CHAINENV_MAX_RENDER_BURSTS 256
-#define CHAINENV_MAX_SNAPSHOTS (2 * CHAINENV_MAX_RENDER_WAVES + 8)
+#define CHAINENV_MAX_SNAPSHOTS (CHAINENV_MAX_RENDER_WAVES + 2)
 #define CHAINENV_BURST_DURATION 0.36f
 #define CHAINENV_TRANSFER_DURATION 0.28f
 #define CHAINENV_WAVE_DELAY 0.10f
@@ -41,6 +42,10 @@ struct Log {
     float episode_length;
     float chain_bursts;
     float invalid_rate;
+    float hist_score;
+    float hist_n;
+    float hist_score_bank[CHAINENV_MAX_BANKS];
+    float hist_n_bank[CHAINENV_MAX_BANKS];
     float slot_0_score;
     float slot_1_score;
     float draw_rate;
@@ -92,8 +97,6 @@ struct Client {
 typedef struct ResolveStats ResolveStats;
 struct ResolveStats {
     int bursts;
-    int waves;
-    int transfers;
     float end_time;
 };
 
@@ -104,6 +107,12 @@ struct ChainEnv {
     float* rewards;
     float* terminals;
     unsigned char* action_mask;
+    // Logical slots may be non-adjacent during historical self-play.
+    float* obs_ptr[CHAINENV_MAX_SLOTS];
+    float* action_ptr[CHAINENV_MAX_SLOTS];
+    float* reward_ptr[CHAINENV_MAX_SLOTS];
+    float* terminal_ptr[CHAINENV_MAX_SLOTS];
+    unsigned char* action_mask_ptr[CHAINENV_MAX_SLOTS];
     int num_agents;
     Log log;
     Client* client;
@@ -128,8 +137,13 @@ struct ChainEnv {
     int last_player_action;
     int last_env_action;
     int last_chain_bursts;
-    int last_chain_waves;
     int winner;
+    // Selfplay-pool tagging. tag = 0 means pure selfplay; tag = 1..N means
+    // slot 0 (primary) is playing frozen bank tag-1. boundary_reached is set
+    // on historical episode end and cleared by pufferl_count_aligned after a
+    // pending opponent swap has safely aligned all tagged envs.
+    int tag;
+    int boundary_reached;
     unsigned int rng;
 };
 
@@ -170,12 +184,6 @@ static inline bool chainenv_cell_active(const ChainEnv* env, int row, int col) {
     return row >= 0 && row < env->rows && col >= 0 && col < env->cols;
 }
 
-static inline bool chainenv_board_idx_active(const ChainEnv* env, int idx) {
-    int row = idx / CHAINENV_MAX_COLS;
-    int col = idx % CHAINENV_MAX_COLS;
-    return chainenv_cell_active(env, row, col);
-}
-
 static inline int chainenv_action_to_board_idx(const ChainEnv* env, int action) {
     if (action < 0 || action >= env->rows * env->cols) {
         return -1;
@@ -184,16 +192,6 @@ static inline int chainenv_action_to_board_idx(const ChainEnv* env, int action) 
     int row = action / env->cols;
     int col = action % env->cols;
     return chainenv_slot(row, col);
-}
-
-static inline int chainenv_board_idx_to_action(const ChainEnv* env, int board_idx) {
-    int row = board_idx / CHAINENV_MAX_COLS;
-    int col = board_idx % CHAINENV_MAX_COLS;
-    if (!chainenv_cell_active(env, row, col)) {
-        return -1;
-    }
-
-    return row * env->cols + col;
 }
 
 static inline int chainenv_critical_mass(const ChainEnv* env, int row, int col) {
@@ -212,7 +210,7 @@ static inline int chainenv_stable_capacity(const ChainEnv* env) {
 }
 
 static inline void chainenv_add_log(ChainEnv* env, int invalid) {
-    float reward = env->rewards[0];
+    float reward = *env->reward_ptr[0];
     env->log.perf += reward > 0.0f ? 1.0f : (reward == 0.0f ? 0.5f : 0.0f);
     env->log.score += reward;
     env->log.episode_return += reward;
@@ -220,19 +218,33 @@ static inline void chainenv_add_log(ChainEnv* env, int invalid) {
     env->log.chain_bursts += (float)env->last_chain_bursts;
     env->log.invalid_rate += invalid ? 1.0f : 0.0f;
     if (env->num_agents > 1) {
-        float slot0_reward = env->rewards[0];
-        float slot1_reward = env->rewards[1];
-        if (fabsf(slot0_reward - slot1_reward) <= 1.0e-6f) {
+        if (env->winner == 0) {
             env->log.slot_0_score += 0.5f;
             env->log.slot_1_score += 0.5f;
             env->log.draw_rate += 1.0f;
-        } else if (slot0_reward > slot1_reward) {
-            env->log.slot_0_score += 1.0f;
         } else {
-            env->log.slot_1_score += 1.0f;
+            int winner_slot = chainenv_slot_for_player(env, env->winner);
+            if (winner_slot == 0) env->log.slot_0_score += 1.0f;
+            else env->log.slot_1_score += 1.0f;
         }
     }
     env->log.n += 1.0f;
+}
+
+static inline void chainenv_add_historical_log(ChainEnv* env) {
+    if (env->num_agents < 2 || env->tag <= 0 || env->tag > CHAINENV_MAX_BANKS) {
+        return;
+    }
+
+    float primary_score = env->winner == 0
+        ? 0.5f
+        : (chainenv_player_for_slot(env, 0) == env->winner ? 1.0f : 0.0f);
+    int bank_idx = env->tag - 1;
+    env->log.hist_score_bank[bank_idx] += primary_score;
+    env->log.hist_n_bank[bank_idx] += 1.0f;
+    env->log.hist_score += primary_score;
+    env->log.hist_n += 1.0f;
+    env->boundary_reached = 1;
 }
 
 static inline void chainenv_layout_board(Client* client, const ChainEnv* env) {
@@ -296,13 +308,7 @@ static inline void chainenv_record_snapshot(ChainEnv* env, float reveal_time) {
     }
 
     Client* client = env->client;
-    int snapshot_idx = client->snapshot_count;
-    if (snapshot_idx >= CHAINENV_MAX_SNAPSHOTS) {
-        snapshot_idx = CHAINENV_MAX_SNAPSHOTS - 1;
-    } else {
-        client->snapshot_count += 1;
-    }
-
+    int snapshot_idx = client->snapshot_count++;
     chainenv_copy_board(
         client->snapshot_owner[snapshot_idx],
         client->snapshot_orbs[snapshot_idx],
@@ -382,8 +388,8 @@ static inline void chainenv_recount(const ChainEnv* env, int* red_total, int* gr
 
 static inline void chainenv_zero_outputs(ChainEnv* env) {
     for (int slot = 0; slot < env->num_agents; slot++) {
-        env->rewards[slot] = 0.0f;
-        env->terminals[slot] = 0.0f;
+        *env->reward_ptr[slot] = 0.0f;
+        *env->terminal_ptr[slot] = 0.0f;
     }
 }
 
@@ -394,12 +400,12 @@ static inline void chainenv_compute_observations(ChainEnv* env) {
     int red_total = 0;
     int green_total = 0;
     chainenv_recount(env, &red_total, &green_total);
-    memset(env->observations, 0, env->num_agents * CHAINENV_OBS_SIZE * sizeof(float));
 
     float area = (float)(env->rows * env->cols);
     for (int slot = 0; slot < env->num_agents; slot++) {
+        float* obs = env->obs_ptr[slot];
+        memset(obs, 0, CHAINENV_OBS_SIZE * sizeof(float));
         int player = chainenv_player_for_slot(env, slot);
-        float* obs = env->observations + slot * CHAINENV_OBS_SIZE;
 
         for (int row = 0; row < env->rows; row++) {
             for (int col = 0; col < env->cols; col++) {
@@ -428,27 +434,23 @@ static inline void chainenv_compute_observations(ChainEnv* env) {
 }
 
 static inline void chainenv_update_action_mask(ChainEnv* env) {
-    if (env->action_mask == NULL) {
-        return;
+    for (int slot = 0; slot < env->num_agents; slot++) {
+        memset(env->action_mask_ptr[slot], 0, CHAINENV_MAX_ACTIONS);
     }
 
-    memset(env->action_mask, 0, env->num_agents * CHAINENV_MAX_ACTIONS * sizeof(unsigned char));
     if (env->end_game) {
         for (int slot = 0; slot < env->num_agents; slot++) {
-            env->action_mask[slot * CHAINENV_MAX_ACTIONS + CHAINENV_NOOP_ACTION] = 1;
+            env->action_mask_ptr[slot][CHAINENV_NOOP_ACTION] = 1;
         }
         return;
     }
 
     if (!chainenv_is_selfplay(env)) {
+        unsigned char* mask = env->action_mask_ptr[0];
         for (int action = 0; action < env->rows * env->cols; action++) {
             int idx = chainenv_action_to_board_idx(env, action);
-            if (idx < 0) {
-                continue;
-            }
-
             if (env->owner[idx] == 0 || env->owner[idx] == CHAINENV_PLAYER_RED) {
-                env->action_mask[action] = 1;
+                mask[action] = 1;
             }
         }
         return;
@@ -456,7 +458,7 @@ static inline void chainenv_update_action_mask(ChainEnv* env) {
 
     int active_slot = chainenv_slot_for_player(env, env->current_player);
     for (int slot = 0; slot < env->num_agents; slot++) {
-        unsigned char* mask = env->action_mask + slot * CHAINENV_MAX_ACTIONS;
+        unsigned char* mask = env->action_mask_ptr[slot];
         if (slot != active_slot) {
             mask[CHAINENV_NOOP_ACTION] = 1;
             continue;
@@ -514,7 +516,6 @@ static inline ResolveStats chainenv_resolve_chain(ChainEnv* env, int player, flo
             break;
         }
 
-        stats.waves += 1;
         bool record_wave = wave < CHAINENV_MAX_RENDER_WAVES;
         float delay = start_delay + recorded_waves * CHAINENV_WAVE_DELAY;
         for (int i = 0; i < unstable_count; i++) {
@@ -553,7 +554,6 @@ static inline ResolveStats chainenv_resolve_chain(ChainEnv* env, int player, flo
 
                 int nidx = chainenv_slot(nr, nc);
                 chainenv_apply_single_orb(env, nidx, player);
-                stats.transfers += 1;
                 if (record_wave) {
                     chainenv_record_transfer(env, src_row, src_col, nr, nc, player, delay);
                 }
@@ -634,10 +634,6 @@ static inline int chainenv_timeout_winner(const ChainEnv* env) {
 
 static inline float chainenv_move_score(const ChainEnv* env, int action, int player) {
     int idx = chainenv_action_to_board_idx(env, action);
-    if (idx < 0) {
-        return -1.0e9f;
-    }
-
     int row = idx / CHAINENV_MAX_COLS;
     int col = idx % CHAINENV_MAX_COLS;
     int critical = chainenv_critical_mass(env, row, col);
@@ -694,10 +690,6 @@ static inline int chainenv_choose_env_action(ChainEnv* env) {
     int legal_count = 0;
     for (int action = 0; action < env->rows * env->cols; action++) {
         int idx = chainenv_action_to_board_idx(env, action);
-        if (idx < 0) {
-            continue;
-        }
-
         if (env->owner[idx] == 0 || env->owner[idx] == CHAINENV_PLAYER_GREEN) {
             legal_actions[legal_count++] = action;
         }
@@ -713,14 +705,12 @@ static inline int chainenv_choose_env_action(ChainEnv* env) {
 
     float scores[CHAINENV_MAX_CELLS];
     float best_score = -1.0e9f;
-    int best_action = legal_actions[0];
     for (int i = 0; i < legal_count; i++) {
         int action = legal_actions[i];
         float score = chainenv_move_score(env, action, CHAINENV_PLAYER_GREEN);
         scores[i] = score;
-        if (score > best_score + 1.0e-6f) {
+        if (score > best_score) {
             best_score = score;
-            best_action = action;
         }
     }
 
@@ -732,7 +722,7 @@ static inline int chainenv_choose_env_action(ChainEnv* env) {
     float weights[CHAINENV_MAX_CELLS];
 
     for (int i = 0; i < legal_count; i++) {
-        if (scores[i] + 1.0e-6f < threshold) {
+        if (scores[i] < threshold) {
             continue;
         }
 
@@ -741,10 +731,6 @@ static inline int chainenv_choose_env_action(ChainEnv* env) {
         weights[candidate_count] = weight;
         total_weight += weight;
         candidate_count += 1;
-    }
-
-    if (candidate_count == 0 || total_weight <= 1.0e-6f) {
-        return best_action;
     }
 
     float sample = ((float)(rand_r(&env->rng) % 100000) / 100000.0f) * total_weight;
@@ -773,21 +759,16 @@ static inline float chainenv_reward_for_player(
 }
 
 static inline void chainenv_finish_game(ChainEnv* env, int winner, int invalid_player) {
-    if (env->num_agents == 1) {
-        env->rewards[0] = chainenv_reward_for_player(
-            env, CHAINENV_PLAYER_RED, winner, invalid_player);
-        env->terminals[0] = 1.0f;
-    } else {
-        for (int slot = 0; slot < env->num_agents; slot++) {
-            int player = chainenv_player_for_slot(env, slot);
-            env->rewards[slot] = chainenv_reward_for_player(
-                env, player, winner, invalid_player);
-            env->terminals[slot] = 1.0f;
-        }
+    for (int slot = 0; slot < env->num_agents; slot++) {
+        int player = chainenv_player_for_slot(env, slot);
+        *env->reward_ptr[slot] = chainenv_reward_for_player(
+            env, player, winner, invalid_player);
+        *env->terminal_ptr[slot] = 1.0f;
     }
 
-    env->end_game = 1;
     env->winner = winner;
+    chainenv_add_historical_log(env);
+    env->end_game = 1;
     chainenv_update_action_mask(env);
     chainenv_add_log(env, invalid_player != 0);
 }
@@ -803,12 +784,7 @@ static inline void chainenv_reset_slot_mapping(ChainEnv* env) {
 
 static inline ResolveStats chainenv_execute_turn(
         ChainEnv* env, int player, int action, float start_delay) {
-    ResolveStats stats = {0};
     int board_idx = chainenv_action_to_board_idx(env, action);
-    if (board_idx < 0) {
-        return stats;
-    }
-
     env->turns_taken[chainenv_player_index(player)] += 1;
     env->move_count += 1;
     if (player == CHAINENV_PLAYER_RED) {
@@ -840,14 +816,10 @@ static inline void chainenv_maybe_open_scripted_duel(ChainEnv* env) {
     chainenv_begin_animation(env);
     ResolveStats env_stats = chainenv_execute_turn(env, CHAINENV_PLAYER_GREEN, env_action, 0.0f);
     env->last_chain_bursts = env_stats.bursts;
-    env->last_chain_waves = env_stats.waves;
     env->current_player = CHAINENV_PLAYER_RED;
 }
 
 static inline void init_chainenv(ChainEnv* env) {
-    if (env->num_agents < 1) env->num_agents = 1;
-    if (env->num_agents > CHAINENV_MAX_SLOTS) env->num_agents = CHAINENV_MAX_SLOTS;
-    if (env->max_steps < 1) env->max_steps = 1;
     int stable_capacity = chainenv_stable_capacity(env);
     if (env->max_steps > stable_capacity) env->max_steps = stable_capacity;
     env->tick = 0;
@@ -859,7 +831,6 @@ static inline void init_chainenv(ChainEnv* env) {
     env->last_player_action = -1;
     env->last_env_action = -1;
     env->last_chain_bursts = 0;
-    env->last_chain_waves = 0;
     env->winner = 0;
     chainenv_set_slot_players(env, CHAINENV_PLAYER_RED, CHAINENV_PLAYER_GREEN);
     chainenv_reset_render_animations(env);
@@ -887,7 +858,6 @@ static inline void c_reset(ChainEnv* env) {
     env->last_player_action = -1;
     env->last_env_action = -1;
     env->last_chain_bursts = 0;
-    env->last_chain_waves = 0;
     env->winner = 0;
     chainenv_reset_slot_mapping(env);
     chainenv_zero_outputs(env);
@@ -908,19 +878,17 @@ static inline void c_step(ChainEnv* env) {
     }
 
     env->last_chain_bursts = 0;
-    env->last_chain_waves = 0;
 
     if (chainenv_is_selfplay(env)) {
         int active_slot = chainenv_slot_for_player(env, env->current_player);
-        int action = (int)env->actions[active_slot];
+        int action = (int)*env->action_ptr[active_slot];
         if (env->current_player == CHAINENV_PLAYER_RED) {
             env->last_player_action = action;
         } else {
             env->last_env_action = action;
         }
 
-        if (action == CHAINENV_NOOP_ACTION ||
-                !chainenv_is_legal_move(env, action, env->current_player)) {
+        if (!chainenv_is_legal_move(env, action, env->current_player)) {
             chainenv_compute_observations(env);
             chainenv_finish_game(env, -env->current_player, env->current_player);
             return;
@@ -929,7 +897,6 @@ static inline void c_step(ChainEnv* env) {
         chainenv_begin_animation(env);
         ResolveStats stats = chainenv_execute_turn(env, env->current_player, action, 0.0f);
         env->last_chain_bursts = stats.bursts;
-        env->last_chain_waves = stats.waves;
 
         int winner = chainenv_check_winner(env);
         if (winner == 0 && env->move_count >= env->max_steps) {
@@ -948,7 +915,7 @@ static inline void c_step(ChainEnv* env) {
         return;
     }
 
-    int action = (int)env->actions[0];
+    int action = (int)*env->action_ptr[0];
     env->last_env_action = -1;
     if (!chainenv_is_legal_move(env, action, CHAINENV_PLAYER_RED)) {
         env->last_player_action = action;
@@ -960,7 +927,6 @@ static inline void c_step(ChainEnv* env) {
     chainenv_begin_animation(env);
     ResolveStats player_stats = chainenv_execute_turn(env, CHAINENV_PLAYER_RED, action, 0.0f);
     env->last_chain_bursts = player_stats.bursts;
-    env->last_chain_waves = player_stats.waves;
 
     int winner = chainenv_check_winner(env);
     if (winner == 0 && env->move_count >= env->max_steps) {
@@ -983,7 +949,6 @@ static inline void c_step(ChainEnv* env) {
     ResolveStats env_stats = chainenv_execute_turn(
         env, CHAINENV_PLAYER_GREEN, env_action, env_start);
     env->last_chain_bursts += env_stats.bursts;
-    env->last_chain_waves += env_stats.waves;
 
     winner = chainenv_check_winner(env);
     if (winner == 0 && env->move_count >= env->max_steps) {

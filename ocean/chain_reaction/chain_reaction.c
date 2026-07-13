@@ -25,19 +25,22 @@ static void demo(void) {
     env.rewards = reward_buf;
     env.terminals = terminal_buf;
     env.action_mask = action_mask_buf;
+    env.obs_ptr[0] = observation_buf;
+    env.action_ptr[0] = action_buf;
+    env.reward_ptr[0] = reward_buf;
+    env.terminal_ptr[0] = terminal_buf;
+    env.action_mask_ptr[0] = action_mask_buf;
     env.client = make_client();
     c_reset(&env);
 
     while (true) {
-        if (env.client != NULL) {
-            chainenv_layout_board(env.client, &env);
-        }
+        chainenv_layout_board(env.client, &env);
 
         bool allow_input = !chainenv_animation_active(&env);
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (env.end_game) {
                 c_reset(&env);
-            } else if (allow_input && env.client != NULL) {
+            } else if (allow_input) {
                 int action = chainenv_pick_action(&env, env.client, GetMousePosition());
                 if (action >= 0) {
                     if (!chainenv_is_legal_move(&env, action, CHAINENV_PLAYER_RED)) {
