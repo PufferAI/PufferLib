@@ -163,7 +163,8 @@ struct PPOKernelArgs {
     const precision_t* action_mask; // (N, T, A_total) or nullptr
     int mask_stride_n, mask_stride_t;
     int num_atns;
-    float clip_coef, vf_clip_coef, vf_coef, ent_coef;
+    float clip_coef, vf_clip_coef, vf_coef;
+    const float* ent_coef; // device ptr, by-value args get baked into the cuda graph
     int T_seq, A_total, N;
     int logits_stride_n, logits_stride_t, logits_stride_a;
     int values_stride_n, values_stride_t;
@@ -174,6 +175,7 @@ struct PPOBuffersPuf {
     FloatTensor loss_output, grad_loss;
     FloatTensor saved_for_bwd;
     FloatTensor grad_logits, grad_values, grad_logstd, adv_scratch;
+    FloatTensor ent_coef;
 };
 
 void register_ppo_buffers(PPOBuffersPuf& bufs, Allocator* alloc, int N, int T, int A_total, bool is_continuous) {
@@ -186,6 +188,7 @@ void register_ppo_buffers(PPOBuffersPuf& bufs, Allocator* alloc, int N, int T, i
         .grad_values = {.shape = {N, T, 1}},
         .grad_logstd = {.shape = {N, T, A_total}},
         .adv_scratch = {.shape = {2}},
+        .ent_coef = {.shape = {1}},
     };
     alloc_register(alloc, &bufs.loss_output);
     alloc_register(alloc, &bufs.saved_for_bwd);
@@ -196,6 +199,7 @@ void register_ppo_buffers(PPOBuffersPuf& bufs, Allocator* alloc, int N, int T, i
         alloc_register(alloc, &bufs.grad_logstd);
     }
     alloc_register(alloc, &bufs.adv_scratch);
+    alloc_register(alloc, &bufs.ent_coef);
 }
 
 // Prioritized replay over single-epoch data. These kernels are
@@ -822,7 +826,8 @@ __global__ void ppo_loss_compute(
     // grad_loss is always 1.0 (set in post_create, never changes)
     float dL = inv_NT;
     float d_pg_loss = dL;
-    float d_entropy_term = dL * (-a.ent_coef);
+    float ent_coef = *a.ent_coef;
+    float d_entropy_term = dL * (-ent_coef);
 
     // Value loss (forward) + value gradient (backward)
 
@@ -938,7 +943,7 @@ __global__ void ppo_loss_compute(
     }
 
     // Forward: loss partials
-    float thread_loss = (pg_loss + a.vf_coef * v_loss - a.ent_coef * total_entropy) * inv_NT;
+    float thread_loss = (pg_loss + a.vf_coef * v_loss - ent_coef * total_entropy) * inv_NT;
     block_losses[LOSS_PG][tid] = pg_loss * inv_NT;
     block_losses[LOSS_VF][tid] = v_loss * inv_NT;
     block_losses[LOSS_ENT][tid] = total_entropy * inv_NT;
@@ -1045,7 +1050,7 @@ void ppo_loss_fwd_bwd(
         PrecisionTensor& logstd,     // continuous logstd or empty
         TrainGraph& graph,
         IntTensor& act_sizes, FloatTensor& losses_acc,
-        float clip_coef, float vf_clip_coef, float vf_coef, float ent_coef,
+        float clip_coef, float vf_clip_coef, float vf_coef, const float* ent_coef,
         PPOBuffersPuf& bufs, bool is_continuous,
         cudaStream_t stream) {
     int N = dec_out.shape[0], T = dec_out.shape[1], fused_cols = dec_out.shape[2];
@@ -1561,6 +1566,9 @@ void train_impl(PuffeRL& pufferl) {
         current_ent_coef = cosine_annealing(hypers.ent_coef, ent_min,
                                             current_epoch, total_epochs);
     }
+    // copy ent_coef to the device buffer read by the loss kernel
+    cudaMemcpy(pufferl.ppo_bufs_puf.ent_coef.data, &current_ent_coef,
+               sizeof(float), cudaMemcpyHostToDevice);
 
     // Annealed priority exponent
     float anneal_beta = prio_beta0 + (1.0f - prio_beta0) * prio_alpha * (float)current_epoch/(float)total_epochs;
@@ -1627,7 +1635,8 @@ void train_impl(PuffeRL& pufferl) {
 
             ppo_loss_fwd_bwd(dec_puf, p_logstd, graph,
                 pufferl.act_sizes_puf, pufferl.losses_puf,
-                hypers.clip_coef, hypers.vf_clip_coef, hypers.vf_coef, current_ent_coef,
+                hypers.clip_coef, hypers.vf_clip_coef, hypers.vf_coef,
+                pufferl.ppo_bufs_puf.ent_coef.data,
                 pufferl.ppo_bufs_puf, pufferl.is_continuous, stream);
 
             FloatTensor grad_logits_puf = pufferl.ppo_bufs_puf.grad_logits;

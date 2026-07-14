@@ -321,7 +321,7 @@ struct PPOProfile {
     PPOKernelArgs ka;
     PPOGraphArgs ga;
     FloatTensor loss, losses_acc, ppo_partials;
-    FloatTensor grad_logits_t, grad_values_t, adv_mean_t, adv_var_t;
+    FloatTensor grad_logits_t, grad_values_t, adv_mean_t, adv_var_t, ent_coef_t;
     PrecisionTensor logits_t, actions_t, old_logprobs_t, advantages_t, prio_t, values_t, returns_t;
     PrecisionTensor ratio_t, newvalue_t;
     IntTensor act_sizes_t;
@@ -351,6 +351,7 @@ PPOProfile* create_ppoloss(int N, int T, int A) {
     p->grad_values_t  = {.shape = {NT}};
     p->adv_mean_t     = {.shape = {1}};
     p->adv_var_t      = {.shape = {1}};
+    p->ent_coef_t     = {.shape = {1}};
     p->loss           = {.shape = {1}};
     p->losses_acc     = {.shape = {LOSS_N + 1}};
     p->ppo_partials   = {.shape = {ppo_grid, LOSS_N + 1}};
@@ -370,6 +371,7 @@ PPOProfile* create_ppoloss(int N, int T, int A) {
     alloc_register(&p->alloc, &p->grad_values_t);
     alloc_register(&p->alloc, &p->adv_mean_t);
     alloc_register(&p->alloc, &p->adv_var_t);
+    alloc_register(&p->alloc, &p->ent_coef_t);
     alloc_register(&p->alloc, &p->loss);
     alloc_register(&p->alloc, &p->losses_acc);
     alloc_register(&p->alloc, &p->ppo_partials);
@@ -377,6 +379,9 @@ PPOProfile* create_ppoloss(int N, int T, int A) {
     alloc_create(&p->alloc);
 
     cudaMemcpy(p->act_sizes_t.data, &A, sizeof(int), cudaMemcpyHostToDevice);
+
+    float ent_coef_val = 0.01f;
+    cudaMemcpy(p->ent_coef_t.data, &ent_coef_val, sizeof(float), cudaMemcpyHostToDevice);
 
     // Fill with random data
     float* buf = (float*)malloc(NT * fused_cols * sizeof(float));
@@ -426,7 +431,7 @@ PPOProfile* create_ppoloss(int N, int T, int A) {
         .adv_var = p->adv_var_t.data,
         .act_sizes = p->act_sizes_t.data,
         .num_atns = 1,
-        .clip_coef = 0.1f, .vf_clip_coef = 0.1f, .vf_coef = 0.5f, .ent_coef = 0.01f,
+        .clip_coef = 0.1f, .vf_clip_coef = 0.1f, .vf_coef = 0.5f, .ent_coef = p->ent_coef_t.data,
         .T_seq = T, .A_total = A, .N = N,
         .logits_stride_n = T * fused_cols, .logits_stride_t = fused_cols, .logits_stride_a = 1,
         .values_stride_n = T * fused_cols, .values_stride_t = fused_cols,
