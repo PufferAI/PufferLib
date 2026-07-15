@@ -79,20 +79,12 @@ void my_init(Env* env, Dict* kwargs) {
     env->loss_reward = dict_get(kwargs, "loss_reward")->value;
     env->invalid_move_reward = dict_get(kwargs, "invalid_move_reward")->value;
 
-    if (env->rows < 2) {
-        env->rows = 2;
-    }
-    if (env->cols < 2) {
-        env->cols = 2;
-    }
-    if (env->rows > MAX_ROWS) {
-        env->rows = MAX_ROWS;
-    }
-    if (env->cols > MAX_COLS) {
-        env->cols = MAX_COLS;
-    }
-    if (env->max_steps < 1) {
-        env->max_steps = 1;
+    if (env->rows < 2 || env->rows > MAX_ROWS ||
+            env->cols < 2 || env->cols > MAX_COLS || env->max_steps < 1) {
+        fprintf(stderr,
+            "chain_reaction requires rows 2-%d, cols 2-%d, and positive max_steps; got %d, %d, %d\n",
+            MAX_ROWS, MAX_COLS, env->rows, env->cols, env->max_steps);
+        exit(1);
     }
 
     init(env);
