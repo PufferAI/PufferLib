@@ -133,9 +133,6 @@ typedef struct {
     int turns_taken[2];
     int current_player;
     int player_for_slot[MAX_SLOTS];
-    int slot_for_player[MAX_SLOTS];
-    int last_player_action;
-    int last_env_action;
     int last_chain_bursts;
     int winner;
     // Selfplay-pool tagging. tag = 0 means pure selfplay; tag = 1..N means
@@ -159,21 +156,6 @@ static bool is_selfplay(ChainEnv* env) {
     return env->num_agents > 1;
 }
 
-static int slot_for_player(ChainEnv* env, int player) {
-    return env->slot_for_player[player_index(player)];
-}
-
-static int player_for_slot(ChainEnv* env, int slot) {
-    return env->player_for_slot[slot];
-}
-
-static void set_slot_players(ChainEnv* env, int slot0_player, int slot1_player) {
-    env->player_for_slot[0] = slot0_player;
-    env->player_for_slot[1] = slot1_player;
-    env->slot_for_player[player_index(slot0_player)] = 0;
-    env->slot_for_player[player_index(slot1_player)] = 1;
-}
-
 // Rendering snapshots whole board states so chain waves can be replayed visually.
 static void copy_render_board(
         int8_t* dst_owner, uint16_t* dst_orbs,
@@ -182,31 +164,12 @@ static void copy_render_board(
     memcpy(dst_orbs, src_orbs, sizeof(uint16_t) * MAX_CELLS);
 }
 
-static void layout_board(ChainEnv* env) {
-    Client* client = env->client;
-    float sidebar_w = fminf(250.0f, (float)client->screen_width * 0.26f);
-    float gutter = fmaxf(30.0f, (float)client->screen_width * 0.04f);
-    float board_area_x = sidebar_w + gutter;
-    float board_area_w = fmaxf(260.0f, (float)client->screen_width - board_area_x - gutter);
-    float available_h = (float)client->screen_height - 150.0f;
-    float cell_size = fminf((board_area_w - 8.0f) / (float)env->cols, available_h / (float)env->rows);
-    cell_size = fmaxf(cell_size, 48.0f);
-
-    client->cell_size = cell_size;
-    client->board_x = board_area_x + fmaxf(0.0f, (board_area_w - cell_size * env->cols) * 0.5f);
-    client->board_y = ((float)client->screen_height - cell_size * env->rows) * 0.5f + 6.0f;
-}
-
 static void reset_animations(Client* client) {
     client->animation_clock = 0.0f;
     client->animation_total = 0.0f;
     client->snapshot_count = 0;
     client->transfer_count = 0;
     client->burst_count = 0;
-}
-
-static void clear_invalid_hint(Client* client) {
-    client->invalid_hint_time = 0.0f;
 }
 
 static void begin_animation(ChainEnv* env) {
@@ -251,13 +214,6 @@ static void count_orbs(ChainEnv* env, int* red_total, int* green_total) {
     *green_total = green;
 }
 
-static void zero_outputs(ChainEnv* env) {
-    for (int slot = 0; slot < env->num_agents; slot++) {
-        *env->reward_ptr[slot] = 0.0f;
-        *env->terminal_ptr[slot] = 0.0f;
-    }
-}
-
 static bool is_legal_move(ChainEnv* env, int action, int player) {
     if (action < 0 || action >= env->rows * env->cols) {
         return false;
@@ -267,34 +223,54 @@ static bool is_legal_move(ChainEnv* env, int action, int player) {
 }
 
 static void compute_observations(ChainEnv* env) {
+    float* obs0 = env->obs_ptr[0];
+    memset(obs0, 0, OBS_SIZE * sizeof(float));
+    float* obs1 = NULL;
+    if (env->num_agents == 2) {
+        obs1 = env->obs_ptr[1];
+        memset(obs1, 0, OBS_SIZE * sizeof(float));
+    }
+
     int red_total = 0;
     int green_total = 0;
-    count_orbs(env, &red_total, &green_total);
+    int player0 = env->player_for_slot[0];
+    for (int row = 0; row < env->rows; row++) {
+        for (int col = 0; col < env->cols; col++) {
+            int idx = board_index(row, col);
+            int obs_idx = idx * OBS_CHANNELS;
+            int owner = env->owner[idx];
+            int orbs = env->orbs[idx];
+            float mass = env->critical_mass[idx] / 4.0f;
+            red_total += owner == RED_PLAYER ? orbs : 0;
+            green_total += owner == GREEN_PLAYER ? orbs : 0;
 
-    float area = (float)(env->rows * env->cols);
-    for (int slot = 0; slot < env->num_agents; slot++) {
-        float* obs = env->obs_ptr[slot];
-        memset(obs, 0, OBS_SIZE * sizeof(float));
-        int player = player_for_slot(env, slot);
-
-        for (int row = 0; row < env->rows; row++) {
-            for (int col = 0; col < env->cols; col++) {
-                int idx = board_index(row, col);
-                int obs_idx = idx * OBS_CHANNELS;
-                obs[obs_idx + 0] = 1.0f;
-                obs[obs_idx + 1] = env->critical_mass[idx] / 4.0f;
-
-                if (env->owner[idx] == player) {
-                    obs[obs_idx + 2] = env->orbs[idx] / 4.0f;
-                } else if (env->owner[idx] == -player) {
-                    obs[obs_idx + 3] = env->orbs[idx] / 4.0f;
+            obs0[obs_idx + 0] = 1.0f;
+            obs0[obs_idx + 1] = mass;
+            if (obs1 != NULL) {
+                obs1[obs_idx + 0] = 1.0f;
+                obs1[obs_idx + 1] = mass;
+            }
+            if (owner == player0) {
+                obs0[obs_idx + 2] = orbs / 4.0f;
+                if (obs1 != NULL) {
+                    obs1[obs_idx + 3] = orbs / 4.0f;
+                }
+            } else if (owner == -player0) {
+                obs0[obs_idx + 3] = orbs / 4.0f;
+                if (obs1 != NULL) {
+                    obs1[obs_idx + 2] = orbs / 4.0f;
                 }
             }
         }
+    }
 
+    float area = (float)(env->rows * env->cols);
+    int base = MAX_CELLS * OBS_CHANNELS;
+    for (int slot = 0; slot < env->num_agents; slot++) {
+        float* obs = env->obs_ptr[slot];
+        int player = env->player_for_slot[slot];
         int self_total = player == RED_PLAYER ? red_total : green_total;
         int opp_total = player == RED_PLAYER ? green_total : red_total;
-        int base = MAX_CELLS * OBS_CHANNELS;
         obs[base + 0] = env->rows / (float)MAX_ROWS;
         obs[base + 1] = env->cols / (float)MAX_COLS;
         obs[base + 2] = self_total / (area * 4.0f);
@@ -326,7 +302,7 @@ static void compute_action_masks(ChainEnv* env) {
         return;
     }
 
-    int active_slot = slot_for_player(env, env->current_player);
+    int active_slot = env->player_for_slot[0] == env->current_player ? 0 : 1;
     for (int slot = 0; slot < env->num_agents; slot++) {
         unsigned char* mask = env->action_mask_ptr[slot];
         if (slot != active_slot) {
@@ -446,7 +422,7 @@ static int choose_opponent_action(ChainEnv* env) {
 
 static void finish_game(ChainEnv* env, int winner, int invalid_player) {
     for (int slot = 0; slot < env->num_agents; slot++) {
-        int player = player_for_slot(env, slot);
+        int player = env->player_for_slot[slot];
         float reward = env->loss_reward;
         if (winner == 0) {
             reward = 0.0f;
@@ -464,7 +440,7 @@ static void finish_game(ChainEnv* env, int winner, int invalid_player) {
         float primary_score = 0.0f;
         if (winner == 0) {
             primary_score = 0.5f;
-        } else if (player_for_slot(env, 0) == winner) {
+        } else if (env->player_for_slot[0] == winner) {
             primary_score = 1.0f;
         }
         int bank = env->tag - 1;
@@ -490,7 +466,7 @@ static void finish_game(ChainEnv* env, int winner, int invalid_player) {
             env->log.slot_0_score += 0.5f;
             env->log.slot_1_score += 0.5f;
             env->log.draw_rate += 1.0f;
-        } else if (slot_for_player(env, winner) == 0) {
+        } else if (env->player_for_slot[0] == winner) {
             env->log.slot_0_score += 1.0f;
         } else {
             env->log.slot_1_score += 1.0f;
@@ -504,12 +480,6 @@ static ResolveStats execute_turn(
     int board_idx = env->action_cell[action];
     env->turns_taken[player_index(player)] += 1;
     env->move_count += 1;
-    if (player == RED_PLAYER) {
-        env->last_player_action = action;
-    } else {
-        env->last_env_action = action;
-    }
-
     place_orb(env, board_idx, player);
     if (env->client != NULL) {
         record_snapshot(env, start_delay + PLACEMENT_DURATION);
@@ -664,17 +634,6 @@ static void init(ChainEnv* env) {
     if (env->max_steps > stable_capacity) {
         env->max_steps = stable_capacity;
     }
-    env->tick = 0;
-    env->move_count = 0;
-    env->end_game = 0;
-    env->turns_taken[0] = 0;
-    env->turns_taken[1] = 0;
-    env->current_player = RED_PLAYER;
-    env->last_player_action = -1;
-    env->last_env_action = -1;
-    env->last_chain_bursts = 0;
-    env->winner = 0;
-    set_slot_players(env, RED_PLAYER, GREEN_PLAYER);
 }
 
 static void c_close(ChainEnv* env) {
@@ -696,19 +655,22 @@ static void c_reset(ChainEnv* env) {
     env->turns_taken[0] = 0;
     env->turns_taken[1] = 0;
     env->current_player = RED_PLAYER;
-    env->last_player_action = -1;
-    env->last_env_action = -1;
     env->last_chain_bursts = 0;
     env->winner = 0;
     if (is_selfplay(env) && (rand_r(&env->rng) & 1) != 0) {
-        set_slot_players(env, GREEN_PLAYER, RED_PLAYER);
+        env->player_for_slot[0] = GREEN_PLAYER;
+        env->player_for_slot[1] = RED_PLAYER;
     } else {
-        set_slot_players(env, RED_PLAYER, GREEN_PLAYER);
+        env->player_for_slot[0] = RED_PLAYER;
+        env->player_for_slot[1] = GREEN_PLAYER;
     }
-    zero_outputs(env);
+    for (int slot = 0; slot < env->num_agents; slot++) {
+        *env->reward_ptr[slot] = 0.0f;
+        *env->terminal_ptr[slot] = 0.0f;
+    }
     if (env->client != NULL) {
         reset_animations(env->client);
-        clear_invalid_hint(env->client);
+        env->client->invalid_hint_time = 0.0f;
     }
 
     if (!is_selfplay(env) && (rand_r(&env->rng) & 1u) != 0u) {
@@ -728,7 +690,10 @@ static void c_reset(ChainEnv* env) {
 
 static void c_step(ChainEnv* env) {
     env->tick += 1;
-    zero_outputs(env);
+    for (int slot = 0; slot < env->num_agents; slot++) {
+        *env->reward_ptr[slot] = 0.0f;
+        *env->terminal_ptr[slot] = 0.0f;
+    }
 
     if (env->end_game) {
         c_reset(env);
@@ -738,14 +703,8 @@ static void c_step(ChainEnv* env) {
     env->last_chain_bursts = 0;
 
     if (is_selfplay(env)) {
-        int active_slot = slot_for_player(env, env->current_player);
+        int active_slot = env->player_for_slot[0] == env->current_player ? 0 : 1;
         int action = (int)*env->action_ptr[active_slot];
-        if (env->current_player == RED_PLAYER) {
-            env->last_player_action = action;
-        } else {
-            env->last_env_action = action;
-        }
-
         if (!is_legal_move(env, action, env->current_player)) {
             compute_observations(env);
             finish_game(env, -env->current_player, env->current_player);
@@ -776,9 +735,7 @@ static void c_step(ChainEnv* env) {
     }
 
     int action = (int)*env->action_ptr[0];
-    env->last_env_action = -1;
     if (!is_legal_move(env, action, RED_PLAYER)) {
-        env->last_player_action = action;
         compute_observations(env);
         finish_game(env, GREEN_PLAYER, RED_PLAYER);
         return;
@@ -820,17 +777,6 @@ static void c_step(ChainEnv* env) {
     compute_action_masks(env);
 }
 
-static Client* make_client(void) {
-    Client* client = calloc(1, sizeof(Client));
-    client->screen_width = 980;
-    client->screen_height = 860;
-
-    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
-    InitWindow(client->screen_width, client->screen_height, "PufferLib Chain Reaction");
-    SetTargetFPS(60);
-    return client;
-}
-
 static Color player_color(int player) {
     return player == RED_PLAYER
         ? (Color){255, 80, 88, 255}
@@ -863,7 +809,15 @@ static void draw_orb(Vector2 center, float radius, Color color, float alpha) {
 
 static void c_render(ChainEnv* env) {
     if (env->client == NULL) {
-        env->client = make_client();
+        env->client = calloc(1, sizeof(Client));
+        env->client->screen_width = 980;
+        env->client->screen_height = 860;
+        SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
+        InitWindow(
+            env->client->screen_width,
+            env->client->screen_height,
+            "PufferLib Chain Reaction");
+        SetTargetFPS(60);
     }
 
     if (IsWindowReady()) {
@@ -876,7 +830,22 @@ static void c_render(ChainEnv* env) {
         exit(0);
     }
 
-    layout_board(env);
+    Client* client = env->client;
+    float sidebar_w = fminf(250.0f, (float)client->screen_width * 0.26f);
+    float gutter = fmaxf(30.0f, (float)client->screen_width * 0.04f);
+    float board_area_x = sidebar_w + gutter;
+    float board_area_w = fmaxf(
+        260.0f, (float)client->screen_width - board_area_x - gutter);
+    float available_h = (float)client->screen_height - 150.0f;
+    float cell_size = fminf(
+        (board_area_w - 8.0f) / (float)env->cols,
+        available_h / (float)env->rows);
+    client->cell_size = fmaxf(cell_size, 48.0f);
+    client->board_x = board_area_x + fmaxf(
+        0.0f, (board_area_w - client->cell_size * env->cols) * 0.5f);
+    client->board_y = (
+        (float)client->screen_height - client->cell_size * env->rows) * 0.5f + 6.0f;
+
     float dt = GetFrameTime();
     env->client->invalid_hint_time = fmaxf(0.0f, env->client->invalid_hint_time - dt);
     env->client->animation_clock = fminf(

@@ -3,7 +3,7 @@
 
 #include "chain_reaction.h"
 
-static void demo(void) {
+int main(void) {
     ChainEnv env = {0};
     env.num_agents = 1;
     env.rows = 9;
@@ -26,12 +26,10 @@ static void demo(void) {
     env.reward_ptr[0] = reward_buf;
     env.terminal_ptr[0] = terminal_buf;
     env.action_mask_ptr[0] = action_mask_buf;
-    env.client = make_client();
+    c_render(&env);
     c_reset(&env);
 
     while (true) {
-        layout_board(&env);
-
         bool allow_input = env.client->animation_clock
             >= env.client->animation_total - 1.0e-4f;
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
@@ -52,7 +50,7 @@ static void demo(void) {
                     if (!is_legal_move(&env, action, RED_PLAYER)) {
                         env.client->invalid_hint_time = 1.9f;
                     } else {
-                        clear_invalid_hint(env.client);
+                        env.client->invalid_hint_time = 0.0f;
                         *env.action_ptr[0] = (float)action;
                         c_step(&env);
                     }
@@ -66,9 +64,4 @@ static void demo(void) {
 
         c_render(&env);
     }
-}
-
-int main(void) {
-    demo();
-    return 0;
 }
