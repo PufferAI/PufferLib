@@ -144,9 +144,10 @@ typedef void (*encoder_backward_fn)(void* weights, void* activations,
 typedef PrecisionTensor (*decoder_backward_fn)(void* weights, void* activations,
     FloatTensor grad_logits, FloatTensor grad_logstd, FloatTensor grad_value, cudaStream_t stream);
 typedef PrecisionTensor (*network_forward_fn)(void* weights, PrecisionTensor x,
-    PrecisionTensor state, void* activations, cudaStream_t stream);
+    PrecisionTensor state, PrecisionTensor active, void* activations, cudaStream_t stream);
 typedef PrecisionTensor (*network_forward_train_fn)(void* weights, PrecisionTensor x,
-    PrecisionTensor state, PrecisionTensor terminals, void* activations, cudaStream_t stream);
+    PrecisionTensor state, PrecisionTensor terminals, PrecisionTensor active,
+    void* activations, cudaStream_t stream);
 typedef PrecisionTensor (*network_backward_fn)(void* weights,
     PrecisionTensor grad, void* activations, cudaStream_t stream);
 
@@ -161,6 +162,7 @@ struct Encoder {
     free_weights_fn free_weights;
     free_activations_fn free_activations;
     int in_dim, out_dim;
+    bool use_bias;
     size_t activation_size;  // sizeof(EncoderActivations) or custom override
 };
 
@@ -176,6 +178,7 @@ struct Decoder {
     free_activations_fn free_activations;
     int hidden_dim, output_dim;
     bool continuous;
+    bool use_bias;
 };
 
 struct Network {
@@ -190,15 +193,17 @@ struct Network {
     free_weights_fn free_weights;
     free_activations_fn free_activations;
     int hidden, num_layers, horizon;
+    bool turn_based;
 };
 
 struct EncoderWeights {
-    PrecisionTensor weight;
+    PrecisionTensor weight, bias;
     int in_dim, out_dim;
+    bool use_bias;
 };
 
 struct EncoderActivations {
-    PrecisionTensor out, saved_input, wgrad_scratch;
+    PrecisionTensor out, saved_input, wgrad_scratch, bgrad_scratch;
 };
 
 // The fused scan operation is the core of PufferNet. It parallelizes
@@ -223,7 +228,7 @@ __device__ __forceinline__ void log_coeffs_and_values_bwd(float grad_log_coeffs,
 
 __global__ void mingru_gate(precision_t* out, precision_t* next_state,
         const precision_t* combined, const precision_t* state_in,
-        const precision_t* x_in, int H, int B) {
+        const precision_t* x_in, const precision_t* active, int H, int B) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int N = B * H;
     if (idx >= N) {
@@ -232,6 +237,12 @@ __global__ void mingru_gate(precision_t* out, precision_t* next_state,
 
     int b = idx / H;
     int h = idx % H;
+
+    if (active != nullptr && to_float(active[b]) == 0.0f) {
+        next_state[idx] = state_in[idx];
+        out[idx] = x_in[idx];
+        return;
+    }
 
     // combined = linear(x_in) = (B, H) -> (B, 3*H)
     int combined_base = b * 3 * H;
@@ -243,7 +254,8 @@ __global__ void mingru_gate(precision_t* out, precision_t* next_state,
 
     // mingru_gate computation
     float gate_sigmoid = sigmoid(gate);
-    float hidden_tilde = (hidden >= 0.0f) ? hidden + 0.5f : fast_sigmoid(hidden);
+    float hidden_tilde = (hidden >= 0.0f) ? hidden + 0.5f :
+        (active != nullptr ? sigmoid(hidden) : fast_sigmoid(hidden));
     float mingru_out = lerp(state, hidden_tilde, gate_sigmoid);
 
     // next_state is mingru_out (for recurrence)
@@ -260,12 +272,116 @@ struct PrefixScan {
     precision_t* state_ptr = nullptr;
     precision_t* input_ptr = nullptr;  // (B, T, H) original input before projection (for highway gate)
     precision_t* terminals_ptr = nullptr;  // (B, T), resets state before timestep t when nonzero
+    precision_t* active_ptr = nullptr;  // (B, T), zero freezes state and suppresses loss
     int B = 0, T = 0, H = 0;
     FloatTensor a_star, s_vals, log_values_buf;
     PrecisionTensor out, next_state;
     PrecisionTensor grad_combined, grad_state;
     PrecisionTensor grad_input;        // (B, T, H) highway gate gradient w.r.t. input
 };
+
+// Exact sequential recurrence for turn-based policies. Waiting timesteps are
+// identity state transitions, matching actor-only legacy inference. The full
+// state history reuses a_star, which already has shape (B, T + 1, H).
+__global__ void mingru_turn_forward(PrefixScan scan) {
+    int T = scan.T, H = scan.H, B = scan.B;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= B * H) return;
+
+    int b = idx / H;
+    int h = idx % H;
+    int state_idx = b * H + h;
+    int hist_base = b * (T + 1) * H + h;
+    float state = to_float(scan.state_ptr[state_idx]);
+
+    for (int t = 0; t < T; t++) {
+        if (scan.terminals_ptr != nullptr &&
+                to_float(scan.terminals_ptr[b * T + t]) != 0.0f) {
+            state = 0.0f;
+        }
+        scan.a_star.data[hist_base + t * H] = state;
+
+        int x_idx = (b * T + t) * H + h;
+        int cbase = (b * T + t) * 3 * H;
+        float x = to_float(scan.input_ptr[x_idx]);
+        bool active = scan.active_ptr == nullptr ||
+            to_float(scan.active_ptr[b * T + t]) != 0.0f;
+        if (active) {
+            float hidden = to_float(scan.combined_ptr[cbase + h]);
+            float gate = to_float(scan.combined_ptr[cbase + H + h]);
+            float proj = to_float(scan.combined_ptr[cbase + 2 * H + h]);
+            float gate_s = sigmoid(gate);
+            float hidden_tilde = hidden >= 0.0f ? hidden + 0.5f : sigmoid(hidden);
+            state += gate_s * (hidden_tilde - state);
+            float proj_s = sigmoid(proj);
+            scan.out.data[x_idx] = from_float(
+                proj_s * state + (1.0f - proj_s) * x);
+        } else {
+            scan.out.data[x_idx] = from_float(x);
+        }
+    }
+    scan.a_star.data[hist_base + T * H] = state;
+    scan.next_state.data[state_idx] = from_float(state);
+}
+
+__global__ void mingru_turn_backward(PrefixScan scan,
+        const precision_t* __restrict__ grad_out,
+        const precision_t* __restrict__ grad_next_state) {
+    int T = scan.T, H = scan.H, B = scan.B;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= B * H) return;
+
+    int b = idx / H;
+    int h = idx % H;
+    int state_idx = b * H + h;
+    int hist_base = b * (T + 1) * H + h;
+    float dstate = to_float(grad_next_state[state_idx]);
+
+    for (int t = T - 1; t >= 0; t--) {
+        int x_idx = (b * T + t) * H + h;
+        int cbase = (b * T + t) * 3 * H;
+        float dout = to_float(grad_out[x_idx]);
+        float state_prev = scan.a_star.data[hist_base + t * H];
+        bool active = scan.active_ptr == nullptr ||
+            to_float(scan.active_ptr[b * T + t]) != 0.0f;
+
+        if (active) {
+            float hidden = to_float(scan.combined_ptr[cbase + h]);
+            float gate = to_float(scan.combined_ptr[cbase + H + h]);
+            float proj = to_float(scan.combined_ptr[cbase + 2 * H + h]);
+            float x = to_float(scan.input_ptr[x_idx]);
+            float gate_s = sigmoid(gate);
+            float hidden_tilde = hidden >= 0.0f ? hidden + 0.5f : sigmoid(hidden);
+            float state = state_prev + gate_s * (hidden_tilde - state_prev);
+            float proj_s = sigmoid(proj);
+
+            float dstate_total = dstate + dout * proj_s;
+            float dgate_s = dstate_total * (hidden_tilde - state_prev);
+            float dhidden_tilde = dstate_total * gate_s;
+            float dhidden = hidden >= 0.0f ? dhidden_tilde :
+                dhidden_tilde * hidden_tilde * (1.0f - hidden_tilde);
+            float dgate = dgate_s * gate_s * (1.0f - gate_s);
+            float dproj = dout * (state - x) * proj_s * (1.0f - proj_s);
+
+            scan.grad_combined.data[cbase + h] = from_float(dhidden);
+            scan.grad_combined.data[cbase + H + h] = from_float(dgate);
+            scan.grad_combined.data[cbase + 2 * H + h] = from_float(dproj);
+            scan.grad_input.data[x_idx] = from_float(dout * (1.0f - proj_s));
+            dstate = dstate_total * (1.0f - gate_s);
+        } else {
+            scan.grad_combined.data[cbase + h] = from_float(0.0f);
+            scan.grad_combined.data[cbase + H + h] = from_float(0.0f);
+            scan.grad_combined.data[cbase + 2 * H + h] = from_float(0.0f);
+            scan.grad_input.data[x_idx] = from_float(dout);
+        }
+
+        if (scan.terminals_ptr != nullptr &&
+                to_float(scan.terminals_ptr[b * T + t]) != 0.0f) {
+            dstate = 0.0f;
+        }
+    }
+    scan.grad_state.data[state_idx] = from_float(dstate);
+}
 
 // Checkpointing trades off partial recomputation for memory bandwidth.
 #define CHECKPOINT_INTERVAL 4
@@ -554,17 +670,59 @@ __global__ void assemble_decoder_grad(
     dst[idx] = from_float((col < od) ? grad_logits[row * od + col] : grad_value[row]);
 }
 
+__global__ void add_bias_kernel(precision_t* __restrict__ data,
+        const precision_t* __restrict__ bias, int total, int dim) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total) return;
+    data[idx] = from_float(to_float(data[idx]) + to_float(bias[idx % dim]));
+}
+
+__global__ void sum_bias_grad_kernel(precision_t* __restrict__ bgrad,
+        const precision_t* __restrict__ grad, int rows, int dim) {
+    int col = blockIdx.x;
+    if (col >= dim) return;
+    float sum = 0.0f;
+    for (int row = threadIdx.x; row < rows; row += blockDim.x) {
+        sum += to_float(grad[row * dim + col]);
+    }
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        sum += __shfl_down_sync(0xffffffff, sum, offset);
+    }
+    __shared__ float warp_sums[32];
+    int lane = threadIdx.x & 31;
+    int warp = threadIdx.x >> 5;
+    if (lane == 0) warp_sums[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        sum = lane < (blockDim.x + 31) / 32 ? warp_sums[lane] : 0.0f;
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            sum += __shfl_down_sync(0xffffffff, sum, offset);
+        }
+        if (lane == 0) bgrad[col] = from_float(sum);
+    }
+}
+
 PrecisionTensor encoder_forward(void* w, void* activations, PrecisionTensor input, cudaStream_t stream) {
     EncoderWeights* ew = (EncoderWeights*)w;
     EncoderActivations* a = (EncoderActivations*)activations;
     if (a->saved_input.data) puf_copy(&a->saved_input, &input, stream);
     puf_mm(&input, &ew->weight, &a->out, stream);
+    if (ew->use_bias) {
+        int total = input.shape[0] * ew->out_dim;
+        add_bias_kernel<<<grid_size(total), BLOCK_SIZE, 0, stream>>>(
+            a->out.data, ew->bias.data, total, ew->out_dim);
+    }
     return a->out;
 }
 
 void encoder_backward(void* w, void* activations, PrecisionTensor grad, cudaStream_t stream) {
+    EncoderWeights* ew = (EncoderWeights*)w;
     EncoderActivations* a = (EncoderActivations*)activations;
     puf_mm_tn(&grad, &a->saved_input, &a->wgrad_scratch, stream);
+    if (ew->use_bias) {
+        sum_bias_grad_kernel<<<ew->out_dim, 256, 0, stream>>>(
+            a->bgrad_scratch.data, grad.data, grad.shape[0], ew->out_dim);
+    }
 }
 
 void encoder_init_weights(void* w, ulong* seed, cudaStream_t stream) {
@@ -574,12 +732,20 @@ void encoder_init_weights(void* w, ulong* seed, cudaStream_t stream) {
         .shape = {ew->out_dim, ew->in_dim},
     };
     puf_kaiming_init(&wt, std::sqrt(2.0f), (*seed)++, stream);
+    if (ew->use_bias) {
+        cudaMemsetAsync(ew->bias.data, 0,
+            (size_t)ew->out_dim * sizeof(precision_t), stream);
+    }
 }
 
 void encoder_reg_params(void* w, Allocator* alloc) {
     EncoderWeights* ew = (EncoderWeights*)w;
     ew->weight = {.shape = {ew->out_dim, ew->in_dim}};
     alloc_register(alloc,&ew->weight);
+    if (ew->use_bias) {
+        ew->bias = {.shape = {ew->out_dim}};
+        alloc_register(alloc,&ew->bias);
+    }
 }
 
 void encoder_reg_train(void* w, void* activations, Allocator* acts, Allocator* grads, int B_TT) {
@@ -589,10 +755,12 @@ void encoder_reg_train(void* w, void* activations, Allocator* acts, Allocator* g
         .out =              {.shape = {B_TT, ew->out_dim}},
         .saved_input =      {.shape = {B_TT, ew->in_dim}},
         .wgrad_scratch =    {.shape = {ew->out_dim, ew->in_dim}},
+        .bgrad_scratch =    {.shape = {ew->out_dim}},
     };
     alloc_register(acts,&a->out);
     alloc_register(acts,&a->saved_input);
     alloc_register(grads,&a->wgrad_scratch);
+    if (ew->use_bias) alloc_register(grads,&a->bgrad_scratch);
 }
 
 void encoder_reg_rollout(void* w, void* activations, Allocator* alloc, int B) {
@@ -606,6 +774,7 @@ void* encoder_create_weights(void* self) {
     Encoder* e = (Encoder*)self;
     EncoderWeights* ew = (EncoderWeights*)calloc(1, sizeof(EncoderWeights));
     ew->in_dim = e->in_dim; ew->out_dim = e->out_dim;
+    ew->use_bias = e->use_bias;
     return ew;
 }
 
@@ -618,13 +787,15 @@ void encoder_free_activations(void* activations) {
 }
 
 struct DecoderWeights {
-    PrecisionTensor weight, logstd;
-    int hidden_dim, output_dim;
+    PrecisionTensor weight, bias, logstd;
+    int hidden_dim, output_dim, bias_dim;
     bool continuous;
+    bool use_bias;
 };
 
 struct DecoderActivations {
-    PrecisionTensor out, grad_out, saved_input, grad_input, wgrad_scratch, logstd_scratch;
+    PrecisionTensor out, grad_out, saved_input, grad_input, wgrad_scratch,
+        bgrad_scratch, logstd_scratch;
 };
 
 PrecisionTensor decoder_forward(void* w, void* activations, PrecisionTensor input, cudaStream_t stream) {
@@ -634,6 +805,12 @@ PrecisionTensor decoder_forward(void* w, void* activations, PrecisionTensor inpu
         puf_copy(&a->saved_input, &input, stream);
     }
     puf_mm(&input, &dw->weight, &a->out, stream);
+    if (dw->use_bias) {
+        int od1 = dw->output_dim + 1;
+        int total = input.shape[0] * od1;
+        add_bias_kernel<<<grid_size(total), BLOCK_SIZE, 0, stream>>>(
+            a->out.data, dw->bias.data, total, od1);
+    }
     return a->out;
 }
 
@@ -644,12 +821,23 @@ void decoder_init_weights(void* w, ulong* seed, cudaStream_t stream) {
         .shape = {dw->output_dim + 1, dw->hidden_dim},
     };
     puf_kaiming_init(&wt, 1.0f, (*seed)++, stream);
+    if (dw->use_bias) {
+        cudaMemsetAsync(dw->bias.data, 0,
+            (size_t)dw->bias_dim * sizeof(precision_t), stream);
+    }
 }
 
 void decoder_reg_params(void* w, Allocator* alloc) {
     DecoderWeights* dw = (DecoderWeights*)w;
     dw->weight = {.shape = {dw->output_dim + 1, dw->hidden_dim}};
     alloc_register(alloc,&dw->weight);
+    if (dw->use_bias) {
+        // Allocator/model serialization is flat. Pad this odd-sized vector so
+        // the following MinGRU tensor remains 16-byte aligned in bf16 builds.
+        dw->bias_dim = (dw->output_dim + 8) & ~7;
+        dw->bias = {.shape = {dw->bias_dim}};
+        alloc_register(alloc,&dw->bias);
+    }
     if (dw->continuous) {
         dw->logstd = {.shape = {1, dw->output_dim}};
         alloc_register(alloc,&dw->logstd);
@@ -666,6 +854,7 @@ void decoder_reg_train(void* w, void* activations, Allocator* acts, Allocator* g
         .saved_input =      {.shape = {B_TT, dw->hidden_dim}},
         .grad_input =       {.shape = {B_TT, dw->hidden_dim}},
         .wgrad_scratch =    {.shape = {od1, dw->hidden_dim}},
+        .bgrad_scratch =    {.shape = {dw->bias_dim}},
         .logstd_scratch =   {.shape = {1, dw->output_dim}},
     };
     alloc_register(acts,&a->out);
@@ -673,6 +862,7 @@ void decoder_reg_train(void* w, void* activations, Allocator* acts, Allocator* g
     alloc_register(acts,&a->grad_out);
     alloc_register(acts,&a->grad_input);
     alloc_register(grads,&a->wgrad_scratch);
+    if (dw->use_bias) alloc_register(grads,&a->bgrad_scratch);
     if (dw->continuous) alloc_register(grads,&a->logstd_scratch);
 }
 
@@ -687,6 +877,8 @@ void* decoder_create_weights(void* self) {
     Decoder* d = (Decoder*)self;
     DecoderWeights* dw = (DecoderWeights*)calloc(1, sizeof(DecoderWeights));
     dw->hidden_dim = d->hidden_dim; dw->output_dim = d->output_dim; dw->continuous = d->continuous;
+    dw->use_bias = d->use_bias;
+    if (dw->use_bias) dw->bias_dim = (dw->output_dim + 8) & ~7;
     return dw;
 }
 
@@ -707,6 +899,10 @@ PrecisionTensor decoder_backward(void* w, void* activations,
     assemble_decoder_grad<<<grid_size(B_TT * od1), BLOCK_SIZE, 0, stream>>>(
         a->grad_out.data, grad_logits.data, grad_value.data, B_TT, od, od1);
     puf_mm_tn(&a->grad_out, &a->saved_input, &a->wgrad_scratch, stream);
+    if (dw->use_bias) {
+        sum_bias_grad_kernel<<<od1, 256, 0, stream>>>(
+            a->bgrad_scratch.data, a->grad_out.data, B_TT, od1);
+    }
     if (dw->continuous && grad_logstd.data != nullptr) {
         sum_rows_to_precision_kernel<<<grid_size(dw->output_dim), BLOCK_SIZE, 0, stream>>>(
             a->logstd_scratch.data, grad_logstd.data, B_TT, dw->output_dim);
@@ -740,6 +936,7 @@ void mingru_activations_free(MinGRUActivations* a) {
 
 struct MinGRUWeights {
     int hidden, num_layers, horizon;
+    bool turn_based;
     PrecisionTensor* weights;  // [num_layers]
 };
 
@@ -829,6 +1026,7 @@ void* mingru_create_weights(void* self) {
     Network* n = (Network*)self;
     MinGRUWeights* mw = (MinGRUWeights*)calloc(1, sizeof(MinGRUWeights));
     mw->hidden = n->hidden; mw->num_layers = n->num_layers; mw->horizon = n->horizon;
+    mw->turn_based = n->turn_based;
     mw->weights = (PrecisionTensor*)calloc(n->num_layers, sizeof(PrecisionTensor));
     return mw;
 }
@@ -846,7 +1044,7 @@ void mingru_free_activations(void* activations) {
 }
 
 PrecisionTensor mingru_forward(void* w, PrecisionTensor x, PrecisionTensor state,
-        void* activations, cudaStream_t stream) {
+        PrecisionTensor active, void* activations, cudaStream_t stream) {
     MinGRUWeights* m = (MinGRUWeights*)w;
     MinGRUActivations* a = (MinGRUActivations*)activations;
     int B = state.shape[1];
@@ -856,7 +1054,8 @@ PrecisionTensor mingru_forward(void* w, PrecisionTensor x, PrecisionTensor state
         puf_mm(&x, &m->weights[i], &a->combined[i], stream);
         mingru_gate<<<grid_size(B*H), BLOCK_SIZE, 0, stream>>>(
             a->out.data, a->next_state.data,
-            a->combined[i].data, state_i.data, x.data, H, B);
+            a->combined[i].data, state_i.data, x.data,
+            m->turn_based ? active.data : nullptr, H, B);
         puf_copy(&state_i, &a->next_state, stream);
         x = a->out;
     }
@@ -864,7 +1063,8 @@ PrecisionTensor mingru_forward(void* w, PrecisionTensor x, PrecisionTensor state
 }
 
 PrecisionTensor mingru_forward_train(void* w, PrecisionTensor x, PrecisionTensor state,
-        PrecisionTensor terminals, void* activations, cudaStream_t stream) {
+        PrecisionTensor terminals, PrecisionTensor active, void* activations,
+        cudaStream_t stream) {
     MinGRUWeights* m = (MinGRUWeights*)w;
     MinGRUActivations* a = (MinGRUActivations*)activations;
     int B = x.shape[0];
@@ -876,7 +1076,14 @@ PrecisionTensor mingru_forward_train(void* w, PrecisionTensor x, PrecisionTensor
         a->scan_bufs[i].state_ptr = state_i.data;
         a->scan_bufs[i].input_ptr = a->saved_inputs[i].data;
         a->scan_bufs[i].terminals_ptr = terminals.data;
-        mingru_scan_forward<<<grid_size(B*m->hidden), BLOCK_SIZE, 0, stream>>>(a->scan_bufs[i]);
+        a->scan_bufs[i].active_ptr = m->turn_based ? active.data : nullptr;
+        if (m->turn_based) {
+            mingru_turn_forward<<<grid_size(B*m->hidden), BLOCK_SIZE, 0, stream>>>(
+                a->scan_bufs[i]);
+        } else {
+            mingru_scan_forward<<<grid_size(B*m->hidden), BLOCK_SIZE, 0, stream>>>(
+                a->scan_bufs[i]);
+        }
         x = a->scan_bufs[i].out;
     }
     return x;
@@ -905,8 +1112,13 @@ PrecisionTensor mingru_backward(void* w, PrecisionTensor grad, void* activations
     MinGRUActivations* a = (MinGRUActivations*)activations;
     for (int i = m->num_layers - 1; i >= 0; i--) {
         PrefixScan& scan = a->scan_bufs[i];
-        mingru_scan_backward<<<grid_size(scan.B*scan.H), BLOCK_SIZE, 0, stream>>>(
-            scan, grad.data, a->grad_next_state.data);
+        if (m->turn_based) {
+            mingru_turn_backward<<<grid_size(scan.B*scan.H), BLOCK_SIZE, 0, stream>>>(
+                scan, grad.data, a->grad_next_state.data);
+        } else {
+            mingru_scan_backward<<<grid_size(scan.B*scan.H), BLOCK_SIZE, 0, stream>>>(
+                scan, grad.data, a->grad_next_state.data);
+        }
         puf_mm_tn(&scan.grad_combined, &a->saved_inputs[i], &a->wgrad_scratch[i], stream);
         puf_mm_nn(&scan.grad_combined, &m->weights[i], &a->grad_input_buf, stream);
         int n = numel(scan.grad_input.shape);
@@ -944,17 +1156,21 @@ void policy_activations_free(Policy* p, PolicyActivations& a) {
 }
 
 PrecisionTensor policy_forward(Policy* p, PolicyWeights& w, PolicyActivations& activations,
-        PrecisionTensor obs, PrecisionTensor state, cudaStream_t stream) {
+        PrecisionTensor obs, PrecisionTensor state, PrecisionTensor active,
+        cudaStream_t stream) {
     PrecisionTensor enc_out = p->encoder.forward(w.encoder, activations.encoder, obs, stream);
-    PrecisionTensor h = p->network.forward(w.network, enc_out, state, activations.network, stream);
+    PrecisionTensor h = p->network.forward(w.network, enc_out, state, active,
+        activations.network, stream);
     return p->decoder.forward(w.decoder, activations.decoder, h, stream);
 }
 
 PrecisionTensor policy_forward_train(Policy* p, PolicyWeights& w, PolicyActivations& activations,
-        PrecisionTensor x, PrecisionTensor state, PrecisionTensor terminals, cudaStream_t stream) {
+        PrecisionTensor x, PrecisionTensor state, PrecisionTensor terminals,
+        PrecisionTensor active, cudaStream_t stream) {
     int B = x.shape[0], TT = x.shape[1];
     PrecisionTensor h = p->encoder.forward(w.encoder, activations.encoder, *puf_squeeze(&x, 0), stream);
-    h = p->network.forward_train(w.network, *puf_unsqueeze(&h, 0, B, TT), state, terminals, activations.network, stream);
+    h = p->network.forward_train(w.network, *puf_unsqueeze(&h, 0, B, TT),
+        state, terminals, active, activations.network, stream);
     PrecisionTensor dec_out = p->decoder.forward(w.decoder, activations.decoder, *puf_squeeze(&h, 0), stream);
     return *puf_unsqueeze(&dec_out, 0, B, TT);
 }
@@ -1025,7 +1241,8 @@ void policy_weights_free(Policy* p, PolicyWeights* w) {
 // has no heap state so this returns by value; callers store it wherever.
 Policy build_policy(const char* env_name, int input_size, int hidden_size,
                            int num_layers, int decoder_output_size, int act_n,
-                           bool is_continuous, int horizon) {
+                           bool is_continuous, bool use_bias, bool turn_based,
+                           int horizon) {
     Encoder encoder = {
         .forward = encoder_forward,
         .backward = encoder_backward,
@@ -1037,6 +1254,7 @@ Policy build_policy(const char* env_name, int input_size, int hidden_size,
         .free_weights = encoder_free_weights,
         .free_activations = encoder_free_activations,
         .in_dim = input_size, .out_dim = hidden_size,
+        .use_bias = use_bias,
         .activation_size = sizeof(EncoderActivations),
     };
     create_custom_encoder(env_name, &encoder);
@@ -1051,6 +1269,7 @@ Policy build_policy(const char* env_name, int input_size, int hidden_size,
         .free_weights = decoder_free_weights,
         .free_activations = decoder_free_activations,
         .hidden_dim = hidden_size, .output_dim = decoder_output_size, .continuous = is_continuous,
+        .use_bias = use_bias,
     };
     Network network = {
         .forward = mingru_forward,
@@ -1064,6 +1283,7 @@ Policy build_policy(const char* env_name, int input_size, int hidden_size,
         .free_weights = mingru_free_weights,
         .free_activations = mingru_free_activations,
         .hidden = hidden_size, .num_layers = num_layers, .horizon = horizon,
+        .turn_based = turn_based,
     };
     return Policy{
         .encoder = encoder, .decoder = decoder, .network = network,
@@ -1306,6 +1526,7 @@ struct TrainGraph {
     PrecisionTensor mb_actions;     // (B, T, num_atns)
     PrecisionTensor mb_logprobs;    // (B, T)
     PrecisionTensor mb_terminals;   // (B, T), resets recurrent state before timestep t
+    PrecisionTensor mb_importance;  // (B, T), active-turn mask for turn-based policies
     PrecisionTensor mb_advantages;  // ...
     PrecisionTensor mb_values;
     PrecisionTensor mb_returns;
@@ -1323,6 +1544,7 @@ void register_train_buffers(TrainGraph& bufs, Allocator* alloc, int B, int T, in
         .mb_actions =       {.shape = {B, T, num_atns}},
         .mb_logprobs =      {.shape = {B, T}},
         .mb_terminals =     {.shape = {B, T}},
+        .mb_importance =    {.shape = {B, T}},
         .mb_advantages =    {.shape = {B, T}},
         .mb_values =        {.shape = {B, T}},
         .mb_returns =       {.shape = {B, T}},
@@ -1336,6 +1558,7 @@ void register_train_buffers(TrainGraph& bufs, Allocator* alloc, int B, int T, in
     alloc_register(alloc, &bufs.mb_actions);
     alloc_register(alloc, &bufs.mb_logprobs);
     alloc_register(alloc, &bufs.mb_terminals);
+    alloc_register(alloc, &bufs.mb_importance);
     alloc_register(alloc, &bufs.mb_advantages);
     alloc_register(alloc, &bufs.mb_prio);
     alloc_register(alloc, &bufs.mb_values);
@@ -1580,6 +1803,7 @@ struct PPOKernelArgs {
     const float* adv_var;
     const int* act_sizes;
     const precision_t* action_mask; // (N, T, A_total) or nullptr
+    const precision_t* active;      // (N, T) or nullptr
     int mask_stride_n, mask_stride_t;
     int num_atns;
     float clip_coef, vf_clip_coef, vf_coef, ent_coef;
@@ -1699,6 +1923,8 @@ __global__ void ppo_loss_compute(
     int n = idx / a.T_seq;
     int t = idx % a.T_seq;
     int nt = n * a.T_seq + t;
+    float sample_weight = (a.active == nullptr || to_float(a.active[nt]) != 0.0f)
+        ? inv_NT : 0.0f;
 
     int logits_base = n * a.logits_stride_n + t * a.logits_stride_t;
     int values_idx = n * a.values_stride_n + t * a.values_stride_t;
@@ -1718,7 +1944,7 @@ __global__ void ppo_loss_compute(
     float adv_normalized = (adv - float(a.adv_mean[0])) / (adv_std + 1e-8f);
 
     // grad_loss is always 1.0 (set in post_create, never changes)
-    float dL = inv_NT;
+    float dL = sample_weight;
     float d_pg_loss = dL;
     float d_entropy_term = dL * (-a.ent_coef);
 
@@ -1836,14 +2062,15 @@ __global__ void ppo_loss_compute(
     }
 
     // Forward: loss partials
-    float thread_loss = (pg_loss + a.vf_coef * v_loss - a.ent_coef * total_entropy) * inv_NT;
-    block_losses[LOSS_PG][tid] = pg_loss * inv_NT;
-    block_losses[LOSS_VF][tid] = v_loss * inv_NT;
-    block_losses[LOSS_ENT][tid] = total_entropy * inv_NT;
+    float thread_loss = (pg_loss + a.vf_coef * v_loss - a.ent_coef * total_entropy) * sample_weight;
+    block_losses[LOSS_PG][tid] = pg_loss * sample_weight;
+    block_losses[LOSS_VF][tid] = v_loss * sample_weight;
+    block_losses[LOSS_ENT][tid] = total_entropy * sample_weight;
     block_losses[LOSS_TOTAL][tid] = thread_loss;
-    block_losses[LOSS_OLD_APPROX_KL][tid] = (-logratio) * inv_NT;
-    block_losses[LOSS_APPROX_KL][tid] = ((ratio - 1.0f) - logratio) * inv_NT;
-    block_losses[LOSS_CLIPFRAC][tid] = (fabsf(ratio - 1.0f) > a.clip_coef ? 1.0f : 0.0f) * inv_NT;
+    block_losses[LOSS_OLD_APPROX_KL][tid] = (-logratio) * sample_weight;
+    block_losses[LOSS_APPROX_KL][tid] = ((ratio - 1.0f) - logratio) * sample_weight;
+    block_losses[LOSS_CLIPFRAC][tid] =
+        (fabsf(ratio - 1.0f) > a.clip_coef ? 1.0f : 0.0f) * sample_weight;
     } // end if (idx < total_elements)
 
 // Deterministic aggregation
@@ -1944,7 +2171,7 @@ void ppo_loss_fwd_bwd(
         TrainGraph& graph,
         IntTensor& act_sizes, FloatTensor& losses_acc,
         float clip_coef, float vf_clip_coef, float vf_coef, float ent_coef,
-        PPOBuffersPuf& bufs, bool is_continuous,
+        PPOBuffersPuf& bufs, bool is_continuous, bool turn_based,
         cudaStream_t stream) {
     int N = dec_out.shape[0], T = dec_out.shape[1], fused_cols = dec_out.shape[2];
     int A_total = fused_cols - 1;  // last column is value
@@ -1996,6 +2223,7 @@ void ppo_loss_fwd_bwd(
         .adv_var = adv_var_ptr,
         .act_sizes = act_sizes.data,
         .action_mask = has_mask ? graph.mb_action_mask.data : nullptr,
+        .active = turn_based ? graph.mb_importance.data : nullptr,
         .mask_stride_n = has_mask ? T * A_total : 0,
         .mask_stride_t = has_mask ? A_total : 0,
         .num_atns = (int)numel(act_sizes.shape),
@@ -2149,6 +2377,61 @@ void puff_advantage_cuda(PrecisionTensor& values, PrecisionTensor& rewards,
     kernel<<<blocks, 256, 0, stream>>>(
         values.data, rewards.data, dones.data, importance.data,
         advantages.data, gamma, lambda, rho_clip, c_clip, num_steps, horizon);
+}
+
+// GAE over actor decisions rather than wall-clock ticks. Rewards produced while
+// a slot waits (including a terminal loss caused by the opponent) are folded
+// into its preceding active action, with one discount per policy decision.
+__global__ void puff_advantage_turn_based(
+        const precision_t* values, const precision_t* rewards,
+        const precision_t* dones, const precision_t* active,
+        precision_t* advantages, float gamma, float lambda,
+        int num_rows, int horizon) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= num_rows) return;
+    int base = row * horizon;
+
+    for (int t = 0; t < horizon; t++) {
+        advantages[base + t] = from_float(0.0f);
+    }
+
+    for (int t = horizon - 2; t >= 0; t--) {
+        if (to_float(active[base + t]) == 0.0f) continue;
+
+        float reward = 0.0f;
+        bool done = false;
+        int next = t + 1;
+        for (; next < horizon; next++) {
+            reward += to_float(rewards[base + next]);
+            if (to_float(dones[base + next]) != 0.0f) {
+                done = true;
+                break;
+            }
+            if (to_float(active[base + next]) != 0.0f) break;
+        }
+
+        float next_value = 0.0f;
+        float next_advantage = 0.0f;
+        if (!done && next < horizon &&
+                to_float(active[base + next]) != 0.0f) {
+            next_value = to_float(values[base + next]);
+            next_advantage = to_float(advantages[base + next]);
+        }
+        float delta = reward + (done ? 0.0f : gamma * next_value) -
+            to_float(values[base + t]);
+        advantages[base + t] = from_float(
+            delta + (done ? 0.0f : gamma * lambda * next_advantage));
+    }
+}
+
+void puff_advantage_turn_based_cuda(PrecisionTensor& values,
+        PrecisionTensor& rewards, PrecisionTensor& dones,
+        PrecisionTensor& active, PrecisionTensor& advantages,
+        float gamma, float lambda, cudaStream_t stream) {
+    int rows = values.shape[0];
+    puff_advantage_turn_based<<<grid_size(rows), 256, 0, stream>>>(
+        values.data, rewards.data, dones.data, active.data, advantages.data,
+        gamma, lambda, rows, values.shape[1]);
 }
 
 #endif // PUFFERLIB_ALGO_CU

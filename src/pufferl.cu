@@ -269,6 +269,8 @@ typedef struct {
     int num_buffers;
     int hidden_size;
     int num_layers;
+    int use_bias;
+    int turn_based;
     float lr;
     float min_lr_ratio;
     bool anneal_lr;
@@ -308,6 +310,8 @@ HypersT puf_config_to_hypers(Ini* ini, int rank, int world_size, int gpu_id) {
     h.horizon = puf_ini_get(ini, "train", "horizon");
     h.hidden_size = puf_ini_get(ini, "policy", "hidden_size");
     h.num_layers = puf_ini_get(ini, "policy", "num_layers");
+    h.use_bias = puf_ini_get(ini, "policy", "use_bias");
+    h.turn_based = puf_ini_get(ini, "policy", "turn_based");
     h.lr = puf_ini_get(ini, "train", "learning_rate");
     h.min_lr_ratio = puf_ini_get(ini, "train", "min_lr_ratio");
     h.anneal_lr = puf_ini_get(ini, "train", "anneal_lr");
@@ -364,6 +368,8 @@ int puf_config_train_valid(Ini* ini, char* err, size_t err_size) {
     int horizon = puf_ini_get(ini, "train", "horizon");
     int agents = puf_ini_get(ini, "vec", "total_agents");
     int gpus = puf_ini_get(ini, "train", "gpus");
+    int turn_based = puf_ini_get(ini, "policy", "turn_based");
+    int action_mask_size = puf_ini_get(ini, "vec", "action_mask_size");
     if (gpus < 1) {
         return puf_err(err, err_size, "train.gpus must be >= 1");
     }
@@ -372,6 +378,10 @@ int puf_config_train_valid(Ini* ini, char* err, size_t err_size) {
     }
     if (mb > (long)horizon * agents) {
         return puf_err(err, err_size, "train.minibatch_size > train.horizon * vec.total_agents");
+    }
+    if (turn_based && action_mask_size < 1) {
+        return puf_err(err, err_size,
+            "policy.turn_based requires vec.action_mask_size >= 1");
     }
     return 1;
 }
@@ -817,6 +827,20 @@ PrecisionTensor puf_slice(PrecisionTensor& p, int t, int start, int count) {
     }
 }
 
+__global__ void active_from_action_mask(precision_t* active,
+        const precision_t* action_mask, int rows, int mask_size) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+    bool any = false;
+    for (int a = 0; a < mask_size; a++) {
+        if (to_float(action_mask[(long)row * mask_size + a]) != 0.0f) {
+            any = true;
+            break;
+        }
+    }
+    active[row] = from_float(any ? 1.0f : 0.0f);
+}
+
 void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
     HypersT& hypers = pufferl->hypers;
     int graph_slot = hypers.async ? pufferl->rollout_write_slot : 0;
@@ -866,6 +890,7 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
 
     // Copy action mask from env into rollout buffer (if env opted in)
     PrecisionTensor mask_slice = {};
+    PrecisionTensor active_slice = {};
     int mask_stride = 0;
     if (rollouts.action_mask.data != nullptr) {
         int mask_size = rollouts.action_mask.shape[2];
@@ -876,6 +901,11 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
             mask_slice.data,
             env.action_mask.data + (long)start * mask_size,
             mask_n);
+        if (hypers.turn_based) {
+            active_slice = puf_slice(rollouts.importance, t, start, block_size);
+            active_from_action_mask<<<grid_size(block_size), BLOCK_SIZE, 0, stream>>>(
+                active_slice.data, mask_slice.data, block_size, mask_size);
+        }
     }
 
     // Per-bank forward: layout[b]..layout[b+1) within each buffer chunk.
@@ -910,10 +940,14 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
         PrecisionTensor lp_b    = puf_slice(rollouts.logprobs,     t, sub_start, bank_size);
         PrecisionTensor val_b   = puf_slice(rollouts.values,       t, sub_start, bank_size);
         PrecisionTensor mask_b  = {};
+        PrecisionTensor active_b = {};
         int mask_stride_b = 0;
         if (rollouts.action_mask.data != nullptr) {
             mask_b = puf_slice(rollouts.action_mask, t, sub_start, bank_size);
             mask_stride_b = mask_stride;
+        }
+        if (hypers.turn_based) {
+            active_b = puf_slice(rollouts.importance, t, sub_start, bank_size);
         }
 
         int state_start = (b == 0) ? bank_off : 0;
@@ -926,7 +960,8 @@ void pufferl_forward(PuffeRL* pufferl, int buf, int t, cudaStream_t stream) {
                 rollouts.initial_states, *s_bank, state_start, sub_start, bank_size);
         }
 
-        PrecisionTensor dec_puf = policy_forward(p_bank, *w_bank, *a_bank, obs_b, *s_bank, stream);
+        PrecisionTensor dec_puf = policy_forward(
+            p_bank, *w_bank, *a_bank, obs_b, *s_bank, active_b, stream);
 
         PrecisionTensor p_logstd = {};
         DecoderWeights* dw = (DecoderWeights*)w_bank->decoder;
@@ -1527,6 +1562,8 @@ __global__ void select_copy(RolloutBuf rollouts, TrainGraph graph,
         / rollouts.logprobs.shape[0]) * sizeof(precision_t);
     int term_row_bytes = (numel(rollouts.terminals.shape)
         / rollouts.terminals.shape[0]) * sizeof(precision_t);
+    int importance_row_bytes = (numel(rollouts.importance.shape)
+        / rollouts.importance.shape[0]) * sizeof(precision_t);
     int horizon = rollouts.values.shape[1];
 
     switch (ch) {
@@ -1557,6 +1594,10 @@ __global__ void select_copy(RolloutBuf rollouts, TrainGraph graph,
             (char*)graph.mb_terminals.data, src_row, mb, term_row_bytes);
         break;
     case 6:
+        copy_bytes((const char*)rollouts.importance.data,
+            (char*)graph.mb_importance.data, src_row, mb, importance_row_bytes);
+        break;
+    case 7:
         if (graph.mb_action_mask.data != nullptr) {
             int mask_row_bytes = (numel(rollouts.action_mask.shape)
                 / rollouts.action_mask.shape[0]) * sizeof(precision_t);
@@ -1566,7 +1607,7 @@ __global__ void select_copy(RolloutBuf rollouts, TrainGraph graph,
             copy_initial_state(rollouts.initial_states, graph.mb_state, src_row, mb);
         }
         break;
-    case 7:
+    case 8:
         if (rollouts.initial_states.data != nullptr) {
             copy_initial_state(rollouts.initial_states, graph.mb_state, src_row, mb);
         }
@@ -1661,6 +1702,7 @@ void train_impl(PuffeRL& pufferl, RolloutBuf* src_arg) {
     puf_transpose_field(&rollouts.logprobs, &src.logprobs, T, B, 1, train_stream);
     puf_transpose_field(&rollouts.rewards, &src.rewards, T, B, 1, train_stream);
     puf_transpose_field(&rollouts.terminals, &src.terminals, T, B, 1, train_stream);
+    puf_transpose_field(&rollouts.importance, &src.importance, T, B, 1, train_stream);
     puf_transpose_field(&rollouts.ratio, &src.ratio, T, B, 1, train_stream);
     puf_transpose_field(&rollouts.values, &src.values, T, B, 1, train_stream);
     if (src.action_mask.data != nullptr) {
@@ -1715,9 +1757,15 @@ void train_impl(PuffeRL& pufferl, RolloutBuf* src_arg) {
         puf_zero(&advantages_puf, train_stream);
 
         profile_begin("compute_advantage", hypers.profile);
-        puff_advantage_cuda(rollouts.values, rollouts.rewards, rollouts.terminals,
-            rollouts.ratio, advantages_puf, hypers.gamma, hypers.gae_lambda,
-            hypers.vtrace_rho_clip, hypers.vtrace_c_clip, train_stream);
+        if (hypers.turn_based) {
+            puff_advantage_turn_based_cuda(rollouts.values, rollouts.rewards,
+                rollouts.terminals, rollouts.importance, advantages_puf,
+                hypers.gamma, hypers.gae_lambda, train_stream);
+        } else {
+            puff_advantage_cuda(rollouts.values, rollouts.rewards, rollouts.terminals,
+                rollouts.ratio, advantages_puf, hypers.gamma, hypers.gae_lambda,
+                hypers.vtrace_rho_clip, hypers.vtrace_c_clip, train_stream);
+        }
         if (pufferl.num_frozen_banks > 0) {
             int apb = hypers.total_agents / hypers.num_buffers;
             int rows = advantages_puf.shape[0];
@@ -1745,7 +1793,7 @@ void train_impl(PuffeRL& pufferl, RolloutBuf* src_arg) {
             sel_src.values = rollouts.values;
             sel_src.initial_states = hypers.reset_state ? PrecisionTensor() : src.initial_states;
             int mb_segs = pufferl.prio_bufs.idx.shape[0];
-            int channels = 6;
+            int channels = 7;
             if (graph.mb_action_mask.data != nullptr) channels++;
             if (!hypers.reset_state) channels++;
             select_copy<<<dim3(mb_segs, channels), SELECT_COPY_THREADS, 0, train_stream>>>(
@@ -1769,8 +1817,10 @@ void train_impl(PuffeRL& pufferl, RolloutBuf* src_arg) {
             PrecisionTensor obs_puf = graph.mb_obs;
             PrecisionTensor state_puf = graph.mb_state;
             PrecisionTensor terminals_puf = graph.mb_terminals;
+            PrecisionTensor active_puf = graph.mb_importance;
             PrecisionTensor dec_puf = policy_forward_train(&pufferl.policy, pufferl.weights,
-                pufferl.train_activations, obs_puf, state_puf, terminals_puf, stream);
+                pufferl.train_activations, obs_puf, state_puf, terminals_puf,
+                active_puf, stream);
             DecoderWeights* dw_train = (DecoderWeights*)pufferl.weights.decoder;
             PrecisionTensor p_logstd;
             if (dw_train->continuous) {
@@ -1780,7 +1830,8 @@ void train_impl(PuffeRL& pufferl, RolloutBuf* src_arg) {
             ppo_loss_fwd_bwd(dec_puf, p_logstd, graph,
                 pufferl.act_sizes_puf, pufferl.losses_puf,
                 hypers.clip_coef, hypers.vf_clip_coef, hypers.vf_coef, current_ent_coef,
-                pufferl.ppo_bufs_puf, pufferl.is_continuous, stream);
+                pufferl.ppo_bufs_puf, pufferl.is_continuous,
+                hypers.turn_based, stream);
 
             FloatTensor grad_logits_puf = pufferl.ppo_bufs_puf.grad_logits;
             FloatTensor grad_logstd_puf = pufferl.is_continuous ? pufferl.ppo_bufs_puf.grad_logstd : FloatTensor();
@@ -1862,7 +1913,9 @@ void weight_bank_create_for_pufferl(WeightBank* bank, PuffeRL* pufferl,
     for (int i = 0; i < num_action_heads; i++) act_n += act_sizes[i];
     int decoder_output_size = pufferl->is_continuous ? num_action_heads : act_n;
     bank->policy = build_policy(pufferl->env_name, input_size, hidden_size,
-        num_layers, decoder_output_size, act_n, pufferl->is_continuous, pufferl->hypers.horizon);
+        num_layers, decoder_output_size, act_n, pufferl->is_continuous,
+        pufferl->hypers.use_bias, pufferl->hypers.turn_based,
+        pufferl->hypers.horizon);
     bank->hidden_size = hidden_size;
     bank->num_layers = num_layers;
 
@@ -2209,7 +2262,8 @@ PuffeRL* create_pufferl_impl(HypersT& hypers, Dict* vec_kwargs,
     int num_buffers = hypers.num_buffers;
 
     pufferl->policy = build_policy(pufferl->env_name, input_size, hidden_size,
-        num_layers, decoder_output_size, act_n, is_continuous, hypers.horizon);
+        num_layers, decoder_output_size, act_n, is_continuous,
+        hypers.use_bias, hypers.turn_based, hypers.horizon);
 
     if (hypers.async) {
         cudaStreamCreateWithFlags(&pufferl->train_stream, cudaStreamNonBlocking);
@@ -3321,6 +3375,7 @@ typedef struct {
     char pending_path[SELFPLAY_PATH_MAX];
     long opp_started_step;
     int num_envs;
+    long swaps;
 } SelfplayBank;
 
 typedef struct {
@@ -3435,6 +3490,7 @@ void selfplay_step(Selfplay* sp, PuffeRL* p, Dict* log) {
                 selfplay_clear_aligned(p, tag);
                 bank->pending_path[0] = 0;
                 bank->opp_started_step = current_step;
+                bank->swaps++;
             }
         } else if (timed_out) {
             const char* path = selfplay_sample(sp);
@@ -3444,6 +3500,14 @@ void selfplay_step(Selfplay* sp, PuffeRL* p, Dict* log) {
     }
     dict_set(log, "pool/size", sp->pool_size);
     dict_set(log, "pool/num_banks", sp->num_banks);
+    long swaps = 0;
+    int pending_banks = 0;
+    for (int b = 0; b < sp->num_banks; b++) {
+        swaps += sp->banks[b].swaps;
+        pending_banks += sp->banks[b].pending_path[0] != 0;
+    }
+    dict_set(log, "pool/swaps", swaps);
+    dict_set(log, "pool/pending_banks", pending_banks);
 }
 
 #define LEAGUE_ID_MAX 128
@@ -4404,6 +4468,7 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
     }
 
     PuffeRL* pufferl = create_trainer(ini, ctx);
+    puf_load_primary_if_configured(pufferl, ini);
     char initial_checkpoint[4096] = {0};
     if (use_selfplay) {
         train_checkpoint_path(pufferl, checkpoint_dir,
@@ -4664,4 +4729,3 @@ int main(int argc, char** argv) {
 }
 
 #endif
-

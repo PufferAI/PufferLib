@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="EN-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+
+    <title>Guerrilla Checkers</title>
+
+    <meta name="title" content="Guerrilla Checkers">
+    <meta name="description" content="Guerrilla Checkers HTML5 game">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+    <style>
+        html, body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: black;
+            touch-action: none;
+        }
+
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        canvas.emscripten {
+            display: block;
+            border: 0;
+            background: black;
+            max-width: 100vw;
+            max-height: 100dvh;
+        }
+
+        #output {
+            display: none;
+        }
+    </style>
+    <script type='text/javascript' src="https://cdn.jsdelivr.net/gh/eligrey/FileSaver.js/dist/FileSaver.min.js"> </script>
+    <script type='text/javascript'>
+        function saveFileFromMEMFSToDisk(memoryFSname, localFSname)     // This can be called by C/C++ code
+        {
+            var isSafari = false; // Not supported, navigator.userAgent access is being restricted
+            //var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+            var data = FS.readFile(memoryFSname);
+            var blob;
+
+            if (isSafari) blob = new Blob([data.buffer], { type: "application/octet-stream" });
+            else blob = new Blob([data.buffer], { type: "application/octet-binary" });
+
+            // NOTE: SaveAsDialog is a browser setting. For example, in Google Chrome,
+            // in Settings/Advanced/Downloads section you have a setting:
+            // 'Ask where to save each file before downloading' - which you can set true/false.
+            // If you enable this setting it would always ask you and bring the SaveAsDialog
+            saveAs(blob, localFSname);
+
+            // Alternative implementation to avoid FileSaver.js
+            //const link = document.createElement("a");
+            //link.href = URL.createObjectURL(blob);
+            //link.download = localFSname;
+            //link.click();
+        }
+
+        function fitCanvasToViewport() {
+            var canvas = document.getElementById('canvas');
+            if (!canvas || !canvas.width || !canvas.height) {
+                window.requestAnimationFrame(fitCanvasToViewport);
+                return;
+            }
+
+            var ratio = canvas.width / canvas.height;
+            var vw = window.innerWidth;
+            var vh = window.innerHeight || document.documentElement.clientHeight;
+
+            var width = vw;
+            var height = width / ratio;
+            if (height > vh) {
+                height = vh;
+                width = height * ratio;
+            }
+
+            canvas.style.width = Math.floor(width) + 'px';
+            canvas.style.height = Math.floor(height) + 'px';
+        }
+
+        window.addEventListener('resize', fitCanvasToViewport);
+        window.addEventListener('orientationchange', fitCanvasToViewport);
+    </script>
+    </head>
+    <body>
+        <canvas class=emscripten id=canvas oncontextmenu=event.preventDefault() tabindex=-1></canvas>
+        <p id="output"></p>
+        <script>
+            var Module = {
+                postRun: [fitCanvasToViewport],
+                print: (function() {
+                    var element = document.getElementById('output');
+                    if (element) element.value = ''; // clear browser cache
+                    return function(text) {
+                        if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+                        console.log(text);
+                        if (element) {
+                          element.value += text + "\n";
+                          element.scrollTop = element.scrollHeight; // focus on bottom
+                        }
+                    };
+                })(),
+                canvas: (function() {
+                    var canvas = document.getElementById('canvas');
+                    return canvas;
+                })()
+            };
+        </script>
+        {{{ SCRIPT }}}
+    </body>
+</html>
