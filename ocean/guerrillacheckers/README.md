@@ -57,12 +57,3 @@ side-specific entries:
 | Puffer 40 | 1636 | 1879 |
 | MCTS 2K | 1834 | 1969 |
 | MCTS 10K | 2200 | 2108 |
-
-## Web client
-
-Use the checked-in responsive shell when building the web client:
-
-```sh
-WEB_SHELL_FILE=resources/guerrillacheckers/minshell.html \
-  ./build.sh guerrillacheckers --web
-```
