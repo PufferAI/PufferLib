@@ -23,6 +23,7 @@
 #define GC_MAX_GUERRILLAS 66
 #define GC_ACTIONS 256
 #define GC_G_ACTIONS (GC_G_CELLS * 4)
+#define GC_PASS_ACTION (GC_ACTIONS - 1)
 #define GC_OBS_SIZE (GC_G_CELLS + GC_COIN_CELLS + 7)
 #define GC_INVALID_ACTION_REWARD -1.0f
 #define GC_MAX_BANKS 8
@@ -488,13 +489,19 @@ static int gc_enumerate_legal(GuerrillaCheckers* env, int* out) {
 }
 
 static int gc_rebuild_action_mask(GuerrillaCheckers* env) {
+    int actor_slot = gc_actor_slot(env);
     for (int slot = 0; slot < env->num_agents; slot++) {
         unsigned char* mask = env->agents[slot].action_mask;
         if (mask == NULL) continue;
         memset(mask, 0, GC_ACTIONS * sizeof(unsigned char));
-        // In turn-based selfplay an all-zero mask marks the waiting slot. The
-        // trainer freezes its recurrent state and excludes the no-op timestep
-        // from PPO; only the actor slot receives legal actions below.
+        // Match the standard Ocean turn-based convention: the waiting slot has
+        // one deterministic pass action. c_step reads only the actor slot, so
+        // this action is ignored while keeping PPO and recurrent updates valid.
+        // Action 255 is otherwise impossible: it is the off-board down-right
+        // move from the bottom-right coin square.
+        if (env->selfplay && slot != actor_slot) {
+            mask[GC_PASS_ACTION] = 1;
+        }
     }
 
     int legal[GC_ACTIONS];

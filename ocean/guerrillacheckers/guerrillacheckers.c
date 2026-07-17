@@ -61,6 +61,7 @@ typedef struct {
     Affine* encoder;
     Affine* decoder;
     MinGRU* gru;
+    int full_turn_state;
 } GcDemoNet;
 
 enum {
@@ -301,12 +302,7 @@ static int gc_demo_net_init(GcDemoNet* net, const char* path) {
     net->weights = load_weights(path);
     if (net->weights == NULL) return 0;
     int num_weights = net->weights->size - 7;
-    int biased_native_weights =
-        GC_DEMO_NET_HIDDEN * GC_OBS_SIZE + GC_DEMO_NET_HIDDEN +
-        (GC_ACTIONS + 1) * GC_DEMO_NET_HIDDEN +
-        ((GC_ACTIONS + 1 + 7) & ~7) +
-        GC_DEMO_NET_LAYERS * 3 * GC_DEMO_NET_HIDDEN * GC_DEMO_NET_HIDDEN;
-    int bias_free_native_weights =
+    int native_weights =
         GC_DEMO_NET_HIDDEN * GC_OBS_SIZE +
         (GC_ACTIONS + 1) * GC_DEMO_NET_HIDDEN +
         GC_DEMO_NET_LAYERS * 3 * GC_DEMO_NET_HIDDEN * GC_DEMO_NET_HIDDEN;
@@ -314,24 +310,22 @@ static int gc_demo_net_init(GcDemoNet* net, const char* path) {
         GC_DEMO_NET_HIDDEN * GC_OBS_SIZE + GC_DEMO_NET_HIDDEN +
         GC_ACTIONS * GC_DEMO_NET_HIDDEN + GC_ACTIONS +
         GC_DEMO_NET_LAYERS * 3 * GC_DEMO_NET_HIDDEN * GC_DEMO_NET_HIDDEN;
-    if (num_weights != legacy_weights &&
-            num_weights != biased_native_weights &&
-            num_weights != bias_free_native_weights) {
-        fprintf(stderr, "error: unsupported Puffer NN checkpoint size: %d floats\n",
+    if (num_weights != legacy_weights && num_weights != native_weights) {
+        fprintf(stderr, "error: unsupported Puffer checkpoint size: %d floats\n",
             num_weights);
         free(net->weights);
         net->weights = NULL;
         return 0;
     }
-    int has_bias = num_weights != bias_free_native_weights;
     int is_native = num_weights != legacy_weights;
+    // Puffer 40 used actor-only recurrent updates. Standard 5c policies process
+    // both acting and pass timesteps.
+    net->full_turn_state = is_native;
     net->encoder = make_affine(
-        net->weights, has_bias, GC_OBS_SIZE, GC_DEMO_NET_HIDDEN);
+        net->weights, !is_native, GC_OBS_SIZE, GC_DEMO_NET_HIDDEN);
     int decoder_outputs = is_native ? GC_ACTIONS + 1 : GC_ACTIONS;
     net->decoder = make_affine(
-        net->weights, has_bias, GC_DEMO_NET_HIDDEN, decoder_outputs);
-    // Biased native checkpoints pad the fused actor/value bias to an
-    // eight-float boundary. Other supported layouts are already aligned.
+        net->weights, !is_native, GC_DEMO_NET_HIDDEN, decoder_outputs);
     net->weights->idx = (net->weights->idx + 7) & ~7;
     net->gru = make_mingru(net->weights, 1, GC_DEMO_NET_HIDDEN, GC_DEMO_NET_LAYERS);
     return 1;
@@ -349,12 +343,11 @@ static void gc_demo_net_reset(void) {
     }
 }
 
-static int gc_demo_net_action(GuerrillaCheckers* env, int model) {
-    GcDemoNet* net = &gc_demo_nets[model][env->player_to_move];
+static float* gc_demo_net_observe(GuerrillaCheckers* env, int model, int side) {
+    GcDemoNet* net = &gc_demo_nets[model][side];
     gc_compute_observations(env);
-    int slot = gc_actor_slot(env);
+    int slot = env->selfplay ? env->slot_for_side[side] : 0;
     uint8_t* observations = (uint8_t*)env->agents[slot].observations;
-    unsigned char* action_mask = env->agents[slot].action_mask;
     float obs[GC_OBS_SIZE];
     for (int i = 0; i < GC_OBS_SIZE; i++) {
         obs[i] = (float)observations[i];
@@ -362,7 +355,14 @@ static int gc_demo_net_action(GuerrillaCheckers* env, int model) {
     affine(net->encoder, obs);
     mingru(net->gru, net->encoder->output);
     affine(net->decoder, net->gru->output);
-    float* logits = net->decoder->output;
+    return net->decoder->output;
+}
+
+static int gc_demo_net_action(GuerrillaCheckers* env, int model) {
+    int side = env->player_to_move;
+    int slot = gc_actor_slot(env);
+    unsigned char* action_mask = env->agents[slot].action_mask;
+    float* logits = gc_demo_net_observe(env, model, side);
 
     // Sample from the softmax over legal actions, matching the masked
     // sampling the policy was trained with.
@@ -706,7 +706,36 @@ static int gc_demo_level_action(GuerrillaCheckers* env, int level_index) {
     return gc_bot_action(env);
 }
 
+static int gc_demo_level_model(int level_index) {
+    const GcDemoLevel* level = &gc_demo_levels[level_index];
+    if (level->opponent == GC_DEMO_NET_BOT &&
+            gc_demo_net_loaded[GC_DEMO_NET_ORIGINAL]) {
+        return GC_DEMO_NET_ORIGINAL;
+    }
+    if (level->opponent == GC_DEMO_CANDIDATE_BOT &&
+            gc_demo_net_loaded[GC_DEMO_NET_CANDIDATE]) {
+        return GC_DEMO_NET_CANDIDATE;
+    }
+    return -1;
+}
+
+static int gc_demo_observe_waiting(GuerrillaCheckers* env, int level_index) {
+    int model = gc_demo_level_model(level_index);
+    if (model < 0) return 0;
+    int waiting_side = env->player_to_move == GC_GUERRILLA ? GC_COIN : GC_GUERRILLA;
+    GcDemoNet* net = &gc_demo_nets[model][waiting_side];
+    if (net->full_turn_state) {
+        (void)gc_demo_net_observe(env, model, waiting_side);
+        return 1;
+    }
+    return 0;
+}
+
 static int gc_demo_bot_action(GuerrillaCheckers* env, GcDemoUi* ui) {
+    int waiting_side = env->player_to_move == GC_GUERRILLA ? GC_COIN : GC_GUERRILLA;
+    if (ui->ctrl[waiting_side] == GC_CTRL_AI) {
+        gc_demo_observe_waiting(env, ui->ai_level[waiting_side]);
+    }
     return gc_demo_level_action(env, ui->ai_level[env->player_to_move]);
 }
 
@@ -824,6 +853,12 @@ static void demo(void) {
         }
 
         if (action != GC_DEMO_NOOP) {
+            int waiting_side = env.player_to_move == GC_GUERRILLA ?
+                GC_COIN : GC_GUERRILLA;
+            if (ui.ctrl[env.player_to_move] == GC_CTRL_HUMAN &&
+                    ui.ctrl[waiting_side] == GC_CTRL_AI) {
+                gc_demo_observe_waiting(&env, ui.ai_level[waiting_side]);
+            }
             gc_demo_apply(&env, &ui, action);
             ui.selected = GC_DEMO_NOOP;
             ui.ai_wait = GC_DEMO_AI_WAIT;
@@ -979,6 +1014,12 @@ static int gc_cli_tournament(int games, const char* candidate_path,
                 while (!env.game_over && plies++ < 600) {
                     int guerrilla_to_move = env.player_to_move == GC_GUERRILLA;
                     int mover = guerrilla_to_move ? g_entity : c_entity;
+                    int waiter = guerrilla_to_move ? c_entity : g_entity;
+                    double wait_t0 = gc_cli_now();
+                    if (gc_demo_observe_waiting(&env,
+                            guerrilla_to_move ? c_bot : g_bot)) {
+                        stats[waiter].seconds += gc_cli_now() - wait_t0;
+                    }
                     double t0 = gc_cli_now();
                     int action = gc_demo_level_action(&env,
                         guerrilla_to_move ? g_bot : c_bot);
