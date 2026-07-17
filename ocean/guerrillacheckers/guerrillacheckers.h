@@ -531,13 +531,6 @@ static int gc_prepare_turn(GuerrillaCheckers* env) {
     return !env->game_over;
 }
 
-static int gc_action_allowed_by_current_mask(GuerrillaCheckers* env, int action) {
-    if (action < 0 || action >= GC_ACTIONS) return 0;
-    unsigned char* mask = gc_actor_mask(env);
-    if (mask != NULL) return mask[action] != 0;
-    return gc_action_is_legal(env, action);
-}
-
 // Apply one legal action for the current player; returns the number of enemy
 // pieces captured. Shared by the learner and the built-in bot.
 static int gc_apply_action(GuerrillaCheckers* env, int action) {
@@ -556,19 +549,6 @@ static int gc_apply_action(GuerrillaCheckers* env, int action) {
     int dst = gc_coin_neighbor(src, action % 4);
     int captures = gc_move_coin(env, src, dst);
     return captures > 0 ? captures : 0;
-}
-
-static int gc_collect_legal(GuerrillaCheckers* env, int* out) {
-    int n = 0;
-    unsigned char* mask = gc_actor_mask(env);
-    if (mask != NULL) {
-        for (int action = 0; action < GC_ACTIONS; action++) {
-            if (mask[action]) out[n++] = action;
-        }
-        return n;
-    }
-
-    return gc_enumerate_legal(env, out);
 }
 
 static inline void gc_add_capture_candidates(int pos, int* candidates, int* n) {
@@ -665,7 +645,7 @@ static int gc_bot_action(GuerrillaCheckers* env) {
     if (env->opponent == GC_BOT_MCTS) return gc_mcts_action(env);
 
     int legal[GC_ACTIONS];
-    int n = gc_collect_legal(env, legal);
+    int n = gc_enumerate_legal(env, legal);
     assert(n > 0 &&
         "Guerrilla Checkers bot reached a non-terminal state with no legal moves");
     if (env->opponent != GC_BOT_GREEDY) {
@@ -686,7 +666,6 @@ static void gc_play_bot_turns(GuerrillaCheckers* env) {
 static void gc_compute_observations(GuerrillaCheckers* env) {
     for (int slot = 0; slot < env->num_agents; slot++) {
         uint8_t* observations = (uint8_t*)env->agents[slot].observations;
-        if (observations == NULL) continue;
         int idx = 0;
         for (int i = 0; i < GC_G_CELLS; i++) {
             observations[idx++] = env->guerrilla_cells[i] ? 1 : 0;
@@ -854,7 +833,7 @@ void puf_step(Env* env) {
     int action = (int)env->agents[actor_slot].actions[0];
     assert(env->legal_count > 0 &&
         "Guerrilla Checkers step reached a non-terminal state with no legal moves");
-    int legal = gc_action_allowed_by_current_mask(env, action);
+    int legal = gc_action_is_legal(env, action);
     env->tick++;
 
     int score_side = env->selfplay ? GC_NONE : env->agent_side;

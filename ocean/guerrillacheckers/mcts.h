@@ -1,7 +1,7 @@
 // MCTS (UCT) opponent for Guerrilla Checkers, ported from
 // nico/guerrillacheckers/src/mcts.nim. Included by guerrillacheckers.h AFTER the
 // GuerrillaCheckers struct and the game primitives it relies on are defined:
-// gc_rand, gc_collect_legal, gc_apply_action, gc_action_capture_score, and the
+// gc_rand, gc_enumerate_legal, gc_apply_action, gc_action_capture_score, and the
 // GC_* board/action constants. Not meant to be included standalone.
 //
 // Perfect-information single-tree UCT: wins are stored from the perspective of
@@ -21,10 +21,6 @@ enum {
 
 // UCB1 exploration constant from the reference engine (~sqrt(2)/2).
 #define GC_MCTS_DEFAULT_EXPLORATION 0.7f
-// Defensive bound on rollout length; the game terminates far sooner (the
-// Guerrilla places <=66 pieces, so exhaustion caps the number of turns).
-#define GC_MCTS_ROLLOUT_CAP 4096
-
 typedef struct GcMctsNode {
     int move;              // action leading to this node (-1 at the root)
     int parent;            // pool index of parent (-1 at the root)
@@ -42,7 +38,7 @@ typedef struct GcMctsNode {
 // does not call). Returns the number of legal actions.
 static int gc_mcts_legal(GuerrillaCheckers* s, int* out) {
     if (s->game_over) return 0;
-    int n = gc_collect_legal(s, out);
+    int n = gc_enumerate_legal(s, out);
     if (n == 0) {
         gc_apply_no_legal_loss(s, n);
     }
@@ -102,7 +98,7 @@ static void gc_mcts_init_node(GcMctsNode* n, int move, int parent, int sibling,
 
 static int gc_mcts_action(GuerrillaCheckers* env) {
     int root_legal[GC_ACTIONS];
-    int root_n = gc_collect_legal(env, root_legal);
+    int root_n = gc_enumerate_legal(env, root_legal);
     if (root_n <= 1) return root_n == 1 ? root_legal[0] : 0;  // nothing to search
 
     int itermax = env->mcts_iterations > 0 ? env->mcts_iterations : 1;
@@ -151,14 +147,12 @@ static int gc_mcts_action(GuerrillaCheckers* env) {
         }
 
         // Simulate: rollout to a terminal state (random or greedy playout).
-        int guard = 0;
-        while (!s.game_over && guard++ < GC_MCTS_ROLLOUT_CAP) {
+        while (!s.game_over) {
             int rollout[GC_ACTIONS];
             int rn = gc_mcts_legal(&s, rollout);
             if (rn == 0) break;  // game_over was set by gc_mcts_legal
             gc_apply_action(&s, gc_mcts_rollout_pick(env, &s, rollout, rn));
         }
-        if (!s.game_over) { s.game_over = 1; s.winner = GC_COIN; }  // cap safety net
 
         // Backpropagate the terminal result to the root.
         for (int bn = node; ; bn = pool[bn].parent) {

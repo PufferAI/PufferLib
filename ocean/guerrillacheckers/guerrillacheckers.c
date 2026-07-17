@@ -182,7 +182,7 @@ static int gc_demo_mouse_guerrilla_cell(GuerrillaCheckers* env, Vector2 mouse) {
 static int gc_demo_pos_has_legal_action(GuerrillaCheckers* env, int pos) {
     if (pos < 0) return 0;
     for (int dir = 0; dir < 4; dir++) {
-        if (gc_action_allowed_by_current_mask(env, pos * 4 + dir)) return 1;
+        if (gc_action_is_legal(env, pos * 4 + dir)) return 1;
     }
     return 0;
 }
@@ -215,7 +215,7 @@ static int gc_demo_human_action(GuerrillaCheckers* env, int* selected) {
         }
         if (*selected >= 0) {
             int action = gc_demo_guerrilla_action(*selected, pos);
-            if (gc_action_allowed_by_current_mask(env, action)) return action;
+            if (gc_action_is_legal(env, action)) return action;
         }
         if (gc_demo_pos_has_legal_action(env, pos)) *selected = pos;
         return GC_DEMO_NOOP;
@@ -230,7 +230,7 @@ static int gc_demo_human_action(GuerrillaCheckers* env, int* selected) {
     }
     if (*selected >= 0) {
         int action = gc_demo_coin_action(*selected, pos);
-        if (gc_action_allowed_by_current_mask(env, action)) return action;
+        if (gc_action_is_legal(env, action)) return action;
     }
     if (gc_demo_pos_has_legal_action(env, pos)) *selected = pos;
     return GC_DEMO_NOOP;
@@ -553,7 +553,7 @@ static void gc_demo_render_hints(GuerrillaCheckers* env, GcDemoUi* ui) {
                 GC_DEMO_SELECT);
             for (int dir = 0; dir < 4; dir++) {
                 int action = ui->selected * 4 + dir;
-                if (!gc_action_allowed_by_current_mask(env, action)) continue;
+                if (!gc_action_is_legal(env, action)) continue;
                 int first;
                 int second;
                 gc_decode_guerrilla_action(action, &first, &second);
@@ -585,7 +585,7 @@ static void gc_demo_render_hints(GuerrillaCheckers* env, GcDemoUi* ui) {
             (float)(gc_coin_y(ui->selected) * cell + cell / 2)};
         DrawRing(center, cell * 0.30f, cell * 0.30f + 4.0f, 0, 360, 32, GC_DEMO_SELECT);
         for (int dir = 0; dir < 4; dir++) {
-            if (!gc_action_allowed_by_current_mask(env, ui->selected * 4 + dir)) continue;
+            if (!gc_action_is_legal(env, ui->selected * 4 + dir)) continue;
             int dst = gc_coin_neighbor(ui->selected, dir);
             int dx = gc_coin_x(dst) * cell;
             int dy = gc_coin_y(dst) * cell;
@@ -1005,8 +1005,7 @@ static int gc_cli_tournament(int games, const char* candidate_path,
                 puf_reset(&env);
                 gc_demo_net_reset();
 
-                int plies = 0;
-                while (!env.game_over && plies++ < 600) {
+                while (!env.game_over) {
                     int guerrilla_to_move = env.player_to_move == GC_GUERRILLA;
                     int mover = guerrilla_to_move ? g_entity : c_entity;
                     int waiter = guerrilla_to_move ? c_entity : g_entity;
@@ -1024,9 +1023,7 @@ static int gc_cli_tournament(int games, const char* candidate_path,
                     gc_prepare_turn(&env);
                 }
 
-                // Draws are impossible; the ply cap is unreachable, but if a
-                // game ever stalled the env's timeout rule (COIN wins) applies.
-                int winner = env.game_over && env.winner == GC_GUERRILLA ?
+                int winner = env.winner == GC_GUERRILLA ?
                     g_entity : c_entity;
                 int loser = winner == g_entity ? c_entity : g_entity;
                 stats[winner].wins++;
