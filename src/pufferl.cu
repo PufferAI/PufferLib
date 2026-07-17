@@ -269,7 +269,6 @@ typedef struct {
     int num_buffers;
     int hidden_size;
     int num_layers;
-    int use_bias;
     int turn_based;
     float lr;
     float min_lr_ratio;
@@ -302,6 +301,11 @@ typedef struct {
     int seed;
 } HypersT;
 
+static int puf_turn_based(Ini* ini) {
+    DictItem* item = dict_find(puf_ini_section(ini, "policy", 0), "turn_based");
+    return item ? (int)item->value : 0;
+}
+
 HypersT puf_config_to_hypers(Ini* ini, int rank, int world_size, int gpu_id) {
     HypersT h = {0};
     h.total_agents = puf_ini_get(ini, "vec", "total_agents");
@@ -310,8 +314,7 @@ HypersT puf_config_to_hypers(Ini* ini, int rank, int world_size, int gpu_id) {
     h.horizon = puf_ini_get(ini, "train", "horizon");
     h.hidden_size = puf_ini_get(ini, "policy", "hidden_size");
     h.num_layers = puf_ini_get(ini, "policy", "num_layers");
-    h.use_bias = puf_ini_get(ini, "policy", "use_bias");
-    h.turn_based = puf_ini_get(ini, "policy", "turn_based");
+    h.turn_based = puf_turn_based(ini);
     h.lr = puf_ini_get(ini, "train", "learning_rate");
     h.min_lr_ratio = puf_ini_get(ini, "train", "min_lr_ratio");
     h.anneal_lr = puf_ini_get(ini, "train", "anneal_lr");
@@ -368,7 +371,7 @@ int puf_config_train_valid(Ini* ini, char* err, size_t err_size) {
     int horizon = puf_ini_get(ini, "train", "horizon");
     int agents = puf_ini_get(ini, "vec", "total_agents");
     int gpus = puf_ini_get(ini, "train", "gpus");
-    int turn_based = puf_ini_get(ini, "policy", "turn_based");
+    int turn_based = puf_turn_based(ini);
     int action_mask_size = puf_ini_get(ini, "vec", "action_mask_size");
     if (gpus < 1) {
         return puf_err(err, err_size, "train.gpus must be >= 1");
@@ -1914,8 +1917,7 @@ void weight_bank_create_for_pufferl(WeightBank* bank, PuffeRL* pufferl,
     int decoder_output_size = pufferl->is_continuous ? num_action_heads : act_n;
     bank->policy = build_policy(pufferl->env_name, input_size, hidden_size,
         num_layers, decoder_output_size, act_n, pufferl->is_continuous,
-        pufferl->hypers.use_bias, pufferl->hypers.turn_based,
-        pufferl->hypers.horizon);
+        pufferl->hypers.turn_based, pufferl->hypers.horizon);
     bank->hidden_size = hidden_size;
     bank->num_layers = num_layers;
 
@@ -2263,7 +2265,7 @@ PuffeRL* create_pufferl_impl(HypersT& hypers, Dict* vec_kwargs,
 
     pufferl->policy = build_policy(pufferl->env_name, input_size, hidden_size,
         num_layers, decoder_output_size, act_n, is_continuous,
-        hypers.use_bias, hypers.turn_based, hypers.horizon);
+        hypers.turn_based, hypers.horizon);
 
     if (hypers.async) {
         cudaStreamCreateWithFlags(&pufferl->train_stream, cudaStreamNonBlocking);
@@ -3375,7 +3377,6 @@ typedef struct {
     char pending_path[SELFPLAY_PATH_MAX];
     long opp_started_step;
     int num_envs;
-    long swaps;
 } SelfplayBank;
 
 typedef struct {
@@ -3490,7 +3491,6 @@ void selfplay_step(Selfplay* sp, PuffeRL* p, Dict* log) {
                 selfplay_clear_aligned(p, tag);
                 bank->pending_path[0] = 0;
                 bank->opp_started_step = current_step;
-                bank->swaps++;
             }
         } else if (timed_out) {
             const char* path = selfplay_sample(sp);
@@ -3500,14 +3500,6 @@ void selfplay_step(Selfplay* sp, PuffeRL* p, Dict* log) {
     }
     dict_set(log, "pool/size", sp->pool_size);
     dict_set(log, "pool/num_banks", sp->num_banks);
-    long swaps = 0;
-    int pending_banks = 0;
-    for (int b = 0; b < sp->num_banks; b++) {
-        swaps += sp->banks[b].swaps;
-        pending_banks += sp->banks[b].pending_path[0] != 0;
-    }
-    dict_set(log, "pool/swaps", swaps);
-    dict_set(log, "pool/pending_banks", pending_banks);
 }
 
 #define LEAGUE_ID_MAX 128

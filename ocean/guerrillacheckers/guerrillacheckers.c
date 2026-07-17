@@ -301,29 +301,37 @@ static int gc_demo_net_init(GcDemoNet* net, const char* path) {
     net->weights = load_weights(path);
     if (net->weights == NULL) return 0;
     int num_weights = net->weights->size - 7;
-    int native_weights =
+    int biased_native_weights =
         GC_DEMO_NET_HIDDEN * GC_OBS_SIZE + GC_DEMO_NET_HIDDEN +
         (GC_ACTIONS + 1) * GC_DEMO_NET_HIDDEN +
         ((GC_ACTIONS + 1 + 7) & ~7) +
+        GC_DEMO_NET_LAYERS * 3 * GC_DEMO_NET_HIDDEN * GC_DEMO_NET_HIDDEN;
+    int bias_free_native_weights =
+        GC_DEMO_NET_HIDDEN * GC_OBS_SIZE +
+        (GC_ACTIONS + 1) * GC_DEMO_NET_HIDDEN +
         GC_DEMO_NET_LAYERS * 3 * GC_DEMO_NET_HIDDEN * GC_DEMO_NET_HIDDEN;
     int legacy_weights =
         GC_DEMO_NET_HIDDEN * GC_OBS_SIZE + GC_DEMO_NET_HIDDEN +
         GC_ACTIONS * GC_DEMO_NET_HIDDEN + GC_ACTIONS +
         GC_DEMO_NET_LAYERS * 3 * GC_DEMO_NET_HIDDEN * GC_DEMO_NET_HIDDEN;
-    if (num_weights != legacy_weights && num_weights != native_weights) {
+    if (num_weights != legacy_weights &&
+            num_weights != biased_native_weights &&
+            num_weights != bias_free_native_weights) {
         fprintf(stderr, "error: unsupported Puffer NN checkpoint size: %d floats\n",
             num_weights);
         free(net->weights);
         net->weights = NULL;
         return 0;
     }
-    net->encoder = make_affine(net->weights, 1, GC_OBS_SIZE, GC_DEMO_NET_HIDDEN);
-    int decoder_outputs = num_weights == native_weights ? GC_ACTIONS + 1 : GC_ACTIONS;
+    int has_bias = num_weights != bias_free_native_weights;
+    int is_native = num_weights != legacy_weights;
+    net->encoder = make_affine(
+        net->weights, has_bias, GC_OBS_SIZE, GC_DEMO_NET_HIDDEN);
+    int decoder_outputs = is_native ? GC_ACTIONS + 1 : GC_ACTIONS;
     net->decoder = make_affine(
-        net->weights, 1, GC_DEMO_NET_HIDDEN, decoder_outputs);
-    // Native checkpoints pad the fused actor/value bias to an eight-float
-    // boundary. The legacy evaluator has no value head, so skip that padding
-    // before loading the recurrent weights.
+        net->weights, has_bias, GC_DEMO_NET_HIDDEN, decoder_outputs);
+    // Biased native checkpoints pad the fused actor/value bias to an
+    // eight-float boundary. Other supported layouts are already aligned.
     net->weights->idx = (net->weights->idx + 7) & ~7;
     net->gru = make_mingru(net->weights, 1, GC_DEMO_NET_HIDDEN, GC_DEMO_NET_LAYERS);
     return 1;
@@ -1033,158 +1041,6 @@ static int gc_cli_tournament(int games, const char* candidate_path,
     return 0;
 }
 
-// Run one requested candidate pairing without recomputing the rest of the
-// round-robin. Levels use the standalone menu's 1-based numbering.
-static int gc_cli_candidate_pair(int guerrilla_level, int coin_level, int games,
-        const char* candidate_path) {
-    int g_bot = guerrilla_level - 1;
-    int c_bot = coin_level - 1;
-    if (g_bot < 0 || g_bot >= GC_CLI_MAX_BOTS ||
-            c_bot < 0 || c_bot >= GC_CLI_MAX_BOTS || games <= 0) {
-        fprintf(stderr, "error: levels must be 1..6 and games must be positive\n");
-        return 1;
-    }
-    if (g_bot != GC_DEMO_CANDIDATE_LEVEL &&
-            c_bot != GC_DEMO_CANDIDATE_LEVEL) {
-        fprintf(stderr, "error: --candidate-pair requires level 6 on one side\n");
-        return 1;
-    }
-
-    GuerrillaCheckers env = {0};
-    env.num_agents = 2;
-    env.selfplay = 1;
-    env.mcts_exploration = GC_MCTS_DEFAULT_EXPLORATION;
-    env.mcts_rollout = GC_MCTS_ROLLOUT_GREEDY;
-    env.rng = 1u;
-    gc_demo_allocate(&env);
-
-    if (g_bot == GC_DEMO_LEVEL_NET || c_bot == GC_DEMO_LEVEL_NET) {
-        gc_demo_net_loaded[GC_DEMO_NET_ORIGINAL] =
-            gc_demo_net_init(&gc_demo_nets[GC_DEMO_NET_ORIGINAL][GC_GUERRILLA],
-                GC_DEMO_NET_WEIGHTS) &&
-            gc_demo_net_init(&gc_demo_nets[GC_DEMO_NET_ORIGINAL][GC_COIN],
-                GC_DEMO_NET_WEIGHTS);
-        if (!gc_demo_net_loaded[GC_DEMO_NET_ORIGINAL]) {
-            fprintf(stderr, "error: failed to load original Puffer NN\n");
-            gc_demo_free(&env);
-            return 1;
-        }
-    }
-    gc_demo_net_loaded[GC_DEMO_NET_CANDIDATE] =
-        gc_demo_net_init(&gc_demo_nets[GC_DEMO_NET_CANDIDATE][GC_GUERRILLA],
-            candidate_path) &&
-        gc_demo_net_init(&gc_demo_nets[GC_DEMO_NET_CANDIDATE][GC_COIN],
-            candidate_path);
-    if (!gc_demo_net_loaded[GC_DEMO_NET_CANDIDATE]) {
-        fprintf(stderr, "error: failed to load candidate %s\n", candidate_path);
-        gc_demo_free(&env);
-        return 1;
-    }
-
-    int guerrilla_wins = 0;
-    for (int game = 0; game < games; game++) {
-        env.rng = (0x9E3779B9u * (unsigned int)(game + 1)) | 1u;
-        c_reset(&env);
-        gc_demo_net_reset();
-        int plies = 0;
-        while (!env.game_over && plies++ < 600) {
-            int bot = env.player_to_move == GC_GUERRILLA ? g_bot : c_bot;
-            int action = gc_demo_level_action(&env, bot);
-            gc_apply_action(&env, action);
-            gc_prepare_turn(&env);
-        }
-        if (env.game_over && env.winner == GC_GUERRILLA) guerrilla_wins++;
-        fprintf(stderr, "\rG %-9s vs C %-9s  %3d/%d ",
-            gc_demo_levels[g_bot].name, gc_demo_levels[c_bot].name,
-            game + 1, games);
-    }
-    fprintf(stderr, "\r");
-    printf("%d\t%d\t%d\t%d\t%s\t%s\n", guerrilla_level, coin_level,
-        guerrilla_wins, games - guerrilla_wins,
-        gc_demo_levels[g_bot].name, gc_demo_levels[c_bot].name);
-    gc_demo_free(&env);
-    return 0;
-}
-
-static int gc_cli_selfplay_smoke(int games) {
-    GuerrillaCheckers env = {0};
-    env.num_agents = 2;
-    env.selfplay = 1;
-    env.max_episode_length = 256;
-    env.mcts_exploration = GC_MCTS_DEFAULT_EXPLORATION;
-    env.mcts_rollout = GC_MCTS_ROLLOUT_GREEDY;
-    env.rng = 1u;
-    env.agents[0].policy = 0;
-    env.agents[1].policy = 1;
-    env.tag = 1;
-    gc_demo_allocate(&env);
-    c_reset(&env);
-
-    int completed = 0;
-    int slot_0_as_guerrilla = 0;
-    int slot_0_as_coin = 0;
-    while (completed < games) {
-        int actor_slot = gc_actor_slot(&env);
-        int waiting_slot = 1 - actor_slot;
-        unsigned char* actor_mask = env.agents[actor_slot].action_mask;
-        unsigned char* waiting_mask = env.agents[waiting_slot].action_mask;
-        int action = -1;
-        int actor_legal = 0;
-        int waiting_legal = 0;
-        for (int a = 0; a < GC_ACTIONS; a++) {
-            if (actor_mask[a]) {
-                if (action < 0) action = a;
-                actor_legal++;
-            }
-            if (waiting_mask[a]) waiting_legal++;
-        }
-        if (action < 0 || actor_legal != env.legal_count || waiting_legal != 0) {
-            fprintf(stderr, "selfplay smoke: invalid actor/waiting masks\n");
-            gc_demo_free(&env);
-            return 1;
-        }
-
-        env.agents[actor_slot].actions[0] = (float)action;
-        env.agents[waiting_slot].actions[0] = 0.0f;
-        int slot_0_side = env.slot_for_side[GC_GUERRILLA] == 0 ?
-            GC_GUERRILLA : GC_COIN;
-        c_step(&env);
-        if (*env.agents[0].terminals != 1.0f) continue;
-
-        if (*env.agents[1].terminals != 1.0f ||
-                *env.agents[0].rewards + *env.agents[1].rewards != 0.0f) {
-            fprintf(stderr, "selfplay smoke: terminal contract mismatch\n");
-            gc_demo_free(&env);
-            return 1;
-        }
-        if (slot_0_side == GC_GUERRILLA) slot_0_as_guerrilla++;
-        else slot_0_as_coin++;
-        completed++;
-    }
-
-    int ok = env.log.n == (float)games &&
-        env.log.slot_0_score + env.log.slot_1_score == (float)games &&
-        env.log.slot_0_guerrilla_n == (float)slot_0_as_guerrilla &&
-        env.log.slot_0_coin_n == (float)slot_0_as_coin &&
-        env.log.hist_n == (float)games &&
-        env.log.hist_n_bank[0] == (float)games &&
-        env.boundary_reached == 1 &&
-        slot_0_as_guerrilla > 0 && slot_0_as_coin > 0;
-    env.side_cfg = GC_GUERRILLA;
-    c_reset(&env);
-    ok = ok && env.slot_for_side[GC_GUERRILLA] == 0;
-    env.side_cfg = GC_COIN;
-    c_reset(&env);
-    ok = ok && env.slot_for_side[GC_COIN] == 0;
-    printf("selfplay smoke: games=%d slot0=%.0f slot1=%.0f "
-        "slot0_sides=G%d/C%d hist_n=%.0f boundary=%d\n",
-        games, env.log.slot_0_score, env.log.slot_1_score,
-        slot_0_as_guerrilla, slot_0_as_coin, env.log.hist_n,
-        env.boundary_reached);
-    gc_demo_free(&env);
-    return ok ? 0 : 1;
-}
-
 int main(int argc, char** argv) {
     if (argc > 1) {
         if (strcmp(argv[1], "--tournament") == 0) {
@@ -1203,26 +1059,9 @@ int main(int argc, char** argv) {
             }
             return gc_cli_tournament(games, argv[3], 1);
         }
-        if (strcmp(argv[1], "--candidate-pair") == 0) {
-            if (argc < 6) {
-                fprintf(stderr, "error: --candidate-pair requires "
-                    "GUERRILLA_LEVEL COIN_LEVEL GAMES CANDIDATE\n");
-                return 1;
-            }
-            return gc_cli_candidate_pair(
-                atoi(argv[2]), atoi(argv[3]), atoi(argv[4]), argv[5]);
-        }
-        if (strcmp(argv[1], "--selfplay-smoke") == 0) {
-            int games = argc > 2 ? atoi(argv[2]) : 100;
-            if (games < 2) games = 2;
-            return gc_cli_selfplay_smoke(games);
-        }
         fprintf(stderr,
             "usage: %s [--tournament [games-per-pairing] [candidate.bin] | "
-            "--compare-candidate [games-per-pairing] candidate.bin | "
-            "--candidate-pair GUERRILLA_LEVEL COIN_LEVEL GAMES "
-            "candidate.bin | "
-            "--selfplay-smoke [games]]\n",
+            "--compare-candidate [games-per-pairing] candidate.bin]\n",
             argv[0]);
         return 1;
     }

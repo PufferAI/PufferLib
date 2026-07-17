@@ -853,9 +853,9 @@ static void c_step(GuerrillaCheckers* env) {
     int score_side = env->selfplay ? GC_NONE : env->agent_side;
 
     if (!legal) {
-        // All rollout paths (CUDA, and CPU/MPS via sample_logits) now consume
-        // MY_ACTION_MASK before sampling, so a masked policy never lands here and
-        // invalid_rate stays ~0. As a safety net for unmasked/eval use, treat an
+        // Policy rollout paths consume MY_ACTION_MASK before sampling, so a
+        // masked policy never lands here and invalid_rate stays ~0. As a safety
+        // net for unmasked/eval use, treat an
         // illegal action as a negative no-op (not an instant forfeit) so stalling
         // never beats legal play; the timeout below bounds any stall.
         env->invalid_this_episode++;
