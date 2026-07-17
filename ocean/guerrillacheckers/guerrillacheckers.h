@@ -104,7 +104,7 @@ struct Env {
     // selfplay == 1: two logical policy slots alternate turns. Slot 0 is the
     // primary policy and slot 1 is the historical bank in tagged envs. Their
     // side assignment is randomized each episode. selfplay == 0: slot 0 plays
-    // agent_side against a built-in bot inside c_step.
+    // agent_side against a built-in bot inside puf_step.
     int selfplay;
     int side_cfg;    // configured slot-0/agent side: 0 = random, else G / COIN
     int agent_side;  // resolved agent side for the current episode
@@ -495,7 +495,7 @@ static int gc_rebuild_action_mask(GuerrillaCheckers* env) {
         if (mask == NULL) continue;
         memset(mask, 0, GC_ACTIONS * sizeof(unsigned char));
         // Match the standard Ocean turn-based convention: the waiting slot has
-        // one deterministic pass action. c_step reads only the actor slot, so
+        // one deterministic pass action. puf_step reads only the actor slot, so
         // this action is ignored while keeping PPO and recurrent updates valid.
         // Action 255 is otherwise impossible: it is the off-board down-right
         // move from the bottom-right coin square.
@@ -777,7 +777,7 @@ static void gc_finish_step(GuerrillaCheckers* env, int actor_slot,
     gc_compute_observations(env);
 }
 
-static void c_reset(GuerrillaCheckers* env) {
+void puf_reset(Env* env) {
     memset(env->coin_cells, 0, sizeof(env->coin_cells));
     memset(env->guerrilla_cells, 0, sizeof(env->guerrilla_cells));
 
@@ -836,14 +836,14 @@ static void gc_reset_after_terminal_step(GuerrillaCheckers* env) {
         rewards[slot] = *env->agents[slot].rewards;
         terminals[slot] = *env->agents[slot].terminals;
     }
-    c_reset(env);
+    puf_reset(env);
     for (int slot = 0; slot < env->num_agents; slot++) {
         *env->agents[slot].rewards = rewards[slot];
         *env->agents[slot].terminals = terminals[slot];
     }
 }
 
-static void c_step(GuerrillaCheckers* env) {
+void puf_step(Env* env) {
     for (int slot = 0; slot < env->num_agents; slot++) {
         *env->agents[slot].rewards = 0.0f;
         *env->agents[slot].terminals = 0.0f;
@@ -889,7 +889,7 @@ static void c_step(GuerrillaCheckers* env) {
     gc_reset_after_terminal_step(env);
 }
 
-static void c_close(GuerrillaCheckers* env) {
+void puf_close(Env* env) {
     if (env->client != NULL) {
         CloseWindow();
         free(env->client);
@@ -947,7 +947,7 @@ static void gc_render_board(GuerrillaCheckers* env) {
     }
 }
 
-static void c_render(GuerrillaCheckers* env) {
+void puf_render(Env* env) {
     if (IsKeyDown(KEY_ESCAPE)) exit(0);
     if (env->client == NULL) env->client = gc_make_client(env);
 
@@ -965,20 +965,4 @@ static void c_render(GuerrillaCheckers* env) {
         env->guerrilla_count, GC_MAX_GUERRILLAS),
         250, GC_BOARD_H * cell + 16, 18, (Color){190, 204, 208, 255});
     EndDrawing();
-}
-
-void puf_reset(Env* env) {
-    c_reset(env);
-}
-
-void puf_step(Env* env) {
-    c_step(env);
-}
-
-void puf_render(Env* env) {
-    c_render(env);
-}
-
-void puf_close(Env* env) {
-    c_close(env);
 }

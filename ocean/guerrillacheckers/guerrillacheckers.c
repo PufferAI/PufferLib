@@ -138,7 +138,7 @@ static void gc_demo_allocate(GuerrillaCheckers* env) {
 }
 
 static void gc_demo_free(GuerrillaCheckers* env) {
-    c_close(env);
+    puf_close(env);
     for (int slot = 0; slot < env->num_agents; slot++) {
         free(env->agents[slot].action_mask);
         free(env->agents[slot].terminals);
@@ -405,7 +405,7 @@ static int gc_demo_button(Rectangle rect, const char* label, int active) {
 static void gc_demo_start_game(GuerrillaCheckers* env, GcDemoUi* ui) {
     // Vary the seed per game so bot play differs between runs.
     env->rng ^= (unsigned int)(GetTime() * 1000.0) | 1u;
-    c_reset(env);
+    puf_reset(env);
     ui->selected = GC_DEMO_NOOP;
     ui->ai_wait = GC_DEMO_AI_WAIT;
     ui->over_wait = 0;
@@ -740,11 +740,6 @@ static int gc_demo_bot_action(GuerrillaCheckers* env, GcDemoUi* ui) {
 }
 
 static void demo(void) {
-    // The client applies actions and renders directly (menus, hints, no
-    // auto-reset); the puf_* entry points in the header serve native training.
-    (void)c_step;
-    (void)c_render;
-
     GuerrillaCheckers env = {0};
     env.num_agents = 2;
     env.max_episode_length = 256;
@@ -758,7 +753,7 @@ static void demo(void) {
     env.rng = 1234u;
 
     gc_demo_allocate(&env);
-    c_reset(&env);
+    puf_reset(&env);
 
     gc_demo_net_loaded[GC_DEMO_NET_ORIGINAL] =
         gc_demo_net_init(&gc_demo_nets[GC_DEMO_NET_ORIGINAL][GC_GUERRILLA],
@@ -806,7 +801,7 @@ static void demo(void) {
                     if (env.winner == GC_GUERRILLA) ui.tally.guerrilla_wins++;
                     else ui.tally.coin_wins++;
                     env.rng ^= (unsigned int)(GetTime() * 1e6) | 1u;
-                    c_reset(&env);
+                    puf_reset(&env);
                     gc_demo_net_reset();
                     continue;
                 }
@@ -1007,7 +1002,7 @@ static int gc_cli_tournament(int games, const char* candidate_path,
             int c_wins = 0;
             for (int g = 0; g < games; g++) {
                 env.rng = (0x9E3779B9u * (unsigned int)((a * 16 + b) * 100003 + g)) | 1u;
-                c_reset(&env);
+                puf_reset(&env);
                 gc_demo_net_reset();
 
                 int plies = 0;
