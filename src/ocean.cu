@@ -571,7 +571,204 @@ static void nmmo3_encoder_free_weights(void* weights) { free(weights); }
 static void nmmo3_encoder_free_activations(void* activations) { free(activations); }
 
 // Override encoder vtable for known ocean environments. No-op for unknown envs.
+#ifdef CRAFTAX_COMPACT_OBS
+// Craftax compact observation ABI:
+//   792 uint8 map-token IDs, followed by 51 raw little-endian float32 values.
+// Rollout, transpose, and prioritized-gather buffers keep those 996 bytes
+// packed. At the encoder boundary, each map cell's eight tokens are repacked
+// into one fixed scalar embedding sum per map cell. The 99 cell embeddings
+// are concatenated with the 51 scalar channels, narrowing the dense projection
+// from 843 to 150 inputs. Raw token bytes stay exact in every rollout buffer;
+// channel-specific lookup tables normalize each vocabulary independently. The
+// following dense projection is learned; the tiny sparse table stays fixed to
+// avoid an ill-conditioned Muon update on a highly contended 8x37 matrix.
+#define CRAFTAX_COMPACT_MAP_BYTES 792
+#define CRAFTAX_COMPACT_TAIL_FLOATS 51
+#define CRAFTAX_COMPACT_CELLS 99
+#define CRAFTAX_COMPACT_CHANNELS 8
+#define CRAFTAX_EMBED_VOCAB 37
+#define CRAFTAX_EMBED_PARAMS \
+    (CRAFTAX_COMPACT_CHANNELS * CRAFTAX_EMBED_VOCAB)
+#define CRAFTAX_ENCODER_MAP_FEATURES CRAFTAX_COMPACT_CELLS
+#define CRAFTAX_COMPACT_BYTES \
+    (CRAFTAX_COMPACT_MAP_BYTES + 4 * CRAFTAX_COMPACT_TAIL_FLOATS)
+#define CRAFTAX_ENCODER_OBS \
+    (CRAFTAX_ENCODER_MAP_FEATURES + CRAFTAX_COMPACT_TAIL_FLOATS)
+
+struct CraftaxCompactEncoderWeights {
+    PrecisionTensor embed, weight;
+    int compact_bytes, out_dim;
+};
+
+struct CraftaxCompactEncoderActivations {
+    PrecisionTensor out, features, weight_wgrad;
+};
+
+__global__ void craftax_expand_compact_kernel(
+        precision_t* __restrict__ dst,
+        const unsigned char* __restrict__ src,
+        const precision_t* __restrict__ embed, int B) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = B * CRAFTAX_ENCODER_OBS;
+    if (idx >= total) return;
+    int b = idx / CRAFTAX_ENCODER_OBS;
+    int col = idx - b * CRAFTAX_ENCODER_OBS;
+    const unsigned char* row = src + (int64_t)b * CRAFTAX_COMPACT_BYTES;
+    float value;
+    if (col < CRAFTAX_ENCODER_MAP_FEATURES) {
+        const unsigned char* token = row + col * CRAFTAX_COMPACT_CHANNELS;
+        value = 0.0f;
+        #pragma unroll
+        for (int channel = 0; channel < CRAFTAX_COMPACT_CHANNELS; channel++) {
+            value += to_float(embed[
+                channel * CRAFTAX_EMBED_VOCAB + (int)token[channel]]);
+        }
+    } else {
+        int tail = col - CRAFTAX_ENCODER_MAP_FEATURES;
+        const unsigned char* p = row + CRAFTAX_COMPACT_MAP_BYTES + 4 * tail;
+        uint32_t bits = (uint32_t)p[0]
+            | ((uint32_t)p[1] << 8)
+            | ((uint32_t)p[2] << 16)
+            | ((uint32_t)p[3] << 24);
+        value = __uint_as_float(bits);
+    }
+    dst[idx] = from_float(value);
+}
+
+__global__ void craftax_init_embeddings_kernel(precision_t* embed) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= CRAFTAX_EMBED_PARAMS) return;
+    int channel = idx / CRAFTAX_EMBED_VOCAB;
+    int token = idx - channel * CRAFTAX_EMBED_VOCAB;
+    const int max_token[CRAFTAX_COMPACT_CHANNELS] = {36, 5, 1, 8, 8, 8, 8, 8};
+    embed[idx] = token <= max_token[channel]
+        ? from_float((float)token / (float)max_token[channel])
+        : from_float(0.0f);
+}
+
+static PrecisionTensor craftax_compact_encoder_forward(
+        void* w, void* activations, PrecisionTensor input,
+        cudaStream_t stream) {
+    CraftaxCompactEncoderWeights* ew = (CraftaxCompactEncoderWeights*)w;
+    CraftaxCompactEncoderActivations* a =
+        (CraftaxCompactEncoderActivations*)activations;
+    int B = input.shape[0];
+    assert(input.shape[1] == ew->compact_bytes);
+    craftax_expand_compact_kernel<<<
+        grid_size(B * CRAFTAX_ENCODER_OBS), BLOCK_SIZE, 0, stream>>>(
+        a->features.data,
+        (const unsigned char*)(const void*)input.data, ew->embed.data, B);
+    puf_mm(&a->features, &ew->weight, &a->out, stream);
+    return a->out;
+}
+
+static void craftax_compact_encoder_backward(
+        void* w, void* activations, PrecisionTensor grad,
+        cudaStream_t stream) {
+    (void)w;
+    CraftaxCompactEncoderActivations* a =
+        (CraftaxCompactEncoderActivations*)activations;
+    puf_mm_tn(&grad, &a->features, &a->weight_wgrad, stream);
+}
+
+static void craftax_compact_encoder_init_weights(
+        void* w, uint64_t* seed, cudaStream_t stream) {
+    CraftaxCompactEncoderWeights* ew = (CraftaxCompactEncoderWeights*)w;
+    PrecisionTensor wt = {
+        .data = ew->weight.data,
+        .shape = {ew->out_dim, CRAFTAX_ENCODER_OBS},
+    };
+    craftax_init_embeddings_kernel<<<
+        grid_size(CRAFTAX_EMBED_PARAMS), BLOCK_SIZE, 0, stream>>>(
+        ew->embed.data);
+    // Match the default 843-wide encoder's per-column initialization scale;
+    // otherwise fan-in-based init would make the narrower front end 24% hotter.
+    float gain = std::sqrt(
+        2.0f * (float)CRAFTAX_ENCODER_OBS / 843.0f);
+    puf_kaiming_init(&wt, gain, (*seed)++, stream);
+}
+
+static void craftax_compact_encoder_reg_params(void* w, Allocator* alloc) {
+    CraftaxCompactEncoderWeights* ew = (CraftaxCompactEncoderWeights*)w;
+    ew->weight = {.shape = {ew->out_dim, CRAFTAX_ENCODER_OBS}};
+    alloc_register(alloc, &ew->weight);
+}
+
+static void craftax_compact_encoder_reg_train(
+        void* w, void* activations, Allocator* acts, Allocator* grads,
+        int B_TT) {
+    CraftaxCompactEncoderWeights* ew = (CraftaxCompactEncoderWeights*)w;
+    CraftaxCompactEncoderActivations* a =
+        (CraftaxCompactEncoderActivations*)activations;
+    *a = {
+        .out = {.shape = {B_TT, ew->out_dim}},
+        .features = {.shape = {B_TT, CRAFTAX_ENCODER_OBS}},
+        .weight_wgrad = {.shape = {ew->out_dim, CRAFTAX_ENCODER_OBS}},
+    };
+    alloc_register(acts, &a->out);
+    alloc_register(acts, &a->features);
+    alloc_register(grads, &a->weight_wgrad);
+}
+
+static void craftax_compact_encoder_reg_rollout(
+        void* w, void* activations, Allocator* alloc, int B) {
+    CraftaxCompactEncoderWeights* ew = (CraftaxCompactEncoderWeights*)w;
+    CraftaxCompactEncoderActivations* a =
+        (CraftaxCompactEncoderActivations*)activations;
+    *a = {
+        .out = {.shape = {B, ew->out_dim}},
+        .features = {.shape = {B, CRAFTAX_ENCODER_OBS}},
+    };
+    alloc_register(alloc, &a->out);
+    alloc_register(alloc, &a->features);
+}
+
+static void* craftax_compact_encoder_create_weights(void* self) {
+    Encoder* e = (Encoder*)self;
+    CraftaxCompactEncoderWeights* ew =
+        (CraftaxCompactEncoderWeights*)calloc(
+            1, sizeof(CraftaxCompactEncoderWeights));
+    ew->compact_bytes = e->in_dim;
+    ew->out_dim = e->out_dim;
+    assert(ew->compact_bytes == CRAFTAX_COMPACT_BYTES);
+    ew->embed = {
+        .shape = {CRAFTAX_COMPACT_CHANNELS, CRAFTAX_EMBED_VOCAB}};
+    cudaMalloc(&ew->embed.data, CRAFTAX_EMBED_PARAMS * sizeof(precision_t));
+    return ew;
+}
+
+static void craftax_compact_encoder_free_weights(void* weights) {
+    CraftaxCompactEncoderWeights* ew =
+        (CraftaxCompactEncoderWeights*)weights;
+    cudaFree(ew->embed.data);
+    free(ew);
+}
+
+static void craftax_compact_encoder_free_activations(void* activations) {
+    free(activations);
+}
+#endif
+
 static void create_custom_encoder(const std::string& env_name, Encoder* enc) {
+#ifdef CRAFTAX_COMPACT_OBS
+    if (env_name == "craftax") {
+        *enc = Encoder{
+            .forward = craftax_compact_encoder_forward,
+            .backward = craftax_compact_encoder_backward,
+            .init_weights = craftax_compact_encoder_init_weights,
+            .reg_params = craftax_compact_encoder_reg_params,
+            .reg_train = craftax_compact_encoder_reg_train,
+            .reg_rollout = craftax_compact_encoder_reg_rollout,
+            .create_weights = craftax_compact_encoder_create_weights,
+            .free_weights = craftax_compact_encoder_free_weights,
+            .free_activations = craftax_compact_encoder_free_activations,
+            .in_dim = enc->in_dim,
+            .out_dim = enc->out_dim,
+            .activation_size = sizeof(CraftaxCompactEncoderActivations),
+        };
+        return;
+    }
+#endif
     if (env_name == "nmmo3") {
         *enc = Encoder{
             .forward = nmmo3_encoder_forward,

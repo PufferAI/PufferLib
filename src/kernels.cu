@@ -187,6 +187,17 @@ __global__ void transpose_102(precision_t* __restrict__ dst,
     dst[b * A * C + a * C + c] = src[idx];
 }
 
+__global__ void transpose_102_byte(unsigned char* __restrict__ dst,
+        const unsigned char* __restrict__ src, int A, int B, int C) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = A * B * C;
+    if (idx >= total) {
+        return;
+    }
+    int a = idx / (B * C), rem = idx % (B * C), b = rem / C, c = rem % C;
+    dst[b * A * C + a * C + c] = src[idx];
+}
+
 __global__ void fill_precision_kernel(precision_t* __restrict__ dst, precision_t val, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
@@ -436,6 +447,9 @@ void alloc_register(Allocator* a, PrecisionTensor* t) {
 }
 void alloc_register(Allocator* a, FloatTensor* t) {
     alloc_register_impl(a, (void**)&t->data, t->shape, sizeof(float));
+}
+void alloc_register(Allocator* a, ByteTensor* t) {
+    alloc_register_impl(a, (void**)&t->data, t->shape, sizeof(unsigned char));
 }
 void alloc_register(Allocator* a, LongTensor* t) {
     alloc_register_impl(a, (void**)&t->data, t->shape, sizeof(long));

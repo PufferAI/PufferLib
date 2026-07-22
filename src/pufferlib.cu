@@ -32,6 +32,12 @@ enum ProfileIdx {
     NUM_PROF,
 };
 
+#ifdef CRAFTAX_COMPACT_OBS
+using RolloutObsTensor = ByteTensor;
+#else
+using RolloutObsTensor = PrecisionTensor;
+#endif
+
 static const char* PROF_NAMES[NUM_PROF] = {
     "rollout",
     "eval_gpu",
@@ -49,7 +55,7 @@ typedef struct {
 // Data collected by parallel environment workers. Each worker handles
 // a constant subset of agents 
 struct RolloutBuf {
-    PrecisionTensor observations;  // (horizon, agents, input_size)
+    RolloutObsTensor observations; // compact Craftax stays byte-packed end to end
     PrecisionTensor actions;       // (horizon, agents, num_atns)
     PrecisionTensor values;        // (horizon, agents)
     PrecisionTensor logprobs;      // ...
@@ -94,7 +100,7 @@ void register_rollout_buffers(RolloutBuf& bufs, Allocator* alloc, int T, int B, 
 // training to perform several (though not all) ops in contiguous memory
 struct TrainGraph {
     PrecisionTensor mb_state;       // (layers, B, hidden)
-    PrecisionTensor mb_obs;         // (B, T, input_size)
+    RolloutObsTensor mb_obs;        // (B, T, input_size)
     PrecisionTensor mb_actions;     // (B, T, num_atns)
     PrecisionTensor mb_logprobs;    // (B, T)
     PrecisionTensor mb_advantages;  // ...
@@ -232,6 +238,22 @@ inline PrecisionTensor puf_slice(PrecisionTensor& p, int t, int start, int count
         long B = p.shape[1];
         return {.data = p.data + (t*B + start), .shape = {count}};
     }
+}
+
+inline ByteTensor puf_slice(ByteTensor& p, int t, int start, int count) {
+    if (ndim(p.shape) == 3) {
+        long B = p.shape[1], F = p.shape[2];
+        return {.data = p.data + (t*B + start)*F, .shape = {count, F}};
+    } else {
+        long B = p.shape[1];
+        return {.data = p.data + (t*B + start), .shape = {count}};
+    }
+}
+
+inline PrecisionTensor policy_obs_view(ByteTensor p) {
+    PrecisionTensor view = {.data = (precision_t*)(void*)p.data};
+    memcpy(view.shape, p.shape, sizeof(view.shape));
+    return view;
 }
 
 struct EnvBuf {
@@ -623,8 +645,15 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
     // Copy observations, rewards, terminals from GPU env buffers to rollout buffer
     OBS_TENSOR_T& obs_env = env.obs;
     int n = block_size * obs_env.shape[1];
+#ifdef CRAFTAX_COMPACT_OBS
+    ByteTensor obs_dst = puf_slice(rollouts.observations, t, start, block_size);
+    cudaMemcpyAsync(obs_dst.data,
+        obs_env.data + (long)start*obs_env.shape[1], n,
+        cudaMemcpyDeviceToDevice, stream);
+#else
     PrecisionTensor obs_dst = puf_slice(rollouts.observations, t, start, block_size);
     cast_dispatch(obs_dst.data, obs_env.data + (long)start*obs_env.shape[1], n, stream);
+#endif
 
     PrecisionTensor rew_dst = puf_slice(rollouts.rewards, t, start, block_size);
     n = block_size;
@@ -679,7 +708,14 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
         }
 
         int sub_start = start + bank_off;
-        PrecisionTensor obs_b   = puf_slice(rollouts.observations, t, sub_start, bank_size);
+#ifdef CRAFTAX_COMPACT_OBS
+        ByteTensor obs_bytes_b = puf_slice(
+            rollouts.observations, t, sub_start, bank_size);
+        PrecisionTensor obs_b = policy_obs_view(obs_bytes_b);
+#else
+        PrecisionTensor obs_b = puf_slice(
+            rollouts.observations, t, sub_start, bank_size);
+#endif
         PrecisionTensor act_b   = puf_slice(rollouts.actions,      t, sub_start, bank_size);
         PrecisionTensor lp_b    = puf_slice(rollouts.logprobs,     t, sub_start, bank_size);
         PrecisionTensor val_b   = puf_slice(rollouts.values,       t, sub_start, bank_size);
@@ -1452,7 +1488,8 @@ __global__ void select_copy(RolloutBuf rollouts, TrainGraph graph,
     int src_row = idx[mb];
 
     // Compute row byte counts from tensor shapes
-    int obs_row_bytes = (numel(rollouts.observations.shape) / rollouts.observations.shape[0]) * sizeof(precision_t);
+    int obs_row_bytes = (numel(rollouts.observations.shape)
+        / rollouts.observations.shape[0]) * sizeof(*rollouts.observations.data);
     int act_row_bytes = (numel(rollouts.actions.shape) / rollouts.actions.shape[0]) * sizeof(precision_t);
     int lp_row_bytes = (numel(rollouts.logprobs.shape) / rollouts.logprobs.shape[0]) * sizeof(precision_t);
     int horizon = rollouts.values.shape[1];
@@ -1511,8 +1548,13 @@ void train_impl(PuffeRL& pufferl) {
     int obs_size = (ndim(src.observations.shape) >= 3) ? src.observations.shape[2] : 1;
     int num_atns = (ndim(src.actions.shape) >= 3) ? src.actions.shape[2] : 1;
 
+#ifdef CRAFTAX_COMPACT_OBS
+    transpose_102_byte<<<grid_size(T*B*obs_size), BLOCK_SIZE, 0, train_stream>>>(
+        rollouts.observations.data, src.observations.data, T, B, obs_size);
+#else
     transpose_102<<<grid_size(T*B*obs_size), BLOCK_SIZE, 0, train_stream>>>(
         rollouts.observations.data, src.observations.data, T, B, obs_size);
+#endif
     transpose_102<<<grid_size(T*B*num_atns), BLOCK_SIZE, 0, train_stream>>>(
         rollouts.actions.data, src.actions.data, T, B, num_atns);
     transpose_102<<<grid_size(T*B), BLOCK_SIZE, 0, train_stream>>>(
@@ -1624,7 +1666,11 @@ void train_impl(PuffeRL& pufferl) {
             }
 
             cudaStream_t stream = train_stream;
+#ifdef CRAFTAX_COMPACT_OBS
+            PrecisionTensor obs_puf = policy_obs_view(graph.mb_obs);
+#else
             PrecisionTensor obs_puf = graph.mb_obs;
+#endif
             PrecisionTensor state_puf = graph.mb_state;
             PrecisionTensor dec_puf = policy_forward_train(&pufferl.policy, pufferl.weights, pufferl.train_activations, obs_puf, state_puf, stream);
             DecoderWeights* dw_train = (DecoderWeights*)pufferl.weights.decoder;
