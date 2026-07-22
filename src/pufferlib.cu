@@ -204,8 +204,9 @@ void register_ppo_buffers(PPOBuffersPuf& bufs, Allocator* alloc, int N, int T, i
 
 // Prioritized replay over single-epoch data. These kernels are
 // the least cleaned because we will likely have a better method in 5.0
+#define PRIO_CDF_BLOCK_SIZE 1024
 struct PrioBuffers {
-    FloatTensor prio_probs, cdf, mb_prio;
+    FloatTensor prio_probs, cdf, cdf_block_sums, mb_prio;
     IntTensor idx;
 };
 
@@ -213,11 +214,13 @@ void register_prio_buffers(PrioBuffers& bufs, Allocator* alloc, int B, int minib
     bufs = (PrioBuffers){
         .prio_probs = {.shape = {B}},
         .cdf = {.shape = {B}},
+        .cdf_block_sums = {.shape = {(B + PRIO_CDF_BLOCK_SIZE - 1) / PRIO_CDF_BLOCK_SIZE}},
         .mb_prio = {.shape = {minibatch_segments}},
         .idx = {.shape = {minibatch_segments}},
     };
     alloc_register(alloc, &bufs.prio_probs);
     alloc_register(alloc, &bufs.cdf);
+    alloc_register(alloc, &bufs.cdf_block_sums);
     alloc_register(alloc, &bufs.idx);
     alloc_register(alloc, &bufs.mb_prio);
 }
@@ -1196,7 +1199,7 @@ __global__ void compute_prio_imp_weights(
     }
 }
 
-__global__ void build_cdf(
+__global__ void build_cdf_serial(
     float* __restrict__ cdf, const float* __restrict__ probs, int B) {
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         float cum = 0.0f;
@@ -1204,6 +1207,75 @@ __global__ void build_cdf(
             cum += probs[i];
             cdf[i] = cum;
         }
+    }
+}
+
+template <int num_warps>
+__device__ __forceinline__ float prio_inclusive_scan(float value, float* warp_sums) {
+    int lane = threadIdx.x % PRIO_WARP_SIZE;
+    int warp_id = threadIdx.x / PRIO_WARP_SIZE;
+
+    for (int offset = 1; offset < PRIO_WARP_SIZE; offset *= 2) {
+        float other = __shfl_up_sync(PRIO_FULL_MASK, value, offset);
+        if (lane >= offset) {
+            value += other;
+        }
+    }
+    if (lane == PRIO_WARP_SIZE - 1) {
+        warp_sums[warp_id] = value;
+    }
+    __syncthreads();
+
+    if (warp_id == 0) {
+        float warp_sum = lane < num_warps ? warp_sums[lane] : 0.0f;
+        for (int offset = 1; offset < PRIO_WARP_SIZE; offset *= 2) {
+            float other = __shfl_up_sync(PRIO_FULL_MASK, warp_sum, offset);
+            if (lane >= offset) {
+                warp_sum += other;
+            }
+        }
+        if (lane < num_warps) {
+            warp_sums[lane] = warp_sum;
+        }
+    }
+    __syncthreads();
+
+    if (warp_id > 0) {
+        value += warp_sums[warp_id - 1];
+    }
+    return value;
+}
+
+__global__ void build_cdf_scan_blocks(
+        float* __restrict__ cdf, float* __restrict__ block_sums,
+        const float* __restrict__ probs, int B) {
+    __shared__ float warp_sums[PRIO_CDF_BLOCK_SIZE / PRIO_WARP_SIZE];
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    float value = idx < B ? probs[idx] : 0.0f;
+    value = prio_inclusive_scan<PRIO_CDF_BLOCK_SIZE / PRIO_WARP_SIZE>(value, warp_sums);
+    if (idx < B) {
+        cdf[idx] = value;
+    }
+    if (threadIdx.x == PRIO_CDF_BLOCK_SIZE - 1) {
+        block_sums[blockIdx.x] = value;
+    }
+}
+
+__global__ void scan_cdf_block_sums(float* block_sums, int num_blocks) {
+    __shared__ float warp_sums[PRIO_NUM_WARPS];
+    int tx = threadIdx.x;
+    float value = tx < num_blocks ? block_sums[tx] : 0.0f;
+    value = prio_inclusive_scan<PRIO_NUM_WARPS>(value, warp_sums);
+    if (tx < num_blocks) {
+        block_sums[tx] = value;
+    }
+}
+
+__global__ void add_cdf_block_offsets(
+        float* cdf, const float* __restrict__ block_sums, int B) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < B && blockIdx.x > 0) {
+        cdf[idx] += block_sums[blockIdx.x - 1];
     }
 }
 
@@ -1247,7 +1319,17 @@ void prio_replay_cuda(PrecisionTensor& advantages, float prio_alpha,
     compute_prio_normalize<<<1, PRIO_BLOCK_SIZE, 0, stream>>>(
         bufs.prio_probs.data, B);
     //int block = fmaxf(((minibatch_segments + 31) / 32) * 32, 32);
-    build_cdf<<<1, 1, 0, stream>>>(bufs.cdf.data, bufs.prio_probs.data, B);
+    int cdf_blocks = (B + PRIO_CDF_BLOCK_SIZE - 1) / PRIO_CDF_BLOCK_SIZE;
+    // scan_cdf_block_sums is a single block: B caps at PRIO_CDF_BLOCK_SIZE^2
+    assert(cdf_blocks <= PRIO_CDF_BLOCK_SIZE && "build_cdf: B too large for two-level scan");
+    build_cdf_scan_blocks<<<cdf_blocks, PRIO_CDF_BLOCK_SIZE, 0, stream>>>(
+        bufs.cdf.data, bufs.cdf_block_sums.data, bufs.prio_probs.data, B);
+    if (cdf_blocks > 1) {
+        scan_cdf_block_sums<<<1, PRIO_BLOCK_SIZE, 0, stream>>>(
+            bufs.cdf_block_sums.data, cdf_blocks);
+        add_cdf_block_offsets<<<cdf_blocks, PRIO_CDF_BLOCK_SIZE, 0, stream>>>(
+            bufs.cdf.data, bufs.cdf_block_sums.data, B);
+    }
     int threads = 256;
     int blocks = (minibatch_segments + threads - 1) / threads;
     multinomial_sample<<<blocks, threads, 0, stream>>>(

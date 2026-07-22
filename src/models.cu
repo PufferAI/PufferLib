@@ -83,6 +83,14 @@ struct EncoderActivations {
     PrecisionTensor out, saved_input, wgrad_scratch;
 };
 
+#ifndef ALIAS_TRAIN_LINEAR_INPUTS
+#define ALIAS_TRAIN_LINEAR_INPUTS 1
+#endif
+
+#ifndef MINGRU_FUSE_HIGHWAY_GRAD_ADD
+#define MINGRU_FUSE_HIGHWAY_GRAD_ADD 1
+#endif
+
 // The core of 4.0 is the MinGRU fused scan operation. This allows us to parallelize
 // training across the sequence dimension and scale to longer sequences
 __device__ __forceinline__ void log_coeffs_and_values_fwd(float gate, float hidden,
@@ -143,6 +151,7 @@ struct PrefixScan {
     precision_t* input_ptr = nullptr;  // (B, T, H) original input before projection (for highway gate)
     int B = 0, T = 0, H = 0;
     FloatTensor a_star, s_vals, log_values_buf;
+    FloatTensor backward_chunks;
     PrecisionTensor out, next_state;
     PrecisionTensor grad_combined, grad_state;
     PrecisionTensor grad_input;        // (B, T, H) highway gate gradient w.r.t. input
@@ -150,7 +159,7 @@ struct PrefixScan {
 
 // Checkpointing trades off partial recomputation for memory bandwidth.
 #define CHECKPOINT_INTERVAL 4
-__global__ void mingru_scan_forward(PrefixScan scan) {
+__device__ __forceinline__ void mingru_scan_forward_impl(PrefixScan scan) {
     int T_seq = scan.T, H = scan.H, B = scan.B;
     precision_t* __restrict__ out = scan.out.data;
     precision_t* __restrict__ next_state = scan.next_state.data;
@@ -235,8 +244,16 @@ __global__ void mingru_scan_forward(PrefixScan scan) {
     next_state[bH + h] = from_float(scan_result);
 }
 
+__global__ void mingru_scan_forward_ref(PrefixScan scan) {
+    mingru_scan_forward_impl(scan);
+}
+
+__global__ void mingru_scan_forward(PrefixScan scan) {
+    mingru_scan_forward_impl(scan);
+}
+
 // Reads sparse checkpoints from forward pass, recomputes intermediate values in chunks
-__global__ void mingru_scan_backward(PrefixScan scan,
+__global__ void mingru_scan_backward_ref(PrefixScan scan,
         const precision_t* __restrict__ grad_out,
         const precision_t* __restrict__ grad_next_state) {
     int T_seq = scan.T, H = scan.H, B = scan.B;
@@ -385,6 +402,164 @@ __global__ void mingru_scan_backward(PrefixScan scan,
     grad_state[state_idx] = from_float(grad_z_0 / to_float(state[state_idx]));
 }
 
+// Split the reverse scan into independent chunks. In exact arithmetic,
+//
+//   acc_t   = alpha_t * acc_{t+1} + u_t
+//   carry_t = carry_{t+1} + u_t - k_t * acc_t
+//
+// composes across a chunk as the triangular affine transfer
+//
+//   acc_start   = A * acc_end + B
+//   carry_start = carry_end + D * acc_end + E.
+//
+// Floating-point addition is not affine, however, and composing those maps
+// changes near-cancelled gate gradients. The tiled kernel therefore builds
+// chunk-local values in parallel, replays the cheap carries in reference order,
+// then applies all chunks in parallel before the block exits. This keeps exact
+// fp32 rounding without global synchronization between phases.
+#define MINGRU_BACKWARD_CHUNK 4
+
+#define MINGRU_BACKWARD_H_TILE 16
+__global__ void mingru_scan_backward_tiled(PrefixScan scan,
+        const precision_t* __restrict__ grad_out,
+        const precision_t* __restrict__ grad_next_state) {
+    int T_seq = scan.T, H = scan.H;
+    int h_tiles = (H + MINGRU_BACKWARD_H_TILE - 1) / MINGRU_BACKWARD_H_TILE;
+    int b = blockIdx.x / h_tiles;
+    int h_tile = blockIdx.x - b * h_tiles;
+    int chunk = threadIdx.x / MINGRU_BACKWARD_H_TILE;
+    int lane = threadIdx.x - chunk * MINGRU_BACKWARD_H_TILE;
+    int h = h_tile * MINGRU_BACKWARD_H_TILE + lane;
+    bool valid = h < H;
+
+    extern __shared__ float shared[];
+    int shared_steps = T_seq * MINGRU_BACKWARD_H_TILE;
+    float* shared_u = shared;
+    float* shared_k = shared_u + shared_steps;
+    float* shared_s = shared_k + shared_steps;
+
+    int bHT = b * H * T_seq;
+    int cbase = 3 * bHT;
+    int H3 = 3 * H;
+    int H2 = 2 * H;
+    int state_idx = b * H + h;
+    int out_base = bHT + h;
+    int buf_base = b * (T_seq + 1) * H + h;
+    int chunk_start = chunk * MINGRU_BACKWARD_CHUNK + 1;
+    int chunk_end = min(T_seq, chunk_start + MINGRU_BACKWARD_CHUNK - 1);
+
+    if (valid) {
+        int checkpoint_idx = buf_base + (chunk_start - 1) * H;
+        float a_star = scan.a_star.data[checkpoint_idx];
+        float s = scan.s_vals.data[checkpoint_idx];
+        float log_value = scan.log_values_buf.data[checkpoint_idx];
+        for (int t = chunk_start; t <= chunk_end; ++t) {
+            int t_offset = (t - 1) * H3;
+            int input_idx = out_base + (t - 1) * H;
+            int shared_idx = (t - 1) * MINGRU_BACKWARD_H_TILE + lane;
+            float hidden_val = to_float(scan.combined_ptr[cbase + h + t_offset]);
+            float gate_val = to_float(scan.combined_ptr[cbase + H + h + t_offset]);
+            float proj_val = to_float(scan.combined_ptr[cbase + H2 + h + t_offset]);
+            float log_coeff;
+            log_coeffs_and_values_fwd(
+                gate_val, hidden_val, &log_coeff, &log_value);
+            a_star += log_coeff;
+            float z = log_value - a_star;
+            s = logaddexp(s, z);
+            float scan_result = __expf(a_star + s);
+            float grad_out_val = to_float(grad_out[input_idx]);
+            float proj_sigmoid = sigmoid(proj_val);
+            float grad_scan_from_next = (t == T_seq)
+                ? to_float(grad_next_state[state_idx]) : 0.0f;
+            shared_u[shared_idx] = (grad_scan_from_next
+                + grad_out_val * proj_sigmoid) * scan_result;
+            shared_k[shared_idx] = __expf(z - s);
+            shared_s[shared_idx] = s;
+
+            float x_val = to_float(scan.input_ptr[input_idx]);
+            scan.grad_combined.data[cbase + H2 + h + t_offset] = from_float(
+                grad_out_val * (scan_result - x_val)
+                * proj_sigmoid * (1.0f - proj_sigmoid));
+            scan.grad_input.data[input_idx] = from_float(
+                grad_out_val * (1.0f - proj_sigmoid));
+        }
+    }
+    __syncthreads();
+
+    if (chunk == 0 && valid) {
+        float acc = 0.0f;
+        float carry_grad_a = 0.0f;
+        float s_next = shared_s[(T_seq - 1) * MINGRU_BACKWARD_H_TILE + lane];
+        for (int t = T_seq; t > 0; --t) {
+            int boundary_chunk = (t - 1) / MINGRU_BACKWARD_CHUNK;
+            if (t == T_seq || t % MINGRU_BACKWARD_CHUNK == 0) {
+                float* boundary = &scan.backward_chunks.data[
+                    (boundary_chunk * scan.B * H + state_idx) * 2];
+                boundary[0] = acc;
+                boundary[1] = carry_grad_a;
+            }
+            int shared_idx = (t - 1) * MINGRU_BACKWARD_H_TILE + lane;
+            float grad_log_h = shared_u[shared_idx];
+            float s_t = shared_s[shared_idx];
+            float alpha_t = (t == T_seq) ? 0.0f : __expf(s_t - s_next);
+            if (t == T_seq) {
+                acc = grad_log_h;
+            } else {
+                acc = __fmaf_rn(acc, alpha_t, grad_log_h);
+            }
+            float grad_z = acc * shared_k[shared_idx];
+            float grad_a = __fsub_rn(
+                __fadd_rn(grad_log_h, carry_grad_a), grad_z);
+            carry_grad_a = grad_a;
+            shared_s[shared_idx] = alpha_t;
+            s_next = s_t;
+        }
+        acc *= __expf(scan.s_vals.data[buf_base] - s_next);
+        float grad_z_0 = acc;
+        scan.grad_state.data[state_idx] = from_float(
+            grad_z_0 / to_float(scan.state_ptr[state_idx]));
+    }
+    __syncthreads();
+
+    if (valid) {
+        float* boundary = &scan.backward_chunks.data[(chunk * scan.B * H + state_idx) * 2];
+        float acc = boundary[0];
+        float carry_grad_a = boundary[1];
+        for (int t = chunk_end; t >= chunk_start; --t) {
+            int t_offset = (t - 1) * H3;
+            int shared_idx = (t - 1) * MINGRU_BACKWARD_H_TILE + lane;
+            float grad_log_h = shared_u[shared_idx];
+            if (t == T_seq) {
+                acc = grad_log_h;
+            } else {
+                acc = __fmaf_rn(acc, shared_s[shared_idx], grad_log_h);
+            }
+            float grad_z = acc * shared_k[shared_idx];
+            float grad_a = __fsub_rn(
+                __fadd_rn(grad_log_h, carry_grad_a), grad_z);
+            carry_grad_a = grad_a;
+
+            float hidden_val = to_float(scan.combined_ptr[cbase + h + t_offset]);
+            float gate_val = to_float(scan.combined_ptr[cbase + H + h + t_offset]);
+            float grad_g, grad_h;
+            log_coeffs_and_values_bwd(
+                grad_a, grad_z, gate_val, hidden_val, &grad_g, &grad_h);
+            scan.grad_combined.data[cbase + h + t_offset] = from_float(grad_h);
+            scan.grad_combined.data[cbase + H + h + t_offset] = from_float(grad_g);
+        }
+    }
+}
+
+static void mingru_scan_backward(PrefixScan scan,
+        const precision_t* grad_out, const precision_t* grad_next_state, cudaStream_t stream) {
+    int chunks = (scan.T + MINGRU_BACKWARD_CHUNK - 1) / MINGRU_BACKWARD_CHUNK;
+    int h_tiles = (scan.H + MINGRU_BACKWARD_H_TILE - 1) / MINGRU_BACKWARD_H_TILE;
+    int threads = chunks * MINGRU_BACKWARD_H_TILE;
+    int shared_bytes = 3 * scan.T * MINGRU_BACKWARD_H_TILE * sizeof(float);
+    mingru_scan_backward_tiled<<<scan.B * h_tiles, threads, shared_bytes, stream>>>(
+        scan, grad_out, grad_next_state);
+}
+
 __global__ void sum_rows_to_precision_kernel(precision_t* __restrict__ dst,
         const float* __restrict__ src, int R, int C) {
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -412,7 +587,13 @@ __global__ void assemble_decoder_grad(
 static PrecisionTensor encoder_forward(void* w, void* activations, PrecisionTensor input, cudaStream_t stream) {
     EncoderWeights* ew = (EncoderWeights*)w;
     EncoderActivations* a = (EncoderActivations*)activations;
-    if (a->saved_input.data) puf_copy(&a->saved_input, &input, stream);
+    if (numel(a->saved_input.shape) > 1) {
+#if ALIAS_TRAIN_LINEAR_INPUTS
+        a->saved_input.data = input.data;
+#else
+        puf_copy(&a->saved_input, &input, stream);
+#endif
+    }
     puf_mm(&input, &ew->weight, &a->out, stream);
     return a->out;
 }
@@ -446,7 +627,9 @@ static void encoder_reg_train(void* w, void* activations, Allocator* acts, Alloc
         .wgrad_scratch =    {.shape = {ew->out_dim, ew->in_dim}},
     };
     alloc_register(acts,&a->out);
+#if !ALIAS_TRAIN_LINEAR_INPUTS
     alloc_register(acts,&a->saved_input);
+#endif
     alloc_register(grads,&a->wgrad_scratch);
 }
 
@@ -485,8 +668,12 @@ struct DecoderActivations {
 static PrecisionTensor decoder_forward(void* w, void* activations, PrecisionTensor input, cudaStream_t stream) {
     DecoderWeights* dw = (DecoderWeights*)w;
     DecoderActivations* a = (DecoderActivations*)activations;
-    if (a->saved_input.data) {
+    if (numel(a->saved_input.shape) > 1) {
+#if ALIAS_TRAIN_LINEAR_INPUTS
+        a->saved_input.data = input.data;
+#else
         puf_copy(&a->saved_input, &input, stream);
+#endif
     }
     puf_mm(&input, &dw->weight, &a->out, stream);
     return a->out;
@@ -524,7 +711,9 @@ static void decoder_reg_train(void* w, void* activations, Allocator* acts, Alloc
         .logstd_scratch =   {.shape = {1, dw->output_dim}},
     };
     alloc_register(acts,&a->out);
+#if !ALIAS_TRAIN_LINEAR_INPUTS
     alloc_register(acts,&a->saved_input);
+#endif
     alloc_register(acts,&a->grad_out);
     alloc_register(acts,&a->grad_input);
     alloc_register(grads,&a->wgrad_scratch);
@@ -626,6 +815,7 @@ static void mingru_reg_train(void* w, void* activations, Allocator* acts, Alloca
     MinGRUWeights* m = (MinGRUWeights*)w;
     MinGRUActivations* a = (MinGRUActivations*)activations;
     int H = m->hidden, TT = m->horizon, B = B_TT / TT;
+    int backward_chunks = (TT + MINGRU_BACKWARD_CHUNK - 1) / MINGRU_BACKWARD_CHUNK;
     a->num_layers = m->num_layers;
     a->saved_inputs = (PrecisionTensor*)calloc(m->num_layers, sizeof(PrecisionTensor));
     a->scan_bufs = (PrefixScan*)calloc(m->num_layers, sizeof(PrefixScan));
@@ -633,7 +823,9 @@ static void mingru_reg_train(void* w, void* activations, Allocator* acts, Alloca
     a->wgrad_scratch = (PrecisionTensor*)calloc(m->num_layers, sizeof(PrecisionTensor));
     a->grad_input_buf = {.shape = {B_TT, H}};
     a->grad_next_state = {.shape = {B, 1, H}};
+#if !MINGRU_FUSE_HIGHWAY_GRAD_ADD
     alloc_register(acts,&a->grad_input_buf);
+#endif
     alloc_register(acts,&a->grad_next_state);
     for (int i = 0; i < m->num_layers; i++) {
         a->scan_bufs[i] = {
@@ -641,6 +833,7 @@ static void mingru_reg_train(void* w, void* activations, Allocator* acts, Alloca
             .a_star =           {.shape = {B, TT + 1, H}},
             .s_vals =           {.shape = {B, TT + 1, H}},
             .log_values_buf =   {.shape = {B, TT + 1, H}},
+            .backward_chunks =  {.shape = {backward_chunks, B, H, 2}},
             .out =              {.shape = {B, TT, H}},
             .next_state =       {.shape = {B, 1, H}},
             .grad_combined =    {.shape = {B, TT, 3 * H}},
@@ -650,13 +843,16 @@ static void mingru_reg_train(void* w, void* activations, Allocator* acts, Alloca
         a->saved_inputs[i]  = {.shape = {B, TT, H}};
         a->combined_bufs[i] = {.shape = {B_TT, 3 * H}};
         a->wgrad_scratch[i] = {.shape = {3 * H, H}};
+#if !ALIAS_TRAIN_LINEAR_INPUTS
         alloc_register(acts,&a->saved_inputs[i]);
+#endif
         alloc_register(acts,&a->combined_bufs[i]);
         alloc_register(acts,&a->scan_bufs[i].out);
         alloc_register(acts,&a->scan_bufs[i].next_state);
         alloc_register(acts,&a->scan_bufs[i].a_star);
         alloc_register(acts,&a->scan_bufs[i].s_vals);
         alloc_register(acts,&a->scan_bufs[i].log_values_buf);
+        alloc_register(acts,&a->scan_bufs[i].backward_chunks);
         alloc_register(acts,&a->scan_bufs[i].grad_combined);
         alloc_register(acts,&a->scan_bufs[i].grad_state);
         alloc_register(acts,&a->scan_bufs[i].grad_input);
@@ -724,7 +920,11 @@ static PrecisionTensor mingru_forward_train(void* w, PrecisionTensor x, Precisio
     MinGRUActivations* a = (MinGRUActivations*)activations;
     int B = x.shape[0];
     for (int i = 0; i < m->num_layers; i++) {
+#if ALIAS_TRAIN_LINEAR_INPUTS
+        a->saved_inputs[i].data = x.data;
+#else
         puf_copy(&a->saved_inputs[i], &x, stream);
+#endif
         PrecisionTensor state_i = mingru_state_layer(m, state, i);
         puf_mm(&x, &m->weights[i], &a->combined_bufs[i], stream);
         a->scan_bufs[i].combined_ptr = a->combined_bufs[i].data;
@@ -741,14 +941,19 @@ static PrecisionTensor mingru_backward(void* w, PrecisionTensor grad, void* acti
     MinGRUActivations* a = (MinGRUActivations*)activations;
     for (int i = m->num_layers - 1; i >= 0; i--) {
         PrefixScan& scan = a->scan_bufs[i];
-        mingru_scan_backward<<<grid_size(scan.B*scan.H), BLOCK_SIZE, 0, stream>>>(
-            scan, grad.data, a->grad_next_state.data);
+        mingru_scan_backward(scan, grad.data, a->grad_next_state.data, stream);
         puf_mm_tn(&scan.grad_combined, &a->saved_inputs[i], &a->wgrad_scratch[i], stream);
+#if MINGRU_FUSE_HIGHWAY_GRAD_ADD
+        puf_addmm_nn(&scan.grad_combined, &m->weights[i], &scan.grad_input,
+            1.0f, 1.0f, stream);
+        grad = scan.grad_input;
+#else
         puf_mm_nn(&scan.grad_combined, &m->weights[i], &a->grad_input_buf, stream);
         int n = numel(scan.grad_input.shape);
         add_kernel<<<grid_size(n), BLOCK_SIZE, 0, stream>>>(
             a->grad_input_buf.data, scan.grad_input.data, n);
         grad = a->grad_input_buf;
+#endif
     }
     return grad;
 }
