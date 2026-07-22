@@ -35,6 +35,26 @@ class DefaultEncoder(nn.Module):
     def forward(self, observations):
         return self.encoder(observations.view(observations.shape[0], -1).float())
 
+class CraftaxCompactEncoder(nn.Module):
+    '''Expands the craftax compact uint8 observation (built with
+    -DCRAFTAX_COMPACT_OBS) back to the exact 843-float observation on GPU:
+    792 map ID bytes are cast to float, and the trailing 204 bytes are
+    reinterpreted as the 51 float32 scalar channels.'''
+    MAP_BYTES = 792
+    TAIL_FLOATS = 51
+
+    def __init__(self, obs_size, hidden_size=128):
+        super().__init__()
+        assert obs_size == self.MAP_BYTES + 4*self.TAIL_FLOATS, \
+            f'expected compact craftax obs (996 bytes), got {obs_size}'
+        self.encoder = nn.Linear(self.MAP_BYTES + self.TAIL_FLOATS, hidden_size)
+
+    def forward(self, observations):
+        observations = observations.view(observations.shape[0], -1)
+        map_part = observations[:, :self.MAP_BYTES].float()
+        tail = observations[:, self.MAP_BYTES:].contiguous().view(torch.float32)
+        return self.encoder(torch.cat([map_part, tail], dim=1))
+
 class MinimalEntityEncoder(nn.Module):
     def __init__(self, obs_size, hidden_size=128):
         super().__init__()

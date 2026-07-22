@@ -104,7 +104,17 @@ static inline void craftax_profile_report(void) {
 #define CRAFTAX_NUM_MOB_CLASSES 5
 #define CRAFTAX_NUM_MOB_TYPES 8
 #define CRAFTAX_INVENTORY_OBS_SIZE 51
+// Compile with -DCRAFTAX_COMPACT_OBS to emit uint8 observations (996 bytes:
+// 792 map ID bytes + 51 float32 scalars as raw bytes) instead of 843 floats.
+// Pair with OBS_TENSOR_T ByteTensor and the CraftaxCompactEncoder policy
+// encoder, which expands back to the identical 843-float observation on GPU.
+#ifdef CRAFTAX_COMPACT_OBS
+#define CRAFTAX_OBS_SIZE CRAFTAX_WG_COMPACT_OBS_SIZE
+typedef uint8_t CraftaxObs;
+#else
 #define CRAFTAX_OBS_SIZE CRAFTAX_WG_OBS_SIZE
+typedef float CraftaxObs;
+#endif
 
 #define CRAFTAX_NUM_ACTIONS 43
 #define CRAFTAX_NUM_ACHIEVEMENTS 67
@@ -416,6 +426,10 @@ typedef struct CraftaxState {
     int32_t up_ladders[CRAFTAX_NUM_LEVELS][2];
     bool chests_opened[CRAFTAX_NUM_LEVELS];
     int32_t monsters_killed[CRAFTAX_NUM_LEVELS];
+
+    // Mirrors CraftaxWorldState: lazy floor generation bookkeeping.
+    uint32_t lazy_floor_keys[CRAFTAX_NUM_LEVELS][2];
+    uint32_t lazy_floors_pending;
 } CraftaxState;
 
 typedef char CraftaxStateMatchesWorldState[
@@ -474,23 +488,48 @@ static inline void craftax_set_map_block(
     craftax_refresh_spawn_bits_cell(state, level, row, col);
 }
 
+static inline void craftax_refresh_spawn_bits_level(
+    CraftaxState* state,
+    int32_t level
+) {
+    for (int32_t row = 0; row < CRAFTAX_MAP_SIZE; row++) {
+        uint64_t all_bits = 0;
+        uint64_t grave_bits = 0;
+        uint64_t water_bits = 0;
+        for (int32_t col = 0; col < CRAFTAX_MAP_SIZE; col++) {
+            uint8_t block = state->map[level][row][col];
+            uint64_t bit = 1ULL << col;
+            all_bits |= (0ULL - craftax_spawn_all_bit(block)) & bit;
+            grave_bits |= (0ULL - craftax_spawn_grave_bit(block)) & bit;
+            water_bits |= (0ULL - craftax_spawn_water_bit(block)) & bit;
+        }
+        state->spawn_all_bits[level][row] = all_bits;
+        state->spawn_grave_bits[level][row] = grave_bits;
+        state->spawn_water_bits[level][row] = water_bits;
+    }
+}
+
+// Generate a deferred floor on first visit. No-op when the floor is already
+// present (bit clear), so zero-initialized fixture states are unaffected.
+static inline void craftax_ensure_floor_generated(
+    CraftaxState* state,
+    int32_t level
+) {
+    if (level < 0 || level >= CRAFTAX_NUM_LEVELS) return;
+    uint32_t bit = 1u << (uint32_t)level;
+    if (!(state->lazy_floors_pending & bit)) return;
+    CraftaxThreefryKey key = {{
+        state->lazy_floor_keys[level][0],
+        state->lazy_floor_keys[level][1],
+    }};
+    craftax_generate_floor_from_key(key, level, (CraftaxWorldState*)(void*)state);
+    state->lazy_floors_pending &= ~bit;
+    craftax_refresh_spawn_bits_level(state, level);
+}
+
 static inline void craftax_refresh_spawn_bits_all(CraftaxState* state) {
     for (int32_t level = 0; level < CRAFTAX_NUM_LEVELS; level++) {
-        for (int32_t row = 0; row < CRAFTAX_MAP_SIZE; row++) {
-            uint64_t all_bits = 0;
-            uint64_t grave_bits = 0;
-            uint64_t water_bits = 0;
-            for (int32_t col = 0; col < CRAFTAX_MAP_SIZE; col++) {
-                uint8_t block = state->map[level][row][col];
-                uint64_t bit = 1ULL << col;
-                all_bits |= (0ULL - craftax_spawn_all_bit(block)) & bit;
-                grave_bits |= (0ULL - craftax_spawn_grave_bit(block)) & bit;
-                water_bits |= (0ULL - craftax_spawn_water_bit(block)) & bit;
-            }
-            state->spawn_all_bits[level][row] = all_bits;
-            state->spawn_grave_bits[level][row] = grave_bits;
-            state->spawn_water_bits[level][row] = water_bits;
-        }
+        craftax_refresh_spawn_bits_level(state, level);
     }
 }
 
@@ -578,7 +617,7 @@ typedef struct Craftax {
     Client* client;
     Log log;
 
-    float* observations;
+    CraftaxObs* observations;
     float* actions;
     float* rewards;
     float* terminals;
@@ -630,14 +669,32 @@ static inline void craftax_copy_world_state_to_state(
     memcpy(dst, src, sizeof(*dst));
 }
 
+// Lazy floor generation toggle (process-wide, like the reset pool). When on,
+// resets generate only floor 0 and defer floors 1..8 to first visit. Maps are
+// bit-identical to eager generation; only the time of generation changes.
+static int g_craftax_lazy_floors = 0;
+
+static inline void craftax_set_lazy_floors(int enabled) {
+    g_craftax_lazy_floors = enabled;
+}
+
 static inline void craftax_generate_state_from_world_key(
     CraftaxThreefryKey world_key,
     CraftaxState* out
 ) {
-    CraftaxWorldState world_state;
-    craftax_generate_world_from_key(world_key, &world_state);
-    craftax_copy_world_state_to_state(out, &world_state);
-    craftax_refresh_spawn_bits_all(out);
+    // CraftaxState and CraftaxWorldState are layout-identical (see the
+    // sizeof static assert), so generate in place instead of filling an
+    // 80KB temporary and copying it over.
+    craftax_generate_world_from_key_lazy(
+        world_key,
+        (CraftaxWorldState*)(void*)out,
+        g_craftax_lazy_floors != 0);
+    // Deferred floors keep zeroed spawn bits; craftax_ensure_floor_generated
+    // refreshes them when the floor materializes.
+    for (int32_t level = 0; level < CRAFTAX_NUM_LEVELS; level++) {
+        if (out->lazy_floors_pending & (1u << (uint32_t)level)) continue;
+        craftax_refresh_spawn_bits_level(out, level);
+    }
 }
 
 static inline void craftax_reset_state_from_reset_key(
@@ -711,16 +768,128 @@ static inline void craftax_reset_state_from_seed(Craftax* env) {
     craftax_reset_state_from_reset_key(env->state, reset_key);
 }
 
-// Hot-path reset used by c_step on episode-done. Consults the reset pool
-// when enabled, falls through to generate_world otherwise. Pool index is
-// derived from the reset_key so different done events pick different
-// pooled worlds. The direct craftax_reset_state_from_reset_key stays
+// ============================================================
+// Pipelined world pool: producer threads continuously pre-generate fresh
+// worlds into a ring buffer; reset pops one with a memcpy. Unlike the static
+// reset pool above, every world is unique (no diversity bound), but
+// trajectories are no longer reproducible from the seed alone (which pooled
+// world a reset receives depends on thread scheduling).
+// ============================================================
+#include <pthread.h>
+#include <stdatomic.h>
+#include <unistd.h>
+
+typedef struct CraftaxWorldPool {
+    CraftaxState* slots;
+    int capacity;
+    int head;               // next slot to pop (guarded by lock)
+    int count;              // filled slots (guarded by lock)
+    pthread_mutex_t lock;
+    atomic_uint next_world; // world id -> generation key
+    atomic_int running;
+    uint64_t seed;
+    int num_producers;
+    pthread_t producers[64];
+} CraftaxWorldPool;
+
+static CraftaxWorldPool g_craftax_world_pool = {0};
+
+static void* craftax_world_pool_producer(void* arg) {
+    CraftaxWorldPool* pool = (CraftaxWorldPool*)arg;
+    CraftaxState scratch;
+    while (atomic_load_explicit(&pool->running, memory_order_relaxed)) {
+        uint32_t id = atomic_fetch_add(&pool->next_world, 1u);
+        CraftaxThreefryKey key = craftax_prng_key(
+            (uint32_t)(pool->seed ^ (uint64_t)id * 0x9E3779B9u));
+        CraftaxThreefryKey discard, reset_key;
+        craftax_threefry_split(key, &discard, &reset_key);
+        craftax_reset_state_from_reset_key(&scratch, reset_key);
+
+        for (;;) {
+            if (!atomic_load_explicit(&pool->running, memory_order_relaxed)) {
+                return NULL;
+            }
+            pthread_mutex_lock(&pool->lock);
+            if (pool->count < pool->capacity) {
+                int idx = (pool->head + pool->count) % pool->capacity;
+                memcpy(&pool->slots[idx], &scratch, sizeof(CraftaxState));
+                pool->count++;
+                pthread_mutex_unlock(&pool->lock);
+                break;
+            }
+            pthread_mutex_unlock(&pool->lock);
+            usleep(100);  // ring full: trainer is ahead, back off briefly
+        }
+    }
+    return NULL;
+}
+
+static inline void craftax_world_pool_start(
+    int capacity,
+    int producers,
+    uint64_t seed
+) {
+    CraftaxWorldPool* pool = &g_craftax_world_pool;
+    if (atomic_load(&pool->running) || capacity <= 0 || producers <= 0) return;
+    if (producers > 64) producers = 64;
+    pool->slots = (CraftaxState*)calloc((size_t)capacity, sizeof(CraftaxState));
+    pool->capacity = capacity;
+    pool->head = 0;
+    pool->count = 0;
+    pool->seed = seed;
+    pool->num_producers = producers;
+    pthread_mutex_init(&pool->lock, NULL);
+    atomic_store(&pool->next_world, 0u);
+    atomic_store(&pool->running, 1);
+    for (int i = 0; i < producers; i++) {
+        pthread_create(&pool->producers[i], NULL,
+                       craftax_world_pool_producer, pool);
+    }
+}
+
+static inline void craftax_world_pool_stop(void) {
+    CraftaxWorldPool* pool = &g_craftax_world_pool;
+    if (!atomic_load(&pool->running)) return;
+    atomic_store(&pool->running, 0);
+    for (int i = 0; i < pool->num_producers; i++) {
+        pthread_join(pool->producers[i], NULL);
+    }
+    pthread_mutex_destroy(&pool->lock);
+    free(pool->slots);
+    pool->slots = NULL;
+}
+
+// Returns true and fills `out` when a pre-generated world was available.
+static inline bool craftax_world_pool_try_pop(CraftaxState* out) {
+    CraftaxWorldPool* pool = &g_craftax_world_pool;
+    if (!atomic_load_explicit(&pool->running, memory_order_relaxed)) {
+        return false;
+    }
+    pthread_mutex_lock(&pool->lock);
+    if (pool->count == 0) {
+        pthread_mutex_unlock(&pool->lock);
+        return false;
+    }
+    memcpy(out, &pool->slots[pool->head], sizeof(CraftaxState));
+    pool->head = (pool->head + 1) % pool->capacity;
+    pool->count--;
+    pthread_mutex_unlock(&pool->lock);
+    return true;
+}
+
+// Hot-path reset used by c_step on episode-done. Order of preference:
+// pipelined world pool (fresh world, memcpy cost), static reset pool
+// (bounded diversity, memcpy cost), inline generation (exact per-key
+// determinism). The direct craftax_reset_state_from_reset_key stays
 // pool-free so the parity harness and any other direct caller get exact
 // per-key determinism.
 static inline void craftax_reset_state_on_done(
     CraftaxState* out,
     CraftaxThreefryKey reset_key
 ) {
+    if (craftax_world_pool_try_pop(out)) {
+        return;
+    }
     if (g_craftax_reset_pool_size > 0) {
         uint32_t idx = reset_key.word[0] % (uint32_t)g_craftax_reset_pool_size;
         memcpy(out, &g_craftax_reset_pool[idx], sizeof(CraftaxState));
@@ -731,12 +900,16 @@ static inline void craftax_reset_state_on_done(
 
 static inline void craftax_encode_native_observation(
     const CraftaxState* state,
-    float* obs
+    CraftaxObs* obs
 ) {
     if (obs == NULL) {
         return;
     }
+#ifdef CRAFTAX_COMPACT_OBS
+    craftax_encode_compact_observation((const CraftaxWorldState*)(const void*)state, obs);
+#else
     craftax_encode_reset_observation((const CraftaxWorldState*)(const void*)state, obs);
+#endif
 }
 
 static inline float craftax_calculate_light_level_native(int32_t timestep) {
@@ -990,6 +1163,15 @@ static void c_step_gameplay(Craftax* env) {
         memset(env->achievements, 0, sizeof(env->achievements));
         craftax_reset_state_on_done(env->state, reset_key);
     }
+
+#ifdef CRAFTAX_COMPACT_OBS
+    // Host and CUDA arithmetic can land on adjacent float values when several
+    // health deltas are accumulated (for example the two encodings of 0.3f).
+    // Canonicalize only the externally exposed compact-build reward, after
+    // episode bookkeeping, so CPU/GPU parity is exact without changing state.
+    const float reward_grid = 1048576.0f;  // 2^20, exact in float32
+    env->rewards[0] = nearbyintf(env->rewards[0] * reward_grid) / reward_grid;
+#endif
 }
 
 static void c_step_encode(Craftax* env) {
