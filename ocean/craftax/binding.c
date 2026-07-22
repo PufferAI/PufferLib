@@ -7,15 +7,45 @@
 #define OBS_SIZE CRAFTAX_OBS_SIZE
 #define NUM_ATNS 1
 #define ACT_SIZES {CRAFTAX_NUM_ACTIONS}
+#ifdef CRAFTAX_COMPACT_OBS
+#define OBS_TENSOR_T ByteTensor
+#else
 #define OBS_TENSOR_T FloatTensor
+#endif
 
 #define CRAFTAX_VEC_TILE_SIZE 128
 #define MY_VEC_INIT
 #define MY_VEC_CLOSE
 #define MY_VEC_STEP craftax_vec_step
 #define MY_VEC_STEP_RANGE craftax_vec_step_range
+#ifdef PUFFER_GPU_ENV
+// Device-resident env (binding.cu): the vec steps entirely on the GPU.
+#define MY_GPU_ENV 1
+#endif
 #define Env Craftax
 #include "vecenv.h"
+
+#ifdef PUFFER_GPU_ENV
+// Implemented in binding.cu: drains per-env device logs (same Log layout
+// as the CPU env) and zeroes them device-side.
+void craftax_gpu_collect_logs(void* logs_out, int num_envs);
+
+void my_gpu_sync_logs(StaticVec* vec) {
+    Craftax* envs = (Craftax*)vec->envs;
+    int n = vec->size;
+    Log* logs = (Log*)malloc((size_t)n * sizeof(Log));
+    craftax_gpu_collect_logs(logs, n);
+    int num_keys = (int)(sizeof(Log) / sizeof(float));
+    for (int i = 0; i < n; i++) {
+        float* dst = (float*)&envs[i].log;
+        float* src = (float*)&logs[i];
+        for (int j = 0; j < num_keys; j++) {
+            dst[j] += src[j];
+        }
+    }
+    free(logs);
+}
+#endif
 
 // Tiled vector step: process agents in tiles that fit comfortably in cache.
 // Each thread processes a contiguous block of lightweight env handles while
@@ -129,6 +159,26 @@ void my_init(Env* env, Dict* kwargs) {
     DictItem* pool_item = dict_get_unsafe(kwargs, "reset_pool_size");
     if (pool_item != NULL) reset_pool_size = (int)pool_item->value;
     craftax_set_reset_pool_size(reset_pool_size);
+
+    // Lazy floor generation: reset generates only floor 0, floors 1..8 are
+    // generated on first descent (bit-identical maps, deferred cost).
+    int lazy_floors = 0;
+    DictItem* lazy_item = dict_get_unsafe(kwargs, "lazy_floors");
+    if (lazy_item != NULL) lazy_floors = (int)lazy_item->value;
+    craftax_set_lazy_floors(lazy_floors);
+
+    // Pipelined world pool: producer threads pre-generate fresh worlds so
+    // episode resets become a memcpy. Every world is unique (unlike the
+    // static reset pool) but reset outcomes depend on thread scheduling.
+    int wp_producers = 0;
+    int wp_capacity = 1024;
+    DictItem* wp_item = dict_get_unsafe(kwargs, "world_pool_producers");
+    if (wp_item != NULL) wp_producers = (int)wp_item->value;
+    DictItem* wpc_item = dict_get_unsafe(kwargs, "world_pool_capacity");
+    if (wpc_item != NULL) wp_capacity = (int)wpc_item->value;
+    if (wp_producers > 0) {
+        craftax_world_pool_start(wp_capacity, wp_producers, env->seed);
+    }
 
     c_init(env);
 }

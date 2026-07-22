@@ -140,6 +140,13 @@ fi
 
 OUTPUT_NAME=${OUTPUT_NAME:-$ENV}
 
+# Craftax's compact observation ABI must be selected consistently in the host
+# binding, optional device env, and compiled trainer. Leave it opt-in so the
+# default float-observation build remains unchanged.
+if [ "${COMPACT_OBS:-0}" = "1" ]; then
+    EXTRA_CFLAGS="$EXTRA_CFLAGS -DCRAFTAX_COMPACT_OBS"
+fi
+
 # Standalone environment build
 # -mavx2 enables AVX2 intrinsics (__m256, _mm256_*) which drive.h and
 # src/bf16.h use directly. x86_64 only — strip if porting to ARM/Apple Silicon.
@@ -258,6 +265,33 @@ if [ ! -f "$BINDING_SRC" ]; then
     exit 1
 fi
 
+# Optional device-resident env: GPU_ENV=1 compiles $SRC_DIR/binding.cu
+# (a CUDA implementation of the my_gpu_* hooks in src/vecenv.h) into the env
+# static lib and defines PUFFER_GPU_ENV for the binding so the vec steps the
+# env entirely on the GPU. CUDA build mode only.
+GPU_ENV_SRC="$SRC_DIR/binding.cu"
+GPU_ENV_OBJ=""
+if [ "${GPU_ENV:-0}" = "1" ]; then
+    if [ ! -f "$GPU_ENV_SRC" ]; then
+        echo "Error: GPU_ENV=1 but $GPU_ENV_SRC not found"
+        exit 1
+    fi
+    if [ -n "$MODE" ]; then
+        echo "Error: GPU_ENV=1 requires the default CUDA build mode"
+        exit 1
+    fi
+    EXTRA_CFLAGS="$EXTRA_CFLAGS -DPUFFER_GPU_ENV"
+    GPU_ENV_OBJ="build/libgpu_${ENV}.o"
+    echo "Compiling device env $GPU_ENV_SRC..."
+    $NVCC -c -arch=$ARCH -O3 -Xcompiler -fPIC \
+        --expt-relaxed-constexpr -fmad=false \
+        -std=c++17 \
+        -I. -Isrc -I$SRC_DIR \
+        -I$CUDA_HOME/include \
+        $PRECISION $EXTRA_CFLAGS \
+        "$GPU_ENV_SRC" -o "$GPU_ENV_OBJ"
+fi
+
 echo "Compiling static library for $ENV..."
 ${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
     -I. -Isrc -I$SRC_DIR -Ivendor \
@@ -267,10 +301,17 @@ ${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
     -fno-semantic-interposition -fvisibility=hidden \
     -fPIC -fopenmp \
     "$BINDING_SRC" -o "$STATIC_OBJ"
-ar rcs "$STATIC_LIB" "$STATIC_OBJ"
+ar rcs "$STATIC_LIB" "$STATIC_OBJ" $GPU_ENV_OBJ
 
-# Brittle hack: have to extract the tensor type from the static lib to build trainer
-OBS_TENSOR_T=$(awk '/^#define OBS_TENSOR_T/{print $3}' "$BINDING_SRC")
+# Brittle hack: have to extract the tensor type from the static lib to build trainer.
+# Preprocess (with the same flags as the binding compile) so flag-gated defines
+# like -DCRAFTAX_COMPACT_OBS resolve to the tensor type actually compiled in.
+OBS_TENSOR_T=$(${CC:-clang} -E -dM $EXTRA_CFLAGS \
+    -I. -Isrc -I$SRC_DIR -Ivendor \
+    "${INCLUDES[@]}" \
+    -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
+    -DPLATFORM_DESKTOP \
+    "$BINDING_SRC" | awk '$2=="OBS_TENSOR_T"{print $3}')
 if [ -z "$OBS_TENSOR_T" ]; then
     echo "Error: Could not find OBS_TENSOR_T in $BINDING_SRC"
     exit 1
@@ -289,7 +330,7 @@ if [ -z "$MODE" ]; then
         -Xcompiler=-fopenmp \
         -DOBS_TENSOR_T=$OBS_TENSOR_T \
         -DENV_NAME=$ENV \
-        $PRECISION $NVCC_OPT \
+        $PRECISION $EXTRA_CFLAGS $NVCC_OPT \
         src/bindings.cu -o build/bindings.o
 
     LINK_CMD=(
@@ -316,7 +357,7 @@ elif [ "$MODE" = "cpu" ]; then
         -I$PYTHON_INCLUDE -I$PYBIND_INCLUDE \
         -DOBS_TENSOR_T=$OBS_TENSOR_T \
         -DENV_NAME=$ENV \
-        $PRECISION $LINK_OPT \
+        $PRECISION $EXTRA_CFLAGS $LINK_OPT \
         src/bindings_cpu.cpp -o build/bindings_cpu.o
     LINK_CMD=(
         ${CXX:-g++} -shared -fPIC -fopenmp
@@ -337,7 +378,7 @@ elif [ "$MODE" = "profile" ]; then
         -DOBS_TENSOR_T=$OBS_TENSOR_T \
         -DENV_NAME=$ENV \
         -Xcompiler=-DPLATFORM_DESKTOP \
-        $PRECISION \
+        $PRECISION $EXTRA_CFLAGS \
         -Xcompiler=-fopenmp \
         tests/profile_kernels.cu vendor/ini.c \
         "$STATIC_LIB" "$RAYLIB_A" \
