@@ -2069,6 +2069,10 @@ void puf_load_primary_if_configured(PuffeRL* p, Ini* ini) {
         "load_model_path", resolved_path, sizeof(resolved_path));
     if (load_path) {
         puf_load_weights_into(p->master_weights, p->param_puf, p->default_stream, load_path);
+        if (p->hypers.async) {
+            puf_copy(&p->actor_param_puf, &p->param_puf, p->default_stream);
+        }
+        cudaStreamSynchronize(p->default_stream);
         printf("Loaded weights from %s\n", load_path);
     }
 }
@@ -4404,6 +4408,7 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
     }
 
     PuffeRL* pufferl = create_trainer(ini, ctx);
+    puf_load_primary_if_configured(pufferl, ini);
     char initial_checkpoint[4096] = {0};
     if (use_selfplay) {
         train_checkpoint_path(pufferl, checkpoint_dir,
