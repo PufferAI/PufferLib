@@ -50,7 +50,7 @@ typedef struct {
 // a constant subset of agents 
 struct RolloutBuf {
     PrecisionTensor observations;  // (horizon, agents, input_size)
-    PrecisionTensor actions;       // (horizon, agents, num_atns)
+    FloatTensor actions;           // (horizon, agents, num_atns)
     PrecisionTensor values;        // (horizon, agents)
     PrecisionTensor logprobs;      // ...
     PrecisionTensor rewards;
@@ -95,7 +95,7 @@ void register_rollout_buffers(RolloutBuf& bufs, Allocator* alloc, int T, int B, 
 struct TrainGraph {
     PrecisionTensor mb_state;       // (layers, B, hidden)
     PrecisionTensor mb_obs;         // (B, T, input_size)
-    PrecisionTensor mb_actions;     // (B, T, num_atns)
+    FloatTensor mb_actions;         // (B, T, num_atns)
     PrecisionTensor mb_logprobs;    // (B, T)
     PrecisionTensor mb_advantages;  // ...
     PrecisionTensor mb_values;
@@ -142,7 +142,7 @@ void register_train_buffers(TrainGraph& bufs, Allocator* alloc, int B, int T, in
 struct PPOGraphArgs {
     precision_t* out_ratio;
     precision_t* out_newvalue;
-    const precision_t* actions;
+    const float* actions;
     const precision_t* old_logprobs;
     const precision_t* advantages;
     const precision_t* prio;
@@ -224,7 +224,8 @@ void register_prio_buffers(PrioBuffers& bufs, Allocator* alloc, int B, int minib
 
 // Slice: select dim0 index t, then narrow dim0 from start for count.
 // 3D (T, B, F) -> (count, F); 2D (T, B) -> (count,)
-inline PrecisionTensor puf_slice(PrecisionTensor& p, int t, int start, int count) {
+template <typename Tensor>
+inline Tensor puf_slice(Tensor& p, int t, int start, int count) {
     if (ndim(p.shape) == 3) {
         long B = p.shape[1], F = p.shape[2];
         return {.data = p.data + (t*B + start)*F, .shape = {count, F}};
@@ -466,7 +467,8 @@ __global__ void sample_logits(
         PrecisionTensor dec_out,              // (B, logits_dim + 1 for values)
         PrecisionTensor logstd_puf,           // (1, od) - continuous actions only
         IntTensor act_sizes_puf,              // (num_atns,) action head sizes
-        precision_t* __restrict__ actions,    // (B, num_atns)
+        float* __restrict__ actions,          // (B, num_atns)
+        float* __restrict__ env_actions,      // (B, num_atns)
         precision_t* __restrict__ logprobs,   // (B,)
         precision_t* __restrict__ value_out,  // (B,)
         curandStatePhilox4_32_10_t* __restrict__ rng_states,
@@ -509,13 +511,16 @@ __global__ void sample_logits(
             float noise = curand_normal(&state);
             float action = finite_or_clamp(mean + std * noise, -1.0e6f, 1.0e6f);
 
+            // Preserve the previous reduced-precision continuous action semantics.
             precision_t stored_action_p = from_float(action);
             float stored_action = to_float(stored_action_p);
             // Log probability: -0.5 * ((action - mean) / std)^2 - 0.5 * log(2*pi) - log(std)
             float normalized = (stored_action - mean) / std;
             float log_prob = -0.5f * normalized * normalized - 0.5f * LOG_2PI - log_std;
 
-            actions[idx * num_atns + h] = stored_action_p;
+            int action_idx = idx * num_atns + h;
+            actions[action_idx] = stored_action;
+            env_actions[action_idx] = stored_action;
             total_log_prob += log_prob;
         }
     } else {
@@ -573,8 +578,11 @@ __global__ void sample_logits(
             float sampled_logit = masked_logit(logits, logits_base, logits_offset, sampled_action, action_mask, mask_base);
             float log_prob = sampled_logit - logsumexp;
 
-            // Write action for this head
-            actions[idx * num_atns + h] = from_float(sampled_action);
+            // Float32 preserves large categorical indices that BF16 cannot represent exactly.
+            int action_idx = idx * num_atns + h;
+            float action = static_cast<float>(sampled_action);
+            actions[action_idx] = action;
+            env_actions[action_idx] = action;
             total_log_prob += log_prob;
 
             // Advance to next action head
@@ -680,7 +688,7 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
 
         int sub_start = start + bank_off;
         PrecisionTensor obs_b   = puf_slice(rollouts.observations, t, sub_start, bank_size);
-        PrecisionTensor act_b   = puf_slice(rollouts.actions,      t, sub_start, bank_size);
+        FloatTensor act_b       = puf_slice(rollouts.actions,      t, sub_start, bank_size);
         PrecisionTensor lp_b    = puf_slice(rollouts.logprobs,     t, sub_start, bank_size);
         PrecisionTensor val_b   = puf_slice(rollouts.values,       t, sub_start, bank_size);
         PrecisionTensor mask_b  = {};
@@ -701,13 +709,10 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
         // Offset RNG by bank_off so banks don't collide on per-buffer rng slots.
         sample_logits<<<grid_size(bank_size), BLOCK_SIZE, 0, stream>>>(
             dec_puf, p_logstd, pufferl->act_sizes_puf,
-            act_b.data, lp_b.data, val_b.data,
+            act_b.data, env.actions.data + (long)sub_start * act_cols,
+            lp_b.data, val_b.data,
             pufferl->rng_states[buf] + bank_off,
             mask_b.data, mask_stride_b);
-
-        cast<<<grid_size(numel(act_b.shape)), BLOCK_SIZE, 0, stream>>>(
-                env.actions.data + (long)sub_start * act_cols,
-                act_b.data, numel(act_b.shape));
     }
 
     if (capturing) {
@@ -1453,7 +1458,7 @@ __global__ void select_copy(RolloutBuf rollouts, TrainGraph graph,
 
     // Compute row byte counts from tensor shapes
     int obs_row_bytes = (numel(rollouts.observations.shape) / rollouts.observations.shape[0]) * sizeof(precision_t);
-    int act_row_bytes = (numel(rollouts.actions.shape) / rollouts.actions.shape[0]) * sizeof(precision_t);
+    int act_row_bytes = (numel(rollouts.actions.shape) / rollouts.actions.shape[0]) * sizeof(float);
     int lp_row_bytes = (numel(rollouts.logprobs.shape) / rollouts.logprobs.shape[0]) * sizeof(precision_t);
     int horizon = rollouts.values.shape[1];
 
