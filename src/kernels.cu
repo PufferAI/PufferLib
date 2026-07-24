@@ -176,8 +176,9 @@ __device__ __forceinline__ void copy_bytes(const char* __restrict__ src,
 */
 
 // Transpose dims 0,1: [A, B, C] -> [B, A, C]. For 2D, pass C=1.
-__global__ void transpose_102(precision_t* __restrict__ dst,
-        const precision_t* __restrict__ src, int A, int B, int C) {
+template <typename T>
+__global__ void transpose_102(T* __restrict__ dst,
+        const T* __restrict__ src, int A, int B, int C) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total = A * B * C;
     if (idx >= total) {
