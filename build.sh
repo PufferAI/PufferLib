@@ -310,7 +310,7 @@ if [ -z "$MODE" ]; then
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
         -lomp5 $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
-        -o "$OUTPUT"
+
     )
     "${LINK_CMD[@]}"
     echo "Built: $OUTPUT"
