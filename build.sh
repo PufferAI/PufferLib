@@ -54,16 +54,28 @@ fi
 PLATFORM="$(uname -s)"
 if [ "$PLATFORM" = "Linux" ]; then
     RAYLIB_NAME='raylib-5.5_linux_amd64'
-    OMP_LIB=-lomp5
     SANITIZE_FLAGS=(-fsanitize=address,undefined,bounds,pointer-overflow,leak -fno-omit-frame-pointer)
+    INCLUDES=()
     STANDALONE_LDFLAGS=(-lGL)
     SHARED_LDFLAGS=(-Bsymbolic-functions)
 else
+    if ! command -v brew &>/dev/null; then
+        echo "Homebrew is not installed."
+        exit 0
+    fi
+    # "--versions" is faster than normal "brew list llvm"
+    if ! brew list --versions llvm &>/dev/null; then
+        echo "LLVM is not installed via Homebrew. please 'brew install llvm'"
+        exit 0
+    fi
     RAYLIB_NAME='raylib-5.5_macos'
-    OMP_LIB=-lomp
     SANITIZE_FLAGS=()
-    STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
-    SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup)
+    # Homebrew "real" clang setup on mac
+    LLVM_PREFIX=$(brew --prefix llvm)
+    export PATH="$LLVM_PREFIX/bin:$PATH"
+    INCLUDES+=(-I$LLVM_PREFIX/include)
+    STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL -L$LLVM_PREFIX/lib)
+    SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup -L$LLVM_PREFIX/lib)
 fi
 
 CLANG_WARN=(
@@ -95,7 +107,7 @@ else
 fi
 
 RAYLIB_A="$RAYLIB_NAME/lib/libraylib.a"
-INCLUDES=(-I./$RAYLIB_NAME/include -I./src -I./vendor)
+INCLUDES+=(-I./$RAYLIB_NAME/include -I./src -I./vendor)
 LINK_ARCHIVES=("$RAYLIB_A")
 EXTRA_SRC=""
 EXTRA_LDFLAGS=()
@@ -301,7 +313,7 @@ if [ -z "$MODE" ]; then
         "${WHEEL_RPATH_FLAGS[@]}"
         "${EXTRA_LDFLAGS[@]}"
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
-        $OMP_LIB $LINK_OPT
+        -lomp5 $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
         -o "$OUTPUT"
     )
