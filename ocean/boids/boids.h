@@ -223,7 +223,7 @@ void c_step(Boids *env) {
         // TODO: Once done with above TODO, delete rewards normalization section right below here
         // Normalization
         // env->rewards[current_indx] = current_boid_reward / 5.0f;
-        // env->rewards[current_indx] = current_boid_reward / 205.0f;
+        // env->rewards[current_indx] = current_boid_reward / 1854.0f; <- potentially
         env->rewards[current_indx] = current_boid_reward / 64.0f;
 
         //log updates
