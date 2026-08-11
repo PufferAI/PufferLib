@@ -171,7 +171,7 @@ void c_render(Target* env) {
         SetTargetFPS(60);
         env->client = (Client*)calloc(1, sizeof(Client));
         env->client->puffer = LoadTexture("resources/shared/puffers_128.png");
-        env->client->star = LoadTexture("resources/shared/star.png");
+        env->client->star = LoadTexture("resources/onlyfish/star.png");
     }
 
     // Standard across our envs so exiting is always the same
