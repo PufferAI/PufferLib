@@ -2994,9 +2994,12 @@ static PuffeRL* eval_make(Ini* ini, TrainContext* ctx, int mode) {
 EvalResult run_eval(Ini* ini, TrainContext* ctx, int mode, int verbose) {
     long n = puf_ini_get(ini, "base", "eval_episodes");
     assert((mode == EVAL_RENDER || n > 0) && "eval requires positive base.eval_episodes");
-    PuffeRL* p = eval_make(ini, ctx, mode);
-    EvalResult r = eval_loop(ini, p, mode, verbose, n, NULL, 0);
+    Ini eval_ini = {0};
+    puf_ini_copy(&eval_ini, ini);
+    PuffeRL* p = eval_make(&eval_ini, ctx, mode);
+    EvalResult r = eval_loop(&eval_ini, p, mode, verbose, n, NULL, 0);
     close_pufferl(p);
+    puf_ini_free(&eval_ini);
     return r;
 }
 
@@ -3249,16 +3252,18 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
     close_pufferl(pufferl);
 
     if (pool_eval && ctx->artifact_owner) {
-        puf_ini_put(ini, "base.load_model_path", final_checkpoint);
+        Ini eval_ini = {0};
+        puf_ini_copy(&eval_ini, ini);
+        puf_ini_put(&eval_ini, "base.load_model_path", final_checkpoint);
         int n_opp = 0;
         float sum = 0;
         for (int i = 0; i < selfplay.pool_size && n_opp < max_opp; i++) {
             if (strcmp(selfplay.pool[i], final_checkpoint) == 0) {
                 continue;
             }
-            puf_ini_put(ini, "base.load_enemy_model_path", selfplay.pool[i]);
-            PuffeRL* ep = eval_make(ini, ctx, EVAL_MATCH);
-            EvalResult r = eval_loop(ini, ep, EVAL_MATCH, 0, pool_games, NULL, 0);
+            puf_ini_put(&eval_ini, "base.load_enemy_model_path", selfplay.pool[i]);
+            PuffeRL* ep = eval_make(&eval_ini, ctx, EVAL_MATCH);
+            EvalResult r = eval_loop(&eval_ini, ep, EVAL_MATCH, 0, pool_games, NULL, 0);
             close_pufferl(ep);
             sum += r.score;
             n_opp++;
@@ -3273,6 +3278,7 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
             dict_set(&last_log, "selfplay/pool_score", result.score);
             printf("selfplay_eval mean_score=%.4f n=%d\n", result.score, n_opp);
         }
+        puf_ini_free(&eval_ini);
     }
 
     if (ctx->artifact_owner) {

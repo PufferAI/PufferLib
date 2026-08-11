@@ -166,6 +166,23 @@ typedef struct {
     int num_sections;
 } Ini;
 
+static inline void puf_ini_copy(Ini* dst, Ini* src) {
+    memset(dst, 0, sizeof(*dst));
+    if (!src->num_sections) {
+        return;
+    }
+
+    dst->sections = (Dict*)calloc((size_t)src->num_sections, sizeof(Dict));
+    if (!dst->sections) {
+        perror("calloc");
+        exit(1);
+    }
+    dst->num_sections = src->num_sections;
+    for (int i = 0; i < src->num_sections; i++) {
+        dict_copy(&dst->sections[i], &src->sections[i]);
+    }
+}
+
 static char* puf_ini_trim(char* s) {
     while (isspace((unsigned char)*s)) {
         s++;
