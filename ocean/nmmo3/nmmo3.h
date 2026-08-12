@@ -971,6 +971,8 @@ void compute_all_obs(MMO* env) {
                     env->observations[obs_adr+7] = seen->hp / 20; // Bucketed for discrete
                     env->observations[obs_adr+8] = seen->anim;
                     env->observations[obs_adr+9] = seen->dir;
+                } else {
+                    memset(&env->observations[obs_adr+4], 0, 6*sizeof(unsigned char));
                 }
                 obs_adr += 10;
             }
