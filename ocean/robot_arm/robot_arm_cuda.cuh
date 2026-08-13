@@ -5,31 +5,12 @@
 
 #include "robot_arm.h"
 
-#ifndef PL_IMPULSE_MAX_MANIFOLDS
 #define PL_IMPULSE_MAX_MANIFOLDS 48
-#endif
-#ifndef PL_IMPULSE_MAX_CANDIDATES
 #define PL_IMPULSE_MAX_CANDIDATES 20
-#endif
-
-#ifndef PL_SAT_PARALLEL_EPSILON
-#define PL_SAT_PARALLEL_EPSILON 1.0e-8f  // degenerate cross, not a margin
-#endif
-
-#ifndef PL_SAT_CLIP_EPSILON
-#define PL_SAT_CLIP_EPSILON 0.0f  // exact clip; SAT has no tolerance
-#endif
-
-#ifndef PL_SAT_MANIFOLD_DUPLICATE_EPSILON
+#define PL_SAT_PARALLEL_EPSILON 1.0e-8f
 #define PL_SAT_MANIFOLD_DUPLICATE_EPSILON 1.0e-8f
-#endif
-
-#ifndef PL_SAT_MAX_MANIFOLD_POINTS
 #define PL_SAT_MAX_MANIFOLD_POINTS 4
-#endif
-#ifndef PL_SAT_MAX_CLIP_VERTICES
 #define PL_SAT_MAX_CLIP_VERTICES 8
-#endif
 
 typedef enum PlSatFeature {
     PL_SAT_FACE_A_X = 0,
@@ -254,14 +235,13 @@ RA_D static RA_INLINE int pl_sclip(
     if (count <= 0) {
         return 0;
     }
-    const float boundary = offset + PL_SAT_CLIP_EPSILON;
     int output_count = 0;
     RaVec3 previous = input[count - 1];
-    float previous_distance = ra_dot(previous, normal) - boundary;
+    float previous_distance = ra_dot(previous, normal) - offset;
     int previous_inside = previous_distance <= 0.0f;
     for (int index = 0; index < count; ++index) {
         RaVec3 current = input[index];
-        float current_distance = ra_dot(current, normal) - boundary;
+        float current_distance = ra_dot(current, normal) - offset;
         int current_inside = current_distance <= 0.0f;
         if (current_inside != previous_inside
                 && output_count < PL_SAT_MAX_CLIP_VERTICES) {
@@ -628,21 +608,10 @@ RA_D static RA_INLINE int pl_smans(
         &box_a, &box_b, margin, &query, manifold);
 }
 
-#ifndef PL_IMPULSE_MAX_POINTS
-#define PL_IMPULSE_MAX_POINTS 4
-#endif
-
-#ifndef PL_IMPULSE_MAX_CACHE
+#define PL_IMPULSE_MAX_POINTS PL_SAT_MAX_MANIFOLD_POINTS
 #define PL_IMPULSE_MAX_CACHE 192
-#endif
-
-#ifndef PL_IMPULSE_MAX_SOLVER_ITERS
 #define PL_IMPULSE_MAX_SOLVER_ITERS 64
-#endif
-
-#ifndef PL_IMPULSE_EPSILON
 #define PL_IMPULSE_EPSILON 1.0e-8f
-#endif
 
 typedef struct PlImpulseConfig {
     int velocity_iterations;
@@ -1836,25 +1805,8 @@ RA_D static RA_INLINE void pl_isolve(
     pl_iwrc(cache, manifolds, manifold_count);
 }
 
-#ifndef RA_CUDA_MAX_BODIES
-#define RA_CUDA_MAX_BODIES 32
-#endif
-#ifndef RA_CUDA_MAX_MANIFOLDS
-#define RA_CUDA_MAX_MANIFOLDS PL_IMPULSE_MAX_MANIFOLDS
-#endif
-#if defined(__cplusplus)
-static_assert(RA_CUDA_MAX_MANIFOLDS == PL_IMPULSE_MAX_MANIFOLDS,
-    "CUDA world and impulse solver manifold capacities must match");
-#else
-_Static_assert(RA_CUDA_MAX_MANIFOLDS == PL_IMPULSE_MAX_MANIFOLDS,
-    "CUDA world and impulse solver manifold capacities must match");
-#endif
-#ifndef RA_CUDA_PAD_MAX_VISIBLE_CANDIDATES
 #define RA_CUDA_PAD_MAX_VISIBLE_CANDIDATES 128
-#endif
-#ifndef RA_CUDA_CONTACT_SLOP
 #define RA_CUDA_CONTACT_SLOP 1.0e-5f
-#endif
 
 #define RA_CUDA_BODY_CUBE 0
 #define RA_CUDA_BODY_BASE 1
@@ -1863,18 +1815,15 @@ _Static_assert(RA_CUDA_MAX_MANIFOLDS == PL_IMPULSE_MAX_MANIFOLDS,
 #define RA_CUDA_SHELL_BOXES 5
 #define RA_CUDA_BODY_LINK_START \
     (RA_CUDA_BODY_SHELL_START + RA_CUDA_SHELL_BOXES)
-#define RA_CUDA_LINK_BOXES RA_DOF
 #define RA_CUDA_BODY_PAD_LEFT_START \
-    (RA_CUDA_BODY_LINK_START + RA_CUDA_LINK_BOXES)
-#define RA_CUDA_PAD_BOXES 5
+    (RA_CUDA_BODY_LINK_START + RA_DOF)
 #define RA_CUDA_BODY_PAD_RIGHT_START \
-    (RA_CUDA_BODY_PAD_LEFT_START + RA_CUDA_PAD_BOXES)
+    (RA_CUDA_BODY_PAD_LEFT_START + RA_PAD_BOXES)
 #define RA_CUDA_ROBOT_BODY_END \
-    (RA_CUDA_BODY_PAD_RIGHT_START + RA_CUDA_PAD_BOXES)
+    (RA_CUDA_BODY_PAD_RIGHT_START + RA_PAD_BOXES)
 #define RA_CUDA_BODY_RIM RA_CUDA_ROBOT_BODY_END
 #define RA_CUDA_BODY_BACKBOARD (RA_CUDA_BODY_RIM + 1)
-#define RA_CUDA_PRODUCTION_BODY_COUNT \
-    (RA_CUDA_BODY_BACKBOARD + 1)
+#define RA_CUDA_BODIES (RA_CUDA_BODY_BACKBOARD + 1)
 
 typedef struct RaCudaRigidWorld {
     int body_count;
@@ -1882,9 +1831,9 @@ typedef struct RaCudaRigidWorld {
     int manifold_count;
     unsigned int topology;
     uint32_t compound_pad_component_mask[2];
-    RaRigidBody bodies[RA_CUDA_MAX_BODIES];
-    RaConvexShape shapes[RA_CUDA_MAX_BODIES];
-    PlImpulseManifold manifolds[RA_CUDA_MAX_MANIFOLDS];
+    RaRigidBody bodies[RA_CUDA_BODIES];
+    RaConvexShape shapes[RA_CUDA_BODIES];
+    PlImpulseManifold manifolds[PL_IMPULSE_MAX_MANIFOLDS];
     PlImpulseCandidate compound_candidate_scratch[
         RA_CUDA_PAD_MAX_VISIBLE_CANDIDATES];
     PlImpulseCache cache;
@@ -1893,7 +1842,7 @@ typedef struct RaCudaRigidWorld {
 
 RA_D static RA_INLINE int ra_manok(
         RaCudaRigidWorld* world) {
-    return world->manifold_count < RA_CUDA_MAX_MANIFOLDS;
+    return world->manifold_count < PL_IMPULSE_MAX_MANIFOLDS;
 }
 
 typedef struct RaCudaProductionStaged {
@@ -1947,7 +1896,7 @@ RA_HD static RA_INLINE void ra_rbrst(
 RA_D static RA_INLINE void ra_rbind(
         RaCudaRigidWorld* world, int index,
         RaRigidBody body, RaConvexShape shape) {
-    assert(index >= 0 && index < RA_CUDA_MAX_BODIES);
+    assert(index >= 0 && index < RA_CUDA_BODIES);
     world->bodies[index] = body;
     world->shapes[index] = shape;
     int next = index + 1;
@@ -2159,7 +2108,7 @@ RA_D static RA_INLINE void ra_bodies(
         ra_setbox(rigid, RA_CUDA_BODY_SHELL_START + item,
             box.pose, box.half_extent, 0.0f, velocity, hand_angular);
     }
-    for (int item = 0; item < RA_CUDA_LINK_BOXES; ++item) {
+    for (int item = 0; item < RA_DOF; ++item) {
         RaCollisionBox box = ra_linkb(links, item);
         RaVec3 velocity = ra_ptvel(
             state->qd, origins, axes, item, box.pose.position);
@@ -2169,7 +2118,7 @@ RA_D static RA_INLINE void ra_bodies(
             box.pose, box.half_extent, 0.0f, velocity, angular);
     }
     const RaVec3 hand_axis = ra_rotate(frame.hand.rotation, ra_v3(0, 1, 0));
-    for (int pad = 0; pad < RA_CUDA_PAD_BOXES; ++pad) {
+    for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
         for (int side = 0; side < 2; ++side) {
             RaPose finger = side == 0
                 ? frame.left_finger : frame.right_finger;
@@ -2211,7 +2160,7 @@ RA_D static RA_INLINE void ra_react(
     const RaVec3* origins = world->staged.origins;
     const RaVec3* axes = world->staged.axes;
     const int manifold_count = ra_min(ra_max(rigid->manifold_count, 0),
-        RA_CUDA_MAX_MANIFOLDS);
+        PL_IMPULSE_MAX_MANIFOLDS);
     int robot_contact = 0;
     for (int index = 0; index < manifold_count; ++index) {
         int body = rigid->manifolds[index].body_b;
@@ -2430,7 +2379,7 @@ RA_D static RA_INLINE int ra_bpad(
     memset(&best, 0, sizeof(best));
     float best_separation = 3.402823466e+38f;
     int best_pad = -1;
-    for (int pad = 0; pad < RA_CUDA_PAD_BOXES; ++pad) {
+    for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
         int body = pad_start + pad;
         PlSatQuery query = pl_sq(
             &world->shapes[RA_CUDA_BODY_CUBE], &world->shapes[body],
@@ -2546,21 +2495,21 @@ RA_D static RA_INLINE int ra_padc(
     ra_caxes(world->shapes[pad_start].pose.rotation, pad_axes);
     float frame_axis_x = ra_dot(frame_origin, pad_axes[0]);
     float frame_axis_z = ra_dot(frame_origin, pad_axes[2]);
-    float rect_min_x[RA_CUDA_PAD_BOXES];
-    float rect_max_x[RA_CUDA_PAD_BOXES];
-    float rect_min_z[RA_CUDA_PAD_BOXES];
-    float rect_max_z[RA_CUDA_PAD_BOXES];
-    float support_plane[RA_CUDA_PAD_BOXES];
-    RaVec3 inner_surface[RA_CUDA_PAD_BOXES];
-    float temporal_plane[RA_CUDA_PAD_BOXES];
-    float pad_normal_velocity[RA_CUDA_PAD_BOXES];
-    float pad_angular_bound[RA_CUDA_PAD_BOXES];
-    int pad_active[RA_CUDA_PAD_BOXES];
-    float x_bounds[RA_CUDA_PAD_BOXES * 2];
-    float z_bounds[RA_CUDA_PAD_BOXES * 2];
+    float rect_min_x[RA_PAD_BOXES];
+    float rect_max_x[RA_PAD_BOXES];
+    float rect_min_z[RA_PAD_BOXES];
+    float rect_max_z[RA_PAD_BOXES];
+    float support_plane[RA_PAD_BOXES];
+    RaVec3 inner_surface[RA_PAD_BOXES];
+    float temporal_plane[RA_PAD_BOXES];
+    float pad_normal_velocity[RA_PAD_BOXES];
+    float pad_angular_bound[RA_PAD_BOXES];
+    int pad_active[RA_PAD_BOXES];
+    float x_bounds[RA_PAD_BOXES * 2];
+    float z_bounds[RA_PAD_BOXES * 2];
     int x_bound_count = 0;
     int z_bound_count = 0;
-    for (int pad = 0; pad < RA_CUDA_PAD_BOXES; ++pad) {
+    for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
         const RaConvexShape* pad_shape = &world->shapes[pad_start + pad];
         RaVec3 rectangle_delta = ra_sub(pad_shape->pose.position,
             frame_origin);
@@ -2614,7 +2563,7 @@ RA_D static RA_INLINE int ra_padc(
             z_bounds[unique_z++] = z_bounds[index];
         }
     }
-    for (int pad = 0; pad < RA_CUDA_PAD_BOXES; ++pad) {
+    for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
         int body = pad_start + pad;
             const RaConvexShape* pad_shape = &world->shapes[body];
         PlSatQuery sat_query = pl_sq(
@@ -2685,12 +2634,12 @@ RA_D static RA_INLINE int ra_padc(
     RaVec3 patch_tangent_1, patch_tangent_2;
     pl_itan(inward, &patch_tangent_1,
         &patch_tangent_2);
-    float patch_area_acc[RA_CUDA_PAD_BOXES] = {0.0f};
-    float patch_first_1[RA_CUDA_PAD_BOXES] = {0.0f};
-    float patch_first_2[RA_CUDA_PAD_BOXES] = {0.0f};
-    float patch_raw_11[RA_CUDA_PAD_BOXES] = {0.0f};
-    float patch_raw_22[RA_CUDA_PAD_BOXES] = {0.0f};
-    float patch_raw_12[RA_CUDA_PAD_BOXES] = {0.0f};
+    float patch_area_acc[RA_PAD_BOXES] = {0.0f};
+    float patch_first_1[RA_PAD_BOXES] = {0.0f};
+    float patch_first_2[RA_PAD_BOXES] = {0.0f};
+    float patch_raw_11[RA_PAD_BOXES] = {0.0f};
+    float patch_raw_22[RA_PAD_BOXES] = {0.0f};
+    float patch_raw_12[RA_PAD_BOXES] = {0.0f};
     int candidate_overflow = 0;
 
     int incident_axis = pl_saxis(&cube_obb,
@@ -2717,7 +2666,7 @@ RA_D static RA_INLINE int ra_padc(
             float cell_center_z = 0.5f * (cell_min_z + cell_max_z);
             int owner = -1;
             float best_support = 0.0f;
-            for (int pad = 0; pad < RA_CUDA_PAD_BOXES; ++pad) {
+            for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
                 if (cell_center_x < rect_min_x[pad]
                         - RA_PAD_CSG_BOUNDARY_EPSILON
                     || cell_center_x > rect_max_x[pad]
@@ -2746,7 +2695,7 @@ RA_D static RA_INLINE int ra_padc(
                 clipped[vertex].feature = (uint32_t)vertex;
             }
             int count = 4;
-            int cell_id = x_cell * RA_CUDA_PAD_BOXES + z_cell;
+            int cell_id = x_cell * RA_PAD_BOXES + z_cell;
             int plane_base = 5;
             count = ra_clipp(clipped, count, scratch,
                 pad_axes[0], face_x_offset + cell_max_x, plane_base);
@@ -2796,7 +2745,7 @@ RA_D static RA_INLINE int ra_padc(
                     pad_axes[2]);
                 int point_owner = -1;
                 float point_support = 0.0f;
-                for (int pad = 0; pad < RA_CUDA_PAD_BOXES; ++pad) {
+                for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
                     if (point_x < rect_min_x[pad]
                             - RA_PAD_CSG_BOUNDARY_EPSILON
                         || point_x > rect_max_x[pad]
@@ -2857,8 +2806,8 @@ RA_D static RA_INLINE int ra_padc(
     if (candidate_overflow) {
         return 0;
     }
-    PlImpulsePatch component_patch[RA_CUDA_PAD_BOXES];
-    for (int pad = 0; pad < RA_CUDA_PAD_BOXES; ++pad) {
+    PlImpulsePatch component_patch[RA_PAD_BOXES];
+    for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
         memset(&component_patch[pad], 0, sizeof(component_patch[pad]));
         if (patch_area_acc[pad] <= 1.0e-12f) {
             continue;
@@ -3208,7 +3157,7 @@ RA_D static RA_INLINE int ra_tblpen(
     RaPose links[RA_LINKS];
     RaVec3 end_effector;
     ra_fk(state->q, state->gripper_width, links, NULL, NULL, &end_effector);
-    for (int link = 0; link < RA_CUDA_LINK_BOXES; ++link) {
+    for (int link = 0; link < RA_DOF; ++link) {
         RaCollisionBox box = ra_linkb(links, link);
         if (ra_tblhit(
                 box.pose, box.half_extent, RA_CONTACT_MARGIN)) {
@@ -3230,7 +3179,7 @@ RA_D static RA_INLINE int ra_tblpen(
             return 1;
         }
     }
-    for (int pad = 0; pad < RA_CUDA_PAD_BOXES; ++pad) {
+    for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
         RaConvexShape left = ra_padsh(
             frame.left_finger, pad);
         RaConvexShape right = ra_padsh(
@@ -3547,7 +3496,7 @@ RA_D static RA_INLINE void ra_objr(
     const RaConvexShape* object = &rigid->shapes[object_body];
     float object_radius = ra_brad(object)
         + RA_CONTACT_MARGIN;
-    for (int item = 0; item < RA_CUDA_LINK_BOXES; ++item) {
+    for (int item = 0; item < RA_DOF; ++item) {
         int link_body = RA_CUDA_BODY_LINK_START + item;
         RaVec3 delta = ra_sub(object->pose.position,
             rigid->shapes[link_body].pose.position);

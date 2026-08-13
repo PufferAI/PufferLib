@@ -29,8 +29,9 @@
 #define RA_DOF 7
 #define RA_ACTIONS 8
 #define RA_LINKS (RA_DOF + 3)
-#define RA_OBS_SIZE 69
-#define RA_ACT_SIZES {1, 1, 1, 1, 1, 1, 1, 1}
+#define OBS_SIZE 69
+#define NUM_ATNS RA_ACTIONS
+#define ACT_SIZES {1, 1, 1, 1, 1, 1, 1, 1}
 #ifndef RA_SUBSTEPS
 #define RA_SUBSTEPS 8
 #endif
@@ -38,7 +39,6 @@
 #define RA_BASKETBALL_MAX_STEPS 3600
 #define RA_CONTROL_DT (1.0f / 60.0f)
 #define RA_PHYSICS_DT (RA_CONTROL_DT / (float)RA_SUBSTEPS)
-#define RA_MODEL_SCALE 1.00f
 #define RA_TABLE_TOP 0.00f
 #define RA_TABLE_CENTER_X 0.20f
 #define RA_TABLE_SIZE_X 20.0f
@@ -95,7 +95,6 @@
 #define RA_PAD_DAMPING_RATIO 1.0f
 #define RA_PAD_SUPPORT_PLANE_TOLERANCE 2.0e-6f
 #define RA_PAD_CSG_BOUNDARY_EPSILON 2.0e-7f
-#define RA_PAD_TORSION_RADIUS 0.0065f
 #define RA_LIFT_HEIGHT 0.060f
 #define RA_CARRY_HEIGHT 0.030f
 #define RA_PLACE_RADIUS 0.070f
@@ -125,12 +124,7 @@
 #define RA_STACK_SLIP_PENALTY 0.35f
 #define RA_PICK_REWARD_SCALE 0.10f
 #define RA_STACK_REWARD_SCALE 0.05f
-#define RA_FINGER_PAD_BOXES 5
-#define RA_FINGER_PAD_INNER_OFFSET 0.0015f
-#define RA_FINGER_PAD_HALF_X 0.0085f
-#define RA_FINGER_PAD_Z_MIN -0.0206f
-#define RA_FINGER_PAD_Z_MAX -0.0036f
-#define RA_FINGER_CONTACT_SKIN 0.0002f
+#define RA_PAD_BOXES 5
 #define RA_GRIPPER_CLEARANCE_MARGIN 0.0020f
 #define RA_HAND_COLLISION_FRICTION 0.80f
 
@@ -851,7 +845,7 @@ RA_D static RA_INLINE int ra_padhit(
     int manifold_points = 0;
     memset(best, 0, sizeof(*best));
     best->separation = 1.0e30f;
-    for (int index = 0; index < RA_FINGER_PAD_BOXES; ++index) {
+    for (int index = 0; index < RA_PAD_BOXES; ++index) {
         RaConvexShape pad = ra_padsh(finger, index);
         RaConvexContact candidate;
         memset(&candidate, 0, sizeof(candidate));
@@ -1288,7 +1282,7 @@ RA_D static void ra_observe(const RaState* state, float* observation) {
         ? RA_BASKETBALL_MAX_STEPS : RA_MAX_STEPS;
     observation[index++] = ra_clamp(
         (float)state->step / (float)maximum_steps, 0.0f, 1.0f);
-    assert(index == RA_OBS_SIZE);
+    assert(index == OBS_SIZE);
 }
 
 // Leaves the arm and episode clock.
@@ -1365,13 +1359,11 @@ RA_HD static void ra_reset(RaState* state) {
     }
 
     float cube_angle = ra_rand(&state->rng, -0.72f, -0.28f);
-    float cube_radius = RA_MODEL_SCALE
-        * ra_rand(&state->rng, 0.43f, 0.62f);
+    float cube_radius = ra_rand(&state->rng, 0.43f, 0.62f);
     state->cube_position = ra_v3(cube_radius*cosf(cube_angle),
         RA_TABLE_TOP + RA_CUBE_HALF, -cube_radius*sinf(cube_angle));
     float target_angle = ra_rand(&state->rng, 0.28f, 0.72f);
-    float target_radius = RA_MODEL_SCALE
-        * ra_rand(&state->rng, 0.43f, 0.62f);
+    float target_radius = ra_rand(&state->rng, 0.43f, 0.62f);
     if (state->stack_mode) {
         state->base_cube_position = ra_v3(target_radius*cosf(target_angle),
             RA_TABLE_TOP + RA_CUBE_HALF, -target_radius*sinf(target_angle));
@@ -1960,10 +1952,6 @@ RA_D static float ra_stept(RaState* state, const float* actions,
     return reward;
 }
 
-#define OBS_SIZE RA_OBS_SIZE
-#define NUM_ATNS RA_ACTIONS
-#define ACT_SIZES RA_ACT_SIZES
-
 typedef float obs_t;
 
 #define RA_EXPECTED_MESHES 11
@@ -2345,15 +2333,12 @@ static void ra_draw(RaRenderHost* host, const RaState* state,
         };
         int articulated = renderer->arm.meshCount == RA_EXPECTED_MESHES;
         for (int mesh = 0; mesh < renderer->arm.meshCount; ++mesh) {
-            Matrix transform = MatrixScale(
-                RA_MODEL_SCALE, RA_MODEL_SCALE, RA_MODEL_SCALE);
             int link = articulated ? mesh_link[mesh] : -1;
-            if (link >= 0) {
-                Matrix articulation = MatrixMultiply(
+            Matrix transform = link >= 0
+                ? MatrixMultiply(
                     renderer->inverse_bind[link],
-                    ra_matrix(links[link]));
-                transform = MatrixMultiply(transform, articulation);
-            }
+                    ra_matrix(links[link]))
+                : MatrixIdentity();
             int material_index = renderer->arm.meshMaterial[mesh];
             if (material_index < 0
                     || material_index >= renderer->arm.materialCount) {
