@@ -8,23 +8,13 @@
 #include <string.h>
 
 #include "pufferenv.h"
-#ifdef __CUDACC__
 #define float3 ra_raymath_float3
-#endif
 #include "raymath.h"
-#ifdef __CUDACC__
 #undef float3
-#endif
 
-#ifdef __CUDACC__
 #define RA_HD __host__ __device__
 #define RA_D __device__
 #define RA_INLINE __forceinline__
-#else
-#define RA_HD
-#define RA_D
-#define RA_INLINE inline
-#endif
 
 #define RA_DOF 7
 #define RA_ACTIONS 8

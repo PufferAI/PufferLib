@@ -3599,12 +3599,10 @@ RA_D static RA_INLINE void ra_buildc(
 
 enum { RA_CUDA_BLOCK_SIZE = 128 };
 
-#ifdef PUFFER_GPU_ENV
 typedef struct Env {
     Log log;
     RaCudaProductionWorld world;
 } Env;
-#endif
 
 static_assert(sizeof(RaState) % sizeof(unsigned int) == 0,
     "Robot-arm CUDA state must remain naturally word aligned");

@@ -1,5 +1,4 @@
-#ifndef PUFFER_ROBOT_ARM_GPU_CU
-#define PUFFER_ROBOT_ARM_GPU_CU
+#pragma once
 #ifndef PUFFER_GPU_ENV
 #error "robot_arm.cu requires -DPUFFER_GPU_ENV (build with --gpu)"
 #endif
@@ -100,5 +99,3 @@ void puf_render(Env* env) {
     assert(cudaMemcpy(env, &host_env, sizeof(Env),
         cudaMemcpyHostToDevice) == cudaSuccess);
 }
-
-#endif
