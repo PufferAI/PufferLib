@@ -424,7 +424,23 @@ static inline void puf_ini_apply_arg(Ini* ini, const char* default_section,
     if (strchr(s, '.')) {
         snprintf(full_key, sizeof(full_key), "%s", s);
     } else {
-        snprintf(full_key, sizeof(full_key), "%s.%s", default_section, s);
+        // Bare flags target [base] unless the key is an [env] option.
+        // This keeps `./puffer train robot_arm --stack` mapping to env.stack.
+        const char* section = default_section;
+        Dict* default_dict = puf_ini_section(ini, default_section, 0);
+        if (!dict_find(default_dict, s)) {
+            Dict* env_dict = NULL;
+            for (int i = 0; i < ini->num_sections; i++) {
+                if (strcmp(ini->sections[i].name, "env") == 0) {
+                    env_dict = &ini->sections[i];
+                    break;
+                }
+            }
+            if (env_dict && dict_find(env_dict, s)) {
+                section = "env";
+            }
+        }
+        snprintf(full_key, sizeof(full_key), "%s.%s", section, s);
     }
     puf_ini_put(ini, full_key, value);
 }

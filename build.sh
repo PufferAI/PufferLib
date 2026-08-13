@@ -4,6 +4,7 @@ set -e
 # Usage:
 #   ./build.sh breakout              # Full native train/eval binary (CPU envs)
 #   ./build.sh breakout --gpu        # GPU env (ENV_HEADER=ocean/ENV/ENV.cu; exclusive vs .h)
+#   ./build.sh robot_arm             # CUDA-only; implies --gpu
 #   ./build.sh breakout --float      # float32 precision (required for --slowly)
 #   ./build.sh breakout --cpu        # Tiny standalone CPU eval executable
 #   ./build.sh breakout --debug      # Debug build
@@ -34,6 +35,16 @@ for arg in "$@"; do
         *) echo "Error: unknown argument '$arg'" && exit 1 ;;
     esac
 done
+
+if [ "$ENV" = "robot_arm" ]; then
+    USE_GPU_ENV=1
+    case "${MODE:-native}" in
+        local|fast|web|cpu)
+            echo "Error: robot_arm physics is CUDA-only; use the native GPU build" >&2
+            exit 1
+            ;;
+    esac
+fi
 
 if [ "$ENV" = "all" ]; then
     FAILED=""

@@ -1399,6 +1399,7 @@ RA_D static void ra_logep(const RaState* state, struct Log* log) {
             state->basketball_release_center_miss_cm_sum;
         log->release_center_miss_count +=
             (float)state->basketball_releases;
+        log->episode_length += (float)state->step;
         log->n += 1.0f;
         return;
     }
@@ -1942,8 +1943,6 @@ RA_D static float ra_stept(RaState* state, const float* actions,
     return reward;
 }
 
-typedef float obs_t;
-
 #define RA_EXPECTED_MESHES 11
 
 typedef struct RaRenderer {
@@ -1994,6 +1993,7 @@ void puf_log(Log* log, Dict* out) {
         float release_count = log->release_center_miss_count;
         dict_set(out, "avg_release_miss_cm", release_count > 0.0f
             ? log->release_center_miss_cm_sum / release_count : 0.0f);
+        dict_set(out, "episode_length", log->episode_length);
         return;
     }
     dict_set(out, "success_rate", log->success_rate);

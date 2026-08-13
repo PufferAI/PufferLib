@@ -1,6 +1,7 @@
 #pragma once
 
 #include <assert.h>
+#include <cuda_bf16.h>
 #include <stdint.h>
 
 #include "robot_arm.h"
@@ -3601,6 +3602,11 @@ enum { RA_CUDA_BLOCK_SIZE = 128 };
 
 typedef struct Env {
     Log log;
+    Agent agents[1];
+    int num_agents;
+    int tag;
+    int boundary_reached;
+    unsigned int rng;
     RaCudaProductionWorld world;
 } Env;
 
@@ -3616,7 +3622,8 @@ __global__ void ra_kinit(Env* envs, obs_t* observations,
     float local_observation[OBS_SIZE];
     ra_observe(&envs[index].world.state, local_observation);
     for (int feature = 0; feature < OBS_SIZE; ++feature) {
-        observations[index * OBS_SIZE + feature] = local_observation[feature];
+        observations[index * OBS_SIZE + feature] =
+            __float2bfloat16(local_observation[feature]);
     }
     rewards[index] = 0.0f;
     terminals[index] = 0.0f;
@@ -3683,7 +3690,7 @@ __global__ void ra_kfin(Env* envs, int start, int count,
     ra_observe(&world->state, local_observation);
     for (int feature = 0; feature < OBS_SIZE; ++feature) {
         observations[state_index * OBS_SIZE + feature] =
-            local_observation[feature];
+            __float2bfloat16(local_observation[feature]);
     }
     rewards[state_index] = reward;
     terminals[state_index] = terminal;
