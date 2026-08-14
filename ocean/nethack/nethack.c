@@ -561,10 +561,14 @@ static double demo_now(void) {
 }
 
 // NH_WEIGHTS overrides the checked-in demo weights
+// NH_WEIGHTS: a path, or the shorthands "score" (multi-role) / "depth"
 static const char* demo_find_weights(void) {
     const char* envw = getenv("NH_WEIGHTS");
-    if (envw && envw[0]) return envw;
-    return "resources/nethack/nethack_weights.bin";
+    if (!envw || !envw[0] || strcmp(envw, "score") == 0)
+        return "resources/nethack/nethack_score_weights.bin";
+    if (strcmp(envw, "depth") == 0)
+        return "resources/nethack/nethack_depth_weights.bin";
+    return envw;
 }
 
 // Drain stdin. Returns a bitset: bit0=space, bit1=shift+space/S, bit2=quit.
