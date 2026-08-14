@@ -30,12 +30,8 @@ static struct {
 } g_gpu;
 
 static int ra_flag(Dict* kwargs, const char* key) {
-    DictItem* item = kwargs != NULL ? dict_find(kwargs, key) : NULL;
+    DictItem* item = dict_find(kwargs, key);
     return item != NULL && item->value != 0.0;
-}
-
-static int ra_kgrid(int n) {
-    return (n + RA_CUDA_BLOCK_SIZE - 1) / RA_CUDA_BLOCK_SIZE;
 }
 
 static void ra_fill(Env* env, unsigned int rng) {
@@ -56,8 +52,7 @@ Env* puf_vec_create(int n, Dict* env_kwargs,
     g_ra_stack = ra_flag(env_kwargs, "stack");
     g_ra_basketball = ra_flag(env_kwargs, "basketball");
     assert(!(g_ra_stack && g_ra_basketball));
-    DictItem* model = env_kwargs != NULL
-        ? dict_find(env_kwargs, "model_glb") : NULL;
+    DictItem* model = dict_find(env_kwargs, "model_glb");
     if (model != NULL && model->str != NULL && model->str[0] != '\0'
             && strcmp(model->str, "None") != 0) {
         g_ra_model_glb = model->str;
@@ -67,13 +62,13 @@ Env* puf_vec_create(int n, Dict* env_kwargs,
     g_ra_render_host.camera_yaw = 0.78f;
     g_ra_render_host.camera_pitch = 0.48f;
 
-    Env* host_envs = (Env*)calloc((size_t)n, sizeof(Env));
+    Env* host_envs = (Env*)calloc(n, sizeof(Env));
     for (int i = 0; i < n; i++) {
-        ra_fill(&host_envs[i], (unsigned int)(i + 1));
+        ra_fill(&host_envs[i], i + 1);
     }
     Env* envs = NULL;
-    assert(cudaMalloc((void**)&envs, (size_t)n * sizeof(Env)) == cudaSuccess);
-    assert(cudaMemcpy(envs, host_envs, (size_t)n * sizeof(Env),
+    assert(cudaMalloc((void**)&envs, n * sizeof(Env)) == cudaSuccess);
+    assert(cudaMemcpy(envs, host_envs, n * sizeof(Env),
         cudaMemcpyHostToDevice) == cudaSuccess);
     free(host_envs);
     g_gpu.envs = envs;
@@ -90,22 +85,19 @@ void puf_bind_stream(cudaStream_t stream) {
     g_gpu.stream = stream;
 }
 
-void puf_init(Env* env, Dict* kwargs) {
-    (void)env;
-    (void)kwargs;
+void puf_init(Env*, Dict*) {
 }
 
-void puf_reset(Env* env) {
-    (void)env;
-    ra_kinit<<<ra_kgrid(g_gpu.n), RA_CUDA_BLOCK_SIZE>>>(
+void puf_reset(Env*) {
+    ra_kinit<<<(g_gpu.n + RA_CUDA_BLOCK_SIZE - 1) / RA_CUDA_BLOCK_SIZE,
+        RA_CUDA_BLOCK_SIZE>>>(
         g_gpu.envs, g_gpu.observations, g_gpu.rewards, g_gpu.terminals,
         g_gpu.n);
     assert(cudaGetLastError() == cudaSuccess);
 }
 
-void puf_step(Env* env) {
-    (void)env;
-    dim3 grid(ra_kgrid(g_gpu.n));
+void puf_step(Env*) {
+    dim3 grid((g_gpu.n + RA_CUDA_BLOCK_SIZE - 1) / RA_CUDA_BLOCK_SIZE);
     dim3 block(RA_CUDA_BLOCK_SIZE);
     ra_kbegin<<<grid, block, 0, g_gpu.stream>>>(
         g_gpu.envs, 0, g_gpu.n, g_gpu.actions);
@@ -119,18 +111,13 @@ void puf_step(Env* env) {
     assert(cudaGetLastError() == cudaSuccess);
 }
 
-void puf_close(Env* env) {
-    (void)env;
+void puf_close(Env*) {
     ra_rclose(&g_ra_render_host);
     cudaFree(g_gpu.envs);
     g_gpu.envs = NULL;
 }
 
-void puf_render(Env* env) {
-    (void)env;
-    if (!g_gpu.envs || g_gpu.n < 1) {
-        return;
-    }
+void puf_render(Env*) {
     if (g_gpu.stream) {
         cudaStreamSynchronize(g_gpu.stream);
     }

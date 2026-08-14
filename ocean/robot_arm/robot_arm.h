@@ -43,8 +43,8 @@
 #define RA_BALL_RESTITUTION 0.72f
 #define RA_BACKBOARD_STATIC_FRICTION 0.28f
 #define RA_BACKBOARD_DYNAMIC_FRICTION 0.20f
-#define RA_BACKBOARD_RESTITUTION 0.82f  // bank shots: low friction, high bounce
-#define RA_BALL_LINEAR_DRAG 0.08f  // same drag as CUDA flight and release predictor
+#define RA_BACKBOARD_RESTITUTION 0.82f
+#define RA_BALL_LINEAR_DRAG 0.08f
 #define RA_HOOP_CENTER_X 1.55f
 #define RA_HOOP_CENTER_Y 0.70f
 #define RA_HOOP_CENTER_Z -0.35f
@@ -68,19 +68,19 @@
 #define RA_GRASP_COOLDOWN_STEPS 6
 #define RA_GRASP_LOSS_SUBSTEPS ((RA_SUBSTEPS) < 8 ? 8 : (RA_SUBSTEPS))
 #define RA_BASKETBALL_GRASP_LOSS_SUBSTEPS (3 * RA_GRASP_LOSS_SUBSTEPS)
-#define RA_BASKETBALL_GROUNDED_RESET_STEPS 15  // 0.25s resting beyond reach
+#define RA_BASKETBALL_GROUNDED_RESET_STEPS 15
 #define RA_BASKETBALL_GROUNDED_HEIGHT_SLOP 0.006f
 #define RA_BASKETBALL_GROUNDED_MAX_VERTICAL_SPEED 0.12f
 #define RA_BASKETBALL_RELEASE_READY_QUALITY 0.45f
-#define RA_BASKETBALL_PREDICTED_MISS_CAP 2.0f  // no hoop-plane crossing still counts
+#define RA_BASKETBALL_PREDICTED_MISS_CAP 2.0f
 #define RA_PICK_CUBE_MASS 0.10f
 #define RA_STACK_CUBE_MASS 1.00f
 #define RA_FINGER_FRICTION 0.80f
 #define RA_GRIPPER_MAX_FORCE 100.0f
-#define RA_GRIPPER_FORCE_STIFFNESS 1500.0f  // 57.5 g jaw; 100 N at 66.7 mm
+#define RA_GRIPPER_FORCE_STIFFNESS 1500.0f
 #define RA_GRIPPER_FORCE_DAMPING 18.57f
 #define RA_GRIPPER_EFFECTIVE_MASS 0.0575f
-#define RA_PAD_ELASTIC_MODULUS 25000000.0f  // 25 MPa, 1 mm layer
+#define RA_PAD_ELASTIC_MODULUS 25000000.0f
 #define RA_PAD_LAYER_THICKNESS 0.001f
 #define RA_PAD_DAMPING_RATIO 1.0f
 #define RA_PAD_SUPPORT_PLANE_TOLERANCE 2.0e-6f
@@ -131,7 +131,7 @@ typedef struct RaPose {
     RaQuat rotation;
 } RaPose;
 
-struct Log {  // `n` last for PufferLib normalize
+struct Log {
     float score;
     float episode_length;
     float success_rate;
@@ -180,7 +180,6 @@ typedef struct RaState {
     int grasped;
     int grasp_cooldown;
     int grasp_contact_misses;
-    // Reward curriculum latches; not rigid-body state.
     int basketball_close_ready;
     int basketball_release_ready;
     int basketball_release_commanded;
@@ -1204,7 +1203,6 @@ RA_D static void ra_observe(const RaState* state, float* observation) {
         RA_OBS_POS_SCALE);
     ra_obs3(observation, &index, state->cube_velocity, RA_OBS_LIN_VEL_SCALE);
     ra_obs3(observation, &index, state->end_effector, RA_OBS_POS_SCALE);
-    // Basketball: world gripper axes. Pick/stack: gripper in cube frame.
     RaQuat gripper_in_cube = state->basketball_mode
         ? hand_rotation
         : ra_qmul(ra_qconj(state->cube_rotation), hand_rotation);
@@ -1275,7 +1273,6 @@ RA_D static void ra_observe(const RaState* state, float* observation) {
     assert(index == OBS_SIZE);
 }
 
-// Leaves the arm and episode clock.
 RA_HD static void ra_resetb(RaState* state) {
     state->cube_position = ra_v3(
         ra_rand(&state->rng, 0.42f, 0.54f),
@@ -1597,7 +1594,6 @@ RA_D static float ra_stepb(RaState* state,
         reward = 1.0f;
         state->basketball_in_flight = 0;
     } else if (grounded && state->basketball_in_flight) {
-        // Miss does not teleport a reachable ball.
         state->attempts += 1;
         reward = -0.010f;
         state->basketball_in_flight = 0;
@@ -1782,7 +1778,6 @@ RA_D static float ra_stept(RaState* state, const float* actions,
     if (state->stack_mode && state->transported && state->stack_aligned
             && state->grasped) {
         reward -= 0.030f;
-        // One-shot opening credit in the release corridor.
         if (!state->stack_opening_credited && grip_action > 0.25f) {
             state->stack_opening_credited = 1;
             if (stack_release_ready) {
@@ -2317,7 +2312,6 @@ static void ra_draw(RaRenderHost* host, const RaState* state,
             0.054f, 0.054f, 32, (Color){84, 255, 190, 255});
     }
     if (renderer->loaded) {
-        // pack_panda_glb.py: one primitive per rigid body in this order.
         static const signed char mesh_link[RA_EXPECTED_MESHES] = {
             -1, 1, 2, 3, 4, 5, 6, 7, 7, 8, 9,
         };

@@ -1143,7 +1143,6 @@ RA_D static RA_INLINE float pl_irvel(
         RaVec3 point, RaVec3 direction) {
     if (reaction != NULL && reaction->active && reaction_state != NULL
             && direction_index >= 0 && direction_index < 3) {
-        // Live qd/jaw; body_b.linear_velocity is stale after other rows.
         float velocity = reaction->jaw_jacobian[direction_index]
             * reaction_state->gripper_velocity;
         for (int joint = 0; joint < RA_DOF; ++joint) {
@@ -2208,7 +2207,7 @@ RA_D static RA_INLINE void ra_react(
                     &inverse_mass);
                 reaction->inverse_mass[direction_index] = inverse_mass;
             }
-            if (side >= 0) {  // pads share jaw Jacobian; shell is arm-only
+            if (side >= 0) {
                 RaVec3 outward = ra_scale(
                     hand_axis, side == 0 ? 1.0f : -1.0f);
                 for (int direction_index = 0; direction_index < 3;
@@ -2266,34 +2265,6 @@ RA_D static RA_INLINE void ra_react(
                 &manifold->angular_reaction.inverse_mass);
             manifold->angular_reaction.active = 1;
         }
-    }
-}
-
-RA_D static RA_INLINE void ra_intarm(
-        RaState* state, float* energy,
-        float mass_factor[RA_DOF][RA_DOF]) {
-    float matrix[RA_DOF][RA_DOF];
-    float gravity[RA_DOF];
-    float rhs[RA_DOF];
-    float acceleration[RA_DOF] = {0};
-    ra_massm(state, matrix);  // omit FD Coriolis
-    ra_gravt(state, gravity);
-    for (int joint = 0; joint < RA_DOF; ++joint) {
-        float kp = joint < 2 ? 4500.0f : (joint < 4 ? 3500.0f : 2000.0f);
-        float kd = joint < 2 ? 450.0f : (joint < 4 ? 350.0f : 200.0f);
-        float motor = ra_clamp(
-            kp * (state->target_q[joint] - state->q[joint])
-                - kd * state->qd[joint],
-            -ra_mlim(joint), ra_mlim(joint));
-        rhs[joint] = motor - state->qd[joint] + gravity[joint];
-        *energy += fabsf(motor * state->qd[joint]) * RA_PHYSICS_DT;
-    }
-    ra_massf(matrix, mass_factor);
-    ra_masss(mass_factor, rhs, acceleration);
-    for (int joint = 0; joint < RA_DOF; ++joint) {
-        state->qd[joint] = ra_clamp(
-            state->qd[joint] + acceleration[joint] * RA_PHYSICS_DT,
-            -12.0f, 12.0f);
     }
 }
 
@@ -2790,7 +2761,6 @@ RA_D static RA_INLINE int ra_padc(
                 candidate.contact.point_a = point_a;
                 candidate.contact.point_b = point_b;
                 candidate.contact.separation = separation;
-                // Feature: bits 16..23 cell, 0..15 corner/edge.
                 uint32_t local_feature = (clipped[point_index].feature
                     & 0x0000ffffu)
                     | ((uint32_t)(cell_id & 0xffu) << 16);
@@ -3295,36 +3265,6 @@ RA_D static RA_INLINE void ra_colc(
         / RA_PHYSICS_DT;
 }
 
-RA_D static RA_INLINE void ra_begin(
-        RaCudaProductionWorld* world, const float* actions) {
-    RaState* state = &world->state;
-    for (int action = 0; action < RA_ACTIONS; ++action) {
-        world->staged.actions[action] = actions[action];
-    }
-    for (int joint = 0; joint < RA_DOF; ++joint) {
-        float action = ra_clamp(actions[joint], -1.0f, 1.0f);
-        state->target_q[joint] = ra_clamp(ra_jhome(joint)
-            + action * ra_aspan(joint),
-            ra_jmin(joint), ra_jmax(joint));
-    }
-    float grip_action = ra_clamp(actions[RA_DOF], -1.0f, 1.0f);
-    world->staged.target_width =
-        0.004f + 0.076f * 0.5f * (grip_action + 1.0f);
-    world->staged.energy = 0.0f;
-    world->staged.first_grasp = 0;
-    world->staged.grasp_broken = 0;
-    world->staged.released = 0;
-    if (state->grasp_cooldown > 0) {
-        state->grasp_cooldown -= 1;
-    }
-    if (state->basketball_mode) {
-        state->previous_ball_position = state->cube_position;
-    }
-    ra_fk(state->q, state->gripper_width, world->staged.links,
-        NULL, NULL, &state->end_effector);
-    state->step += 1;
-}
-
 RA_D static RA_INLINE void ra_prep(
         RaCudaProductionWorld* world,
         float mass_factor[RA_DOF][RA_DOF]) {
@@ -3339,8 +3279,30 @@ RA_D static RA_INLINE void ra_prep(
         -RA_GRIPPER_MAX_FORCE, RA_GRIPPER_MAX_FORCE);
     state->gripper_velocity += motor
         / RA_GRIPPER_EFFECTIVE_MASS * RA_PHYSICS_DT;
-    ra_intarm(
-        state, &world->staged.energy, mass_factor);
+    float matrix[RA_DOF][RA_DOF];
+    float gravity[RA_DOF];
+    float rhs[RA_DOF];
+    float acceleration[RA_DOF] = {0};
+    ra_massm(state, matrix);
+    ra_gravt(state, gravity);
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        float kp = joint < 2 ? 4500.0f : (joint < 4 ? 3500.0f : 2000.0f);
+        float kd = joint < 2 ? 450.0f : (joint < 4 ? 350.0f : 200.0f);
+        float arm_motor = ra_clamp(
+            kp * (state->target_q[joint] - state->q[joint])
+                - kd * state->qd[joint],
+            -ra_mlim(joint), ra_mlim(joint));
+        rhs[joint] = arm_motor - state->qd[joint] + gravity[joint];
+        world->staged.energy += fabsf(arm_motor * state->qd[joint])
+            * RA_PHYSICS_DT;
+    }
+    ra_massf(matrix, mass_factor);
+    ra_masss(mass_factor, rhs, acceleration);
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        state->qd[joint] = ra_clamp(
+            state->qd[joint] + acceleration[joint] * RA_PHYSICS_DT,
+            -12.0f, 12.0f);
+    }
     if (state->basketball_mode) {
         state->cube_velocity = ra_bvel(
             state->cube_velocity, RA_PHYSICS_DT);
@@ -3358,7 +3320,6 @@ RA_D static RA_INLINE void ra_solve(
         RaCudaProductionWorld* world) {
     RaState* state = &world->state;
     RaPose* links = world->staged.links;
-    // Snapshot approach speed so the impulse cache cannot kill a bank shot.
     float backboard_incoming_speed = 0.0f;
     RaVec3 backboard_normal = ra_v3(0, 0, 0);
     if (state->basketball_mode) {
@@ -3460,7 +3421,6 @@ RA_D static RA_INLINE void ra_solve(
             && ++state->grasp_contact_misses >= grasp_loss_substeps) {
         state->grasped = 0;
         world->staged.grasp_broken = 1;
-        // Explicit open starts flight; closed-jaw loss is slip.
         if (grip_action > 0.25f) {
             state->grasp_cooldown = RA_GRASP_COOLDOWN_STEPS;
             world->staged.released = 1;
@@ -3582,7 +3542,6 @@ RA_D static RA_INLINE void ra_buildc(
         }
     }
     ra_botc(world);
-    // Table-robot last so object/hand keep manifold slots.
     for (int body = RA_CUDA_BODY_SHELL_START;
             body < RA_CUDA_ROBOT_BODY_END; ++body) {
         if (body < RA_CUDA_BODY_SHELL_START + 3) {
@@ -3636,12 +3595,34 @@ __global__ void ra_kbegin(Env* envs, int start, int count,
         return;
     }
     int state_index = start + local;
-    float local_actions[RA_ACTIONS];
+    RaCudaProductionWorld* world = &envs[state_index].world;
+    RaState* state = &world->state;
     for (int action = 0; action < RA_ACTIONS; ++action) {
-        local_actions[action] = actions[(size_t)state_index * RA_ACTIONS
+        world->staged.actions[action] = actions[state_index * RA_ACTIONS
             + action];
     }
-    ra_begin(&envs[state_index].world, local_actions);
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        float action = ra_clamp(world->staged.actions[joint], -1.0f, 1.0f);
+        state->target_q[joint] = ra_clamp(ra_jhome(joint)
+            + action * ra_aspan(joint),
+            ra_jmin(joint), ra_jmax(joint));
+    }
+    float grip_action = ra_clamp(world->staged.actions[RA_DOF], -1.0f, 1.0f);
+    world->staged.target_width =
+        0.004f + 0.076f * 0.5f * (grip_action + 1.0f);
+    world->staged.energy = 0.0f;
+    world->staged.first_grasp = 0;
+    world->staged.grasp_broken = 0;
+    world->staged.released = 0;
+    if (state->grasp_cooldown > 0) {
+        state->grasp_cooldown -= 1;
+    }
+    if (state->basketball_mode) {
+        state->previous_ball_position = state->cube_position;
+    }
+    ra_fk(state->q, state->gripper_width, world->staged.links,
+        NULL, NULL, &state->end_effector);
+    state->step += 1;
 }
 
 __global__ void ra_kphys(Env* envs, int start,
