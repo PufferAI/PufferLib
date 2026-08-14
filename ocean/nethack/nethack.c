@@ -44,6 +44,10 @@ static void env_open(Nethack* env) {
     // NH_MULTI=1: random role/race/gender/align per reset (challenge protocol)
     const char* mr = getenv("NH_MULTI");
     if (mr && mr[0] && mr[0] != '0') env->multi_role = 1.0f;
+    // the depth recipe trains with SEARCH20 and RUN masked; mirror it
+    const char* wv = getenv("NH_WEIGHTS");
+    if (wv && strcmp(wv, "depth") == 0)
+        env->mask_search20 = env->mask_run = 1.0f;
     nethack_sync_buffers(env); // flat mask pointer, written by compute_mask
     nethack_do_reset(env);
 }
