@@ -4,9 +4,18 @@
 
 // helpers
 
+// demo-only: sees the topline after every engine step (macros overwrite it
+// many times per RL step); NULL in training
+static void (*nethack_msg_tap)(Nethack* env);
+
+static void nethack_engine_step(Nethack* env) {
+    env->ctx = nle_step(env->ctx, &env->obs);
+    if (nethack_msg_tap) nethack_msg_tap(env);
+}
+
 static void nethack_send_key(Nethack* env, int key) {
     env->obs.action = key;
-    env->ctx = nle_step(env->ctx, &env->obs);
+    nethack_engine_step(env);
 }
 
 // message ends with '?': single-key prompts NLE doesn't expose via misc[]
@@ -60,7 +69,7 @@ static void nethack_drain_prompts(Nethack* env) {
         // alternate return/ESC: getpos-class pickers eat '\r' silently and
         // only ESC exits them (the t-frozen wedge class)
         env->obs.action = yn ? 27 : (i & 1 ? 27 : '\r');
-        env->ctx = nle_step(env->ctx, &env->obs);
+        nethack_engine_step(env);
     }
 }
 
@@ -100,7 +109,7 @@ static int nethack_handle_prompts(Nethack* env) {
                    && nethack_msg_contains(env, "Sell"))
             env->stats.sells++;
         env->obs.action = ring ? 'r' : (commit ? 'y' : 27);
-        env->ctx = nle_step(env->ctx, &env->obs);
+        nethack_engine_step(env);
     }
     if (illegal) env->stats.illegal_actions++;
     return illegal;
@@ -117,10 +126,10 @@ static void nethack_answer_direction(Nethack* env, int key) {
 static void nethack_answer_menu(Nethack* env) {
     for (int r = 0; r < 2 && !env->obs.done && env->misc[NETHACK_MISC_XWAIT]; r++) {
         env->obs.action = '.';
-        env->ctx = nle_step(env->ctx, &env->obs);
+        nethack_engine_step(env);
         if (env->obs.done || !env->misc[NETHACK_MISC_XWAIT]) break;
         env->obs.action = '\r';
-        env->ctx = nle_step(env->ctx, &env->obs);
+        nethack_engine_step(env);
     }
 }
 
@@ -164,7 +173,7 @@ static int nethack_item_use(Nethack* env, int cmd, const char* gate,
             return 1;
         }
         else return 0;
-        env->ctx = nle_step(env->ctx, &env->obs);
+        nethack_engine_step(env);
     }
     return 0;
 }
@@ -203,11 +212,11 @@ static void nethack_verb_wield(Nethack* env, int slot, int* bad_pick) {
 // aborts fall through to nethack_handle_prompts
 static void nethack_do_elbereth(Nethack* env) {
     env->obs.action = 'E';
-    env->ctx = nle_step(env->ctx, &env->obs);
+    nethack_engine_step(env);
     if (env->obs.done || !env->misc[NETHACK_MISC_YN]
         || !nethack_msg_contains(env, "write with")) return;
     env->obs.action = '-';
-    env->ctx = nle_step(env->ctx, &env->obs);
+    nethack_engine_step(env);
     // the dust --More-- raises xwait ALONGSIDE the getlin — clear it before
     // typing; decline "add to current engraving?" so the fresh text replaces it
     const char* c = "Elbereth\r";
@@ -217,7 +226,7 @@ static void nethack_do_elbereth(Nethack* env) {
                  && nethack_msg_contains(env, "current engraving")) env->obs.action = 'n';
         else if (env->misc[NETHACK_MISC_GETLIN]) env->obs.action = (unsigned char)*c++;
         else break;
-        env->ctx = nle_step(env->ctx, &env->obs);
+        nethack_engine_step(env);
     }
 }
 
@@ -238,11 +247,11 @@ static void nethack_do_engrave_id(Nethack* env) {
     int lb = nethack_letter_bit(env->inv_letters[slot]);
     if (lb >= 0) env->engid_tested |= 1ULL << lb;
     env->obs.action = 'E';
-    env->ctx = nle_step(env->ctx, &env->obs);
+    nethack_engine_step(env);
     if (env->obs.done || !env->misc[NETHACK_MISC_YN]
         || !nethack_msg_contains(env, "write with")) return;
     env->obs.action = env->inv_letters[slot];
-    env->ctx = nle_step(env->ctx, &env->obs);
+    nethack_engine_step(env);
     const char* c = "x\r";
     for (int i = 0; i < NETHACK_AUTODISMISS_MAX && !env->obs.done && *c; i++) {
         if (env->misc[NETHACK_MISC_XWAIT]) env->obs.action = ' ';
@@ -250,7 +259,7 @@ static void nethack_do_engrave_id(Nethack* env) {
                  && nethack_msg_contains(env, "current engraving")) env->obs.action = 'n';
         else if (env->misc[NETHACK_MISC_GETLIN]) env->obs.action = (unsigned char)*c++;
         else break;
-        env->ctx = nle_step(env->ctx, &env->obs);
+        nethack_engine_step(env);
     }
 }
 

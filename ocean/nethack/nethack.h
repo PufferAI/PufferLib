@@ -525,7 +525,7 @@ static void nethack_pack_obs(Nethack* env) {
         if (++env->stall_ctr == 96) {
             for (int k = 0; k < 8 && !env->obs.done; k++) {
                 env->obs.action = 27;
-                env->ctx = nle_step(env->ctx, &env->obs);
+                nethack_engine_step(env);
             }
             env->stall_ctr = 0; // re-arm; recovery shows as turn advance
         }
@@ -627,6 +627,7 @@ static void nethack_do_reset(Nethack* env) {
         env->gend_idx = (g == 1) ? 1 : 0;
     }
     nle_obs_refresh(env->ctx, &env->obs); // full fill: prev_* seeds read blstats
+    if (nethack_msg_tap) nethack_msg_tap(env); // welcome arrives pre-step
 
     env->prev_score = 0;
     env->prev_exp = env->blstats[NLE_BL_EXP];

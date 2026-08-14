@@ -13,7 +13,9 @@ static int demo_tty;
 static unsigned char demo_tty_chars[NLE_TERM_LI * NLE_TERM_CO];
 static signed char demo_tty_colors[NLE_TERM_LI * NLE_TERM_CO];
 static unsigned char demo_tty_cursor[2];
+static void demo_note_message(Nethack* env);
 static void demo_view_setup(void) {
+    nethack_msg_tap = demo_note_message; // ring sees every engine step's topline
     const char* t = getenv("NH_TTY");
     demo_tty = t && t[0] && t[0] != '0';
     if (!demo_tty) return;
@@ -675,8 +677,17 @@ static void demo_note_message(Nethack* env) {
     int j = 0;
     for (; j < 95 && env->message[j]; j++) buf[j] = (char)env->message[j];
     buf[j] = 0;
-    if (demo_msg_n > 0 && strcmp(demo_msgs[(demo_msg_n - 1) % DEMO_MSG_RING], buf) == 0)
-        return;
+    if (demo_msg_n > 0) {
+        char* prev = demo_msgs[(demo_msg_n - 1) % DEMO_MSG_RING];
+        if (strcmp(prev, buf) == 0) return;
+        // getline echo: the game repaints the topline per keystroke; an
+        // extension of the previous message replaces it (lossless)
+        size_t pl = strlen(prev);
+        if (pl > 0 && j > (int)pl && strncmp(prev, buf, pl) == 0) {
+            strcpy(prev, buf);
+            return;
+        }
+    }
     strcpy(demo_msgs[demo_msg_n % DEMO_MSG_RING], buf);
     demo_msg_n++;
 }
@@ -994,7 +1005,6 @@ static void run_demo_interactive(long max_steps) {
         if (do_step) {
             demo_step_once(net, &env, acts_f, &ep_score, &ep_len,
                            &ep_depth, &ep_xp, &ep_gt);
-            demo_note_message(&env);
             steps++;
             demo_render(&env, confirmed_hold ? rate : 0, steps);
         } else {
@@ -1047,7 +1057,6 @@ static void run_demo_auto(long max_steps, int frame_ms) {
     for (long t = 0; t < max_steps; t++) {
         demo_step_once(net, &env, acts_f, &ep_score, &ep_len,
                        &ep_depth, &ep_xp, &ep_gt);
-        if (frame_ms > 0) demo_note_message(&env);
         if (trace) {
             if ((int)acts_f[0] == NETHACK_ACT_APPLY) {
                 int sl = (int)acts_f[1 + 9];
