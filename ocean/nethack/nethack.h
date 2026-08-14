@@ -114,6 +114,7 @@ struct Env {
     float gold_coef;
     float exp_coef;
     float descent_coef;
+    float floor_coef;
     float xp_coef;
     float scout_coef;
     float ac_coef;
@@ -136,12 +137,19 @@ struct Env {
 // demo-only obs planes; NULL in training (fills skipped)
 static unsigned char* nethack_color_sink;
 static unsigned char* nethack_invstr_sink;
+static unsigned char* nethack_tty_chars_sink;
+static signed char* nethack_tty_colors_sink;
+static unsigned char* nethack_tty_cursor_sink;
+static const char* nethack_options_override; // demo-only; NULL = default options
 
 static void nethack_bind_obs(Nethack* env) {
     nle_obs* o = &env->obs;
     memset(o, 0, sizeof(*o));
     o->colors = nethack_color_sink;
     o->inv_strs = nethack_invstr_sink;
+    o->tty_chars = nethack_tty_chars_sink;
+    o->tty_colors = nethack_tty_colors_sink;
+    o->tty_cursor = nethack_tty_cursor_sink;
     o->glyphs = env->glyphs;
     o->blstats = env->blstats;
     o->chars = env->chars;
@@ -170,7 +178,8 @@ static void nethack_init_settings(Nethack* env) {
     env->settings.spawn_monsters = 1;
     env->settings.underfoot_glyphs = 1; // underfoot shows objects
     snprintf(env->settings.options, sizeof(env->settings.options), "@%s",
-             nethack_rc_path(NETHACK_DEFAULT_OPTIONS));
+             nethack_rc_path(nethack_options_override
+                 ? nethack_options_override : NETHACK_DEFAULT_OPTIONS));
     env->settings.fix_moon_phase = true; // moon phase from seed
 }
 
@@ -717,13 +726,14 @@ static float nethack_reward(Nethack* env) {
     r += env->gold_coef * (float)(g - env->prev_gold);
     env->prev_gold = g;
 
-    // unique-floor stat (no reward)
+    // floor: pays once per new unique (dnum, dlevel) floor entered (branches count)
     long dn = env->blstats[NLE_BL_DNUM], dl = env->blstats[NLE_BL_DLEVEL];
     if (dn >= 0 && dn < 16 && dl >= 1 && dl <= 64) {
         unsigned long long fb = 1ULL << (dl - 1);
         if (!(env->stats.floors_bits[dn] & fb)) {
             env->stats.floors_bits[dn] |= fb;
             env->stats.floors++;
+            r += env->floor_coef;
         }
     }
 
@@ -1022,6 +1032,7 @@ void puf_init(Env* env, Dict* kwargs) {
     env->gold_coef = dict_get(kwargs, "gold_coef");
     env->exp_coef = dict_get(kwargs, "exp_coef");
     env->descent_coef = dict_get(kwargs, "descent_coef");
+    env->floor_coef = dict_get(kwargs, "floor_coef");
     env->scout_coef = dict_get(kwargs, "scout_coef");
     env->ac_coef = dict_get(kwargs, "ac_coef");
     env->scout_ready = dict_get(kwargs, "scout_ready");

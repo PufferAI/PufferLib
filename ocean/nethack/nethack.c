@@ -8,8 +8,23 @@
 #include "../../src/puffercpu.h"
 #include "glyph_map.h"
 
+// NH_TTY=1: the map panel shows the game's real tty screen instead of the obs
+static int demo_tty;
+static unsigned char demo_tty_chars[NLE_TERM_LI * NLE_TERM_CO];
+static signed char demo_tty_colors[NLE_TERM_LI * NLE_TERM_CO];
+static unsigned char demo_tty_cursor[2];
+static void demo_view_setup(void) {
+    const char* t = getenv("NH_TTY");
+    demo_tty = t && t[0] && t[0] != '0';
+    if (!demo_tty) return;
+    nethack_tty_chars_sink = demo_tty_chars;
+    nethack_tty_colors_sink = demo_tty_colors;
+    nethack_tty_cursor_sink = demo_tty_cursor;
+}
+
 // single-agent env, reset immediately (training's puf_reset is lazy)
 static void env_open(Nethack* env) {
+    demo_view_setup();
     memset(env, 0, sizeof(*env));
     // dungeon variety: rng feeds init()'s seed; srand() runs before env_open
     // in both demo modes, so NH_SEED replays exactly and no-seed varies by time
@@ -650,7 +665,7 @@ static void demo_step_once(NethackNet* net, Nethack* env, float* acts_f,
 }
 
 // message history ring for the rich view
-#define DEMO_MSG_RING 6
+#define DEMO_MSG_RING 18
 static char demo_msgs[DEMO_MSG_RING][96];
 static int demo_msg_n = 0;
 
@@ -716,6 +731,17 @@ static void demo_map_cell(Nethack* env, int r, int c, int hero) {
            demo_ansi_clr[clr], ch);
 }
 
+// tty map cell: authentic chars/colors from the game's own screen (rows 1..21)
+static void demo_map_cell_tty(int r, int c) {
+    unsigned char ch = demo_tty_chars[(r + 1) * NLE_TERM_CO + (c + 1)];
+    int clr = demo_tty_colors[(r + 1) * NLE_TERM_CO + (c + 1)] & 15;
+    if (!ch || ch == ' ') {
+        putchar(' ');
+        return;
+    }
+    printf("\x1b[%dm%c\x1b[0m", demo_ansi_clr[clr], ch);
+}
+
 #define DEMO_INV_W 42 // inventory pane inner width
 
 // perm_invent pane: doname text grouped by class in game display order
@@ -757,90 +783,132 @@ static void demo_box_edge(const char* l, const char* r, const char* title, int i
     printf("%s", r);
 }
 
+// right-column inventory box segment for composite row k (0 = top border)
+static void demo_inv_row(int k, int last, int pn,
+                         char plines[][DEMO_INV_W + 8], const char** pclrs) {
+    if (k == 0) {
+        printf(" ");
+        demo_box_edge("┌", "┐\n", "Inventory", DEMO_INV_W);
+        return;
+    }
+    if (k >= last) {
+        printf(" ");
+        demo_box_edge("└", "┘\n", NULL, DEMO_INV_W);
+        return;
+    }
+    printf(" │ ");
+    int i = k - 1, len = 0;
+    if (i == last - 2 && pn > last - 1)
+        len = printf("\x1b[2m... +%d more\x1b[0m", pn - (last - 2)) - 8;
+    else if (i < pn)
+        len = printf("%s%.*s\x1b[0m", pclrs[i], DEMO_INV_W - 2, plines[i])
+            - (int)strlen(pclrs[i]) - 4;
+    printf("%*s│\n", DEMO_INV_W - 1 - len, "");
+}
+
 static void demo_render(Nethack* env, int rate_hz, long steps) {
     long* bl = env->blstats;
     printf("\x1b[H\x1b[2J");
-    // message window
-    int total = NH_COLS + 3 + DEMO_INV_W; // map box + gap + inv box inner
-    demo_box_edge("┌", "┐\n", NULL, total);
-    int shown = demo_msg_n < DEMO_MSG_RING ? demo_msg_n : DEMO_MSG_RING;
-    for (int k = 0; k < DEMO_MSG_RING; k++) {
-        printf("│ ");
-        int len = 0;
-        if (k >= DEMO_MSG_RING - shown) {
-            int idx = (demo_msg_n - (DEMO_MSG_RING - k)) % DEMO_MSG_RING;
-            len = printf("%s%.*s\x1b[0m", k == DEMO_MSG_RING - 1 ? "\x1b[1m" : "\x1b[2m",
-                         total - 2, demo_msgs[idx]) - 8;
-        }
-        printf("%*s│\n", total - 1 - len, "");
-    }
-    demo_box_edge("└", "┘\n", NULL, total);
-    // map box + inventory box
-    char title[32];
     static char plines[DEMO_PANE_MAX][DEMO_INV_W + 8];
     static const char* pclrs[DEMO_PANE_MAX];
     int pn = demo_inv_pane(env, plines, pclrs);
-    snprintf(title, sizeof(title), "Dlvl:%ld", bl[NLE_BL_DEPTH]);
-    demo_box_edge("┌", "┐", title, NH_COLS);
-    printf(" ");
-    demo_box_edge("┌", "┐\n", "Inventory", DEMO_INV_W);
-    for (int r = 0; r < NH_ROWS; r++) {
-        printf("│");
-        for (int c = 0; c < NH_COLS; c++)
-            demo_map_cell(env, r, c, c == bl[NLE_BL_X] && r == bl[NLE_BL_Y]);
-        printf("│ │ ");
+    // left column: message box, map box, status box; inventory runs full height
+    int last = 1 + DEMO_MSG_RING + 1 + 1 + NH_ROWS + 1 + 4 - 1;
+    int k = 0;
+    demo_box_edge("┌", "┐", NULL, NH_COLS);
+    demo_inv_row(k++, last, pn, plines, pclrs);
+    int shown = demo_msg_n < DEMO_MSG_RING ? demo_msg_n : DEMO_MSG_RING;
+    for (int m = 0; m < DEMO_MSG_RING; m++) {
+        printf("│ ");
         int len = 0;
-        if (r < NH_ROWS - 1 || pn <= NH_ROWS) {
-            if (r < pn)
-                len = printf("%s%.*s\x1b[0m", pclrs[r], DEMO_INV_W - 2, plines[r])
-                    - (int)strlen(pclrs[r]) - 4;
-        } else
-            len = printf("\x1b[2m... +%d more\x1b[0m", pn - (NH_ROWS - 1)) - 8;
-        printf("%*s│\n", DEMO_INV_W - 1 - len, "");
+        if (m >= DEMO_MSG_RING - shown) {
+            int idx = (demo_msg_n - (DEMO_MSG_RING - m)) % DEMO_MSG_RING;
+            len = printf("%s%.*s\x1b[0m", m == DEMO_MSG_RING - 1 ? "\x1b[1m" : "\x1b[2m",
+                         NH_COLS - 2, demo_msgs[idx]) - 8;
+        }
+        printf("%*s│", NH_COLS - 1 - len, "");
+        demo_inv_row(k++, last, pn, plines, pclrs);
     }
     demo_box_edge("└", "┘", NULL, NH_COLS);
-    printf(" ");
-    demo_box_edge("└", "┘\n", NULL, DEMO_INV_W);
-    // status: hitpointbar over the agent name, then the stat line
+    demo_inv_row(k++, last, pn, plines, pclrs);
+    char title[32];
+    snprintf(title, sizeof(title), "Dlvl:%ld", bl[NLE_BL_DEPTH]);
+    demo_box_edge("┌", "┐", title, NH_COLS);
+    demo_inv_row(k++, last, pn, plines, pclrs);
+    for (int r = 0; r < NH_ROWS; r++) {
+        printf("│");
+        for (int c = 0; c < NH_COLS; c++) {
+            if (demo_tty) demo_map_cell_tty(r, c);
+            else demo_map_cell(env, r, c, c == bl[NLE_BL_X] && r == bl[NLE_BL_Y]);
+        }
+        printf("│");
+        demo_inv_row(k++, last, pn, plines, pclrs);
+    }
+    demo_box_edge("└", "┘", NULL, NH_COLS);
+    demo_inv_row(k++, last, pn, plines, pclrs);
+    // status box: hitpointbar over the agent name, then the stat line
+    demo_box_edge("┌", "┐", NULL, NH_COLS);
+    demo_inv_row(k++, last, pn, plines, pclrs);
     long hp = bl[NLE_BL_HP], hpm = bl[NLE_BL_HPMAX] > 0 ? bl[NLE_BL_HPMAX] : 1;
-    const char* name = "Agent the Puffer";
-    int fill = (int)((hp * 16 + hpm - 1) / hpm);
-    if (fill > 16) fill = 16;
+    static const char* rolenm[13] = {"Archeologist", "Barbarian", "Caveman",
+        "Healer", "Knight", "Monk", "Priest", "Rogue", "Ranger", "Samurai",
+        "Tourist", "Valkyrie", "Wizard"};
+    static const char* racenm[5] = {"human", "elven", "dwarven", "gnomish", "orcish"};
+    static const char* alignnm[3] = {"lawful", "neutral", "chaotic"};
+    int ir = 0, ic = 0, ig = 0, ia = 0;
+    nle_identity(env->ctx, &ir, &ic, &ig, &ia);
+    char name[40];
+    int nl = snprintf(name, sizeof(name), "Agent the %s",
+        (ir >= 0 && ir < 13) ? rolenm[ir] : "Puffer");
+    int fill = (int)((hp * nl + hpm - 1) / hpm);
+    if (fill > nl) fill = nl;
     int hpc = hp * 3 >= hpm * 2 ? 32 : hp * 3 >= hpm ? 33 : 31;
-    printf("[\x1b[7;%dm%.*s\x1b[0m%s] St:%ld Dx:%ld Co:%ld  Score:%ld\n",
+    int len = printf("│ [\x1b[7;%dm%.*s\x1b[0m%s] \x1b[2m%s %s %s\x1b[0m"
+           " St:%ld Dx:%ld Co:%ld  Score:%ld",
            hpc, fill, name, name + fill,
-           bl[NLE_BL_STR25], bl[NLE_BL_DEX], bl[NLE_BL_CON], bl[NLE_BL_SCORE]);
+           (ia >= 0 && ia < 3) ? alignnm[ia] : "?", ig == 1 ? "female" : "male",
+           (ic >= 0 && ic < 5) ? racenm[ic] : "?",
+           bl[NLE_BL_STR25], bl[NLE_BL_DEX], bl[NLE_BL_CON], bl[NLE_BL_SCORE]) - 23;
+    if (len < NH_COLS - 1) printf("%*s", NH_COLS - 1 - len, "");
+    printf("│");
+    demo_inv_row(k++, last, pn, plines, pclrs);
     static const char* conds[10] = {"Stone", "Slime", "Strngl", "FoodPois",
         "TermIll", "Blind", "Deaf", "Stun", "Conf", "Hallu"};
     static const char* hungers[5] = {"Satiated", "", "Hungry", "Weak", "Fainting"};
     long hu = bl[NLE_BL_HUNGER];
-    printf("Dlvl:%ld $:%ld HP:%ld(%ld) Pw:%ld(%ld) AC:%ld Xp:%ld/%ld T:%ld",
+    len = printf("│ Dlvl:%ld $:%ld HP:%ld(%ld) Pw:%ld(%ld) AC:%ld Xp:%ld/%ld T:%ld",
            bl[NLE_BL_DEPTH], bl[NLE_BL_GOLD], hp, bl[NLE_BL_HPMAX],
            bl[NLE_BL_ENE], bl[NLE_BL_ENEMAX], bl[NLE_BL_AC],
-           bl[NLE_BL_XP], bl[NLE_BL_EXP], bl[NLE_BL_TIME]);
-    if (hu >= 0 && hu < 5 && hungers[hu][0]) printf(" \x1b[33m%s\x1b[0m", hungers[hu]);
+           bl[NLE_BL_XP], bl[NLE_BL_EXP], bl[NLE_BL_TIME]) - 4;
+    if (hu >= 0 && hu < 5 && hungers[hu][0]) len += printf(" \x1b[33m%s\x1b[0m", hungers[hu]) - 9;
     // known spells: name Lv fail%% (env->spell_* is refreshed each pack_obs)
     if (env->n_spells > 0) {
         static const struct { int id; const char* nm; } spnames[] = {
             {344, "sleep"}, {348, "healing"}, {377, "protection"},
             {340, "force bolt"}, {342, "magic missile"}, {361, "cure blindness"},
         };
-        printf("  \x1b[36mSp:");
-        for (int i = 0; i < env->n_spells && i < 3; i++) {
+        len += printf("  \x1b[36mSp:") - 5;
+        for (int i = 0; i < env->n_spells && i < 2; i++) {
             const char* nm = NULL;
-            for (unsigned k = 0; k < sizeof(spnames)/sizeof(spnames[0]); k++) {
-                if (spnames[k].id != env->spell_ids[i]) continue;
-                nm = spnames[k].nm;
+            for (unsigned s = 0; s < sizeof(spnames)/sizeof(spnames[0]); s++) {
+                if (spnames[s].id != env->spell_ids[i]) continue;
+                nm = spnames[s].nm;
                 break;
             }
-            printf("%s%s(L%d %d%%)", i ? "," : "",
+            len += printf("%s%s(L%d %d%%)", i ? "," : "",
                    nm ? nm : "spell", env->spell_levs[i], env->spell_fails[i]);
         }
         printf("\x1b[0m");
     }
     for (int b = 0; b < 10; b++)
-        if (bl[NLE_BL_CONDITION] & (1L << b)) printf(" \x1b[31;1m%s\x1b[0m", conds[b]);
-    printf("\n\x1b[2msteps %ld  |  SPACE step/hold 5Hz  |  Shift+SPACE (or S) 20Hz  |  q quit",
+        if (bl[NLE_BL_CONDITION] & (1L << b))
+            len += printf(" \x1b[31;1m%s\x1b[0m", conds[b]) - 11;
+    if (len < NH_COLS - 1) printf("%*s", NH_COLS - 1 - len, "");
+    printf("│");
+    demo_inv_row(k++, last, pn, plines, pclrs);
+    demo_box_edge("└", "┘", NULL, NH_COLS);
+    demo_inv_row(k++, last, pn, plines, pclrs);
+    printf("\x1b[2msteps %ld  |  SPACE step/hold 5Hz  |  Shift+SPACE (or S) 20Hz  |  q quit",
            steps);
     if (rate_hz > 0) printf("  |  running %d Hz", rate_hz);
     printf("\x1b[0m\n");
@@ -962,17 +1030,43 @@ static void run_demo_auto(long max_steps, int frame_ms) {
     NethackNet* net = make_nethack_net(w);
 
     Nethack env;
+    // frame mode renders the same composite as interactive
+    if (frame_ms > 0) {
+        nethack_color_sink = demo_colors;
+        nethack_invstr_sink = demo_inv_strs;
+    }
     const char* seed_env = getenv("NH_SEED");
     srand(seed_env ? (unsigned)strtoul(seed_env, NULL, 10) : (unsigned)time(NULL));
     env_open(&env);
 
     float ep_score = 0, ep_len = 0, ep_depth = 0, ep_xp = 0, ep_gt = 0;
     float acts_f[DEMO_NUM_HEADS];
+    // NH_TRACE=1: print a line on every floor change (route analysis)
+    int trace = getenv("NH_TRACE") != NULL;
+    long pf = -1;
     for (long t = 0; t < max_steps; t++) {
         demo_step_once(net, &env, acts_f, &ep_score, &ep_len,
                        &ep_depth, &ep_xp, &ep_gt);
+        if (frame_ms > 0) demo_note_message(&env);
+        if (trace) {
+            if ((int)acts_f[0] == NETHACK_ACT_APPLY) {
+                int sl = (int)acts_f[1 + 9];
+                printf("TRACE APPLY g=%d\n", env.inv_glyphs[sl]);
+            }
+            long f = env.blstats[23] << 8 | env.blstats[24];
+            if (f != pf) {
+                printf("TRACE t=%ld d=%ld:%ld hp=%ld xp=%ld\n",
+                       env.blstats[NLE_BL_TIME], env.blstats[23],
+                       env.blstats[24], env.blstats[10], env.blstats[18]);
+                pf = f;
+            }
+            if (env.agents[0].terminals[0] != 0.0f) {
+                printf("TRACE END\n");
+                pf = -1;
+            }
+        }
         if (frame_ms > 0) {
-            puf_render(&env);
+            demo_render(&env, 1000 / frame_ms, t);
             usleep(frame_ms * 1000);
         }
     }
