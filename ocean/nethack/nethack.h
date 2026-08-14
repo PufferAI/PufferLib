@@ -40,6 +40,7 @@ extern void nle_weight(nle_ctx_t*, int*, int*);
 extern int nle_spells(nle_ctx_t*, short*, signed char*, signed char*, int*, int);
 extern int nle_cast_blocked(nle_ctx_t*);
 extern void nle_end(nle_ctx_t*);
+extern void nle_identity(nle_ctx_t*, int*, int*, int*, int*);
 #ifdef __cplusplus
 }
 #endif
@@ -121,9 +122,11 @@ struct Env {
     float death_penalty;
     float mask_search20; // 1 removes SEARCH20 from the action space
     float mask_run; // 1 removes RUN from the action space
+    float multi_role; // 1 = random role/race/gender/align per reset (challenge protocol)
 
     unsigned int rng; // required by vecenv.h
     unsigned long seed; // advanced each reset
+    int role_idx, race_idx, gend_idx; // multi-role identity (read back)
 };
 
 #include "macros.h"
@@ -454,6 +457,10 @@ static void nethack_pack_obs(Nethack* env) {
         q[3] = known ? env->spell_knows[s] : 0;
     }
 
+    extra[NETHACK_EXTRA_ROLEOH + env->role_idx] = 1;
+    extra[NETHACK_EXTRA_ROLEOH + 13 + env->race_idx] = 1;
+    extra[NETHACK_EXTRA_ROLEOH + 18 + env->gend_idx] = 1;
+
     int wt, wcap;
     nle_weight(env->ctx, &wt, &wcap);
     if (wcap < 1) wcap = 1;
@@ -550,6 +557,7 @@ static void nethack_add_log(Nethack* env, int how) { // how: nle how_done, -1 = 
     env->log.reads_book += (float)env->stats.reads_book;
     env->log.sells += (float)env->stats.sells;
     env->log.buys += (float)env->stats.buys;
+    env->log.role_ix += (float)env->role_idx;
     env->log.discoveries += (float)(nle_discoveries(env->ctx) - env->disc0);
     env->log.min_ac += (float)env->stats.min_ac;
     env->log.burdened_frac += env->stats.length > 0
@@ -586,6 +594,14 @@ static void nethack_do_reset(Nethack* env) {
 
     // seed advance
     env->seed = env->seed * 6364136223846793005UL + 1442695040888963407UL;
+    // engine-random character per reset; identity read back after start
+    if (env->multi_role != 0.0f) {
+        char rcp[512];
+        snprintf(env->settings.options, sizeof(env->settings.options), "@%s",
+                 nethack_rc_path_opts(rcp, sizeof(rcp),
+                     "name:Agent,role:random,race:random,gender:random,"
+                     "align:random," NETHACK_OPTIONS_TAIL "!status_updates"));
+    }
     env->settings.initial_seeds.seeds[0] = env->seed;
     env->settings.initial_seeds.seeds[1] = env->seed ^ 0x9E3779B97F4A7C15UL;
     env->settings.initial_seeds.use_init_seeds = true;
@@ -594,6 +610,13 @@ static void nethack_do_reset(Nethack* env) {
     env->ctx = nle_start(&env->obs, NULL, &env->settings);
 
     nethack_drain_prompts(env);
+    {
+        int r = 0, rc = 0, g = 0, a = 0;
+        nle_identity(env->ctx, &r, &rc, &g, &a);
+        env->role_idx = (r >= 0 && r < 13) ? r : 0;
+        env->race_idx = (rc >= 0 && rc < 5) ? rc : 0;
+        env->gend_idx = (g == 1) ? 1 : 0;
+    }
     nle_obs_refresh(env->ctx, &env->obs); // full fill: prev_* seeds read blstats
 
     env->prev_score = 0;
@@ -1007,6 +1030,7 @@ void puf_init(Env* env, Dict* kwargs) {
     env->death_penalty = dict_get(kwargs, "death_penalty");
     env->mask_search20 = dict_get(kwargs, "mask_search20");
     env->mask_run = dict_get(kwargs, "mask_run");
+    env->multi_role = dict_get(kwargs, "multi_role");
 }
 
 // Export order: outcomes first (score/depth/reaches/deaths), then action
@@ -1026,6 +1050,7 @@ void puf_log(Log* log, Dict* out) {
     dict_set(out, "sokoban_depth", log->sokoban_depth);
     dict_set(out, "sells", log->sells);
     dict_set(out, "buys", log->buys);
+    dict_set(out, "role_ix", log->role_ix);
     dict_set(out, "discoveries", log->discoveries);
     dict_set(out, "death_combat", log->death_combat);
     dict_set(out, "death_weak", log->death_weak);

@@ -24,6 +24,9 @@ static void env_open(Nethack* env) {
     a->rewards = (float*)calloc(1, sizeof(float));
     a->terminals = (float*)calloc(1, sizeof(float));
     init(env);
+    // NH_MULTI=1: random role/race/gender/align per reset (challenge protocol)
+    const char* mr = getenv("NH_MULTI");
+    if (mr && mr[0] && mr[0] != '0') env->multi_role = 1.0f;
     nethack_sync_buffers(env); // flat mask pointer, written by compute_mask
     nethack_do_reset(env);
 }
@@ -43,7 +46,7 @@ static void env_close(Nethack* env) {
 #define DEMO_VOCAB 5977
 #define DEMO_EMBED 32
 #define DEMO_BL_FEAT (25 + 7 + 13 + NETHACK_NUM_ACTIONS + NETHACK_NUM_OCLASSES + 2 + 8 + 2 + 2 \
-                      + 1 + 2)
+                      + 1 + 2 + 20)
 #define DEMO_SPKEY 16
 #define DEMO_SPIN (DEMO_EMBED + 4)
 #define DEMO_INV_HID 16 // 16-dim slot rep: pool bottleneck + decoder key (unified)
@@ -383,6 +386,8 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
       float d = (float)demo_i32(ex + 4*(NETHACK_EXTRA_WEIGHT+0)) * 0.01f - 1.0f;
       f[j++] = d / (1.0f + fabsf(d));
       f[j++] = (float)demo_i32(ex + 4*(NETHACK_EXTRA_WEIGHT+1)) * 0.001f; }
+    for (int k = 0; k < 20; k++) // role/race/gender one-hots; mirrors NH_F_ROLE
+        f[j++] = (float)demo_i32(ex + 4*(NETHACK_EXTRA_ROLEOH + k));
     for (int k = 0; k < DEMO_BL_FEAT; k++) f[k] = fminf(fmaxf(f[k], -1.f), 1.f);
 
     float* blout = net->concat + DEMO_LOC_HID + DEMO_GLB_HID + DEMO_INV_POOL;

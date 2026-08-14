@@ -51,7 +51,8 @@ static constexpr int NH_ACTIONS = 26; // NETHACK_NUM_ACTIONS
 static constexpr int NH_OCLASSES = 18; // MAXOCLASSES
 static constexpr int NH_EXTRA_SHOP = 2 + NH_OCLASSES; // extra[] index of the shop pair
 static constexpr int NH_SPELL_SLOTS = 8; // NETHACK_SPELL_SLOTS
-static constexpr int NH_EX_RAW = 2 + NH_OCLASSES + 2 + 1 + 4 * NH_SPELL_SLOTS + 2; // NETHACK_EXTRA_INTS (+spell block +weight pair)
+static constexpr int NH_EX_ROLEOH = 2 + NH_OCLASSES + 2 + 1 + 4 * NH_SPELL_SLOTS + 2;
+static constexpr int NH_EX_RAW = NH_EX_ROLEOH + 13 + 5 + 2; // NETHACK_EXTRA_INTS (+role/race/gender one-hots)
 // blstats feature map (cumulative offsets; each block documented at its
 // kernel branch). hp/ene fracs are the danger ratios the linear bl_w can't
 // synthesize from separate cur/max scalars; dnum is one-hot because dungeon
@@ -69,7 +70,8 @@ static constexpr int NH_F_SHOP = NH_F_ENGR + 2; // in-shop, affordability
 static constexpr int NH_F_SPELL = NH_F_SHOP + 2;
 // encumbrance ratio (softsign around the wall) + carry capacity /1000
 static constexpr int NH_F_WEIGHT = NH_F_SPELL + 1;
-static constexpr int NH_BL_FEAT = NH_F_WEIGHT + 2;
+static constexpr int NH_F_ROLE = NH_F_WEIGHT + 2; // 13 role + 5 race + 2 gender
+static constexpr int NH_BL_FEAT = NH_F_ROLE + 20;
 static constexpr int NH_BL_DNUM = 23;
 static constexpr int NH_BL_HID = 64;
 // Inventory entity branch: 55 slot glyphs, each embed -> shared 32->32
@@ -483,7 +485,7 @@ __global__ void nh_blstats_kernel(
             // known-spell count/8; per-slot content rides the spell-key path
             int v = nh_bl_read_i32(ex + 4*(NH_EXTRA_SHOP + 2));
             f = (float)v * 0.125f;
-        } else {
+        } else if (j < NH_F_ROLE) {
             // encumbrance: softsign(ratio-1) is 0 at the wall, keeps gradient
             // through Overloaded (~3x); capacity /1000 (engine caps there)
             int v = nh_bl_read_i32(ex + 4*(NH_EXTRA_SHOP + 2 + 1 + 4 * NH_SPELL_SLOTS
@@ -493,6 +495,9 @@ __global__ void nh_blstats_kernel(
                 f = d / (1.0f + fabsf(d));
             } else
                 f = (float)v * 0.001f;
+        } else {
+            // role/race/gender one-hots, already 0/1
+            f = (float)nh_bl_read_i32(ex + 4*(NH_EX_ROLEOH + (j - NH_F_ROLE)));
         }
         // strict [-1,1]: bounds deep-play excursions (AC -15 -> -1.5, hp 300 ->
         // 1.5, stacked inv counts) — validated neutral-now, deep-safe (n=4)

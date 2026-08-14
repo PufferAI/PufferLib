@@ -78,7 +78,8 @@ static const signed char nh_obj_armcat[NH_NUM_OBJECTS] = {
 // encumbrance percent (unclipped past 100) + raw carry capacity
 #define NETHACK_SPELL_SLOTS 8
 #define NETHACK_OFF_EXTRA (NETHACK_OFF_BLSTATS + NLE_BLSTATS_SIZE * 4)
-#define NETHACK_EXTRA_INTS (2 + NETHACK_NUM_OCLASSES + 2 + 1 + 4 * NETHACK_SPELL_SLOTS + 2)
+#define NETHACK_EXTRA_INTS (2 + NETHACK_NUM_OCLASSES + 2 + 1 + 4 * NETHACK_SPELL_SLOTS + 2 + 13 + 5 + 2)
+#define NETHACK_EXTRA_ROLEOH (2 + NETHACK_NUM_OCLASSES + 2 + 1 + 4 * NETHACK_SPELL_SLOTS + 2)
 #define NETHACK_EXTRA_SHOP (2 + NETHACK_NUM_OCLASSES)
 #define NETHACK_EXTRA_SPELL (NETHACK_EXTRA_SHOP + 2)
 #define NETHACK_EXTRA_WEIGHT (NETHACK_EXTRA_SPELL + 1 + 4 * NETHACK_SPELL_SLOTS)
@@ -101,7 +102,7 @@ static const signed char nh_obj_armcat[NH_NUM_OBJECTS] = {
 #define NETHACK_PATH_MAX 128 // engine records up to 128 hero tiles/step
 #define NETHACK_INTERNAL_KILLER_MLEV 10 // killer monster level, death only
 
-#define NETHACK_MAX_EPISODE_STEPS 10000
+#define NETHACK_MAX_EPISODE_STEPS 100000
 #define NETHACK_AUTODISMISS_MAX 64 // cap on prompt-dismiss keystrokes per step
 #define NETHACK_MAX_DEPTH 64 // scout bitmaps: max distinct (dnum, dlevel) floors per episode
 
@@ -176,14 +177,14 @@ static inline int nethack_letter_bit(int c) {
 
 // engine options
 
-// !status_updates skips the status renderer + recalc_mapseen (~25% of engine)
-#define NETHACK_DEFAULT_OPTIONS \
-    "name:Agent-mon-hum-neu-mal," \
+#define NETHACK_OPTIONS_TAIL \
     "autopickup,color,disclose:+i +a +v +g +c +o," \
     "mention_walls,nobones,nocmdassist,nolegacy,nosparkle," \
     "pickup_burden:unencumbered," \
-    "runmode:teleport,showexp,showscore,time," \
-    "!status_updates"
+    "runmode:teleport,showexp,showscore,time,"
+
+// !status_updates skips the status renderer + recalc_mapseen (~25% of engine)
+#define NETHACK_DEFAULT_OPTIONS "name:Agent-mon-hum-neu-mal," NETHACK_OPTIONS_TAIL "!status_updates"
 
 // verb table
 
@@ -280,6 +281,7 @@ typedef struct Log {
     float discoveries; // object types discovered this episode (oc_name_known delta)
     float sells; // shop sale offers accepted (deliberate drop in a shop)
     float buys; // shop pickups paid for
+    float role_ix; // multi-role: sampled engine role index (mixing signature)
     float burdened_frac; // steps with encumbrance > Unencumbered
     float min_ac; // best (lowest) AC reached this episode
     float game_time; // NetHack turns survived

@@ -112,6 +112,25 @@ static void nethack_rm_vardir(const char* dir) {
 // one rc per process: AUTOPICKUP_EXCEPTION is a config-file-only directive, so
 // the options string becomes "@<this file>"; written atomically (tmp + rename),
 // concurrent env inits write identical content
+// content-addressed rc: distinct options content never shares a file
+static const char* nethack_rc_path_opts(char* buf, size_t bufsz, const char* options) {
+    unsigned h = 2166136261u;
+    for (const char* c = options; *c; c++) h = (h ^ (unsigned char)*c) * 16777619u;
+    snprintf(buf, bufsz, "%s/nhrc_%08x", nethack_vardir_base(), h);
+    if (access(buf, R_OK) != 0) {
+        char tmp[560];
+        snprintf(tmp, sizeof(tmp), "%s.%p", buf, (void*)&tmp);
+        FILE* f = fopen(tmp, "w");
+        if (f) {
+            fprintf(f, "OPTIONS=%s\n", options);
+            fprintf(f, "AUTOPICKUP_EXCEPTION=\">corpse\"\n");
+            fclose(f);
+            rename(tmp, buf);
+        }
+    }
+    return buf;
+}
+
 static const char* nethack_rc_path(const char* default_options) {
     static char path[512] = "";
     if (path[0]) return path;
