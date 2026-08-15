@@ -105,7 +105,16 @@ static constexpr int NH_MSG_CONCAT_OFF = NH_LOC_HID + NH_GLB_HID + NH_INV_POOL +
 static constexpr int NH_SPKEY = NH_INV_HID; // 16, shared key width
 static constexpr int NH_SPIN = NH_EMBED_DIM + 4; // 36 key inputs/slot
 static constexpr int NH_SPELL_CONCAT_OFF = NH_MSG_CONCAT_OFF + NH_MSG_HID;
-static constexpr int NH_CONCAT = NH_SPELL_CONCAT_OFF + NH_SPKEY;
+// identity embeddings A/B arm: 1 = explicit tables in a direct concat channel
+// (the one-hot bl features go dead); 0 = the committed one-hot representation
+#ifndef NH_ID_EMBED
+#define NH_ID_EMBED 1
+#endif
+static constexpr int NH_IDE_ROLE = 16, NH_IDE_RACE = 8;
+static constexpr int NH_IDE_GEND = 8, NH_IDE_ALGN = 8;
+static constexpr int NH_IDE_DIM = NH_IDE_ROLE + NH_IDE_RACE + NH_IDE_GEND + NH_IDE_ALGN;
+static constexpr int NH_IDE_CONCAT_OFF = NH_SPELL_CONCAT_OFF + NH_SPKEY;
+static constexpr int NH_CONCAT = NH_IDE_CONCAT_OFF + (NH_ID_EMBED ? NH_IDE_DIM : 0);
 static constexpr int NH_BL_OFF = 2 * NH_MGRID; // blstats offset, obs elements
 static constexpr int NH_INV_OFF = NH_BL_OFF + (NH_BL_RAW + NH_EX_RAW) * 4;
 // obs v4: per-slot identification-gated state, 8 int8 fields per slot
@@ -497,7 +506,9 @@ __global__ void nh_blstats_kernel(
                 f = (float)v * 0.001f;
         } else {
             // role/race/gender one-hots, already 0/1
-            f = (float)nh_bl_read_i32(ex + 4*(NH_EX_ROLEOH + (j - NH_F_ROLE)));
+            // dead under NH_ID_EMBED: identity flows via the embed channel
+            f = NH_ID_EMBED ? 0.0f
+              : (float)nh_bl_read_i32(ex + 4*(NH_EX_ROLEOH + (j - NH_F_ROLE)));
         }
         // strict [-1,1]: bounds deep-play excursions (AC -15 -> -1.5, hp 300 ->
         // 1.5, stacked inv counts) — validated neutral-now, deep-safe (n=4)
@@ -1134,6 +1145,63 @@ __global__ void nh_count_pad_kernel(int* __restrict__ counts, int B) {
         counts[NH_PAD_GLYPH] += NH_PAD_PER_SAMPLE * B;
 }
 
+#if NH_ID_EMBED
+// identity embeddings: indices recovered from the one-hot obs block (align
+// from blstats), table rows copied raw into the concat tail (bl-feats idiom)
+__global__ void nh_idemb_kernel(precision_t* __restrict__ concat,
+    float* __restrict__ idx_out, const precision_t* __restrict__ obs,
+    const precision_t* __restrict__ role_w, const precision_t* __restrict__ race_w,
+    const precision_t* __restrict__ gend_w, const precision_t* __restrict__ algn_w, int B) {
+    int b = blockIdx.x * blockDim.x + threadIdx.x;
+    if (b >= B) return;
+    const precision_t* bl = obs + (int64_t)b * NH_OBS_SIZE + NH_BL_OFF;
+    const precision_t* ex = bl + 4 * NH_BL_RAW;
+    int r = 0, rc = 0, g = 0;
+    for (int i = 0; i < 13; i++) if (nh_bl_read_i32(ex + 4 * (NH_EX_ROLEOH + i))) r = i;
+    for (int i = 0; i < 5; i++) if (nh_bl_read_i32(ex + 4 * (NH_EX_ROLEOH + 13 + i))) rc = i;
+    for (int i = 0; i < 2; i++) if (nh_bl_read_i32(ex + 4 * (NH_EX_ROLEOH + 18 + i))) g = i;
+    int al = 1 - nh_bl_read_i32(bl + 4 * 26); // align: lawful 1, neutral 0, chaotic -1
+    al = al < 0 ? 0 : al > 2 ? 2 : al;
+    idx_out[b * 4 + 0] = (float)r;
+    idx_out[b * 4 + 1] = (float)rc;
+    idx_out[b * 4 + 2] = (float)g;
+    idx_out[b * 4 + 3] = (float)al;
+    precision_t* c = concat + (int64_t)b * NH_CONCAT + NH_IDE_CONCAT_OFF;
+    for (int d = 0; d < NH_IDE_ROLE; d++) c[d] = role_w[r * NH_IDE_ROLE + d];
+    c += NH_IDE_ROLE;
+    for (int d = 0; d < NH_IDE_RACE; d++) c[d] = race_w[rc * NH_IDE_RACE + d];
+    c += NH_IDE_RACE;
+    for (int d = 0; d < NH_IDE_GEND; d++) c[d] = gend_w[g * NH_IDE_GEND + d];
+    c += NH_IDE_GEND;
+    for (int d = 0; d < NH_IDE_ALGN; d++) c[d] = algn_w[al * NH_IDE_ALGN + d];
+}
+
+// table grads: one thread per (row, dim), fixed batch loop -- deterministic
+__global__ void nh_idemb_grad_kernel(precision_t* __restrict__ role_g,
+    precision_t* __restrict__ race_g, precision_t* __restrict__ gend_g,
+    precision_t* __restrict__ algn_g, const precision_t* __restrict__ grad_concat,
+    const float* __restrict__ idx, int B) {
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    const int n_role = 13 * NH_IDE_ROLE, n_race = 5 * NH_IDE_RACE;
+    const int n_gend = 2 * NH_IDE_GEND, n_algn = 3 * NH_IDE_ALGN;
+    if (t >= n_role + n_race + n_gend + n_algn) return;
+    int comp, wdt, off;
+    precision_t* out;
+    int u = t;
+    if (u < n_role) { comp = 0; wdt = NH_IDE_ROLE; off = 0; out = role_g; }
+    else if ((u -= n_role) < n_race) { comp = 1; wdt = NH_IDE_RACE; off = NH_IDE_ROLE; out = race_g; }
+    else if ((u -= n_race) < n_gend) { comp = 2; wdt = NH_IDE_GEND; off = NH_IDE_ROLE + NH_IDE_RACE; out = gend_g; }
+    else { u -= n_gend; comp = 3; wdt = NH_IDE_ALGN; off = NH_IDE_ROLE + NH_IDE_RACE + NH_IDE_GEND; out = algn_g; }
+    int row = u / wdt, d = u % wdt;
+    float acc = 0.0f;
+    for (int b = 0; b < B; b++) {
+        if ((int)idx[b * 4 + comp] != row) continue;
+        acc += to_float(grad_concat[(int64_t)b * NH_CONCAT + NH_IDE_CONCAT_OFF + off + d]);
+    }
+    out[row * wdt + d] = from_float(acc);
+}
+#endif
+
 // encoder structs
 
 struct NethackEncoderWeights {
@@ -1144,6 +1212,9 @@ struct NethackEncoderWeights {
     Prec msg_w; // trigram embedding table (NH_MSG_VOCAB, NH_MSG_HID)
     Prec spk_w; // spell slot-rep projection (NH_SPKEY, NH_SPIN)
     Prec spk2_w, spk2_b; // spell pool projection + bias (inv2 idiom)
+#if NH_ID_EMBED
+    Prec ide_role_w, ide_race_w, ide_gend_w, ide_algn_w; // identity tables
+#endif
     int obs_size, hidden;
 };
 
@@ -1190,6 +1261,10 @@ struct NethackEncoderActivations {
     Prec inv1_wgrad, inv1_bgrad, inv1s_wgrad, invt_wgrad, inv2_wgrad, inv2_bgrad;
     Prec bl_wgrad, bl_bgrad, proj_wgrad, proj_bgrad;
     Prec msg_wgrad, spk_wgrad, spk2_wgrad, spk2_bgrad;
+#if NH_ID_EMBED
+    Float ide_idx; // per-sample [role, race, gend, align] saved for backward
+    Prec ide_role_wgrad, ide_race_wgrad, ide_gend_wgrad, ide_algn_wgrad;
+#endif
 };
 
 static NethackEncoderWeights* nethack_encoder_create(int obs_size, int hidden) {
@@ -1283,6 +1358,12 @@ static Prec nethack_encoder_forward(void* w, void* activations, Prec input, cuda
     nh_sppool_kernel<<<grid_size(B * NH_SPKEY), BLOCK_SIZE, 0, stream>>>(
         a->concat.data, a->spk_pool.data, a->spk_amax.data, a->spk_keys.data,
         ew->spk2_w.data, ew->spk2_b.data, B);
+#if NH_ID_EMBED
+    nh_idemb_kernel<<<grid_size(B), BLOCK_SIZE, 0, stream>>>(
+        a->concat.data, a->ide_idx.data, input.data,
+        ew->ide_role_w.data, ew->ide_race_w.data,
+        ew->ide_gend_w.data, ew->ide_algn_w.data, B);
+#endif
     puf_mm(&a->concat, &ew->proj_w, &a->out, stream);
     nh_bias_relu_kernel<<<grid_size(B * ew->hidden), BLOCK_SIZE, 0, stream>>>(
         a->out.data, ew->proj_b.data, B * ew->hidden, ew->hidden);
@@ -1303,6 +1384,13 @@ static void nethack_encoder_backward(void* w, void* activations, Prec grad, cuda
 
     Prec grad_concat = {.data = a->concat.data, .shape = {B, NH_CONCAT}};
     puf_mm_nn(&grad, &ew->proj_w, &grad_concat, stream);
+
+#if NH_ID_EMBED
+    nh_idemb_grad_kernel<<<grid_size(13 * NH_IDE_ROLE + 5 * NH_IDE_RACE
+        + 2 * NH_IDE_GEND + 3 * NH_IDE_ALGN), BLOCK_SIZE, 0, stream>>>(
+        a->ide_role_wgrad.data, a->ide_race_wgrad.data, a->ide_gend_wgrad.data,
+        a->ide_algn_wgrad.data, grad_concat.data, a->ide_idx.data, B);
+#endif
 
     // Local view: wgrad against saved x_local, then the input grad overwrites
     // x_local in place before scattering into the embed table.
@@ -1505,6 +1593,13 @@ static void nethack_encoder_init_weights(void* w, uint64_t* seed, cudaStream_t s
     puf_kaiming_init(&ew->spk_w, 1.0f, (*seed)++, stream); // spell slot-rep projection
     puf_kaiming_init(&ew->spk2_w, 1.0f, (*seed)++, stream);
     cudaMemsetAsync(ew->spk2_b.data, 0, numel(ew->spk2_b.shape) * sizeof(precision_t), stream);
+#if NH_ID_EMBED
+    // zero: the identity channel starts as an exact no-op (ekind_w idiom)
+    cudaMemsetAsync(ew->ide_role_w.data, 0, numel(ew->ide_role_w.shape) * sizeof(precision_t), stream);
+    cudaMemsetAsync(ew->ide_race_w.data, 0, numel(ew->ide_race_w.shape) * sizeof(precision_t), stream);
+    cudaMemsetAsync(ew->ide_gend_w.data, 0, numel(ew->ide_gend_w.shape) * sizeof(precision_t), stream);
+    cudaMemsetAsync(ew->ide_algn_w.data, 0, numel(ew->ide_algn_w.shape) * sizeof(precision_t), stream);
+#endif
 }
 
 // Param and grad registration orders must match pairwise (muon walks both flat).
@@ -1534,6 +1629,12 @@ static void nethack_encoder_reg_params(void* w, Allocator* alloc) {
     ew->spk_w = {.shape = {NH_SPKEY, NH_SPIN}}; // 16x36=576, mult of 8
     ew->spk2_w = {.shape = {NH_SPKEY, NH_SPKEY}}; // 16x16=256, mult of 8
     ew->spk2_b = {.shape = {NH_SPKEY}}; // 16, mult of 8
+#if NH_ID_EMBED
+    ew->ide_role_w = {.shape = {13, NH_IDE_ROLE}}; // 208, mult of 8
+    ew->ide_race_w = {.shape = {5, NH_IDE_RACE}}; // 40
+    ew->ide_gend_w = {.shape = {2, NH_IDE_GEND}}; // 16
+    ew->ide_algn_w = {.shape = {3, NH_IDE_ALGN}}; // 24
+#endif
     alloc_register(alloc,&ew->embed_w);
     alloc_register(alloc,&ew->ekind_w); alloc_register(alloc,&ew->esub_w);
     alloc_register(alloc,&ew->loc_w);   alloc_register(alloc,&ew->loc_b);
@@ -1548,6 +1649,10 @@ static void nethack_encoder_reg_params(void* w, Allocator* alloc) {
     alloc_register(alloc,&ew->msg_w);
     alloc_register(alloc,&ew->spk_w);
     alloc_register(alloc,&ew->spk2_w);  alloc_register(alloc,&ew->spk2_b);
+#if NH_ID_EMBED
+    alloc_register(alloc,&ew->ide_role_w); alloc_register(alloc,&ew->ide_race_w);
+    alloc_register(alloc,&ew->ide_gend_w); alloc_register(alloc,&ew->ide_algn_w);
+#endif
 }
 
 static void nethack_encoder_reg_train(void* w, void* activations, Allocator* acts, Allocator* grads, int B_TT) {
@@ -1583,6 +1688,9 @@ static void nethack_encoder_reg_train(void* w, void* activations, Allocator* act
     a->spk_dkeys = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SPKEY}};
     a->spk_amax = {.shape = {B_TT, NH_SPKEY}};
     a->spk_pool = {.shape = {B_TT, NH_SPKEY}};
+#if NH_ID_EMBED
+    a->ide_idx = {.shape = {B_TT, 4}};
+#endif
     a->concat = {.shape = {B_TT, NH_CONCAT}};
     a->out = {.shape = {B_TT, ew->hidden}};
     alloc_register(acts,&a->glyph_idx); alloc_register(acts,&a->crop_glyph);
@@ -1596,6 +1704,9 @@ static void nethack_encoder_reg_train(void* w, void* activations, Allocator* act
     alloc_register(acts,&a->spk_in);    alloc_register(acts,&a->spk_keys);
     alloc_register(acts,&a->spk_dkeys); alloc_register(acts,&a->spk_amax);
     alloc_register(acts,&a->spk_pool);
+#if NH_ID_EMBED
+    alloc_register(acts,&a->ide_idx);
+#endif
     alloc_register(acts,&a->inv_sfeat);
     alloc_register(acts,&a->inv_T);     alloc_register(acts,&a->invt_T);
     alloc_register(acts,&a->inv_out);
@@ -1660,6 +1771,12 @@ static void nethack_encoder_reg_train(void* w, void* activations, Allocator* act
     a->spk_wgrad = {.shape = {NH_SPKEY, NH_SPIN}};
     a->spk2_wgrad = {.shape = {NH_SPKEY, NH_SPKEY}};
     a->spk2_bgrad = {.shape = {NH_SPKEY}};
+#if NH_ID_EMBED
+    a->ide_role_wgrad = {.shape = {13, NH_IDE_ROLE}};
+    a->ide_race_wgrad = {.shape = {5, NH_IDE_RACE}};
+    a->ide_gend_wgrad = {.shape = {2, NH_IDE_GEND}};
+    a->ide_algn_wgrad = {.shape = {3, NH_IDE_ALGN}};
+#endif
     alloc_register(grads,&a->embed_wgrad);
     alloc_register(grads,&a->ekind_wgrad); alloc_register(grads,&a->esub_wgrad);
     alloc_register(grads,&a->loc_wgrad);   alloc_register(grads,&a->loc_bgrad);
@@ -1674,6 +1791,10 @@ static void nethack_encoder_reg_train(void* w, void* activations, Allocator* act
     alloc_register(grads,&a->msg_wgrad);
     alloc_register(grads,&a->spk_wgrad);
     alloc_register(grads,&a->spk2_wgrad); alloc_register(grads,&a->spk2_bgrad);
+#if NH_ID_EMBED
+    alloc_register(grads,&a->ide_role_wgrad); alloc_register(grads,&a->ide_race_wgrad);
+    alloc_register(grads,&a->ide_gend_wgrad); alloc_register(grads,&a->ide_algn_wgrad);
+#endif
     nh_enc_last = a;
 }
 
@@ -1708,6 +1829,9 @@ static void nethack_encoder_reg_rollout(void* w, void* activations, Allocator* a
     a->spk_keys = {.shape = {B, NH_SPELL_SLOTS * NH_SPKEY}};
     a->spk_amax = {.shape = {B, NH_SPKEY}};
     a->spk_pool = {.shape = {B, NH_SPKEY}};
+#if NH_ID_EMBED
+    a->ide_idx = {.shape = {B, 4}};
+#endif
     a->concat = {.shape = {B, NH_CONCAT}};
     a->out = {.shape = {B, ew->hidden}};
     alloc_register(alloc,&a->glyph_idx); alloc_register(alloc,&a->crop_glyph);
@@ -1718,6 +1842,9 @@ static void nethack_encoder_reg_rollout(void* w, void* activations, Allocator* a
     alloc_register(alloc,&a->tok_argmax);
     alloc_register(alloc,&a->inv_idx);   alloc_register(alloc,&a->invt_idx);
     alloc_register(alloc,&a->spell_idx);
+#if NH_ID_EMBED
+    alloc_register(alloc,&a->ide_idx);
+#endif
     alloc_register(alloc,&a->inv_sfeat);
     alloc_register(alloc,&a->inv_T);     alloc_register(alloc,&a->invt_T);
     alloc_register(alloc,&a->inv_out);
