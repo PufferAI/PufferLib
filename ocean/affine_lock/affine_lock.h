@@ -21,6 +21,8 @@
 #define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16
 #define AFFINE_LOCK_CURRICULUM_DEPTH_COUNT 6
 #define AFFINE_LOCK_STEP_REWARD (-0.01f)
+#define AFFINE_LOCK_PERF_WEIGHTING_LINEAR 0
+#define AFFINE_LOCK_PERF_WEIGHTING_QUADRATIC 1
 #ifndef AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH
 #define AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH \
     "ocean/affine_lock/generated/affine_lock_8action_visible_targets.bin"
@@ -72,6 +74,7 @@ typedef struct AffineLockShared {
     int start_depth;
     int max_depth;
     int step_grace;
+    int perf_weighting;
     int num_states;
     uint32_t mask;
     uint32_t* next;
@@ -108,7 +111,14 @@ typedef struct AffineLock {
 } AffineLock;
 
 static float affine_lock_solve_credit(const AffineLockShared* shared, int depth) {
-    return shared->max_depth > 0 ? (float)depth / (float)shared->max_depth : 0.0f;
+    if (shared->max_depth <= 0) {
+        return 0.0f;
+    }
+    float ratio = (float)depth / (float)shared->max_depth;
+    if (shared->perf_weighting == AFFINE_LOCK_PERF_WEIGHTING_QUADRATIC) {
+        return ratio * ratio;
+    }
+    return ratio;
 }
 
 static int affine_lock_log_depth(const AffineLock* env) {
@@ -160,12 +170,14 @@ static int affine_lock_init_shared(
         AffineLockShared* shared,
         int start_depth,
         int max_depth,
-        int step_grace) {
+        int step_grace,
+        int perf_weighting) {
     memset(shared, 0, sizeof(*shared));
 
     shared->start_depth = start_depth;
     shared->max_depth = max_depth;
     shared->step_grace = step_grace;
+    shared->perf_weighting = perf_weighting;
     shared->num_states = 1 << AFFINE_LOCK_BITS;
     shared->mask = (1u << AFFINE_LOCK_BITS) - 1u;
     affine_lock_init_observation_bit_patterns(shared);

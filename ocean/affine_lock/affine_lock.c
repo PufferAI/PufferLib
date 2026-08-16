@@ -40,7 +40,7 @@ static int key_to_action(void) {
 int main(void) {
     g_shared = (AffineLockShared*)calloc(1, sizeof(AffineLockShared));
     if (g_shared == NULL ||
-            affine_lock_init_shared(g_shared, 2, 16, 2) != 0) {
+            affine_lock_init_shared(g_shared, 2, 16, 2, AFFINE_LOCK_PERF_WEIGHTING_QUADRATIC) != 0) {
         fprintf(stderr, "failed to initialize affine_lock demo\n");
         demo_cleanup();
         return 1;

@@ -36,11 +36,12 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int start_depth = (int)dict_get(env_kwargs, "start_depth")->value;
     int max_depth = (int)dict_get(env_kwargs, "max_depth")->value;
     int step_grace = (int)dict_get(env_kwargs, "step_grace")->value;
+    int perf_weighting = (int)dict_get(env_kwargs, "perf_weighting")->value;
 
     AffineLockShared* shared =
         (AffineLockShared*)calloc(1, sizeof(AffineLockShared));
     if (shared == NULL || affine_lock_init_shared(
-            shared, start_depth, max_depth, step_grace) != 0) {
+            shared, start_depth, max_depth, step_grace, perf_weighting) != 0) {
         fprintf(stderr, "affine_lock: failed to initialize shared state\n");
         free(shared);
         abort();
