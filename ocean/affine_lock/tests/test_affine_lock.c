@@ -71,7 +71,7 @@ static AffineLockShared make_shared(
     AffineLockShared shared;
     memset(&shared, 0, sizeof(shared));
     int rc = affine_lock_init_shared(
-        &shared, start_depth, max_depth, step_grace);
+        &shared, start_depth, max_depth, step_grace, PERF_WEIGHTING_QUADRATIC);
     EXPECT_EQ_INT(rc, 0);
     EXPECT_EQ_INT(affine_lock_prepare_visible_targets(&shared), 0);
     return shared;
@@ -258,7 +258,8 @@ static int find_non_solving_action(AffineLock* env) {
 }
 
 static float expected_solve_credit(const AffineLockShared* shared, int depth) {
-    return (float)depth / (float)shared->max_depth;
+    float ratio = (float)depth / (float)shared->max_depth;
+    return ratio * ratio;
 }
 
 static uint64_t mix_u64(uint64_t hash, uint64_t value) {
@@ -1125,6 +1126,7 @@ static void test_deterministic_seed_sequences(void) {
 
 static uint64_t run_visible_table_seed_42_golden_sequence(void) {
     AffineLockShared shared = make_shared(2, 16, 0);
+    shared.perf_weighting = PERF_WEIGHTING_LINEAR;
 
     AffineLock env;
     float observations[AFFINE_LOCK_OBS_SIZE];

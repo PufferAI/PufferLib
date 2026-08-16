@@ -21,8 +21,8 @@
 #define AFFINE_LOCK_MAX_SOLUTION_DEPTH 16
 #define AFFINE_LOCK_CURRICULUM_DEPTH_COUNT 6
 #define AFFINE_LOCK_STEP_REWARD (-0.01f)
-#define AFFINE_LOCK_PERF_WEIGHTING_LINEAR 0
-#define AFFINE_LOCK_PERF_WEIGHTING_QUADRATIC 1
+#define PERF_WEIGHTING_LINEAR 0
+#define PERF_WEIGHTING_QUADRATIC 1
 #ifndef AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH
 #define AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH \
     "ocean/affine_lock/generated/affine_lock_8action_visible_targets.bin"
@@ -115,7 +115,7 @@ static float affine_lock_solve_credit(const AffineLockShared* shared, int depth)
         return 0.0f;
     }
     float ratio = (float)depth / (float)shared->max_depth;
-    if (shared->perf_weighting == AFFINE_LOCK_PERF_WEIGHTING_QUADRATIC) {
+    if (shared->perf_weighting == PERF_WEIGHTING_QUADRATIC) {
         return ratio * ratio;
     }
     return ratio;
