@@ -3063,6 +3063,24 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
         mkdir_p(log_dir);
     }
 
+    // base.wandb: stream per-epoch metrics as JSON lines for external sinks
+    // (scripts/wandb_sync.py); config written up front so sinks can attach it
+    FILE* wandb_fp = NULL;
+    const char* wandb_opt = puf_ini_get_str(ini, "base", "wandb");
+    if (ctx->artifact_owner
+            && (wandb_opt[0] == 'T' || wandb_opt[0] == 't' || wandb_opt[0] == '1')) {
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/%s.jsonl", log_dir, run_id);
+        wandb_fp = fopen(path, "w");
+        snprintf(path, sizeof(path), "%s/%s.ini", log_dir, run_id);
+        FILE* cfp = fopen(path, "w");
+        if (cfp) {
+            fprintf(cfp, "# PufferLib log v1\n");
+            puf_ini_write(cfp, ini);
+            fclose(cfp);
+        }
+    }
+
     PuffeRL* pufferl = create_pufferl(ini, ctx);
     Selfplay selfplay = {0};
     if (use_selfplay) {
@@ -3235,6 +3253,18 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
             continue;
         }
         puf_log_history_add(&log_history, &last_log);
+        if (wandb_fp) {
+            int first = 1;
+            fputc('{', wandb_fp);
+            for (int k = 0; k < last_log.size; k++) {
+                DictItem* it = &last_log.items[k];
+                if (it->str || it->values || !isfinite(it->value)) continue;
+                fprintf(wandb_fp, "%s\"%s\": %.17g", first ? "" : ", ", it->key, it->value);
+                first = 0;
+            }
+            fprintf(wandb_fp, "}\n");
+            fflush(wandb_fp);
+        }
     }
 
     // TrainResult curve: bin-mean over log_history (same as artifact metrics).
@@ -3279,7 +3309,13 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
         EvalResult r = eval_loop(ini, pufferl, EVAL_SCORE, 1, eval_episodes,
             &last_log, (int)pufferl->epoch);
         result.score = result.scores[result.points - 1] = r.score;
+        if (wandb_fp) {
+            fprintf(wandb_fp, "{\"agent_steps\": %.17g, \"eval/score\": %.17g, \"eval/n\": %d}\n",
+                (double)pufferl->global_step, (double)r.score, r.games);
+            fflush(wandb_fp);
+        }
     }
+    if (wandb_fp) fclose(wandb_fp);
     close_pufferl(pufferl);
 
     if (pool_eval && ctx->artifact_owner) {
