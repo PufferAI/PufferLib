@@ -1096,6 +1096,10 @@ Dataset load_dataset(const char* path) {
     }
     free(line);
     fclose(fp);
+    if (data.n == 0) {
+        fprintf(stderr, "no data in %s -- run ./cache_data after training\n", path);
+        exit(1);
+    }
     return data;
 }
 
