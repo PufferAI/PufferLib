@@ -54,15 +54,12 @@ int main(int argc, char** argv) {
     EXPECT_TRUE(end != argv[4] && *end == '\0');
 
     AffineLockVisibleTargetTable table;
-    char error[256];
-    int rc = affine_lock_visible_targets_load(
+    int rc = visible_targets_load(
         argv[1],
-        AFFINE_LOCK_VISIBLE_TARGET_8ACTION_V1_HASH,
-        &table,
-        error,
-        sizeof(error));
+        VISIBLE_TARGET_8ACTION_V1_HASH,
+        &table);
     if (rc != 0) {
-        fprintf(stderr, "failed to load visible target table: %s\n", error);
+        fprintf(stderr, "failed to load visible target table: %s\n", argv[1]);
         return 1;
     }
 
@@ -73,7 +70,7 @@ int main(int argc, char** argv) {
     EXPECT_EQ_U32(table.record_count, expected_record_count);
     EXPECT_EQ_U64(
         table.action_set_hash,
-        AFFINE_LOCK_VISIBLE_TARGET_8ACTION_V1_HASH);
+        VISIBLE_TARGET_8ACTION_V1_HASH);
 
     const uint32_t expected_depths[6] = {2, 4, 5, 6, 8, 16};
     const uint64_t expected_exact_counts[6] = {
@@ -111,6 +108,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    affine_lock_visible_targets_free(&table);
+    visible_targets_free(&table);
     return 0;
 }

@@ -30,13 +30,13 @@ manifest identify this exact transform set as `affine_lock_8action_v1`:
 | `7` | `reverse_each_byte` | reverse bit order within each byte |
 
 The Puffer binding exposes one discrete action slot with
-`AFFINE_LOCK_NUM_ACTIONS = 8`.
+`NUM_ACTIONS = 8`.
 
 ## Resets
 
 Resets always sample from the committed visible-target table. To train or test
 on different target distributions, generate a new table with the tool below and
-point `AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH` at it when building.
+point `VISIBLE_TARGET_TABLE_PATH` at it when building.
 
 ## Committed Target Table
 
@@ -105,7 +105,7 @@ To train against a custom 8-action table, either write it to the default path or
 build with an explicit table path:
 
 ```bash
-EXTRA_CFLAGS='-DAFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH="/tmp/affine_lock_8action_visible_targets_seed42.bin"' \
+EXTRA_CFLAGS='-DVISIBLE_TARGET_TABLE_PATH="/tmp/affine_lock_8action_visible_targets_seed42.bin"' \
   ./build.sh affine_lock
 ```
 
@@ -169,7 +169,7 @@ This is generator-only. The committed runtime environment does not train on this
 action set. It is kept as a small, explicit alternate because a four-action
 policy can be easier to learn, and this graph has far more unique depth-16
 pairs than the committed 8-action table. To make it a runtime environment,
-update the env action table, `AFFINE_LOCK_NUM_ACTIONS`, the visible-table
+update the env action table, `NUM_ACTIONS`, the visible-table
 action-set hash/path, generated table artifact, and any policy/config
 expectations that assume eight actions.
 
@@ -200,10 +200,10 @@ Example generation command:
 The 4-action table is not plug-compatible with the committed 8-action runtime.
 To make a real 4-action runtime variant:
 
-1. Change `AFFINE_LOCK_NUM_ACTIONS` to `4`.
+1. Change `NUM_ACTIONS` to `4`.
 2. Change the runtime action enum/table in `affine_lock.h` to match the
    generator's `affine_lock_4action_v1` order.
-3. Point `AFFINE_LOCK_VISIBLE_TARGET_TABLE_PATH` at a 4-action table.
+3. Point `VISIBLE_TARGET_TABLE_PATH` at a 4-action table.
 4. Update the expected action-set hash in `affine_lock_visible_targets.h` to
    the 4-action manifest's `action_set_hash`.
 5. Remove runtime helpers and render labels that only exist for the old
@@ -225,8 +225,8 @@ would need to:
 1. Add the depth to `TARGET_DEPTHS` in
    `tools/generate_8action_visible_targets.c`.
 2. Regenerate the `.bin` and `.json`.
-3. Add the depth to `AFFINE_LOCK_CURRICULUM_DEPTHS` and update
-   `AFFINE_LOCK_CURRICULUM_DEPTH_COUNT`.
+3. Add the depth to `CURRICULUM_DEPTHS` and update
+   `CURRICULUM_DEPTH_COUNT`.
 4. Add matching `Log.depth_D_rate` and `Log.depth_D_solve_rate` fields plus
    `my_log` exports if the depth should appear in training logs.
 5. Update config/docs/tests to expect the new depth and record count.

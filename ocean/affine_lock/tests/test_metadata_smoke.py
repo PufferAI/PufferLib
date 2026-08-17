@@ -22,12 +22,10 @@ EXPECTED_MY_LOG_KEYS = [
     "solved_min_win_moves",
     "conditional_solve_steps",
     "conditional_solve_efficiency",
-    "depth_2_solve_rate",
-    "depth_4_solve_rate",
-    "depth_5_solve_rate",
     "depth_6_solve_rate",
     "depth_8_solve_rate",
     "depth_16_solve_rate",
+    "n",
 ]
 
 
@@ -138,9 +136,9 @@ def check_config():
 
 def check_header_text():
     header = (ROOT / "ocean" / "affine_lock" / "affine_lock.h").read_text()
-    assert "#define OBS_SIZE AFFINE_LOCK_OBS_SIZE" in header
-    assert "#define ACT_SIZES {AFFINE_LOCK_NUM_ACTIONS}" in header
-    assert "#define NUM_ATNS AFFINE_LOCK_NUM_ATNS" in header
+    assert "#define OBS_SIZE (TIMER_INDEX + 1)" in header
+    assert "#define ACT_SIZES {NUM_ACTIONS}" in header
+    assert "#define NUM_ATNS 1" in header
     assert "typedef" in header and "obs_t" in header
     assert "void puf_init(" in header
     assert "void puf_reset(" in header
@@ -152,7 +150,7 @@ def check_header_text():
 
     log_keys = re.findall(r'dict_set\(out,\s*"([^"]+)"', header)
     assert log_keys == EXPECTED_MY_LOG_KEYS
-    assert len(log_keys) + 1 <= 32  # trainer vec_log appends "n".
+    assert len(log_keys) <= 32
 
 
 def float_buffer(ptr, count):

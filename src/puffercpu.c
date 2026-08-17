@@ -895,6 +895,9 @@ int main(int argc, char** argv) {
         SetTargetFPS(60);
     }
 #endif
+    if (!headless) {
+        puf_render(&env);
+    }
     while (headless
             ? (steps < headless_max_steps && env.log.n < (float)headless_episodes)
             : !WindowShouldClose()) {

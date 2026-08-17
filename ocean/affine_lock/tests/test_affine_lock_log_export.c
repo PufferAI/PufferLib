@@ -142,7 +142,7 @@ static uint64_t binding_reset_checksum(const Env* env) {
     hash = mix_u64_for_binding_test(hash, env->target);
     hash = mix_u64_for_binding_test(hash, (uint64_t)(env->target_distance + 1));
     hash = mix_u64_for_binding_test(hash, (uint64_t)env->solution_length);
-    for (int i = 0; i < AFFINE_LOCK_MAX_SOLUTION_DEPTH; i++) {
+    for (int i = 0; i < MAX_SOLUTION_DEPTH; i++) {
         hash = mix_u64_for_binding_test(
             hash, (uint64_t)(env->solution_actions[i] + 1));
     }
@@ -152,12 +152,12 @@ static uint64_t binding_reset_checksum(const Env* env) {
 static void assign_binding_env_buffers(
         Env* envs,
         int total_agents,
-        float observations[][AFFINE_LOCK_OBS_SIZE],
+        float observations[][OBS_SIZE],
         float actions[],
         float rewards[],
         float terminals[]) {
     memset(observations, 0,
-        (size_t)total_agents * AFFINE_LOCK_OBS_SIZE * sizeof(float));
+        (size_t)total_agents * OBS_SIZE * sizeof(float));
     memset(actions, 0, (size_t)total_agents * sizeof(float));
     memset(rewards, 0, (size_t)total_agents * sizeof(float));
     memset(terminals, 0, (size_t)total_agents * sizeof(float));
@@ -174,8 +174,8 @@ static void test_vec_init_visible_targets_repeat_across_runs_and_vary_by_env_id(
     Env* run_a = make_binding_env_batch(42, total_agents);
     Env* run_b = make_binding_env_batch(42, total_agents);
 
-    float obs_a[64][AFFINE_LOCK_OBS_SIZE];
-    float obs_b[64][AFFINE_LOCK_OBS_SIZE];
+    float obs_a[64][OBS_SIZE];
+    float obs_b[64][OBS_SIZE];
     float actions_a[64], actions_b[64];
     float rewards_a[64], rewards_b[64];
     float terminals_a[64], terminals_b[64];
@@ -216,12 +216,6 @@ static void test_vec_init_visible_targets_repeat_across_runs_and_vary_by_env_id(
 
 static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     Log log = {0};
-    log.depth_2_rate = 0.25f;
-    log.depth_2_solve_rate = 0.125f;
-    log.depth_4_rate = 0.5f;
-    log.depth_4_solve_rate = 0.375f;
-    log.depth_5_rate = 0.25f;
-    log.depth_5_solve_rate = 0.125f;
     log.depth_6_rate = 0.25f;
     log.depth_6_solve_rate = 0.125f;
     log.depth_8_rate = 0.0f;
@@ -236,19 +230,13 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     Dict out = {0};
     puf_log(&log, &out);
 
-    EXPECT_EQ_INT(out.size, 19);
+    EXPECT_EQ_INT(out.size, 16);
     EXPECT_NEAR(dict_value(&out, "score"), 0.75, 0.0);
     EXPECT_TRUE(!dict_has_key(&out, "solve_steps"));
     EXPECT_TRUE(!dict_has_key(&out, "solve_efficiency"));
     EXPECT_TRUE(!dict_has_key(&out, "scramble_unique_states"));
     EXPECT_NEAR(dict_value(&out, "min_win_moves"), 4.0, 0.0);
     EXPECT_NEAR(dict_value(&out, "solved_min_win_moves"), 4.0, 0.0);
-    EXPECT_TRUE(!dict_has_key(&out, "depth_2_rate"));
-    EXPECT_NEAR(dict_value(&out, "depth_2_solve_rate"), 0.5, 0.0);
-    EXPECT_TRUE(!dict_has_key(&out, "depth_4_rate"));
-    EXPECT_NEAR(dict_value(&out, "depth_4_solve_rate"), 0.75, 0.0);
-    EXPECT_TRUE(!dict_has_key(&out, "depth_5_rate"));
-    EXPECT_NEAR(dict_value(&out, "depth_5_solve_rate"), 0.5, 0.0);
     EXPECT_TRUE(!dict_has_key(&out, "depth_6_rate"));
     EXPECT_NEAR(dict_value(&out, "depth_6_solve_rate"), 0.5, 0.0);
     EXPECT_TRUE(!dict_has_key(&out, "depth_8_rate"));
