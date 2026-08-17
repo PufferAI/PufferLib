@@ -24,6 +24,7 @@ bash "$ROOT/ocean/affine_lock/tests/test_8action_visible_targets_smoke.sh"
 
 "$CC_BIN" \
   -std=c99 -pedantic -Wall -Wextra -Werror -Wno-unused-function \
+  -D_POSIX_C_SOURCE=200809L \
   -O0 -ffunction-sections -fdata-sections \
   -I"$ROOT" -I"$ROOT/src" -I"$ROOT/ocean/affine_lock" -I"$ROOT/vendor" \
   -I"$RAYLIB_INC" \
@@ -32,6 +33,7 @@ bash "$ROOT/ocean/affine_lock/tests/test_8action_visible_targets_smoke.sh"
 
 "$CC_BIN" \
   -std=c11 -Wall -Wextra -Werror -Wno-unused-function \
+  -D_POSIX_C_SOURCE=200809L \
   -O0 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined \
   -I"$ROOT" -I"$ROOT/src" -I"$ROOT/ocean/affine_lock" -I"$ROOT/vendor" \
   -I"$RAYLIB_INC" \

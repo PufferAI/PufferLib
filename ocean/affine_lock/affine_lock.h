@@ -17,7 +17,7 @@ typedef float obs_t;
 #define STEP_REWARD (-0.01f) // TODO should this be in ini so it can be swept?
 #define VISIBLE_TARGET_TABLE_PATH "ocean/affine_lock/generated/affine_lock_8action_visible_targets.bin"
 #define ACT_SIZES {NUM_ACTIONS}
-#define PUF_STEPS_PER_SEC 2 // TODO remove this?
+#define PUF_STEPS_PER_SEC 2
 
 #define MY_VEC_INIT
 #define MY_VEC_CLOSE
@@ -45,16 +45,15 @@ struct Log {
     float episode_length;
     float solve_steps;
     float timeout_rate;
-    float invalid_rate; // TODO is this even needed?
     float solve_efficiency;
     float target_distance;
     float solved_target_distance;
-    float depth_6_rate;
-    float depth_6_solve_rate;
-    float depth_8_rate;
-    float depth_8_solve_rate;
-    float depth_16_rate;
-    float depth_16_solve_rate;
+    float d6_rate;
+    float d6_solve_rate;
+    float d8_rate;
+    float d8_solve_rate;
+    float d16_rate;
+    float d16_solve_rate;
     float n;
 };
 
@@ -62,63 +61,50 @@ typedef struct AffineLockShared {
     int start_depth;
     int max_depth;
     int step_grace;
-    int num_states; // TODO Only used in testing
     uint32_t mask;
     uint32_t* next;
-    AffineLockVisibleTargetTable visible_target_table;
+    VisibleTargetTable visible_target_table;
     float observation_bit_patterns[256][8];
 } AffineLockShared;
-
-typedef struct Client { // TODO see if we even need this several envs don't have it
-    int screen_width;
-    int screen_height;
-} Client;
 
 struct Env {
     Log log;
     Agent agents[1];
     int tag;
     int boundary_reached;
-    int num_agents; // TODO is this even needed?
+    int num_agents;
     unsigned int rng;
     uint32_t state;
     uint32_t target;
     int step_count;
     int max_steps;
     int scramble_depth;
-    int curriculum_depth;
+    int curriculum_depth; // TODO Consider only demoting by one level on a loss, perhaps both options in the ini
     int solution_length;
     int solution_actions[MAX_SOLUTION_DEPTH];
     int target_distance;
     float episode_return;
     int owns_shared;
     AffineLockShared* shared;
-    Client* client;
 };
 typedef Env AffineLock;
 
-static void init_shared(
-        AffineLockShared* shared,
-        int start_depth,
-        int max_depth,
-        int step_grace) {
+static void init_shared(AffineLockShared* shared, int start_depth, int max_depth, int step_grace) {
     shared->start_depth = start_depth;
     shared->max_depth = max_depth;
     shared->step_grace = step_grace;
-    shared->num_states = 1 << BITS;
     shared->mask = (1u << BITS) - 1u;
     for (int value = 0; value < 256; value++) {
         for (int bit = 0; bit < 8; bit++) {
-            shared->observation_bit_patterns[value][bit] =
-                (value & (1 << bit)) ? 1.0f : -1.0f;
+            shared->observation_bit_patterns[value][bit] = (value & (1 << bit)) ? 1.0f : -1.0f;
         }
     }
 
+    uint32_t num_states = 1u << BITS;
     shared->next = (uint32_t*)calloc(
-        shared->num_states * NUM_ACTIONS, sizeof(uint32_t));
+        num_states * NUM_ACTIONS, sizeof(uint32_t));
 
-    uint32_t nstates = shared->num_states;
-    for (uint32_t state = 0; state < nstates; state++) {
+    for (uint32_t state = 0; state < num_states; state++) {
         for (int action = 0; action < NUM_ACTIONS; action++) {
             uint32_t next = state;
             switch (action) {
@@ -174,27 +160,13 @@ static void init_env(AffineLock* env, AffineLockShared* shared, unsigned int see
     env->curriculum_depth = shared->start_depth;
 }
 
-static unsigned int env_seed( // TODO see if this is in the golden envs
-        unsigned int base_seed, unsigned int env_id) {
-    uint32_t value = 0x811c9dc5u;
-    value = (value ^ base_seed) * 0x01000193u;
-    value = (value ^ env_id) * 0x01000193u;
-    value ^= value >> 16;
-    value *= 0x7feb352du;
-    value ^= value >> 15;
-    value *= 0x846ca68bu;
-    value ^= value >> 16;
-    return value;
-}
-
 void puf_init(Env* env, Dict* kwargs) {
     int start_depth = dict_get(kwargs, "start_depth");
     int max_depth = dict_get(kwargs, "max_depth");
     int step_grace = dict_get(kwargs, "step_grace");
-    int seed = dict_get(kwargs, "seed");
-    AffineLockShared* shared =
-        create_shared(start_depth, max_depth, step_grace);
-    init_env(env, shared, env_seed(seed, env->rng));
+    unsigned int seed = (unsigned int)dict_get(kwargs, "seed");
+    AffineLockShared* shared = create_shared(start_depth, max_depth, step_grace);
+    init_env(env, shared, rand_r(&seed));
     env->owns_shared = 1;
 }
 
@@ -204,11 +176,8 @@ static void free_shared(AffineLockShared* shared) {
 }
 
 void puf_close(AffineLock* env) {
-    if (env->client) {
-        if (IsWindowReady()) {
-            CloseWindow();
-        }
-        free(env->client);
+    if (IsWindowReady()) {
+        CloseWindow();
     }
     if (env->owns_shared) {
         free_shared(env->shared);
@@ -216,7 +185,7 @@ void puf_close(AffineLock* env) {
     }
 }
 
-static void add_log(AffineLock* env, int solved, int invalid) {
+static void add_log(AffineLock* env, int solved) {
     AffineLockShared* shared = env->shared;
     int log_depth = env->target_distance;
     int at_max_depth = log_depth == shared->max_depth;
@@ -228,22 +197,17 @@ static void add_log(AffineLock* env, int solved, int invalid) {
     env->log.episode_return += env->episode_return;
     env->log.episode_length += env->step_count;
     env->log.solve_steps += solved ? env->step_count : 0;
-    env->log.timeout_rate += !solved && !invalid;
-    env->log.invalid_rate += invalid;
+    env->log.timeout_rate += !solved;
     env->log.solve_efficiency += solved ? env->step_count / (float)log_depth : 0;
     env->log.target_distance += env->target_distance;
     env->log.solved_target_distance += solved ? env->target_distance : 0;
-    env->log.depth_6_rate += log_depth == 6;
-    env->log.depth_6_solve_rate += solved && log_depth == 6;
-    env->log.depth_8_rate += log_depth == 8;
-    env->log.depth_8_solve_rate += solved && log_depth == 8;
-    env->log.depth_16_rate += log_depth == 16;
-    env->log.depth_16_solve_rate += solved && log_depth == 16;
+    env->log.d6_rate += log_depth == 6;
+    env->log.d6_solve_rate += solved && log_depth == 6;
+    env->log.d8_rate += log_depth == 8;
+    env->log.d8_solve_rate += solved && log_depth == 8;
+    env->log.d16_rate += log_depth == 16;
+    env->log.d16_solve_rate += solved && log_depth == 16;
     env->log.n += 1;
-}
-
-static uint32_t apply_action(const AffineLockShared* shared, uint32_t rel, int action) {
-    return shared->next[rel * NUM_ACTIONS + action];
 }
 
 // Not rand_r(): glibc's LCG has statistically weak low-order bits, and this
@@ -270,10 +234,10 @@ static int random_bounded(AffineLock* env, int bound) {
     return value % ubound;
 }
 
-static const AffineLockVisibleTargetDepth* visible_target_depth(
+static const VisibleTargetDepth* visible_target_depth(
         const AffineLockShared* shared,
         uint32_t requested_depth) {
-    const AffineLockVisibleTargetTable* table = &shared->visible_target_table;
+    const VisibleTargetTable* table = &shared->visible_target_table;
     for (uint32_t i = 0; i < table->depth_count; i++) {
         if (table->depths[i].depth == requested_depth) {
             return &table->depths[i];
@@ -287,11 +251,9 @@ static void reset_state(AffineLock* env) {
     env->scramble_depth = env->curriculum_depth;
     env->step_count = 0;
     env->episode_return = 0;
-    const AffineLockVisibleTargetDepth* depth =
-        visible_target_depth(shared, env->scramble_depth);
+    const VisibleTargetDepth* depth = visible_target_depth(shared, env->scramble_depth);
     int choice = random_bounded(env, depth->stored_count);
-    const AffineLockVisibleTargetRecord* record =
-        &shared->visible_target_table.records[depth->first_record + choice];
+    const VisibleTargetRecord* record = &shared->visible_target_table.records[depth->first_record + choice];
     env->state = record->start;
     env->target = record->target;
     env->target_distance = record->depth;
@@ -326,9 +288,7 @@ void puf_reset(AffineLock* env) {
     compute_observations(env);
 }
 
-static int next_curriculum_depth(
-        const AffineLockShared* shared,
-        int current_depth) {
+static int next_curriculum_depth( const AffineLockShared* shared, int current_depth) {
     for (int i = 0; i < CURRICULUM_DEPTH_COUNT; i++) {
         int depth = CURRICULUM_DEPTHS[i];
         if (depth > current_depth) {
@@ -360,24 +320,20 @@ void puf_step(AffineLock* env) {
         return;
     }
     AffineLockShared* shared = env->shared;
-    float raw = env->agents[0].actions[0];
-    int invalid = !isfinite(raw) || raw < 0 || raw > NUM_ACTIONS - 1;
-    int action = invalid ? -1 : raw;
-    if (!invalid && action != raw) {
-        invalid = 1;
-    }
     float reward = STEP_REWARD;
     int terminal = 0;
     int solved = 0;
 
     env->agents[0].terminals[0] = 0;
     env->step_count += 1;
-
+    float raw = env->agents[0].actions[0];
+    int invalid = !isfinite(raw) || raw < 0 || raw > NUM_ACTIONS - 1;
     if (invalid) {
         reward = -1;
         terminal = 1;
     } else {
-        env->state = apply_action(shared, env->state, action);
+        int action = (int)raw;
+        env->state = shared->next[env->state * NUM_ACTIONS + action];
         if (env->state == env->target) {
             reward = 1;
             terminal = 1;
@@ -391,7 +347,7 @@ void puf_step(AffineLock* env) {
     env->episode_return += reward;
     if (terminal) {
         env->agents[0].terminals[0] = 1;
-        add_log(env, solved, invalid);
+        add_log(env, solved);
         env->curriculum_depth = solved ?
             next_curriculum_depth(shared, env->scramble_depth) :
             shared->start_depth;
@@ -404,8 +360,7 @@ void puf_log(Log* log, Dict* out) {
     float nsolve = log->solve_rate;
     float solved_min_win_moves = nsolve ? log->solved_target_distance / nsolve : 0;
     float conditional_solve_steps = nsolve ? log->solve_steps / nsolve : 0;
-    float conditional_solve_efficiency = nsolve ?
-        log->solve_efficiency / nsolve : 0;
+    float conditional_solve_efficiency = nsolve ? log->solve_efficiency / nsolve : 0;
 
     dict_set(out, "perf", log->perf);
     dict_set(out, "score", log->score);
@@ -414,14 +369,13 @@ void puf_log(Log* log, Dict* out) {
     dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
     dict_set(out, "timeout_rate", log->timeout_rate);
-    dict_set(out, "invalid_rate", log->invalid_rate);
     dict_set(out, "min_win_moves", log->target_distance);
     dict_set(out, "solved_min_win_moves", solved_min_win_moves);
     dict_set(out, "conditional_solve_steps", conditional_solve_steps);
     dict_set(out, "conditional_solve_efficiency", conditional_solve_efficiency);
-    dict_set(out, "depth_6_solve_rate", log->depth_6_rate ? log->depth_6_solve_rate / log->depth_6_rate : 0);
-    dict_set(out, "depth_8_solve_rate", log->depth_8_rate ? log->depth_8_solve_rate / log->depth_8_rate : 0);
-    dict_set(out, "depth_16_solve_rate", log->depth_16_rate ? log->depth_16_solve_rate / log->depth_16_rate : 0);
+    dict_set(out, "d6_solve_rate", log->d6_rate ? log->d6_solve_rate / log->d6_rate : 0);
+    dict_set(out, "d8_solve_rate", log->d8_rate ? log->d8_solve_rate / log->d8_rate : 0);
+    dict_set(out, "d16_solve_rate", log->d16_rate ? log->d16_solve_rate / log->d16_rate : 0);
     dict_set(out, "n", log->n);
 }
 
@@ -430,13 +384,12 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int total_agents = dict_get(vec_kwargs, "total_agents");
     int num_buffers = dict_get(vec_kwargs, "num_buffers");
     int agents_per_buffer = total_agents / num_buffers;
-    int base_seed = dict_get(env_kwargs, "seed");
+    unsigned int running_seed = (unsigned int)dict_get(env_kwargs, "seed");
     int start_depth = dict_get(env_kwargs, "start_depth");
     int max_depth = dict_get(env_kwargs, "max_depth");
     int step_grace = dict_get(env_kwargs, "step_grace");
 
-    AffineLockShared* shared =
-        create_shared(start_depth, max_depth, step_grace);
+    AffineLockShared* shared = create_shared(start_depth, max_depth, step_grace);
     Env* envs = (Env*)calloc(total_agents, sizeof(Env));
 
     int buf = 0;
@@ -445,7 +398,7 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     buffer_env_counts[0] = 0;
     for (int i = 0; i < total_agents; i++) {
         Env* env = &envs[i];
-        init_env(env, shared, env_seed(base_seed, i));
+        init_env(env, shared, rand_r(&running_seed));
         buf_agents += env->num_agents;
         buffer_env_counts[buf]++;
         if (buf_agents >= agents_per_buffer && buf < num_buffers - 1) {
@@ -470,14 +423,11 @@ void puf_render(AffineLock* env) {
         exit(0);
     }
     human_controls(env);
-    if (!env->client) {
-        Client* client = (Client*)calloc(1, sizeof(Client));
-        client->screen_width = 780;
-        client->screen_height = 360;
-        InitWindow(client->screen_width, client->screen_height,
-            "PufferLib AffineLock");
+    static int window_initialized = 0;
+    if (!window_initialized) {
+        InitWindow(780, 360, "PufferLib AffineLock");
         SetTargetFPS(30);
-        env->client = client;
+        window_initialized = 1;
     }
 
     uint32_t rel = (env->state ^ env->target) & env->shared->mask;
@@ -511,10 +461,8 @@ void puf_render(AffineLock* env) {
             int x = 145 + bit * 34;
             int on = (row_value[row] >> bit) & 1u;
             int mismatch = ((env->state ^ env->target) >> bit) & 1u;
-            Color fill = on ?
-                (Color){80, 210, 140, 255} : (Color){38, 48, 58, 255};
-            Color border = mismatch ?
-                (Color){238, 88, 88, 255} : (Color){182, 196, 205, 255};
+            Color fill = on ? (Color){80, 210, 140, 255} : (Color){38, 48, 58, 255};
+            Color border = mismatch ? (Color){238, 88, 88, 255} : (Color){182, 196, 205, 255};
             DrawRectangle(x, row_y[row], 24, 34, fill);
             DrawRectangleLinesEx(
                 (Rectangle){x, row_y[row], 24, 34},

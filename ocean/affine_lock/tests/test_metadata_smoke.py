@@ -17,14 +17,13 @@ EXPECTED_MY_LOG_KEYS = [
     "episode_return",
     "episode_length",
     "timeout_rate",
-    "invalid_rate",
     "min_win_moves",
     "solved_min_win_moves",
     "conditional_solve_steps",
     "conditional_solve_efficiency",
-    "depth_6_solve_rate",
-    "depth_8_solve_rate",
-    "depth_16_solve_rate",
+    "d6_solve_rate",
+    "d8_solve_rate",
+    "d16_solve_rate",
     "n",
 ]
 
@@ -229,8 +228,7 @@ def check_backend_metadata():
 
         logs = vec.log()
         assert logs["n"] == 2.0
-        assert logs["invalid_rate"] == 1.0
-        assert logs["timeout_rate"] == 0.0
+        assert logs["timeout_rate"] == 1.0
         assert logs["solve_rate"] == 0.0
         assert logs["episode_length"] == 1.0
         assert logs["episode_return"] == -1.0

@@ -148,13 +148,14 @@ static void compute_test_bfs_stats(
     memset(stats, 0, sizeof(*stats));
     stats->shortest_distance = -1;
 
-    int* distances = (int*)malloc((size_t)shared->num_states * sizeof(int));
+    int num_states = 1 << BITS;
+    int* distances = (int*)malloc((size_t)num_states * sizeof(int));
     uint32_t* queue =
-        (uint32_t*)malloc((size_t)shared->num_states * sizeof(uint32_t));
+        (uint32_t*)malloc((size_t)num_states * sizeof(uint32_t));
     EXPECT_TRUE(distances != NULL);
     EXPECT_TRUE(queue != NULL);
 
-    for (int i = 0; i < shared->num_states; i++) {
+    for (int i = 0; i < num_states; i++) {
         distances[i] = -1;
     }
 
@@ -203,7 +204,7 @@ static void test_log_solve_credit_uses_known_target_distance(void) {
     env.target_distance = 8;
     env.step_count = 8;
 
-    add_log(&env, 1, 0);
+    add_log(&env, 1);
 
     EXPECT_NEAR(env.log.perf, expected_solve_credit(&shared, 8), 0.0f);
     EXPECT_NEAR(env.log.score, expected_solve_credit(&shared, 8), 0.0f);
@@ -211,12 +212,12 @@ static void test_log_solve_credit_uses_known_target_distance(void) {
     EXPECT_NEAR(env.log.solve_efficiency, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.target_distance, 8.0f, 0.0f);
     EXPECT_NEAR(env.log.solved_target_distance, 8.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_6_rate, 0.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_6_solve_rate, 0.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_8_rate, 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_8_solve_rate, 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_16_rate, 0.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_16_solve_rate, 0.0f, 0.0f);
+    EXPECT_NEAR(env.log.d6_rate, 0.0f, 0.0f);
+    EXPECT_NEAR(env.log.d6_solve_rate, 0.0f, 0.0f);
+    EXPECT_NEAR(env.log.d8_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.d8_solve_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.d16_rate, 0.0f, 0.0f);
+    EXPECT_NEAR(env.log.d16_solve_rate, 0.0f, 0.0f);
 
     free_shared(&shared);
 }
@@ -244,7 +245,7 @@ static void expect_observation_matches(const AffineLock* env) {
 
 static int find_non_solving_action(AffineLock* env) {
     for (int action = 0; action < NUM_ACTIONS; action++) {
-        uint32_t next = apply_action(env->shared, env->state, action);
+        uint32_t next = env->shared->next[env->state * NUM_ACTIONS + action];
         if (next != env->target) {
             return action;
         }
@@ -277,16 +278,15 @@ static uint64_t log_snapshot_checksum(uint64_t hash, const Log* log) {
     hash = mix_float(hash, log->episode_length);
     hash = mix_float(hash, log->solve_steps);
     hash = mix_float(hash, log->timeout_rate);
-    hash = mix_float(hash, log->invalid_rate);
     hash = mix_float(hash, log->solve_efficiency);
     hash = mix_float(hash, log->target_distance);
     hash = mix_float(hash, log->solved_target_distance);
-    hash = mix_float(hash, log->depth_6_rate);
-    hash = mix_float(hash, log->depth_6_solve_rate);
-    hash = mix_float(hash, log->depth_8_rate);
-    hash = mix_float(hash, log->depth_8_solve_rate);
-    hash = mix_float(hash, log->depth_16_rate);
-    hash = mix_float(hash, log->depth_16_solve_rate);
+    hash = mix_float(hash, log->d6_rate);
+    hash = mix_float(hash, log->d6_solve_rate);
+    hash = mix_float(hash, log->d8_rate);
+    hash = mix_float(hash, log->d8_solve_rate);
+    hash = mix_float(hash, log->d16_rate);
+    hash = mix_float(hash, log->d16_solve_rate);
     hash = mix_float(hash, log->n);
     return hash;
 }
@@ -367,18 +367,18 @@ static void expect_depth_log_delta(
         const Log* after,
         int depth,
         int solved) {
-    EXPECT_NEAR(after->depth_6_rate,
-        before->depth_6_rate + (depth == 6 ? 1.0f : 0.0f), 0.0f);
-    EXPECT_NEAR(after->depth_6_solve_rate,
-        before->depth_6_solve_rate + (solved && depth == 6 ? 1.0f : 0.0f), 0.0f);
-    EXPECT_NEAR(after->depth_8_rate,
-        before->depth_8_rate + (depth == 8 ? 1.0f : 0.0f), 0.0f);
-    EXPECT_NEAR(after->depth_8_solve_rate,
-        before->depth_8_solve_rate + (solved && depth == 8 ? 1.0f : 0.0f), 0.0f);
-    EXPECT_NEAR(after->depth_16_rate,
-        before->depth_16_rate + (depth == 16 ? 1.0f : 0.0f), 0.0f);
-    EXPECT_NEAR(after->depth_16_solve_rate,
-        before->depth_16_solve_rate + (solved && depth == 16 ? 1.0f : 0.0f), 0.0f);
+    EXPECT_NEAR(after->d6_rate,
+        before->d6_rate + (depth == 6 ? 1.0f : 0.0f), 0.0f);
+    EXPECT_NEAR(after->d6_solve_rate,
+        before->d6_solve_rate + (solved && depth == 6 ? 1.0f : 0.0f), 0.0f);
+    EXPECT_NEAR(after->d8_rate,
+        before->d8_rate + (depth == 8 ? 1.0f : 0.0f), 0.0f);
+    EXPECT_NEAR(after->d8_solve_rate,
+        before->d8_solve_rate + (solved && depth == 8 ? 1.0f : 0.0f), 0.0f);
+    EXPECT_NEAR(after->d16_rate,
+        before->d16_rate + (depth == 16 ? 1.0f : 0.0f), 0.0f);
+    EXPECT_NEAR(after->d16_solve_rate,
+        before->d16_solve_rate + (solved && depth == 16 ? 1.0f : 0.0f), 0.0f);
 }
 
 static void expect_oracle_episode_win(AffineLock* env, int depth) {
@@ -414,7 +414,6 @@ static void expect_oracle_episode_win(AffineLock* env, int depth) {
         before.score + expected_solve_credit(shared, depth), 0.0f);
     EXPECT_NEAR(env->log.solve_rate, before.solve_rate + 1.0f, 0.0f);
     EXPECT_NEAR(env->log.timeout_rate, before.timeout_rate, 0.0f);
-    EXPECT_NEAR(env->log.invalid_rate, before.invalid_rate, 0.0f);
     EXPECT_NEAR(env->log.episode_length,
         before.episode_length + (float)solution_length, 0.0f);
     EXPECT_NEAR(env->log.solve_steps,
@@ -462,7 +461,6 @@ static void expect_non_solving_episode_timeout(AffineLock* env, int depth) {
     EXPECT_NEAR(env->log.score, before.score, 0.0f);
     EXPECT_NEAR(env->log.solve_rate, before.solve_rate, 0.0f);
     EXPECT_NEAR(env->log.timeout_rate, before.timeout_rate + 1.0f, 0.0f);
-    EXPECT_NEAR(env->log.invalid_rate, before.invalid_rate, 0.0f);
     EXPECT_NEAR(env->log.episode_length,
         before.episode_length + (float)max_steps, 0.0f);
     EXPECT_NEAR(env->log.solve_steps, before.solve_steps, 0.0f);
@@ -533,7 +531,7 @@ static void test_global_action_examples(void) {
     };
 
     for (int action = 0; action < NUM_ACTIONS; action++) {
-        uint32_t next = apply_action(&shared, start, action);
+        uint32_t next = shared.next[start * NUM_ACTIONS + action];
         EXPECT_EQ_U32(next, bits_from_text(expected[action]));
     }
 
@@ -552,7 +550,6 @@ static void test_actions_round_trip_for_all_states(void) {
         ACTION_REVERSE_EACH_NIBBLE,
         ACTION_REVERSE_EACH_BYTE,
     };
-    EXPECT_EQ_INT(shared.num_states, 1 << 16);
     EXPECT_EQ_U32(shared.mask, 0xffffu);
 
     for (int action = 0; action < NUM_ACTIONS; action++) {
@@ -560,10 +557,10 @@ static void test_actions_round_trip_for_all_states(void) {
         EXPECT_TRUE(inverse >= 0 && inverse < NUM_ACTIONS);
         EXPECT_EQ_INT(inverse_actions[inverse], action);
 
-        for (uint32_t state = 0; state < (uint32_t)shared.num_states; state++) {
-            uint32_t next = apply_action(&shared, state, action);
+        for (uint32_t state = 0; state < (1u << BITS); state++) {
+            uint32_t next = shared.next[state * NUM_ACTIONS + action];
             EXPECT_EQ_U32(next & ~shared.mask, 0u);
-            uint32_t round_trip = apply_action(&shared, next, inverse);
+            uint32_t round_trip = shared.next[next * NUM_ACTIONS + inverse];
             EXPECT_EQ_U32(round_trip, state);
         }
     }
@@ -673,7 +670,7 @@ static void test_visible_target_table_reset_uses_stored_records(void) {
     for (int depth_index = 0; depth_index < 6; depth_index++) {
         int requested_depth = requested_depths[depth_index];
         AffineLockShared shared = make_shared(requested_depth, 16, 0);
-        const AffineLockVisibleTargetDepth* table_depth =
+        const VisibleTargetDepth* table_depth =
             visible_target_depth(&shared, requested_depth);
         EXPECT_TRUE(table_depth != NULL);
         EXPECT_EQ_INT((int)table_depth->stored_count,
@@ -802,7 +799,7 @@ static void test_actions_apply_to_current_state_directly(void) {
     uint32_t target = bits_from_text("1111000011110000");
     uint32_t state = bits_from_text("0011011000010111");
     int action = 1;
-    uint32_t expected_state = apply_action(&shared, state, action);
+    uint32_t expected_state = shared.next[state * NUM_ACTIONS + action];
     EXPECT_NE_U32(expected_state, target);
 
     env.target = target;
@@ -820,7 +817,7 @@ static void test_actions_apply_to_current_state_directly(void) {
     free_shared(&shared);
 }
 
-static void test_action_float_validation_rejects_non_discrete_values(void) {
+static void test_action_float_validation_rejects_out_of_range_values(void) {
     AffineLockShared shared = make_shared(2, 16, 0);
     AffineLock env;
     float observations[OBS_SIZE];
@@ -832,7 +829,6 @@ static void test_action_float_validation_rejects_non_discrete_values(void) {
     const float invalid_actions[] = {
         -1.0f,
         8.0f,
-        1.5f,
         NAN,
         INFINITY,
         -INFINITY,
@@ -840,7 +836,7 @@ static void test_action_float_validation_rejects_non_discrete_values(void) {
     int count = (int)(sizeof(invalid_actions) / sizeof(invalid_actions[0]));
     for (int i = 0; i < count; i++) {
         puf_reset(&env);
-        float prev_invalid = env.log.invalid_rate;
+        float prev_timeout = env.log.timeout_rate;
         float prev_n = env.log.n;
 
         actions[0] = invalid_actions[i];
@@ -848,7 +844,7 @@ static void test_action_float_validation_rejects_non_discrete_values(void) {
 
         EXPECT_NEAR(rewards[0], -1.0f, 0.0f);
         EXPECT_NEAR(terminals[0], 1.0f, 0.0f);
-        EXPECT_NEAR(env.log.invalid_rate, prev_invalid + 1.0f, 0.0f);
+        EXPECT_NEAR(env.log.timeout_rate, prev_timeout + 1.0f, 0.0f);
         EXPECT_NEAR(env.log.n, prev_n + 1.0f, 0.0f);
         EXPECT_EQ_INT(env.step_count, 0);
     }
@@ -878,12 +874,12 @@ static void test_visible_target_table_curriculum_and_logging(void) {
         float prev_max_depth_solve = env.log.max_depth_solve;
         float prev_target_distance = env.log.target_distance;
         float prev_solved_target_distance = env.log.solved_target_distance;
-        float prev_depth_6 = env.log.depth_6_rate;
-        float prev_depth_6_solve = env.log.depth_6_solve_rate;
-        float prev_depth_8 = env.log.depth_8_rate;
-        float prev_depth_8_solve = env.log.depth_8_solve_rate;
-        float prev_depth_16 = env.log.depth_16_rate;
-        float prev_depth_16_solve = env.log.depth_16_solve_rate;
+        float prev_depth_6 = env.log.d6_rate;
+        float prev_depth_6_solve = env.log.d6_solve_rate;
+        float prev_depth_8 = env.log.d8_rate;
+        float prev_depth_8_solve = env.log.d8_solve_rate;
+        float prev_depth_16 = env.log.d16_rate;
+        float prev_depth_16_solve = env.log.d16_solve_rate;
         int target_distance = env.target_distance;
         int metric_depth = target_distance > 0 ? target_distance : depth;
 
@@ -900,17 +896,17 @@ static void test_visible_target_table_curriculum_and_logging(void) {
             prev_target_distance + (float)target_distance, 0.0f);
         EXPECT_NEAR(env.log.solved_target_distance,
             prev_solved_target_distance + (float)target_distance, 0.0f);
-        EXPECT_NEAR(env.log.depth_6_rate,
+        EXPECT_NEAR(env.log.d6_rate,
             prev_depth_6 + (metric_depth == 6 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_6_solve_rate,
+        EXPECT_NEAR(env.log.d6_solve_rate,
             prev_depth_6_solve + (metric_depth == 6 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_8_rate,
+        EXPECT_NEAR(env.log.d8_rate,
             prev_depth_8 + (metric_depth == 8 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_8_solve_rate,
+        EXPECT_NEAR(env.log.d8_solve_rate,
             prev_depth_8_solve + (metric_depth == 8 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_16_rate,
+        EXPECT_NEAR(env.log.d16_rate,
             prev_depth_16 + (metric_depth == 16 ? 1.0f : 0.0f), 0.0f);
-        EXPECT_NEAR(env.log.depth_16_solve_rate,
+        EXPECT_NEAR(env.log.d16_solve_rate,
             prev_depth_16_solve + (metric_depth == 16 ? 1.0f : 0.0f), 0.0f);
 
         int next_depth = episode < 5 ? expected_depths[episode + 1] : 16;
@@ -920,7 +916,7 @@ static void test_visible_target_table_curriculum_and_logging(void) {
     float prev_n = env.log.n;
     float prev_perf = env.log.perf;
     float prev_max_depth_solve = env.log.max_depth_solve;
-    float prev_invalid = env.log.invalid_rate;
+    float prev_timeout = env.log.timeout_rate;
     EXPECT_EQ_INT(env.scramble_depth, shared.max_depth);
     actions[0] = 999.0f;
     puf_step(&env);
@@ -929,7 +925,7 @@ static void test_visible_target_table_curriculum_and_logging(void) {
     EXPECT_NEAR(env.log.n, prev_n + 1.0f, 0.0f);
     EXPECT_NEAR(env.log.perf, prev_perf, 0.0f);
     EXPECT_NEAR(env.log.max_depth_solve, prev_max_depth_solve, 0.0f);
-    EXPECT_NEAR(env.log.invalid_rate, prev_invalid + 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.timeout_rate, prev_timeout + 1.0f, 0.0f);
     EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
 
     free_shared(&shared);
@@ -953,14 +949,13 @@ static void test_visible_target_table_oracle_wins_all_curriculum_depths_end_to_e
 
     EXPECT_EQ_INT(env.scramble_depth, shared.max_depth);
     EXPECT_NEAR(env.log.n, 6.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_6_rate, 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_6_solve_rate, 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_8_rate, 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_8_solve_rate, 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_16_rate, 1.0f, 0.0f);
-    EXPECT_NEAR(env.log.depth_16_solve_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.d6_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.d6_solve_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.d8_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.d8_solve_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.d16_rate, 1.0f, 0.0f);
+    EXPECT_NEAR(env.log.d16_solve_rate, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.timeout_rate, 0.0f, 0.0f);
-    EXPECT_NEAR(env.log.invalid_rate, 0.0f, 0.0f);
 
     free_shared(&shared);
 }
@@ -989,7 +984,6 @@ static void test_visible_target_table_timeouts_at_all_curriculum_depths_end_to_e
         EXPECT_EQ_INT(env.scramble_depth, shared.start_depth);
         EXPECT_TRUE(env.log.timeout_rate >= 1.0f);
         EXPECT_TRUE(env.log.solve_rate >= 0.0f);
-        EXPECT_NEAR(env.log.invalid_rate, 0.0f, 0.0f);
 
         free_shared(&shared);
     }
@@ -1114,7 +1108,7 @@ static uint64_t run_visible_table_seed_42_golden_sequence(void) {
 
 static void test_visible_table_seed_42_golden_checksum(void) {
     uint64_t checksum = run_visible_table_seed_42_golden_sequence();
-    EXPECT_EQ_U64(checksum, 0xc5721c1259a9fd50ull);
+    EXPECT_EQ_U64(checksum, 0x733eb55fe141e600ull);
 }
 
 static void test_deterministic_seed_sequences_and_distinct_env_ids(void) {
@@ -1205,7 +1199,7 @@ int main(void) {
     test_observation_encoding_is_32_signed_bit_floats_plus_timer();
     test_timer_observation_progresses_and_resets_after_timeout();
     test_actions_apply_to_current_state_directly();
-    test_action_float_validation_rejects_non_discrete_values();
+    test_action_float_validation_rejects_out_of_range_values();
     test_visible_target_table_curriculum_and_logging();
     test_visible_target_table_oracle_wins_all_curriculum_depths_end_to_end();
     test_visible_target_table_timeouts_at_all_curriculum_depths_end_to_end();

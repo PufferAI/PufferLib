@@ -9,22 +9,22 @@
 #define VISIBLE_TARGET_RECORD_SIZE 16u
 #define VISIBLE_TARGET_8ACTION_V1_HASH 0x6e11e18fdafc0baaull
 
-typedef struct AffineLockVisibleTargetDepth {
+typedef struct VisibleTargetDepth {
     uint32_t depth;
     uint32_t first_record;
     uint32_t stored_count;
     uint64_t exact_pair_count;
-} AffineLockVisibleTargetDepth;
+} VisibleTargetDepth;
 
-typedef struct AffineLockVisibleTargetRecord {
+typedef struct VisibleTargetRecord {
     uint16_t start;
     uint16_t target;
     uint64_t packed_actions;
     uint8_t solution_length;
     uint8_t depth;
-} AffineLockVisibleTargetRecord;
+} VisibleTargetRecord;
 
-typedef struct AffineLockVisibleTargetTable {
+typedef struct VisibleTargetTable {
     uint32_t version;
     uint32_t header_size;
     uint32_t record_size;
@@ -34,9 +34,9 @@ typedef struct AffineLockVisibleTargetTable {
     uint32_t record_count;
     uint64_t checksum;
     uint64_t action_set_hash;
-    AffineLockVisibleTargetDepth* depths;
-    AffineLockVisibleTargetRecord* records;
-} AffineLockVisibleTargetTable;
+    VisibleTargetDepth* depths;
+    VisibleTargetRecord* records;
+} VisibleTargetTable;
 
 static uint64_t visible_targets_mix_u64(
         uint64_t hash,
@@ -94,7 +94,7 @@ static int visible_targets_read_u64(
 }
 
 static void visible_targets_free(
-        AffineLockVisibleTargetTable* table) {
+        VisibleTargetTable* table) {
     if (table == NULL) {
         return;
     }
@@ -104,18 +104,18 @@ static void visible_targets_free(
 }
 
 static uint64_t visible_targets_checksum(
-        const AffineLockVisibleTargetTable* table) {
+        const VisibleTargetTable* table) {
     uint64_t hash = 1469598103934665603ull;
     hash = visible_targets_mix_u64(hash, table->action_set_hash);
     for (uint32_t depth_index = 0; depth_index < table->depth_count;
             depth_index++) {
-        const AffineLockVisibleTargetDepth* depth = &table->depths[depth_index];
+        const VisibleTargetDepth* depth = &table->depths[depth_index];
         hash = visible_targets_mix_u64(hash, depth->depth);
         hash = visible_targets_mix_u64(hash, depth->exact_pair_count);
         hash = visible_targets_mix_u64(hash, depth->stored_count);
         for (uint32_t i = 0; i < depth->stored_count; i++) {
             uint32_t record_index = depth->first_record + i;
-            const AffineLockVisibleTargetRecord* record =
+            const VisibleTargetRecord* record =
                 &table->records[record_index];
             hash = visible_targets_mix_u64(hash, record->start);
             hash = visible_targets_mix_u64(hash, record->target);
@@ -132,7 +132,7 @@ static uint64_t visible_targets_checksum(
 static int visible_targets_load(
         const char* path,
         uint64_t expected_action_set_hash,
-        AffineLockVisibleTargetTable* table) {
+        VisibleTargetTable* table) {
     static const unsigned char expected_magic[8] = {
         'A', 'L', '7', 'T', 'G', 'T', '1', '\0'
     };
@@ -183,10 +183,10 @@ static int visible_targets_load(
         return -1;
     }
 
-    table->depths = (AffineLockVisibleTargetDepth*)calloc(
-        table->depth_count, sizeof(AffineLockVisibleTargetDepth));
-    table->records = (AffineLockVisibleTargetRecord*)calloc(
-        table->record_count, sizeof(AffineLockVisibleTargetRecord));
+    table->depths = (VisibleTargetDepth*)calloc(
+        table->depth_count, sizeof(VisibleTargetDepth));
+    table->records = (VisibleTargetRecord*)calloc(
+        table->record_count, sizeof(VisibleTargetRecord));
     if (table->depths == NULL || table->records == NULL) {
         fclose(file);
         visible_targets_free(table);
@@ -195,7 +195,7 @@ static int visible_targets_load(
 
     uint64_t depth_record_total = 0;
     for (uint32_t i = 0; i < table->depth_count; i++) {
-        AffineLockVisibleTargetDepth* depth = &table->depths[i];
+        VisibleTargetDepth* depth = &table->depths[i];
         uint32_t reserved = 0;
         if (visible_targets_read_u32(file, &depth->depth) != 0 ||
                 visible_targets_read_u32(
@@ -227,7 +227,7 @@ static int visible_targets_load(
     }
 
     for (uint32_t i = 0; i < table->record_count; i++) {
-        AffineLockVisibleTargetRecord* record = &table->records[i];
+        VisibleTargetRecord* record = &table->records[i];
         uint16_t reserved = 0;
         if (visible_targets_read_u16(file, &record->start) != 0 ||
                 visible_targets_read_u16(file, &record->target) != 0 ||

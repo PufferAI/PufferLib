@@ -216,12 +216,12 @@ static void test_vec_init_visible_targets_repeat_across_runs_and_vary_by_env_id(
 
 static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     Log log = {0};
-    log.depth_6_rate = 0.25f;
-    log.depth_6_solve_rate = 0.125f;
-    log.depth_8_rate = 0.0f;
-    log.depth_8_solve_rate = 0.0f;
-    log.depth_16_rate = 0.125f;
-    log.depth_16_solve_rate = 0.0f;
+    log.d6_rate = 0.25f;
+    log.d6_solve_rate = 0.125f;
+    log.d8_rate = 0.0f;
+    log.d8_solve_rate = 0.0f;
+    log.d16_rate = 0.125f;
+    log.d16_solve_rate = 0.0f;
     log.score = 0.75f;
     log.target_distance = 4.0f;
     log.solved_target_distance = 2.0f;
@@ -230,19 +230,19 @@ static void test_depth_solve_rates_are_conditional_on_depth_attempts(void) {
     Dict out = {0};
     puf_log(&log, &out);
 
-    EXPECT_EQ_INT(out.size, 16);
+    EXPECT_EQ_INT(out.size, 15);
     EXPECT_NEAR(dict_value(&out, "score"), 0.75, 0.0);
     EXPECT_TRUE(!dict_has_key(&out, "solve_steps"));
     EXPECT_TRUE(!dict_has_key(&out, "solve_efficiency"));
     EXPECT_TRUE(!dict_has_key(&out, "scramble_unique_states"));
     EXPECT_NEAR(dict_value(&out, "min_win_moves"), 4.0, 0.0);
     EXPECT_NEAR(dict_value(&out, "solved_min_win_moves"), 4.0, 0.0);
-    EXPECT_TRUE(!dict_has_key(&out, "depth_6_rate"));
-    EXPECT_NEAR(dict_value(&out, "depth_6_solve_rate"), 0.5, 0.0);
-    EXPECT_TRUE(!dict_has_key(&out, "depth_8_rate"));
-    EXPECT_NEAR(dict_value(&out, "depth_8_solve_rate"), 0.0, 0.0);
-    EXPECT_TRUE(!dict_has_key(&out, "depth_16_rate"));
-    EXPECT_NEAR(dict_value(&out, "depth_16_solve_rate"), 0.0, 0.0);
+    EXPECT_TRUE(!dict_has_key(&out, "d6_rate"));
+    EXPECT_NEAR(dict_value(&out, "d6_solve_rate"), 0.5, 0.0);
+    EXPECT_TRUE(!dict_has_key(&out, "d8_rate"));
+    EXPECT_NEAR(dict_value(&out, "d8_solve_rate"), 0.0, 0.0);
+    EXPECT_TRUE(!dict_has_key(&out, "d16_rate"));
+    EXPECT_NEAR(dict_value(&out, "d16_solve_rate"), 0.0, 0.0);
 
     dict_clear(&out);
 }

@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
     unsigned long expected_d16_count = strtoul(argv[4], &end, 10);
     EXPECT_TRUE(end != argv[4] && *end == '\0');
 
-    AffineLockVisibleTargetTable table;
+    VisibleTargetTable table;
     int rc = visible_targets_load(
         argv[1],
         VISIBLE_TARGET_8ACTION_V1_HASH,
@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
     }
 
     for (uint32_t i = 0; i < table.record_count; i++) {
-        const AffineLockVisibleTargetRecord* record = &table.records[i];
+        const VisibleTargetRecord* record = &table.records[i];
         EXPECT_TRUE(record->solution_length == record->depth);
         EXPECT_TRUE(
             record->depth == 2 ||
