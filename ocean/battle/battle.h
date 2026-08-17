@@ -767,9 +767,9 @@ void compute_observations(Battle* env) {
         obs[obs_idx++] = agent->y;
         obs[obs_idx++] = agent->z;
         obs[obs_idx++] = agent->y - ground_height(env, agent->x, agent->z);
-        obs[obs_idx++] = abs(agent->x) - 0.95f*env->size_x;
-        obs[obs_idx++] = abs(agent->z) - 0.95f*env->size_z;
-        obs[obs_idx++] = abs(agent->y) - 0.95f*env->size_y;
+        obs[obs_idx++] = fabsf(agent->x) - 0.95f*env->size_x;
+        obs[obs_idx++] = fabsf(agent->z) - 0.95f*env->size_z;
+        obs[obs_idx++] = fabsf(agent->y) - 0.95f*env->size_y;
         obs[obs_idx++] = agent->speed;
         obs[obs_idx++] = agent->health;
         obs[obs_idx++] = agent->max_turn;
@@ -921,7 +921,8 @@ void puf_step(Battle* env) {
             if (i < env->num_agents/2) {
                 env->agents[i].rewards[0] = reward;
                 env->agents[i].terminals[0] = 1;
-                env->log.score = env->log.episode_return;
+                env->log.score += agent->episode_return;
+                env->log.perf += (agent->episode_return > 0.0f) ? 1 : 0;
                 env->log.episode_length += agent->episode_length;
                 env->log.episode_return += agent->episode_return;
                 env->log.collision_rate += collision;
