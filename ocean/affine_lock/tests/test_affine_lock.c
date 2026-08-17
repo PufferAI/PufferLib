@@ -69,7 +69,7 @@ static AffineLockShared make_shared(
         int step_grace) {
     AffineLockShared shared;
     memset(&shared, 0, sizeof(shared));
-    init_shared(&shared, start_depth, max_depth, step_grace);
+    init_shared(&shared, start_depth, max_depth, step_grace, PERF_WEIGHTING_LINEAR);
     return shared;
 }
 
@@ -218,6 +218,26 @@ static void test_log_solve_credit_uses_known_target_distance(void) {
     EXPECT_NEAR(env.log.d8_solve_rate, 1.0f, 0.0f);
     EXPECT_NEAR(env.log.d16_rate, 0.0f, 0.0f);
     EXPECT_NEAR(env.log.d16_solve_rate, 0.0f, 0.0f);
+
+    free_shared(&shared);
+}
+
+static void test_log_solve_credit_uses_quadratic_perf_weighting(void) {
+    AffineLockShared shared;
+    memset(&shared, 0, sizeof(shared));
+    init_shared(&shared, 2, 16, 0, PERF_WEIGHTING_QUADRATIC);
+    AffineLock env;
+    memset(&env, 0, sizeof(env));
+    env.shared = &shared;
+    env.scramble_depth = 16;
+    env.target_distance = 8;
+    env.step_count = 8;
+
+    add_log(&env, 1);
+
+    float linear_ratio = expected_solve_credit(&shared, 8);
+    EXPECT_NEAR(env.log.perf, linear_ratio * linear_ratio, 0.0f);
+    EXPECT_NEAR(env.log.score, linear_ratio * linear_ratio, 0.0f);
 
     free_shared(&shared);
 }
@@ -1196,6 +1216,7 @@ int main(void) {
     test_visible_target_table_reset_uses_stored_records();
     test_visible_target_table_matches_independent_bfs_over_repeated_resets();
     test_log_solve_credit_uses_known_target_distance();
+    test_log_solve_credit_uses_quadratic_perf_weighting();
     test_observation_encoding_is_32_signed_bit_floats_plus_timer();
     test_timer_observation_progresses_and_resets_after_timeout();
     test_actions_apply_to_current_state_directly();

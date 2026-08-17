@@ -19,6 +19,9 @@ typedef float obs_t;
 #define ACT_SIZES {NUM_ACTIONS}
 #define PUF_STEPS_PER_SEC 2
 
+#define PERF_WEIGHTING_LINEAR 0
+#define PERF_WEIGHTING_QUADRATIC 1
+
 #define MY_VEC_INIT
 #define MY_VEC_CLOSE
 
@@ -61,6 +64,7 @@ typedef struct AffineLockShared {
     int start_depth;
     int max_depth;
     int step_grace;
+    int perf_weighting;
     uint32_t mask;
     uint32_t* next;
     VisibleTargetTable visible_target_table;
@@ -89,10 +93,12 @@ struct Env {
 };
 typedef Env AffineLock;
 
-static void init_shared(AffineLockShared* shared, int start_depth, int max_depth, int step_grace) {
+static void init_shared(AffineLockShared* shared, int start_depth, int max_depth,
+        int step_grace, int perf_weighting) {
     shared->start_depth = start_depth;
     shared->max_depth = max_depth;
     shared->step_grace = step_grace;
+    shared->perf_weighting = perf_weighting;
     shared->mask = (1u << BITS) - 1u;
     for (int value = 0; value < 256; value++) {
         for (int bit = 0; bit < 8; bit++) {
@@ -147,9 +153,10 @@ static void init_shared(AffineLockShared* shared, int start_depth, int max_depth
         "Table' in ocean/affine_lock/README.md");
 }
 
-static AffineLockShared* create_shared(int start_depth, int max_depth, int step_grace) {
+static AffineLockShared* create_shared(int start_depth, int max_depth,
+        int step_grace, int perf_weighting) {
     AffineLockShared* shared = (AffineLockShared*)calloc(1, sizeof(AffineLockShared));
-    init_shared(shared, start_depth, max_depth, step_grace);
+    init_shared(shared, start_depth, max_depth, step_grace, perf_weighting);
     return shared;
 }
 
@@ -164,8 +171,10 @@ void puf_init(Env* env, Dict* kwargs) {
     int start_depth = dict_get(kwargs, "start_depth");
     int max_depth = dict_get(kwargs, "max_depth");
     int step_grace = dict_get(kwargs, "step_grace");
+    int perf_weighting = dict_get(kwargs, "perf_weighting");
     unsigned int seed = (unsigned int)dict_get(kwargs, "seed");
-    AffineLockShared* shared = create_shared(start_depth, max_depth, step_grace);
+    AffineLockShared* shared =
+        create_shared(start_depth, max_depth, step_grace, perf_weighting);
     init_env(env, shared, rand_r(&seed));
     env->owns_shared = 1;
 }
@@ -189,7 +198,12 @@ static void add_log(AffineLock* env, int solved) {
     AffineLockShared* shared = env->shared;
     int log_depth = env->target_distance;
     int at_max_depth = log_depth == shared->max_depth;
-    float solve_credit = solved ? log_depth / (float)shared->max_depth : 0;
+    float ratio = log_depth / (float)shared->max_depth;
+    float solve_credit = 0;
+    if (solved) {
+        solve_credit = shared->perf_weighting == PERF_WEIGHTING_QUADRATIC ?
+            ratio * ratio : ratio;
+    }
     env->log.perf += solve_credit;
     env->log.score += solve_credit;
     env->log.solve_rate += solved;
@@ -388,8 +402,10 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int start_depth = dict_get(env_kwargs, "start_depth");
     int max_depth = dict_get(env_kwargs, "max_depth");
     int step_grace = dict_get(env_kwargs, "step_grace");
+    int perf_weighting = dict_get(env_kwargs, "perf_weighting");
 
-    AffineLockShared* shared = create_shared(start_depth, max_depth, step_grace);
+    AffineLockShared* shared =
+        create_shared(start_depth, max_depth, step_grace, perf_weighting);
     Env* envs = (Env*)calloc(total_agents, sizeof(Env));
 
     int buf = 0;

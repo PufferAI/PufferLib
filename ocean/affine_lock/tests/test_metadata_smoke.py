@@ -54,6 +54,7 @@ def check_config():
     assert parse_int(config["env"]["seed"]) == 42
     assert parse_int(config["env"]["start_depth"]) == 2
     assert parse_int(config["env"]["max_depth"]) == 16
+    assert parse_int(config["env"]["perf_weighting"]) == 1
     assert parse_int(config["train"]["total_timesteps"]) == 200_000_000
     assert parse_int(config["train"]["horizon"]) == 64
     assert parse_int(config["train"]["minibatch_size"]) == 8192
@@ -66,9 +67,6 @@ def check_config():
     assert parse_float(config["train"]["vf_coef"]) == 4.75
     assert parse_float(config["train"]["vf_clip_coef"]) == 0.8
     assert parse_float(config["train"]["max_grad_norm"]) == 3.0
-    assert parse_float(config["train"]["beta1"]) == 0.5
-    assert parse_float(config["train"]["beta2"]) == 0.9915
-    assert parse_float(config["train"]["eps"]) == 0.0001
     assert parse_float(config["train"]["vtrace_rho_clip"]) == 1.4
     assert parse_float(config["train"]["vtrace_c_clip"]) == 3.75
     assert "prio_alpha" not in config["train"]
@@ -89,11 +87,6 @@ def check_config():
     assert_sweep_mean(config, "sweep.train.vf_coef", 4.75)
     assert_sweep_mean(config, "sweep.train.vf_clip_coef", 0.8)
     assert_sweep_mean(config, "sweep.train.max_grad_norm", 3.0)
-    assert_sweep_mean(config, "sweep.train.beta1", 0.5)
-    assert_sweep_mean(config, "sweep.train.beta2", 0.9915)
-    assert_sweep_mean(config, "sweep.train.eps", 0.0001)
-    assert_sweep_mean(config, "sweep.train.vtrace_rho_clip", 1.4)
-    assert_sweep_mean(config, "sweep.train.vtrace_c_clip", 3.75)
     assert "sweep.train.prio_alpha" not in config
     assert "sweep.train.prio_beta0" not in config
     assert config["sweep"]["metric"] == "perf"
@@ -188,9 +181,6 @@ def check_backend_metadata():
     assert base_args["train"]["vf_coef"] == 4.75
     assert base_args["train"]["vf_clip_coef"] == 0.8
     assert base_args["train"]["max_grad_norm"] == 3.0
-    assert base_args["train"]["beta1"] == 0.5
-    assert base_args["train"]["beta2"] == 0.9915
-    assert base_args["train"]["eps"] == 0.0001
     assert base_args["train"]["vtrace_rho_clip"] == 1.4
     assert base_args["train"]["vtrace_c_clip"] == 3.75
     assert "prio_alpha" not in base_args["train"]

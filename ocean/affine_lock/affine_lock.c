@@ -15,6 +15,7 @@ int main(void) {
     dict_set(&kwargs, "start_depth", 2);
     dict_set(&kwargs, "max_depth", 16);
     dict_set(&kwargs, "step_grace", 2);
+    dict_set(&kwargs, "perf_weighting", PERF_WEIGHTING_QUADRATIC);
     dict_set(&kwargs, "seed", (double)(unsigned int)time(NULL));
     puf_init(&env, &kwargs);
     dict_clear(&kwargs);

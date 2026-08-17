@@ -73,6 +73,7 @@ static void fill_env_kwargs(Dict* env_kwargs, int seed) {
     dict_set(env_kwargs, "start_depth", 2);
     dict_set(env_kwargs, "max_depth", 16);
     dict_set(env_kwargs, "step_grace", 0);
+    dict_set(env_kwargs, "perf_weighting", PERF_WEIGHTING_LINEAR);
     dict_set(env_kwargs, "seed", seed);
 }
 
