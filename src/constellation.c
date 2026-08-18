@@ -481,12 +481,19 @@ int main(int argc, char** argv) {
 #include "raymath.h"
 
 #define CAMERA_ORBITAL_SPEED 0.05f
-void CustomUpdateCamera(Camera *camera, float orbitSpeed) {
-    float cameraOrbitalSpeed = CAMERA_ORBITAL_SPEED*GetFrameTime();
-    Matrix rotation = MatrixRotate(GetCameraUp(camera), cameraOrbitalSpeed);
-    Vector3 view = Vector3Subtract(camera->position, camera->target);
-    view = Vector3Transform(view, rotation);
-    camera->position = Vector3Add(camera->target, view);
+#define MOUSE_ROTATE_SPEED 0.005f
+void CustomUpdateCamera(Camera *camera, float orbitSpeed, Rectangle bounds) {
+    if (CheckCollisionPointRec(GetMousePosition(), bounds) && IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+        Vector2 delta = GetMouseDelta();
+        CameraYaw(camera, -delta.x*MOUSE_ROTATE_SPEED, true);
+        CameraPitch(camera, -delta.y*MOUSE_ROTATE_SPEED, true, true, false);
+    } else {
+        float cameraOrbitalSpeed = CAMERA_ORBITAL_SPEED*GetFrameTime();
+        Matrix rotation = MatrixRotate(GetCameraUp(camera), cameraOrbitalSpeed);
+        Vector3 view = Vector3Subtract(camera->position, camera->target);
+        view = Vector3Transform(view, rotation);
+        camera->position = Vector3Add(camera->target, view);
+    }
     CameraMoveToTarget(camera, -GetMouseWheelMove());
     if (IsKeyPressed(KEY_KP_SUBTRACT)) CameraMoveToTarget(camera, 2.0f);
     if (IsKeyPressed(KEY_KP_ADD)) CameraMoveToTarget(camera, -2.0f);
@@ -979,13 +986,16 @@ void update_closest(Tooltip* tooltip, Vector2 *indices, Glyph* glyphs, int size,
     }
 }
 
-void draw_highlight(Tooltip* tooltip, Vector2* indices, Glyph* glyphs, int size) {
+void draw_highlight(Tooltip* tooltip, Vector2* indices, Glyph* glyphs, int size,
+        float x_offset, float y_offset, float* disp_x, float* disp_y) {
     if (!tooltip->active) {
         return;
     }
     // TODO Ugly but can't yet find a better way. Checking ary_idx first makes this cheap
     for (int i=0; i<size; i++) {
         if (indices[i].y == tooltip->ary_idx && indices[i].x == tooltip->env_idx) {
+            *disp_x = x_offset + glyphs[i].x;
+            *disp_y = y_offset + glyphs[i].y;
             DrawRing((Vector2){glyphs[i].x, glyphs[i].y}, 10, 13, 0, 360, 36, PUFF_CYAN);
             return;
         }
@@ -1210,6 +1220,7 @@ int main(void) {
     args1.scale[2] = 1;
     RenderTexture2D fig1 = LoadRenderTexture(args1.width, args1.height);
     RenderTexture2D fig1_overlay = LoadRenderTexture(args1.width, args1.height);
+    Rectangle fig1_bounds = {0, 2*SETTINGS_HEIGHT, args1.width, args1.height};
     int fig_env_idx = 0;
     bool fig_env_active = false;
     bool fig_x_active = false;
@@ -1276,6 +1287,8 @@ int main(void) {
     bool *filter = calloc(max_data_points, sizeof(bool));
 
     Tooltip tooltip = {0};
+    float disp_x = 0;
+    float disp_y = 0;
 
     Vector2 focus = {0, 0};
 
@@ -1287,7 +1300,9 @@ int main(void) {
 
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             focus = GetMousePosition();
-            tooltip.active = false;
+            if (!CheckCollisionPointRec(focus, fig1_bounds)) {
+                tooltip.active = false;
+            }
         }
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
             Vector2 mouse_pos = GetMousePosition();
@@ -1346,12 +1361,14 @@ int main(void) {
         }
         autoscale(points, size, &args1);
         toPx(points, glyphs, size, args1);
-        update_closest(&tooltip, env_indices, glyphs, size, 0, 2*SETTINGS_HEIGHT);
+        if (right_clicked) {
+            update_closest(&tooltip, env_indices, glyphs, size, 0, 2*SETTINGS_HEIGHT);
+        }
         plot_gl(glyphs, size, &shader);
-        draw_highlight(&tooltip, env_indices, glyphs, size);
+        draw_highlight(&tooltip, env_indices, glyphs, size, 0, 2*SETTINGS_HEIGHT, &disp_x, &disp_y);
 
         BeginMode3D(args1.camera);
-        CustomUpdateCamera(&args1.camera, CAMERA_ORBITAL_SPEED);
+        CustomUpdateCamera(&args1.camera, CAMERA_ORBITAL_SPEED, fig1_bounds);
         draw_axes3();
         EndMode3D();
         EndTextureMode();
@@ -1372,9 +1389,11 @@ int main(void) {
         args2.mmin[2] = 0.0f;
         args2.mmax[2] = 0.0f;
         toPx(points, glyphs, size, args2);
-        update_closest(&tooltip, env_indices, glyphs, size, fig1.texture.width, 2*SETTINGS_HEIGHT);
+        if (right_clicked) {
+            update_closest(&tooltip, env_indices, glyphs, size, fig1.texture.width, 2*SETTINGS_HEIGHT);
+        }
         plot_gl(glyphs, size, &shader);
-        draw_highlight(&tooltip, env_indices, glyphs, size);
+        draw_highlight(&tooltip, env_indices, glyphs, size, fig1.texture.width, 2*SETTINGS_HEIGHT, &disp_x, &disp_y);
         draw_axes(args2);
         draw_all_ticks(args2);
         EndTextureMode();
@@ -1411,9 +1430,11 @@ int main(void) {
         }
         autoscale(points, size, &args3);
         toPx(points, glyphs, size, args3);
-        update_closest(&tooltip, env_indices, glyphs, size, 0, fig1.texture.height + 2*SETTINGS_HEIGHT);
+        if (right_clicked) {
+            update_closest(&tooltip, env_indices, glyphs, size, 0, fig1.texture.height + 2*SETTINGS_HEIGHT);
+        }
         plot_gl(glyphs, size, &shader);
-        draw_highlight(&tooltip, env_indices, glyphs, size);
+        draw_highlight(&tooltip, env_indices, glyphs, size, 0, fig1.texture.height + 2*SETTINGS_HEIGHT, &disp_x, &disp_y);
 
         //draw_axes(args3);
         EndTextureMode();
@@ -1623,8 +1644,8 @@ int main(void) {
         if (tooltip.active) {
             const char* text = TextFormat("%s\nscore = %f\ncost = %f\nsteps = %f", env_key, score, cost, steps);
             Vector2 text_size = MeasureTextEx(args1.font_small, text, args1.axis_tick_font_size, 0);
-            float x = tooltip.x;
-            float y = tooltip.y;
+            float x = disp_x;
+            float y = disp_y;
             if (x + text_size.x + 4 > GetScreenWidth()) {
                 x = x - text_size.x - 4;
             }
@@ -1632,7 +1653,7 @@ int main(void) {
                 y = y - text_size.y - 4;
             }
             DrawRectangle(x, y, text_size.x + 4, text_size.y + 4, PUFF_BACKGROUND);
-            DrawCircle(tooltip.x, tooltip.y, 2, PUFF_CYAN);
+            DrawCircle(disp_x, disp_y, 2, PUFF_CYAN);
             DrawTextEx(args1.font_small, text, (Vector2){x + 2, y + 2}, args1.axis_tick_font_size, 0, WHITE);
         }
         EndDrawing();
