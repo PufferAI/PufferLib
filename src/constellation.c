@@ -985,7 +985,7 @@ void draw_highlight(Tooltip* tooltip, Vector2* indices, Glyph* glyphs, int size)
     }
     // TODO Ugly but can't yet find a better way. Checking ary_idx first makes this cheap
     for (int i=0; i<size; i++) {
-        if ((int)indices[i].y == tooltip->ary_idx && (int)indices[i].x == tooltip->env_idx) {
+        if (indices[i].y == tooltip->ary_idx && indices[i].x == tooltip->env_idx) {
             DrawRing((Vector2){glyphs[i].x, glyphs[i].y}, 10, 13, 0, 360, 36, PUFF_CYAN);
             return;
         }
