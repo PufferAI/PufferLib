@@ -89,6 +89,8 @@ struct Env {
     int target_distance;
     float episode_return;
     int owns_shared;
+    int pending_human_action;
+    int hint_action; // -2 none, -1 already solved, else action to press
     AffineLockShared* shared;
 };
 typedef Env AffineLock;
@@ -165,6 +167,8 @@ static void init_env(AffineLock* env, AffineLockShared* shared, unsigned int see
     env->rng = seed;
     env->num_agents = 1;
     env->curriculum_depth = shared->start_depth;
+    env->pending_human_action = -1;
+    env->hint_action = -2;
 }
 
 void puf_init(Env* env, Dict* kwargs) {
@@ -279,6 +283,7 @@ static void reset_state(AffineLock* env) {
         env->solution_actions[i] = (record->packed_actions >> (3 * i)) & 7;
     }
     env->max_steps = env->target_distance + shared->step_grace;
+    env->hint_action = -2;
 }
 
 static void compute_observations(AffineLock* env) {
@@ -312,9 +317,9 @@ static int next_curriculum_depth( const AffineLockShared* shared, int current_de
     return shared->max_depth;
 }
 
-static int human_controls(AffineLock *env) {
+static void human_controls(AffineLock *env) {
     if (!IsWindowReady() || !IsKeyDown(KEY_LEFT_SHIFT)) {
-        return 0;
+        return;
     }
     static const int keys[NUM_ACTIONS] = {
         KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR,
@@ -322,17 +327,21 @@ static int human_controls(AffineLock *env) {
     };
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (IsKeyPressed(keys[i])) {
-            env->agents[0].actions[0] = (float)i;
-            return 1;
+            env->pending_human_action = i;
+            return;
         }
     }
-    return -1;
 }
 
 void puf_step(AffineLock* env) {
-    if (human_controls(env) < 0) {
-        return;
+    if (IsWindowReady() && IsKeyDown(KEY_LEFT_SHIFT)) {
+        if (env->pending_human_action < 0) {
+            return;
+        }
+        env->agents[0].actions[0] = (float)env->pending_human_action;
+        env->pending_human_action = -1;
     }
+    env->hint_action = -2;
     AffineLockShared* shared = env->shared;
     float reward = STEP_REWARD;
     int terminal = 0;
@@ -433,6 +442,20 @@ void my_vec_close(Env* envs) {
     free(envs[0].shared);
 }
 
+static const char* action_name(int action) {
+    static const char* names[NUM_ACTIONS] = {
+        "shift_left", "shift_right", "invert_right_7", "swap_adjacent_bits",
+        "swap_adjacent_pairs", "swap_nibbles_each_byte", "reverse_each_nibble",
+        "reverse_each_byte",
+    };
+    return names[action];
+}
+
+static void show_hint(AffineLock* env) {
+    env->hint_action = env->step_count < env->solution_length ?
+        env->solution_actions[env->step_count] : -1;
+}
+
 void puf_render(AffineLock* env) {
     if (IsWindowReady() && (WindowShouldClose() || IsKeyPressed(KEY_ESCAPE))) {
         puf_close(env);
@@ -467,6 +490,14 @@ void puf_render(AffineLock* env) {
         30, 62, 20, (Color){180, 190, 200, 255});
     DrawText(TextFormat("status %s  mismatches 0x%04x",
         status, rel), 30, 90, 20, status_color);
+    if (env->hint_action != -2) {
+        const char* hint = env->hint_action >= 0 ?
+            TextFormat("Hint: press %d (%s)", env->hint_action + 1,
+                action_name(env->hint_action)) :
+            "Hint: already solved";
+        DrawText(hint, 780 - MeasureText(hint, 18) - 30, 90,
+            18, (Color){245, 205, 92, 255});
+    }
 
     const char* row_label[2] = {"current", "target"};
     uint32_t row_value[2] = {env->state, env->target};
@@ -476,7 +507,7 @@ void puf_render(AffineLock* env) {
         for (int bit = 0; bit < BITS; bit++) {
             int x = 145 + bit * 34;
             int on = (row_value[row] >> bit) & 1u;
-            int mismatch = ((env->state ^ env->target) >> bit) & 1u;
+            int mismatch = row == 0 && (((env->state ^ env->target) >> bit) & 1u);
             Color fill = on ? (Color){80, 210, 140, 255} : (Color){38, 48, 58, 255};
             Color border = mismatch ? (Color){238, 88, 88, 255} : (Color){182, 196, 205, 255};
             DrawRectangle(x, row_y[row], 24, 34, fill);
@@ -488,9 +519,9 @@ void puf_render(AffineLock* env) {
         }
     }
 
-    DrawText("1 shiftL  2 shiftR  3 inv7  4 bit-swap  5 pair-swap",
+    DrawText("shift+1 shiftL  shift+2 shiftR  shift+3 inv7  shift+4 bit-swap  shift+5 pair-swap",
         30, 300, 16, (Color){160, 170, 178, 255});
-    DrawText("6 nib-swap  7 rev-nib  8 rev-byte  R reset",
+    DrawText("shift+6 nib-swap  shift+7 rev-nib  shift+8 rev-byte  H hint  R reset",
         30, 322, 16, (Color){160, 170, 178, 255});
     EndDrawing();
     puf_web_vsync();
