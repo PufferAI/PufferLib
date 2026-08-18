@@ -785,7 +785,8 @@ void draw_axes3() {
     );
 }
 
-void boxplot(Table* table, int col, int x_scale, int i, int hyper_count, PlotArgs args, Color color, bool* filter) {
+void boxplot(Table* table, int col, int x_scale, int i, int hyper_count, PlotArgs args, Color color,
+        bool* filter, bool has_highlight, float highlight_val) {
     int width = args.width;
     int height = args.height;
 
@@ -818,6 +819,13 @@ void boxplot(Table* table, int col, int x_scale, int i, int hyper_count, PlotArg
     left = fminf(fmax(left, args.left_margin), width - args.right_margin);
     right = fmaxf(fmin(right, width - args.right_margin), 0);
     DrawRectangle(left, args.top_margin + i*dy, right - left, dy, color);
+
+    if (has_highlight) {
+        float hval = scale_val(x_scale, highlight_val);
+        float hx = args.left_margin + (hval - x_min)/(x_max - x_min)*plot_width;
+        hx = fminf(fmaxf(hx, args.left_margin), width - args.right_margin);
+        DrawRectangle(hx - 1, args.top_margin + i*dy, 3, dy, BLUE);
+    }
 }
 
 void plot_gl(Glyph* glyphs, int size, Shader* shader) {
@@ -967,6 +975,19 @@ void update_closest(Tooltip* tooltip, Vector2 *indices, Glyph* glyphs, int size,
             tooltip->y = y_offset + glyphs[i].y;
             tooltip->env_idx = indices[i].x;
             tooltip->ary_idx = indices[i].y;
+        }
+    }
+}
+
+void draw_highlight(Tooltip* tooltip, Vector2* indices, Glyph* glyphs, int size) {
+    if (!tooltip->active) {
+        return;
+    }
+    // TODO Ugly but can't yet find a better way. Checking ary_idx first makes this cheap
+    for (int i=0; i<size; i++) {
+        if ((int)indices[i].y == tooltip->ary_idx && (int)indices[i].x == tooltip->env_idx) {
+            DrawRing((Vector2){glyphs[i].x, glyphs[i].y}, 10, 13, 0, 360, 36, PUFF_CYAN);
+            return;
         }
     }
 }
@@ -1327,6 +1348,7 @@ int main(void) {
         toPx(points, glyphs, size, args1);
         update_closest(&tooltip, env_indices, glyphs, size, 0, 2*SETTINGS_HEIGHT);
         plot_gl(glyphs, size, &shader);
+        draw_highlight(&tooltip, env_indices, glyphs, size);
 
         BeginMode3D(args1.camera);
         CustomUpdateCamera(&args1.camera, CAMERA_ORBITAL_SPEED);
@@ -1352,6 +1374,7 @@ int main(void) {
         toPx(points, glyphs, size, args2);
         update_closest(&tooltip, env_indices, glyphs, size, fig1.texture.width, 2*SETTINGS_HEIGHT);
         plot_gl(glyphs, size, &shader);
+        draw_highlight(&tooltip, env_indices, glyphs, size);
         draw_axes(args2);
         draw_all_ticks(args2);
         EndTextureMode();
@@ -1390,6 +1413,7 @@ int main(void) {
         toPx(points, glyphs, size, args3);
         update_closest(&tooltip, env_indices, glyphs, size, 0, fig1.texture.height + 2*SETTINGS_HEIGHT);
         plot_gl(glyphs, size, &shader);
+        draw_highlight(&tooltip, env_indices, glyphs, size);
 
         //draw_axes(args3);
         EndTextureMode();
@@ -1422,7 +1446,10 @@ int main(void) {
                 }
                 apply_filter(filter, table, filter_param_1, fig_range1_min_val, fig_range1_max_val);
                 apply_filter(filter, table, filter_param_2, fig_range2_min_val, fig_range2_max_val);
-                boxplot(table, col, args4.scale[0], j, hyper_count, args4, color, filter);
+                bool has_highlight = tooltip.active && i == tooltip.env_idx;
+                float highlight_val = has_highlight ? table_get(table, tooltip.ary_idx, col) : 0.0f;
+                boxplot(table, col, args4.scale[0], j, hyper_count, args4, color, filter,
+                    has_highlight, highlight_val);
             }
         }
         EndBlendMode();
