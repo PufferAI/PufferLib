@@ -614,18 +614,6 @@ PlotArgs DEFAULT_PLOT_ARGS = {
     .z_label = "Train/Learning Rate",
 };
 
-
-Table* dataset_table(Dataset *data, char *env) {
-    for (int i = 0; i < data->n; i++) {
-        if (strcmp(data->tables[i].name, env) == 0) {
-            return &data->tables[i];
-        }
-    }
-    printf("Error: env %s not found\n", env);
-    exit(1);
-    return NULL;
-}
-
 float safe_log10(float x) {
     if (x <= 0) {
         return x;
