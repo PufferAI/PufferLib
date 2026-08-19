@@ -6,6 +6,50 @@
 
 #include "robot_arm.h"
 
+#define RA_DYN_BODIES 10
+
+typedef struct RaInertia3 {
+    float xx, yy, zz, xy, xz, yz;
+} RaInertia3;
+
+enum { RA_CONVEX_BOX = 0, RA_CONVEX_SPHERE = 1 };
+
+typedef struct RaConvexShape {
+    int type;
+    RaPose pose;
+    RaVec3 half_extents;
+} RaConvexShape;
+
+typedef struct RaRigidBody {
+    RaPose pose;
+    RaVec3 linear_velocity;
+    RaVec3 angular_velocity;
+    float mass;
+    RaInertia3 local_inertia;
+} RaRigidBody;
+
+typedef struct RaConvexContact {
+    int hit;
+    int iterations;
+    float separation;
+    RaVec3 normal;
+    RaVec3 point_a;
+    RaVec3 point_b;
+} RaConvexContact;
+
+typedef struct RaConvexSweep {
+    int hit;
+    int iterations;
+    float toi;
+    RaConvexContact contact;
+} RaConvexSweep;
+
+RA_D static RA_INLINE void ra_caxes(RaQuat rotation, RaVec3 axes[3]) {
+    axes[0] = ra_rotate(rotation, ra_v3(1, 0, 0));
+    axes[1] = ra_rotate(rotation, ra_v3(0, 1, 0));
+    axes[2] = ra_rotate(rotation, ra_v3(0, 0, 1));
+}
+
 #define PL_IMPULSE_MAX_MANIFOLDS 48
 #define PL_IMPULSE_MAX_CANDIDATES 20
 #define PL_SAT_PARALLEL_EPSILON 1.0e-8f
@@ -41,16 +85,6 @@ typedef struct PlSatManifold {
     uint32_t point_feature[PL_SAT_MAX_MANIFOLD_POINTS];  // warm-start key
 } PlSatManifold;
 
-RA_D static RA_INLINE RaVec3 pl_sat_neg(RaVec3 value) {
-    return ra_scale(value, -1.0f);
-}
-
-RA_D static RA_INLINE float pl_shalf(
-        RaVec3 half_extents, int index) {
-    return index == 0 ? half_extents.x
-        : index == 1 ? half_extents.y : half_extents.z;
-}
-
 RA_D static RA_INLINE PlSatObb pl_sobb(
         const RaConvexShape* shape) {
     PlSatObb box;
@@ -76,7 +110,7 @@ RA_D static RA_INLINE RaVec3 pl_ssup(
 
 RA_D static RA_INLINE RaVec3 pl_sorb(
         RaVec3 axis, float projection_a_minus_b) {
-    return projection_a_minus_b < 0.0f ? pl_sat_neg(axis) : axis;  // zero -> +axis
+    return projection_a_minus_b < 0.0f ? ra_scale(axis, -1.0f) : axis;
 }
 
 RA_D static RA_INLINE void pl_scon(
@@ -106,7 +140,7 @@ RA_D static RA_INLINE void pl_sxcon(
     }
     RaVec3 normal = ra_scale(cross_axis, inverse_length);
     if (projection_b_minus_a > 0.0f) {
-        normal = pl_sat_neg(normal);  // normal always B->A
+        normal = ra_scale(normal, -1.0f);
     }
     query->contact.separation = separation;
     query->contact.normal = normal;
@@ -225,7 +259,7 @@ RA_D static RA_INLINE PlSatQuery pl_sqobb(
 
     query.contact.hit = query.contact.separation <= margin;
     RaVec3 normal = query.contact.normal;
-    query.contact.point_a = pl_ssup(a, pl_sat_neg(normal));
+    query.contact.point_a = pl_ssup(a, ra_scale(normal, -1.0f));
     query.contact.point_b = pl_ssup(b, normal);
     return query;
 }
@@ -248,7 +282,8 @@ RA_D static RA_INLINE int pl_sclip(
                 && output_count < PL_SAT_MAX_CLIP_VERTICES) {
             float fraction = previous_distance
                 / (previous_distance - current_distance);
-            output[output_count++] = ra_lerp(previous, current, fraction);
+            output[output_count++] = ra_add(previous,
+                ra_scale(ra_sub(current, previous), fraction));
         }
         if (current_inside
                 && output_count < PL_SAT_MAX_CLIP_VERTICES) {
@@ -266,12 +301,11 @@ RA_D static RA_INLINE void pl_sface(
         RaVec3 output[4]) {
     const int tangent_a = (normal_axis + 1) % 3;
     const int tangent_b = (normal_axis + 2) % 3;
-    const float face_half = pl_shalf(
-        box->half_extents, normal_axis);
-    const float half_a = pl_shalf(
-        box->half_extents, tangent_a);
-    const float half_b = pl_shalf(
-        box->half_extents, tangent_b);
+    float half[3] = {
+        box->half_extents.x, box->half_extents.y, box->half_extents.z};
+    float face_half = half[normal_axis];
+    float half_a = half[tangent_a];
+    float half_b = half[tangent_b];
     const RaVec3 center = ra_add(box->center,
         ra_scale(box->axis[normal_axis], sign*face_half));
     const RaVec3 along_a = ra_scale(box->axis[tangent_a], half_a);
@@ -304,19 +338,6 @@ RA_D static RA_INLINE int pl_sused(
         if (selected[index] == candidate) {
             return 1;
         }
-    }
-    return 0;
-}
-
-RA_D static RA_INLINE int pl_sdup(
-        const PlSatManifold* manifold, RaVec3 point_a, RaVec3 point_b) {
-    const float epsilon = PL_SAT_MANIFOLD_DUPLICATE_EPSILON;
-    const float epsilon_squared = epsilon * epsilon;
-    for (int index = 0; index < manifold->count; ++index) {
-        RaVec3 delta_a = ra_sub(point_a, manifold->point[index].point_a);
-        RaVec3 delta_b = ra_sub(point_b, manifold->point[index].point_b);
-        if (ra_dot(delta_a, delta_a) <= epsilon_squared
-                && ra_dot(delta_b, delta_b) <= epsilon_squared) return 1;
     }
     return 0;
 }
@@ -362,17 +383,19 @@ RA_D static RA_INLINE int pl_sman(
     const RaVec3 contact_normal = query->contact.normal;
 
     RaVec3 reference_normal = reference_is_a
-        ? pl_sat_neg(contact_normal) : contact_normal;
+        ? ra_scale(contact_normal, -1.0f) : contact_normal;
     const float reference_sign = ra_dot(
         reference->axis[reference_axis], reference_normal) < 0.0f
         ? -1.0f : 1.0f;
     reference_normal = ra_scale(
         reference->axis[reference_axis], reference_sign);
+    float ref_half[3] = {
+        reference->half_extents.x, reference->half_extents.y,
+        reference->half_extents.z};
     const RaVec3 reference_center = ra_add(reference->center,
-        ra_scale(reference_normal, pl_shalf(
-            reference->half_extents, reference_axis)));
+        ra_scale(reference_normal, ref_half[reference_axis]));
 
-    const RaVec3 incident_target = pl_sat_neg(reference_normal);
+    const RaVec3 incident_target = ra_scale(reference_normal, -1.0f);
     const int incident_axis = pl_saxis(
         incident, incident_target);
     const float incident_sign = ra_dot(
@@ -388,19 +411,17 @@ RA_D static RA_INLINE int pl_sman(
     const int tangent_b = (reference_axis + 2) % 3;
     const RaVec3 side_a = reference->axis[tangent_a];
     const RaVec3 side_b = reference->axis[tangent_b];
-    const float half_a = pl_shalf(
-        reference->half_extents, tangent_a);
-    const float half_b = pl_shalf(
-        reference->half_extents, tangent_b);
+    float half_a = ref_half[tangent_a];
+    float half_b = ref_half[tangent_b];
     const float center_a = ra_dot(reference_center, side_a);
     const float center_b = ra_dot(reference_center, side_b);
     count = pl_sclip(input, count, scratch, side_a,
         center_a + half_a);
-    count = pl_sclip(scratch, count, input, pl_sat_neg(side_a),
+    count = pl_sclip(scratch, count, input, ra_scale(side_a, -1.0f),
         -center_a + half_a);
     count = pl_sclip(input, count, scratch, side_b,
         center_b + half_b);
-    count = pl_sclip(scratch, count, input, pl_sat_neg(side_b),
+    count = pl_sclip(scratch, count, input, ra_scale(side_b, -1.0f),
         -center_b + half_b);
 
     if (count <= 0) {
@@ -419,8 +440,9 @@ RA_D static RA_INLINE int pl_sman(
         int best = -1;
         float best_projection = -3.402823466e+38f;
         for (int index = 0; index < count; ++index) {
-            if (pl_sused(
-                    selected, selected_count, index)) continue;
+            if (pl_sused(selected, selected_count, index)) {
+                continue;
+            }
             const float projection = direction_a[corner]
                     * ra_dot(input[index], side_a)
                 + direction_b[corner] * ra_dot(input[index], side_b);
@@ -461,8 +483,23 @@ RA_D static RA_INLINE int pl_sman(
             contact.point_a = incident_point;
             contact.point_b = reference_point;
         }
-        if (pl_sdup(
-                manifold, contact.point_a, contact.point_b)) continue;
+        int duplicate = 0;
+        float epsilon_squared = PL_SAT_MANIFOLD_DUPLICATE_EPSILON
+            * PL_SAT_MANIFOLD_DUPLICATE_EPSILON;
+        for (int dup = 0; dup < manifold->count; ++dup) {
+            RaVec3 delta_a = ra_sub(contact.point_a,
+                manifold->point[dup].point_a);
+            RaVec3 delta_b = ra_sub(contact.point_b,
+                manifold->point[dup].point_b);
+            if (ra_dot(delta_a, delta_a) <= epsilon_squared
+                    && ra_dot(delta_b, delta_b) <= epsilon_squared) {
+                duplicate = 1;
+                break;
+            }
+        }
+        if (duplicate) {
+            continue;
+        }
         int output_index = manifold->count++;
         manifold->point[output_index] = contact;
         manifold->point_feature[output_index] = pl_sfid(
@@ -479,29 +516,6 @@ RA_D static RA_INLINE int pl_sman(
         manifold->count = 1;
     }
     return manifold->count;
-}
-
-RA_D static RA_INLINE PlSatQuery pl_sssph(
-        const RaConvexShape* a, const RaConvexShape* b, float margin) {
-    PlSatQuery query;
-    memset(&query, 0, sizeof(query));
-    RaVec3 delta = ra_sub(a->pose.position, b->pose.position);
-    float distance_squared = ra_dot(delta, delta);
-    float distance = sqrtf(ra_max(distance_squared, 0.0f));
-    RaVec3 normal = distance > 1.0e-10f
-        ? ra_scale(delta, 1.0f / distance) : ra_v3(1, 0, 0);
-    float radius_a = a->half_extents.x;
-    float radius_b = b->half_extents.x;
-    query.contact.iterations = 1;
-    query.contact.separation = distance - radius_a - radius_b;
-    query.contact.normal = normal;
-    query.contact.point_a = ra_sub(
-        a->pose.position, ra_scale(normal, radius_a));
-    query.contact.point_b = ra_add(
-        b->pose.position, ra_scale(normal, radius_b));
-    query.contact.hit = query.contact.separation <= margin;
-    query.feature = PL_SAT_FACE_A_X;
-    return query;
 }
 
 RA_D static RA_INLINE PlSatQuery pl_ssbox(
@@ -567,7 +581,25 @@ RA_D static RA_INLINE PlSatQuery pl_ssbox(
 RA_D static RA_INLINE PlSatQuery pl_sq(
         const RaConvexShape* a, const RaConvexShape* b, float margin) {
     if (a->type == RA_CONVEX_SPHERE && b->type == RA_CONVEX_SPHERE) {
-        return pl_sssph(a, b, margin);
+        PlSatQuery query;
+        memset(&query, 0, sizeof(query));
+        RaVec3 delta = ra_sub(a->pose.position, b->pose.position);
+        float distance_squared = ra_dot(delta, delta);
+        float distance = sqrtf(ra_max(distance_squared, 0.0f));
+        RaVec3 normal = distance > 1.0e-10f
+            ? ra_scale(delta, 1.0f / distance) : ra_v3(1, 0, 0);
+        float radius_a = a->half_extents.x;
+        float radius_b = b->half_extents.x;
+        query.contact.iterations = 1;
+        query.contact.separation = distance - radius_a - radius_b;
+        query.contact.normal = normal;
+        query.contact.point_a = ra_sub(
+            a->pose.position, ra_scale(normal, radius_a));
+        query.contact.point_b = ra_add(
+            b->pose.position, ra_scale(normal, radius_b));
+        query.contact.hit = query.contact.separation <= margin;
+        query.feature = PL_SAT_FACE_A_X;
+        return query;
     }
     if (a->type == RA_CONVEX_SPHERE && b->type == RA_CONVEX_BOX) {
         return pl_ssbox(a, b, margin);
@@ -577,7 +609,7 @@ RA_D static RA_INLINE PlSatQuery pl_sq(
         RaVec3 point = query.contact.point_a;
         query.contact.point_a = query.contact.point_b;
         query.contact.point_b = point;
-        query.contact.normal = pl_sat_neg(query.contact.normal);
+        query.contact.normal = ra_scale(query.contact.normal, -1.0f);
         query.feature -= PL_SAT_FACE_B_X;
         return query;
     }
@@ -609,23 +641,89 @@ RA_D static RA_INLINE int pl_smans(
         &box_a, &box_b, margin, &query, manifold);
 }
 
-#define PL_IMPULSE_MAX_POINTS PL_SAT_MAX_MANIFOLD_POINTS
+RA_D static RA_INLINE RaQuat ra_qint(
+        RaQuat rotation, RaVec3 angular_velocity, float dt) {
+    float speed = ra_length(angular_velocity);
+    if (speed < 1.0e-8f) {
+        return ra_qnorm(rotation);
+    }
+    RaQuat increment = ra_qaxis(
+        ra_scale(angular_velocity, 1.0f / speed), speed * dt);
+    return ra_qnorm(ra_qmul(increment, rotation));
+}
+
+RA_D static RA_INLINE RaVec3 ra_invi(
+        const RaRigidBody* body, RaVec3 vector) {
+    RaInertia3 inertia = body->local_inertia;
+    RaVec3 local = ra_rotate(ra_qconj(body->pose.rotation), vector);
+    float cofactor_xx = inertia.yy*inertia.zz - inertia.yz*inertia.yz;
+    float cofactor_xy = inertia.xz*inertia.yz - inertia.xy*inertia.zz;
+    float cofactor_xz = inertia.xy*inertia.yz - inertia.xz*inertia.yy;
+    float cofactor_yy = inertia.xx*inertia.zz - inertia.xz*inertia.xz;
+    float cofactor_yz = inertia.xy*inertia.xz - inertia.xx*inertia.yz;
+    float cofactor_zz = inertia.xx*inertia.yy - inertia.xy*inertia.xy;
+    float determinant = inertia.xx*cofactor_xx
+        + inertia.xy*cofactor_xy + inertia.xz*cofactor_xz;
+    float inverse = 1.0f / ra_max(fabsf(determinant), 1.0e-18f);
+    if (determinant < 0.0f) {
+        inverse = -inverse;
+    }
+    RaVec3 product = ra_v3(
+        inverse*(cofactor_xx*local.x + cofactor_xy*local.y
+            + cofactor_xz*local.z),
+        inverse*(cofactor_xy*local.x + cofactor_yy*local.y
+            + cofactor_yz*local.z),
+        inverse*(cofactor_xz*local.x + cofactor_yz*local.y
+            + cofactor_zz*local.z));
+    return ra_rotate(body->pose.rotation, product);
+}
+
+RA_D static RA_INLINE void ra_impa(
+        RaRigidBody* body, RaVec3 point, RaVec3 impulse) {
+    if (body->mass <= 0.0f) {
+        return;
+    }
+    body->linear_velocity = ra_add(body->linear_velocity,
+        ra_scale(impulse, 1.0f / body->mass));
+    body->angular_velocity = ra_add(body->angular_velocity,
+        ra_invi(body,
+            ra_cross(ra_sub(point, body->pose.position), impulse)));
+}
+
+RA_D static RA_INLINE float ra_impd(
+        const RaRigidBody* body, RaVec3 point, RaVec3 direction) {
+    if (body->mass <= 0.0f) {
+        return 0.0f;
+    }
+    RaVec3 lever = ra_sub(point, body->pose.position);
+    RaVec3 angular = ra_cross(lever, direction);
+    return 1.0f / body->mass + ra_dot(angular,
+        ra_invi(body, angular));
+}
+
+RA_D static RA_INLINE float ra_brad(
+        const RaConvexShape* shape) {
+    return shape->type == RA_CONVEX_SPHERE
+        ? shape->half_extents.x : ra_length(shape->half_extents);
+}
+
+RA_D static RA_INLINE void ra_applyr(
+        RaState* state, const float response[RA_DOF], float magnitude) {
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        state->qd[joint] += response[joint] * magnitude;
+    }
+}
+
 #define PL_IMPULSE_MAX_CACHE 192
-#define PL_IMPULSE_MAX_SOLVER_ITERS 64
 #define PL_IMPULSE_EPSILON 1.0e-8f
 
 typedef struct PlImpulseConfig {
     int velocity_iterations;
     int position_iterations;
     float velocity_impulse_tolerance;  // 0 disables; does not lower the hard cap
-    int warm_start;
-    int split_position;
     float position_beta;
     float slop;
     float speculative_margin;
-    float static_friction;
-    float dynamic_friction;
-    float restitution;
     float restitution_threshold;
     float max_normal_impulse;
     float max_position_correction;
@@ -649,11 +747,11 @@ typedef struct PlImpulseCandidate {
 } PlImpulseCandidate;
 
 typedef struct PlImpulseReaction {
-    int active;  // mass==0 proxy; live qd/jaw, not cached body_b velocity
+    int active;  // mass==0 proxy; live qd/gripper, not cached body_b velocity
     float inverse_mass[3];
-    float jaw_velocity_response[3];
+    float gripper_velocity_response[3];
     float robot_jacobian[3][RA_DOF];
-    float jaw_jacobian[3];
+    float gripper_jacobian[3];
     float robot_response[3][RA_DOF];
 } PlImpulseReaction;
 
@@ -709,7 +807,7 @@ typedef struct PlImpulseManifold {
     PlImpulseAngularReaction angular_reaction;
     uint32_t angular_cache_feature;  // independent of point[0].feature
     int point_count;
-    PlImpulsePoint points[PL_IMPULSE_MAX_POINTS];
+    PlImpulsePoint points[PL_SAT_MAX_MANIFOLD_POINTS];
 } PlImpulseManifold;
 
 typedef struct PlImpulseCacheEntry {
@@ -780,41 +878,6 @@ RA_D static RA_INLINE RaVec3 pl_ipt(
         candidate->contact.point_b), 0.5f);
 }
 
-RA_D static RA_INLINE int pl_ibef(
-        const PlImpulseCandidate* left, const PlImpulseCandidate* right) {
-    if (left->feature != right->feature) {
-        return left->feature < right->feature;
-    }
-    if (left->contact.separation != right->contact.separation) {
-        return left->contact.separation < right->contact.separation;
-    }
-    RaVec3 left_point = pl_ipt(left);
-    RaVec3 right_point = pl_ipt(right);
-    if (left_point.x != right_point.x) {
-        return left_point.x < right_point.x;
-    }
-    if (left_point.y != right_point.y) {
-        return left_point.y < right_point.y;
-    }
-    return left_point.z < right_point.z;
-}
-
-RA_D static RA_INLINE int pl_ius(
-        const PlImpulseCandidate* candidate, float margin) {
-    const RaConvexContact* contact = &candidate->contact;
-    if (!pl_ifin(contact->separation)
-            || !pl_ifin(contact->normal.x)
-            || !pl_ifin(contact->normal.y)
-            || !pl_ifin(contact->normal.z)) return 0;
-    if (!pl_ifin(contact->point_a.x)
-            || !pl_ifin(contact->point_a.y)
-            || !pl_ifin(contact->point_a.z)
-            || !pl_ifin(contact->point_b.x)
-            || !pl_ifin(contact->point_b.y)
-            || !pl_ifin(contact->point_b.z)) return 0;
-    return contact->hit || contact->separation <= margin;
-}
-
 RA_D static RA_INLINE int pl_iman(
         int body_a, int body_b, const PlImpulseCandidate* candidates,
         int candidate_count, float margin, float static_friction,
@@ -838,7 +901,18 @@ RA_D static RA_INLINE int pl_iman(
     int count = ra_min(ra_max(candidate_count, 0), PL_IMPULSE_MAX_CANDIDATES);
     int usable = 0;
     for (int index = 0; index < count; ++index) {
-        if (!pl_ius(&candidates[index], margin)) {
+        const RaConvexContact* contact = &candidates[index].contact;
+        if (!pl_ifin(contact->separation)
+                || !pl_ifin(contact->normal.x)
+                || !pl_ifin(contact->normal.y)
+                || !pl_ifin(contact->normal.z)
+                || !pl_ifin(contact->point_a.x)
+                || !pl_ifin(contact->point_a.y)
+                || !pl_ifin(contact->point_a.z)
+                || !pl_ifin(contact->point_b.x)
+                || !pl_ifin(contact->point_b.y)
+                || !pl_ifin(contact->point_b.z)
+                || !(contact->hit || contact->separation <= margin)) {
             continue;
         }
         if (usable >= PL_IMPULSE_MAX_CANDIDATES) {
@@ -850,8 +924,30 @@ RA_D static RA_INLINE int pl_iman(
     for (int index = 1; index < usable; ++index) {
         PlImpulseCandidate value = work[index];
         int cursor = index;
-        while (cursor > 0
-                && pl_ibef(&value, &work[cursor - 1])) {
+        while (cursor > 0) {
+            const PlImpulseCandidate* left = &value;
+            const PlImpulseCandidate* right = &work[cursor - 1];
+            int before = 0;
+            if (left->feature != right->feature) {
+                before = left->feature < right->feature;
+            } else if (left->contact.separation
+                    != right->contact.separation) {
+                before = left->contact.separation
+                    < right->contact.separation;
+            } else {
+                RaVec3 left_point = pl_ipt(left);
+                RaVec3 right_point = pl_ipt(right);
+                if (left_point.x != right_point.x) {
+                    before = left_point.x < right_point.x;
+                } else if (left_point.y != right_point.y) {
+                    before = left_point.y < right_point.y;
+                } else {
+                    before = left_point.z < right_point.z;
+                }
+            }
+            if (!before) {
+                break;
+            }
             work[cursor] = work[cursor - 1];
             --cursor;
         }
@@ -864,19 +960,23 @@ RA_D static RA_INLINE int pl_iman(
     int unique = 0;
     for (int index = 0; index < usable; ++index) {
         if (unique > 0 && work[index].feature
-                == work[unique - 1].feature) continue;
+                == work[unique - 1].feature) {
+            continue;
+        }
         work[unique++] = work[index];
     }
     usable = unique;
-    int selected[PL_IMPULSE_MAX_POINTS];
+    int selected[PL_SAT_MAX_MANIFOLD_POINTS];
     int selected_count = 0;
     int deepest = 0;
     for (int index = 1; index < usable; ++index) {
         if (work[index].contact.separation
-                < work[deepest].contact.separation) deepest = index;
+                < work[deepest].contact.separation) {
+            deepest = index;
+        }
     }
     selected[selected_count++] = deepest;
-    while (selected_count < PL_IMPULSE_MAX_POINTS
+    while (selected_count < PL_SAT_MAX_MANIFOLD_POINTS
             && selected_count < usable) {
         int best = -1;
         float best_score = -1.0f;
@@ -968,8 +1068,7 @@ RA_D static RA_INLINE int pl_iman(
 
 RA_D static RA_INLINE void pl_isort(
         PlImpulseManifold* manifolds, int manifold_count) {
-    int count = ra_min(ra_max(manifold_count, 0), PL_IMPULSE_MAX_MANIFOLDS);
-    for (int index = 1; index < count; ++index) {
+    for (int index = 1; index < manifold_count; ++index) {
         PlImpulseManifold value = manifolds[index];
         int cursor = index;
         while (cursor > 0) {
@@ -985,9 +1084,7 @@ RA_D static RA_INLINE void pl_isort(
             } else if (left->point_count != right->point_count) {
                 before = left->point_count < right->point_count;
             } else {
-                int point_count = ra_min(ra_max(left->point_count, 0),
-                    PL_IMPULSE_MAX_POINTS);
-                for (int point = 0; point < point_count; ++point) {
+                for (int point = 0; point < left->point_count; ++point) {
                     if (left->points[point].feature
                             != right->points[point].feature) {
                         before = left->points[point].feature
@@ -1020,7 +1117,9 @@ RA_D static RA_INLINE int pl_ifind(
         const PlImpulseCacheEntry* entry = &cache->entries[index];
         if (entry->pair_key == pair_key
                 && entry->body_a == body_a && entry->body_b == body_b
-                && entry->feature == feature) return index;
+                && entry->feature == feature) {
+            return index;
+        }
     }
     return -1;
 }
@@ -1039,38 +1138,21 @@ RA_D static RA_INLINE int pl_islot(
     for (int index = 1; index < cache->count; ++index) {
         const PlImpulseCacheEntry* left = &cache->entries[index];
         const PlImpulseCacheEntry* right = &cache->entries[best];
-        if (left->stamp < right->stamp
-                || (left->stamp == right->stamp
-                    && (left->pair_key < right->pair_key
-                        || (left->pair_key == right->pair_key
-                            && (left->feature < right->feature
-                                || (left->feature == right->feature
-                                    && index < best)))))) best = index;
+        int better = 0;
+        if (left->stamp != right->stamp) {
+            better = left->stamp < right->stamp;
+        } else if (left->pair_key != right->pair_key) {
+            better = left->pair_key < right->pair_key;
+        } else if (left->feature != right->feature) {
+            better = left->feature < right->feature;
+        } else {
+            better = index < best;
+        }
+        if (better) {
+            best = index;
+        }
     }
     return best;
-}
-
-RA_D static RA_INLINE void pl_iexp(
-        PlImpulseCache* cache, int max_age) {
-    int write = 0;
-    for (int read = 0; read < cache->count; ++read) {
-        PlImpulseCacheEntry* entry = &cache->entries[read];
-        uint32_t age = cache->tick - entry->stamp;
-        if (age > (uint32_t)max_age) {
-            continue;
-        }
-        if (write != read) {
-            cache->entries[write] = *entry;
-        }
-        ++write;
-    }
-    cache->count = write;
-}
-
-RA_D static RA_INLINE RaVec3 pl_ianch(
-        const RaRigidBody* body, RaVec3 local) {
-    return ra_add(body->pose.position,
-        ra_rotate(body->pose.rotation, local));
 }
 
 RA_D static RA_INLINE float pl_imass(
@@ -1079,8 +1161,7 @@ RA_D static RA_INLINE float pl_imass(
         const PlImpulseReaction* reaction, int direction_index) {
     float denominator = ra_impd(body_a, point_a, direction)
         + ra_impd(body_b, point_b, direction);
-    if (reaction != NULL && reaction->active
-            && direction_index >= 0 && direction_index < 3) {
+    if (reaction->active) {
         denominator += ra_max(reaction->inverse_mass[direction_index], 0.0f);
     }
     return denominator;
@@ -1096,37 +1177,13 @@ RA_D static RA_INLINE void pl_iap(
 RA_D static RA_INLINE void pl_iar(
         const PlImpulseReaction* reaction, RaState* reaction_state,
         int direction_index, float impulse) {
-    if (reaction == NULL || !reaction->active || reaction_state == NULL
-            || direction_index < 0 || direction_index >= 3) return;
+    if (!reaction->active) {
+        return;
+    }
     ra_applyr(reaction_state,
         reaction->robot_response[direction_index], -impulse);
     reaction_state->gripper_velocity +=
-        reaction->jaw_velocity_response[direction_index] * impulse;
-}
-
-RA_D static RA_INLINE void pl_iupo(
-        PlImpulseManifold* manifolds, int manifold_count,
-        const float delta_q[RA_DOF], float delta_width) {
-    int count = ra_min(ra_max(manifold_count, 0),
-        PL_IMPULSE_MAX_MANIFOLDS);
-    for (int manifold_index = 0; manifold_index < count;
-            ++manifold_index) {
-        PlImpulseManifold* manifold = &manifolds[manifold_index];
-        for (int point_index = 0; point_index < manifold->point_count;
-                ++point_index) {
-            PlImpulsePoint* point = &manifold->points[point_index];
-            if (!point->reaction.active) {
-                continue;
-            }
-            float displacement = point->reaction.jaw_jacobian[0]
-                * delta_width;
-            for (int joint = 0; joint < RA_DOF; ++joint) {
-                displacement += point->reaction.robot_jacobian[0][joint]
-                    * delta_q[joint];
-            }
-            point->prescribed_separation_offset -= displacement;
-        }
-    }
+        reaction->gripper_velocity_response[direction_index] * impulse;
 }
 
 RA_D static RA_INLINE float pl_ibvel(
@@ -1143,7 +1200,7 @@ RA_D static RA_INLINE float pl_irvel(
         RaVec3 point, RaVec3 direction) {
     if (reaction != NULL && reaction->active && reaction_state != NULL
             && direction_index >= 0 && direction_index < 3) {
-        float velocity = reaction->jaw_jacobian[direction_index]
+        float velocity = reaction->gripper_jacobian[direction_index]
             * reaction_state->gripper_velocity;
         for (int joint = 0; joint < RA_DOF; ++joint) {
             velocity += reaction->robot_jacobian[direction_index][joint]
@@ -1178,7 +1235,7 @@ RA_D static RA_INLINE void pl_iaap(
 RA_D static RA_INLINE void pl_iaar(
         const PlImpulseAngularReaction* reaction, RaState* reaction_state,
         float moment) {
-    if (reaction == NULL || !reaction->active || reaction_state == NULL) {
+    if (!reaction->active) {
         return;
     }
     ra_applyr(reaction_state,
@@ -1202,22 +1259,20 @@ RA_D static RA_INLINE void pl_iapos(
 RA_D static RA_INLINE void pl_iref(
         RaRigidBody* body_a, RaRigidBody* body_b,
         const PlImpulseManifold* manifold, PlImpulsePoint* point) {
-    point->point_a = pl_ianch(body_a, point->local_a);
-    point->point_b = pl_ianch(body_b, point->local_b);
+    point->point_a = ra_add(body_a->pose.position,
+        ra_rotate(body_a->pose.rotation, point->local_a));
+    point->point_b = ra_add(body_b->pose.position,
+        ra_rotate(body_b->pose.rotation, point->local_b));
     point->separation = ra_dot(ra_sub(point->point_a, point->point_b),
         manifold->normal) + point->prescribed_separation_offset;
 }
 
 RA_D static RA_INLINE void pl_ildc(
         const PlImpulseCache* cache, PlImpulseManifold* manifold,
-        PlImpulsePoint* point, int warm_start, int max_age) {
+        PlImpulsePoint* point, int max_age) {
     point->normal_impulse = 0.0f;
     point->tangent_1_impulse = 0.0f;
     point->tangent_2_impulse = 0.0f;
-    if (!warm_start) {
-        return;
-    }
-    assert(cache != NULL);
     int slot = pl_ifind(cache, manifold->body_a,
         manifold->body_b, point->feature);
     if (slot < 0) {
@@ -1246,11 +1301,8 @@ RA_D static RA_INLINE void pl_ildc(
 
 RA_D static RA_INLINE void pl_ilda(
         const PlImpulseCache* cache, PlImpulseManifold* manifold,
-        int warm_start, int max_age) {
+        int max_age) {
     manifold->torsional_impulse = 0.0f;
-    if (!warm_start || cache == NULL) {
-        return;
-    }
     int slot = pl_ifind(cache, manifold->body_a,
         manifold->body_b, manifold->angular_cache_feature);
     if (slot < 0) {
@@ -1268,16 +1320,14 @@ RA_D static RA_INLINE void pl_iprep(
         RaRigidBody* bodies, int body_count, PlImpulseManifold* manifolds,
         int manifold_count, const PlImpulseCache* cache,
         const PlImpulseConfig* config) {
-    int count = ra_min(ra_max(manifold_count, 0), PL_IMPULSE_MAX_MANIFOLDS);
-    for (int manifold_index = 0; manifold_index < count; ++manifold_index) {
+    assert(manifold_count >= 0 && manifold_count <= PL_IMPULSE_MAX_MANIFOLDS);
+    for (int manifold_index = 0; manifold_index < manifold_count;
+            ++manifold_index) {
         PlImpulseManifold* manifold = &manifolds[manifold_index];
-        if (manifold->body_a < 0 || manifold->body_b < 0
-                || manifold->body_a >= body_count
-                || manifold->body_b >= body_count
-                || manifold->body_a == manifold->body_b) {
-            manifold->point_count = 0;
-            continue;
-        }
+        assert(manifold->body_a >= 0 && manifold->body_b >= 0
+            && manifold->body_a < body_count
+            && manifold->body_b < body_count
+            && manifold->body_a != manifold->body_b);
         RaRigidBody* body_a = &bodies[manifold->body_a];
         RaRigidBody* body_b = &bodies[manifold->body_b];
         manifold->normal = pl_inrm(manifold->normal,
@@ -1288,10 +1338,10 @@ RA_D static RA_INLINE void pl_iprep(
         manifold->dynamic_friction = ra_clamp(manifold->dynamic_friction,
             0.0f, manifold->static_friction);
         manifold->restitution = ra_clamp(manifold->restitution, 0.0f, 1.0f);
-        int point_count = ra_min(ra_max(manifold->point_count, 0),
-            PL_IMPULSE_MAX_POINTS);
-        manifold->point_count = point_count;
-        for (int point_index = 0; point_index < point_count; ++point_index) {
+        assert(manifold->point_count >= 0
+            && manifold->point_count <= PL_SAT_MAX_MANIFOLD_POINTS);
+        for (int point_index = 0; point_index < manifold->point_count;
+                ++point_index) {
             PlImpulsePoint* point = &manifold->points[point_index];
             point->local_a = ra_rotate(ra_qconj(body_a->pose.rotation),
                 ra_sub(point->point_a, body_a->pose.position));
@@ -1313,11 +1363,9 @@ RA_D static RA_INLINE void pl_iprep(
                     body_b, point->point_b, manifold->tangent_2,
                     &point->reaction, 2),
                 PL_IMPULSE_EPSILON);
-            pl_ildc(cache, manifold, point,
-                config->warm_start != 0, config->cache_max_age);
+            pl_ildc(cache, manifold, point, config->cache_max_age);
         }
-        pl_ilda(cache, manifold,
-            config->warm_start != 0, config->cache_max_age);
+        pl_ilda(cache, manifold, config->cache_max_age);
         if (manifold->torsional_radius > 0.0f) {
             float denominator = pl_iam(
                 body_a, manifold->normal)
@@ -1333,21 +1381,15 @@ RA_D static RA_INLINE void pl_ispos(
         RaRigidBody* bodies, int body_count, PlImpulseManifold* manifolds,
         int manifold_count, const PlImpulseConfig* config,
         RaState* reaction_state) {
-    if (!config->split_position) {
-        return;
-    }
-    int count = ra_min(ra_max(manifold_count, 0), PL_IMPULSE_MAX_MANIFOLDS);
-    int iterations = ra_min(ra_max(config->position_iterations, 0),
-        PL_IMPULSE_MAX_SOLVER_ITERS);
-    for (int iteration = 0; iteration < iterations; ++iteration) {
+    for (int iteration = 0; iteration < config->position_iterations;
+            ++iteration) {
         float maximum_penetration = 0.0f;
-        for (int manifold_index = 0; manifold_index < count;
+        for (int manifold_index = 0; manifold_index < manifold_count;
                 ++manifold_index) {
             PlImpulseManifold* manifold = &manifolds[manifold_index];
-            if (manifold->point_count <= 0
-                    || manifold->body_a < 0 || manifold->body_b < 0
-                    || manifold->body_a >= body_count
-                    || manifold->body_b >= body_count) continue;
+            if (manifold->point_count <= 0) {
+                continue;
+            }
             RaRigidBody* body_a = &bodies[manifold->body_a];
             RaRigidBody* body_b = &bodies[manifold->body_b];
             for (int point_index = 0; point_index < manifold->point_count;
@@ -1360,40 +1402,57 @@ RA_D static RA_INLINE void pl_ispos(
                 if (penetration <= 0.0f) {
                     continue;
                 }
-                float correction = config->position_beta * penetration;
-                correction = ra_min(correction,
-                    ra_max(config->max_position_correction, 0.0f));
+                float correction = ra_min(
+                    config->position_beta * penetration,
+                    config->max_position_correction);
                 float denominator = pl_imass(body_a,
                     point->point_a, body_b, point->point_b, manifold->normal,
                     &point->reaction, 0) + point->normal_cfm;
                 if (denominator <= PL_IMPULSE_EPSILON) {
                     continue;
                 }
-                float magnitude = correction / denominator;
-                magnitude = ra_min(magnitude,
-                    ra_max(config->max_position_impulse, 0.0f));
+                float magnitude = ra_min(correction / denominator,
+                    config->max_position_impulse);
                 pl_iapos(body_a, point->point_a,
                     ra_scale(manifold->normal, magnitude));
                 pl_iapos(body_b, point->point_b,
                     ra_scale(manifold->normal, -magnitude));
                 float delta_q[RA_DOF] = {0.0f};
                 float delta_width = 0.0f;
-                if (reaction_state != NULL && point->reaction.active) {
+                if (point->reaction.active) {
                     for (int joint = 0; joint < RA_DOF; ++joint) {
                         delta_q[joint] = -magnitude
                             * point->reaction.robot_response[0][joint];
                     }
                     delta_width = magnitude
-                        * point->reaction.jaw_velocity_response[0];
+                        * point->reaction.gripper_velocity_response[0];
                     ra_applyr(reaction_state,
                         point->reaction.robot_response[0], -magnitude);
                     reaction_state->gripper_width +=
-                        point->reaction.jaw_velocity_response[0] * magnitude;
+                        point->reaction.gripper_velocity_response[0] * magnitude;
                     reaction_state->gripper_width = ra_clamp(
                         reaction_state->gripper_width, 0.0f, 0.20f);
                 }
-                pl_iupo(manifolds,
-                    manifold_count, delta_q, delta_width);
+                for (int other = 0; other < manifold_count; ++other) {
+                    PlImpulseManifold* other_manifold = &manifolds[other];
+                    for (int other_point = 0;
+                            other_point < other_manifold->point_count;
+                            ++other_point) {
+                        PlImpulsePoint* offset =
+                            &other_manifold->points[other_point];
+                        if (!offset->reaction.active) {
+                            continue;
+                        }
+                        float displacement = offset->reaction.gripper_jacobian[0]
+                            * delta_width;
+                        for (int joint = 0; joint < RA_DOF; ++joint) {
+                            displacement +=
+                                offset->reaction.robot_jacobian[0][joint]
+                                * delta_q[joint];
+                        }
+                        offset->prescribed_separation_offset -= displacement;
+                    }
+                }
             }
         }
         if (maximum_penetration <= config->slop) {
@@ -1407,12 +1466,9 @@ RA_D static RA_INLINE void pl_ibias(
         int manifold_count, float dt, const PlImpulseConfig* config,
         RaState* reaction_state) {
     float safe_dt = ra_max(dt, PL_IMPULSE_EPSILON);
-    int count = ra_min(ra_max(manifold_count, 0), PL_IMPULSE_MAX_MANIFOLDS);
-    for (int manifold_index = 0; manifold_index < count; ++manifold_index) {
+    for (int manifold_index = 0; manifold_index < manifold_count;
+            ++manifold_index) {
         PlImpulseManifold* manifold = &manifolds[manifold_index];
-        if (manifold->body_a < 0 || manifold->body_b < 0
-                || manifold->body_a >= body_count
-                || manifold->body_b >= body_count) continue;
         RaRigidBody* body_a = &bodies[manifold->body_a];
         RaRigidBody* body_b = &bodies[manifold->body_b];
         for (int point_index = 0; point_index < manifold->point_count;
@@ -1462,15 +1518,6 @@ RA_D static RA_INLINE void pl_ibias(
             point->velocity_bias = active_bias;
         }
     }
-}
-
-RA_D static RA_INLINE float pl_intot(
-        const PlImpulseManifold* manifold) {
-    float total = 0.0f;
-    for (int point = 0; point < manifold->point_count; ++point) {
-        total += ra_max(manifold->points[point].normal_impulse, 0.0f);
-    }
-    return total;
 }
 
 RA_D static RA_INLINE float pl_ialim(
@@ -1524,33 +1571,62 @@ RA_D static RA_INLINE float pl_ialim(
     return limit;
 }
 
-RA_D static RA_INLINE void pl_iaws(
-        RaRigidBody* body_a, RaRigidBody* body_b,
-        PlImpulseManifold* manifold, RaState* reaction_state) {
-    if (manifold->angular_reaction.active == 0) {
-        return;
+RA_D static RA_INLINE void pl_iws(
+        RaRigidBody* bodies, int body_count, PlImpulseManifold* manifolds,
+        int manifold_count, RaState* reaction_state) {
+    for (int manifold_index = 0; manifold_index < manifold_count;
+            ++manifold_index) {
+        PlImpulseManifold* manifold = &manifolds[manifold_index];
+        RaRigidBody* body_a = &bodies[manifold->body_a];
+        RaRigidBody* body_b = &bodies[manifold->body_b];
+        for (int point_index = 0; point_index < manifold->point_count;
+                ++point_index) {
+            PlImpulsePoint* point = &manifold->points[point_index];
+            RaVec3 impulse = ra_add(
+                ra_scale(manifold->normal, point->normal_impulse),
+                ra_add(ra_scale(manifold->tangent_1,
+                    point->tangent_1_impulse),
+                    ra_scale(manifold->tangent_2,
+                        point->tangent_2_impulse)));
+            pl_iap(body_a, point->point_a, body_b,
+                point->point_b, impulse);
+            pl_iar(&point->reaction, reaction_state,
+                0, point->normal_impulse);
+            pl_iar(&point->reaction, reaction_state,
+                1, point->tangent_1_impulse);
+            pl_iar(&point->reaction, reaction_state,
+                2, point->tangent_2_impulse);
+        }
+        if (manifold->angular_reaction.active == 0) {
+            continue;
+        }
+        float angular_limit = pl_ialim(manifold,
+            manifold->static_friction);
+        float angular_length = sqrtf(manifold->torsional_impulse
+            * manifold->torsional_impulse);
+        if (angular_length > angular_limit) {
+            float scale = angular_limit
+                / ra_max(angular_length, PL_IMPULSE_EPSILON);
+            manifold->torsional_impulse *= scale;
+        }
+        pl_iaap(body_a, body_b, manifold->normal,
+            manifold->torsional_impulse);
+        pl_iaar(&manifold->angular_reaction,
+            reaction_state, manifold->torsional_impulse);
     }
-    float angular_limit = pl_ialim(manifold,
-        manifold->static_friction);
-    float angular_length = sqrtf(manifold->torsional_impulse
-        * manifold->torsional_impulse);
-    if (angular_length > angular_limit) {
-        float scale = angular_limit
-            / ra_max(angular_length, PL_IMPULSE_EPSILON);
-        manifold->torsional_impulse *= scale;
-    }
-    pl_iaap(body_a, body_b, manifold->normal,
-        manifold->torsional_impulse);
-    pl_iaar(&manifold->angular_reaction,
-        reaction_state, manifold->torsional_impulse);
 }
 
 RA_D static RA_INLINE void pl_iafr(
         RaRigidBody* body_a, RaRigidBody* body_b,
         PlImpulseManifold* manifold, RaState* reaction_state) {
     if (manifold->angular_reaction.active == 0
-            || manifold->torsional_radius <= 0.0f) return;
-    float normal = pl_intot(manifold);
+            || manifold->torsional_radius <= 0.0f) {
+        return;
+    }
+    float normal = 0.0f;
+    for (int point = 0; point < manifold->point_count; ++point) {
+        normal += ra_max(manifold->points[point].normal_impulse, 0.0f);
+    }
     if (normal <= PL_IMPULSE_EPSILON) {
         manifold->torsional_impulse = 0.0f;
         return;
@@ -1584,62 +1660,21 @@ RA_D static RA_INLINE void pl_iafr(
         reaction_state, torsion_delta);
 }
 
-RA_D static RA_INLINE void pl_iws(
-        RaRigidBody* bodies, int body_count, PlImpulseManifold* manifolds,
-        int manifold_count, const PlImpulseConfig* config,
-        RaState* reaction_state) {
-    if (!config->warm_start) {
-        return;
-    }
-    int count = ra_min(ra_max(manifold_count, 0), PL_IMPULSE_MAX_MANIFOLDS);
-    for (int manifold_index = 0; manifold_index < count; ++manifold_index) {
-        PlImpulseManifold* manifold = &manifolds[manifold_index];
-        if (manifold->body_a < 0 || manifold->body_b < 0
-                || manifold->body_a >= body_count
-                || manifold->body_b >= body_count) continue;
-        RaRigidBody* body_a = &bodies[manifold->body_a];
-        RaRigidBody* body_b = &bodies[manifold->body_b];
-        for (int point_index = 0; point_index < manifold->point_count;
-                ++point_index) {
-            PlImpulsePoint* point = &manifold->points[point_index];
-            RaVec3 impulse = ra_add(
-                ra_scale(manifold->normal, point->normal_impulse),
-                ra_add(ra_scale(manifold->tangent_1,
-                    point->tangent_1_impulse),
-                    ra_scale(manifold->tangent_2,
-                        point->tangent_2_impulse)));
-            pl_iap(body_a, point->point_a, body_b,
-                point->point_b, impulse);
-            pl_iar(&point->reaction, reaction_state,
-                0, point->normal_impulse);
-            pl_iar(&point->reaction, reaction_state,
-                1, point->tangent_1_impulse);
-            pl_iar(&point->reaction, reaction_state,
-                2, point->tangent_2_impulse);
-        }
-        pl_iaws(body_a, body_b, manifold,
-            reaction_state);
-    }
-}
-
 RA_D static RA_INLINE void pl_isvel(
         RaRigidBody* bodies, int body_count, PlImpulseManifold* manifolds,
         int manifold_count, const PlImpulseConfig* config,
         RaState* reaction_state) {
-    int count = ra_min(ra_max(manifold_count, 0), PL_IMPULSE_MAX_MANIFOLDS);
-    int iterations = ra_min(ra_max(config->velocity_iterations, 0),
-        PL_IMPULSE_MAX_SOLVER_ITERS);
     pl_iws(bodies, body_count, manifolds,
-        count, config, reaction_state);
-    for (int iteration = 0; iteration < iterations; ++iteration) {
+        manifold_count, reaction_state);
+    for (int iteration = 0; iteration < config->velocity_iterations;
+            ++iteration) {
         float maximum_impulse_delta = 0.0f;
-        for (int manifold_index = 0; manifold_index < count;
+        for (int manifold_index = 0; manifold_index < manifold_count;
                 ++manifold_index) {
             PlImpulseManifold* manifold = &manifolds[manifold_index];
-            if (manifold->point_count <= 0
-                    || manifold->body_a < 0 || manifold->body_b < 0
-                    || manifold->body_a >= body_count
-                    || manifold->body_b >= body_count) continue;
+            if (manifold->point_count <= 0) {
+                continue;
+            }
             RaRigidBody* body_a = &bodies[manifold->body_a];
             RaRigidBody* body_b = &bodies[manifold->body_b];
             float dynamic_friction = ra_clamp(manifold->dynamic_friction,
@@ -1661,7 +1696,7 @@ RA_D static RA_INLINE void pl_isvel(
                         - point->normal_cfm * old_normal)
                         * point->normal_mass;
                 candidate_normal = ra_clamp(candidate_normal, 0.0f,
-                    ra_max(config->max_normal_impulse, 0.0f));
+                    config->max_normal_impulse);
                 point->normal_impulse = candidate_normal;
                 maximum_impulse_delta = ra_max(maximum_impulse_delta,
                     fabsf(candidate_normal - old_normal));
@@ -1734,8 +1769,8 @@ RA_D static RA_INLINE void pl_isvel(
 RA_D static RA_INLINE void pl_iwrc(
         PlImpulseCache* cache, const PlImpulseManifold* manifolds,
         int manifold_count) {
-    int count = ra_min(ra_max(manifold_count, 0), PL_IMPULSE_MAX_MANIFOLDS);
-    for (int manifold_index = 0; manifold_index < count; ++manifold_index) {
+    for (int manifold_index = 0; manifold_index < manifold_count;
+            ++manifold_index) {
         const PlImpulseManifold* manifold = &manifolds[manifold_index];
         for (int point_index = 0; point_index < manifold->point_count;
                 ++point_index) {
@@ -1787,13 +1822,23 @@ RA_D static RA_INLINE void pl_isolve(
         RaRigidBody* bodies, int body_count, PlImpulseManifold* manifolds,
         int manifold_count, float dt, const PlImpulseConfig* config,
         PlImpulseCache* cache, RaState* reaction_state) {
-    assert(config != NULL);
-    assert(cache != NULL);
     cache->tick += 1u;
     if (cache->tick == 0u) {
         cache->tick = 1u;
     }
-    pl_iexp(cache, config->cache_max_age);
+    int write = 0;
+    for (int read = 0; read < cache->count; ++read) {
+        PlImpulseCacheEntry* entry = &cache->entries[read];
+        uint32_t age = cache->tick - entry->stamp;
+        if (age > (uint32_t)config->cache_max_age) {
+            continue;
+        }
+        if (write != read) {
+            cache->entries[write] = *entry;
+        }
+        ++write;
+    }
+    cache->count = write;
     pl_iprep(bodies, body_count, manifolds, manifold_count, cache,
         config);
     pl_ispos(bodies, body_count, manifolds, manifold_count,
@@ -1840,12 +1885,7 @@ typedef struct RaCudaRigidWorld {
     PlImpulseConfig config;
 } RaCudaRigidWorld;
 
-RA_D static RA_INLINE int ra_manok(
-        RaCudaRigidWorld* world) {
-    return world->manifold_count < PL_IMPULSE_MAX_MANIFOLDS;
-}
-
-typedef struct RaCudaProductionStaged {
+typedef struct RaStaged {
     float actions[RA_ACTIONS];
     float target_width;
     float energy;
@@ -1855,17 +1895,1192 @@ typedef struct RaCudaProductionStaged {
     RaPose links[RA_LINKS];
     RaVec3 origins[RA_DOF];
     RaVec3 axes[RA_DOF];
-} RaCudaProductionStaged;
+} RaStaged;
 
-typedef struct RaCudaProductionWorld {
+typedef struct RaWorld {
     RaState state;
     RaCudaRigidWorld rigid;
-    RaCudaProductionStaged staged;
-} RaCudaProductionWorld;
+    RaStaged staged;
+} RaWorld;
 
-RA_HD static RA_INLINE unsigned int ra_topo(
-        const RaState* state) {
-    return state->basketball_mode ? 3u : (state->stack_mode ? 2u : 1u);
+RA_D static RA_INLINE float ra_csup(
+        RaQuat rotation, RaVec3 direction) {
+    RaVec3 axes[3];
+    ra_caxes(rotation, axes);
+    return RA_CUBE_HALF * (fabsf(ra_dot(axes[0], direction))
+        + fabsf(ra_dot(axes[1], direction))
+        + fabsf(ra_dot(axes[2], direction)));
+}
+
+RA_D static RA_INLINE float ra_cup(RaQuat rotation) {
+    RaVec3 axes[3];
+    ra_caxes(rotation, axes);
+    float best = ra_max(fabsf(axes[0].y),
+        ra_max(fabsf(axes[1].y), fabsf(axes[2].y)));
+    return 1.0f - best;
+}
+
+RA_HD static RA_INLINE float ra_rand(
+        uint32_t* state, float low, float high) {
+    uint32_t value = *state;
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    *state = value ? value : 0x9e3779b9u;
+    float unit = (*state >> 8) * (1.0f / 16777216.0f);
+    return low + (high - low) * unit;
+}
+
+RA_D static RA_INLINE float ra_jmin(int joint) {
+    const float values[RA_DOF] = {-2.8973f, -1.7628f, -2.8973f, -3.0718f,
+        -2.8973f, -0.0175f, -2.8973f};
+    return values[joint];
+}
+
+RA_D static RA_INLINE float ra_jmax(int joint) {
+    const float values[RA_DOF] = {2.8973f, 1.7628f, 2.8973f, -0.0698f,
+        2.8973f, 3.7525f, 2.8973f};
+    return values[joint];
+}
+
+RA_D static void ra_massg(const RaState* state,
+        float matrix[RA_DOF][RA_DOF], float torque[RA_DOF]) {
+    float mass[RA_DYN_BODIES] = {
+        4.970684f, 0.646926f, 3.228604f, 3.587895f, 1.225946f,
+        1.666555f, 0.735522f, 0.730000f, 0.015000f, 0.015000f,
+    };
+    RaVec3 com_local[RA_DYN_BODIES] = {
+        { 0.003875f,  0.002081f, -0.047620f},
+        {-0.003141f, -0.028720f,  0.003495f},
+        { 0.027518f,  0.039252f, -0.066502f},
+        {-0.053170f,  0.104419f,  0.027454f},
+        {-0.011953f,  0.041065f, -0.038437f},
+        { 0.060149f, -0.014117f, -0.010517f},
+        { 0.010517f, -0.004252f,  0.061597f},
+        {-0.010000f,  0.000000f,  0.030000f},
+        { 0.000000f,  0.000000f,  0.000000f},
+        { 0.000000f,  0.000000f,  0.000000f},
+    };
+    RaInertia3 inertia[RA_DYN_BODIES] = {
+        {0.703370f, 0.706610f, 0.009117f,
+            -0.000139f,  0.006772f,  0.019169f},
+        {0.007962f, 0.028110f, 0.025995f,
+            -0.003925f,  0.010254f,  0.000704f},
+        {0.037242f, 0.036155f, 0.010830f,
+            -0.004761f, -0.011396f, -0.012805f},
+        {0.025853f, 0.019552f, 0.028323f,
+             0.007796f, -0.001332f,  0.008641f},
+        {0.035549f, 0.029474f, 0.008627f,
+            -0.002117f, -0.004037f,  0.000229f},
+        {0.001964f, 0.004354f, 0.005433f,
+             0.000109f, -0.001158f,  0.000341f},
+        {0.012516f, 0.010027f, 0.004815f,
+            -0.000428f, -0.001196f, -0.000741f},
+        {0.001000f, 0.002500f, 0.001700f,
+             0.000000f,  0.000000f,  0.000000f},
+        {0.000002375f, 0.000002375f, 0.000000750f,
+             0.000000000f, 0.000000000f, 0.000000000f},
+        {0.000002375f, 0.000002375f, 0.000000750f,
+             0.000000000f, 0.000000000f, 0.000000000f},
+    };
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        torque[joint] = 0.0f;
+        for (int column = 0; column < RA_DOF; ++column) {
+            matrix[joint][column] = 0.0f;
+        }
+    }
+    RaPose links[RA_LINKS];
+    RaPose bodies[RA_DYN_BODIES];
+    RaVec3 origins[RA_DOF];
+    RaVec3 axes[RA_DOF];
+    ra_fk(state->q, state->gripper_width, links, origins, axes, NULL);
+    for (int body = 0; body < RA_DOF; ++body) {
+        bodies[body] = links[body + 1];
+    }
+    bodies[7].rotation = links[RA_DOF].rotation;
+    bodies[7].position = ra_add(links[RA_DOF].position,
+        ra_rotate(links[RA_DOF].rotation, ra_v3(0, 0, 0.107f)));
+    bodies[7].rotation = ra_qnorm(ra_qmul(bodies[7].rotation,
+        ra_qaxis(ra_v3(0, 0, 1), -0.78539816339f)));
+    bodies[8] = links[RA_DOF + 1];
+    bodies[9] = links[RA_DOF + 2];
+    RaVec3 gravity = {0, -9.81f, 0};
+    for (int body = 0; body < RA_DYN_BODIES; ++body) {
+        RaVec3 com = ra_add(bodies[body].position,
+            ra_rotate(bodies[body].rotation, com_local[body]));
+        int last = body < RA_DOF ? body : RA_DOF - 1;
+        for (int row = 0; row <= last; ++row) {
+            RaVec3 linear_row = ra_cross(
+                axes[row], ra_sub(com, origins[row]));
+            torque[row] += mass[body] * ra_dot(linear_row, gravity);
+            RaVec3 local_axis = ra_rotate(
+                ra_qconj(bodies[body].rotation), axes[row]);
+            RaInertia3 body_inertia = inertia[body];
+            RaVec3 local_inertia = ra_v3(
+                body_inertia.xx*local_axis.x + body_inertia.xy*local_axis.y
+                    + body_inertia.xz*local_axis.z,
+                body_inertia.xy*local_axis.x + body_inertia.yy*local_axis.y
+                    + body_inertia.yz*local_axis.z,
+                body_inertia.xz*local_axis.x + body_inertia.yz*local_axis.y
+                    + body_inertia.zz*local_axis.z);
+            RaVec3 inertia_row = ra_rotate(
+                bodies[body].rotation, local_inertia);
+            for (int column = 0; column <= row; ++column) {
+                RaVec3 linear_column = ra_cross(
+                    axes[column], ra_sub(com, origins[column]));
+                float value = mass[body] * ra_dot(linear_row, linear_column)
+                    + ra_dot(axes[column], inertia_row);
+                matrix[row][column] += value;
+                if (row != column) {
+                    matrix[column][row] += value;
+                }
+            }
+        }
+    }
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        matrix[joint][joint] += 0.1f;
+    }
+}
+
+RA_D static void ra_masss(
+        const float lower[RA_DOF][RA_DOF],
+        const float rhs[RA_DOF], float solution[RA_DOF]) {
+    float y[RA_DOF] = {0};
+    for (int row = 0; row < RA_DOF; ++row) {
+        float sum = rhs[row];
+        for (int k = 0; k < row; ++k) {
+            sum -= lower[row][k] * y[k];
+        }
+        y[row] = sum / lower[row][row];
+    }
+    for (int row = RA_DOF - 1; row >= 0; --row) {
+        float sum = y[row];
+        for (int k = row + 1; k < RA_DOF; ++k) {
+            sum -= lower[k][row] * solution[k];
+        }
+        solution[row] = sum / lower[row][row];
+    }
+}
+
+RA_D static void ra_jacfk(
+        const float lower[RA_DOF][RA_DOF], const RaVec3* origins,
+        const RaVec3* axes, int last_joint, RaVec3 point,
+        RaVec3 linear_direction, RaVec3 angular_direction,
+        float jacobian[RA_DOF], float response[RA_DOF],
+        float* inverse_mass) {
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        if (joint <= last_joint) {
+            RaVec3 linear = ra_cross(
+                axes[joint], ra_sub(point, origins[joint]));
+            jacobian[joint] = ra_dot(linear, linear_direction)
+                + ra_dot(axes[joint], angular_direction);
+        } else {
+            jacobian[joint] = 0.0f;
+        }
+        response[joint] = 0.0f;
+    }
+    ra_masss(lower, jacobian, response);
+    *inverse_mass = 0.0f;
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        *inverse_mass += jacobian[joint] * response[joint];
+    }
+}
+
+RA_D static RA_INLINE RaVec3 ra_ptvel(
+        const float* qd, const RaVec3* origins, const RaVec3* axes,
+        int last_joint, RaVec3 point) {
+    RaVec3 velocity = ra_v3(0, 0, 0);
+    for (int joint = 0; joint <= last_joint; ++joint) {
+        velocity = ra_add(velocity, ra_scale(
+            ra_cross(axes[joint], ra_sub(point, origins[joint])),
+            qd[joint]));
+    }
+    return velocity;
+}
+
+RA_D static RA_INLINE RaVec3 ra_angvel(
+        const float* qd, const RaVec3* axes, int last_joint) {
+    RaVec3 velocity = ra_v3(0, 0, 0);
+    for (int joint = 0; joint <= last_joint; ++joint) {
+        velocity = ra_add(velocity, ra_scale(axes[joint], qd[joint]));
+    }
+    return velocity;
+}
+
+RA_D static RA_INLINE RaConvexShape ra_padsh(
+        RaPose finger, int index) {
+    RaVec3 local_position[RA_PAD_BOXES] = {
+        {0.0f, 0.0055f, 0.0445f},
+        {0.0055f, 0.0020f, 0.0500f},
+        {-0.0055f, 0.0020f, 0.0500f},
+        {0.0055f, 0.0020f, 0.0395f},
+        {-0.0055f, 0.0020f, 0.0395f},
+    };
+    RaVec3 half_extents[RA_PAD_BOXES] = {
+        {0.0085f, 0.0040f, 0.0085f},
+        {0.0030f, 0.0020f, 0.0030f},
+        {0.0030f, 0.0020f, 0.0030f},
+        {0.0030f, 0.0020f, 0.0035f},
+        {0.0030f, 0.0020f, 0.0035f},
+    };
+    return (RaConvexShape){
+        RA_CONVEX_BOX,
+        {ra_add(finger.position,
+            ra_rotate(finger.rotation, local_position[index])),
+            finger.rotation},
+        half_extents[index],
+    };
+}
+
+RA_D static RA_INLINE float ra_oboxr(
+        const RaVec3 axes[3], RaVec3 half_extents, RaVec3 direction) {
+    return half_extents.x * fabsf(ra_dot(axes[0], direction))
+        + half_extents.y * fabsf(ra_dot(axes[1], direction))
+        + half_extents.z * fabsf(ra_dot(axes[2], direction));
+}
+
+RA_D static RA_INLINE int ra_padhit(
+        RaVec3 cube_position, RaQuat cube_rotation,
+        RaPose finger, float margin, RaConvexContact* best) {
+    RaVec3 inward = ra_scale(
+        ra_rotate(finger.rotation, ra_v3(0, 1, 0)), -1.0f);
+    RaVec3 cube_axes[3];
+    RaVec3 pad_axes[3];
+    ra_caxes(cube_rotation, cube_axes);
+    ra_caxes(finger.rotation, pad_axes);
+    int found = 0;
+    RaVec3 point_a_sum = ra_v3(0, 0, 0);
+    RaVec3 point_b_sum = ra_v3(0, 0, 0);
+    int manifold_points = 0;
+    memset(best, 0, sizeof(*best));
+    best->separation = 1.0e30f;
+    for (int index = 0; index < RA_PAD_BOXES; ++index) {
+        RaConvexShape pad = ra_padsh(finger, index);
+        RaConvexContact candidate;
+        memset(&candidate, 0, sizeof(candidate));
+        RaVec3 delta = ra_sub(cube_position, pad.pose.position);
+        RaVec3 cube_half = ra_v3(RA_CUBE_HALF, RA_CUBE_HALF, RA_CUBE_HALF);
+        int sat_ok = 1;
+        for (int axis_index = 0; axis_index < 15; ++axis_index) {
+            RaVec3 axis;
+            if (axis_index < 3) {
+                axis = cube_axes[axis_index];
+            } else if (axis_index < 6) {
+                axis = pad_axes[axis_index - 3];
+            } else {
+                int pair = axis_index - 6;
+                axis = ra_cross(cube_axes[pair / 3], pad_axes[pair % 3]);
+                float length = ra_length(axis);
+                if (length < 1.0e-6f) {
+                    continue;
+                }
+                axis = ra_scale(axis, 1.0f / length);
+            }
+            float reach = ra_oboxr(
+                    cube_axes, cube_half, axis)
+                + ra_oboxr(
+                    pad_axes, pad.half_extents, axis)
+                + margin;
+            if (fabsf(ra_dot(delta, axis)) > reach) {
+                sat_ok = 0;
+                break;
+            }
+        }
+        if (!sat_ok || ra_dot(delta, inward) < 0.0f) {
+            continue;
+        }
+        RaVec3 inner_surface = ra_add(pad.pose.position,
+            ra_scale(inward, pad.half_extents.y));
+        RaVec3 cube_surface = cube_position;
+        RaVec3 support_dir = ra_scale(inward, -1.0f);
+        for (int axis = 0; axis < 3; ++axis) {
+            float sign = ra_dot(cube_axes[axis], support_dir) < 0.0f
+                ? -1.0f : 1.0f;
+            cube_surface = ra_add(cube_surface,
+                ra_scale(cube_axes[axis], sign * RA_CUBE_HALF));
+        }
+        float face_separation = ra_dot(
+            ra_sub(cube_surface, inner_surface), inward);
+        if (face_separation > margin) {
+            continue;
+        }
+        float local_x = ra_dot(delta, pad_axes[0]);
+        float local_z = ra_dot(delta, pad_axes[2]);
+        float cube_radius_x = ra_oboxr(
+            cube_axes, cube_half, pad_axes[0]);
+        float cube_radius_z = ra_oboxr(
+            cube_axes, cube_half, pad_axes[2]);
+        float low_x = ra_max(-pad.half_extents.x,
+            local_x - cube_radius_x);
+        float high_x = ra_min(pad.half_extents.x,
+            local_x + cube_radius_x);
+        float low_z = ra_max(-pad.half_extents.z,
+            local_z - cube_radius_z);
+        float high_z = ra_min(pad.half_extents.z,
+            local_z + cube_radius_z);
+        float patch_x = low_x <= high_x
+            ? 0.5f * (low_x + high_x)
+            : ra_clamp(local_x, -pad.half_extents.x, pad.half_extents.x);
+        float patch_z = low_z <= high_z
+            ? 0.5f * (low_z + high_z)
+            : ra_clamp(local_z, -pad.half_extents.z, pad.half_extents.z);
+        candidate.hit = 1;
+        candidate.iterations = 15;
+        candidate.separation = face_separation;
+        candidate.normal = inward;
+        candidate.point_b = ra_add(inner_surface,
+            ra_add(ra_scale(pad_axes[0], patch_x),
+                ra_scale(pad_axes[2], patch_z)));
+        candidate.point_a = ra_add(candidate.point_b,
+            ra_scale(inward, face_separation));
+        if (!found || candidate.separation
+                < best->separation - 2.0e-5f) {
+            *best = candidate;
+            point_a_sum = candidate.point_a;
+            point_b_sum = candidate.point_b;
+            manifold_points = 1;
+            found = 1;
+        } else if (candidate.separation
+                <= best->separation + 2.0e-5f) {
+            point_a_sum = ra_add(point_a_sum, candidate.point_a);
+            point_b_sum = ra_add(point_b_sum, candidate.point_b);
+            manifold_points++;
+        }
+    }
+    if (found) {
+        float inverse_points = 1.0f / (float)manifold_points;
+        best->point_a = ra_scale(point_a_sum, inverse_points);
+        best->point_b = ra_scale(point_b_sum, inverse_points);
+        best->normal = inward;
+    }
+    return found;
+}
+
+typedef struct RaGripperCollisionFrame {
+    RaPose hand;
+    RaPose left_finger;
+    RaPose right_finger;
+} RaGripperCollisionFrame;
+
+typedef struct RaCollisionBox {
+    RaPose pose;
+    RaVec3 half_extents;
+} RaCollisionBox;
+
+RA_D static RA_INLINE RaGripperCollisionFrame ra_gripf(
+        const RaPose* links, RaVec3 end_effector) {
+    RaGripperCollisionFrame frame;
+    frame.hand.rotation = links[RA_DOF + 1].rotation;
+    frame.hand.position = ra_sub(end_effector,
+        ra_rotate(frame.hand.rotation, ra_v3(0, 0, 0.115f)));
+    frame.left_finger = links[RA_DOF + 1];
+    frame.right_finger = links[RA_DOF + 2];
+    return frame;
+}
+
+RA_D static RA_INLINE RaPose ra_offp(
+        RaPose parent, RaVec3 local_position) {
+    RaPose pose;
+    pose.position = ra_add(parent.position,
+        ra_rotate(parent.rotation, local_position));
+    pose.rotation = parent.rotation;
+    return pose;
+}
+
+RA_D static RA_INLINE RaCollisionBox ra_linkb(
+        const RaPose* links, int index) {
+    const RaVec3 center[RA_DOF] = {
+        {-0.00001f, -0.03719f, -0.06850f},
+        {-0.00001f, -0.06949f,  0.03720f},
+        { 0.04124f,  0.02803f, -0.03300f},
+        {-0.04126f,  0.03450f,  0.02803f},
+        {-0.00001f,  0.03747f, -0.10340f},
+        { 0.04206f,  0.01523f,  0.00613f},
+        { 0.01864f,  0.01863f,  0.07940f},
+    };
+    const RaVec3 half_extents[RA_DOF] = {
+        {0.05501f, 0.09220f, 0.12350f},
+        {0.05502f, 0.12451f, 0.09220f},
+        {0.09626f, 0.08303f, 0.08800f},
+        {0.09625f, 0.08950f, 0.08303f},
+        {0.05500f, 0.09246f, 0.15560f},
+        {0.08996f, 0.06643f, 0.05012f},
+        {0.06267f, 0.06265f, 0.02740f},
+    };
+    return (RaCollisionBox){
+        ra_offp(links[index + 1], center[index]),
+        half_extents[index],
+    };
+}
+
+RA_D static RA_INLINE RaCollisionBox ra_gripb(
+        const RaGripperCollisionFrame* frame, int index) {
+    RaCollisionBox box;
+    if (index == 0) {
+        box.pose = ra_offp(frame->hand, ra_v3(0, 0, -0.0055f));
+        box.half_extents = ra_v3(0.0320f, 0.1040f, 0.0205f);
+    } else if (index == 1) {
+        box.pose = ra_offp(frame->hand, ra_v3(0, 0, 0.0250f));
+        box.half_extents = ra_v3(0.0240f, 0.1020f, 0.0100f);
+    } else if (index == 2) {
+        box.pose = ra_offp(frame->hand, ra_v3(0, 0, 0.0505f));
+        box.half_extents = ra_v3(0.0220f, 0.1010f, 0.0155f);
+    } else {
+        int right = index >= 5;
+        int distal = index == 4 || index == 6;
+        RaPose finger = right
+            ? frame->right_finger : frame->left_finger;
+        if (distal) {
+            box.pose = ra_offp(finger, ra_v3(0, 0.0080f, 0.0420f));
+            box.half_extents = ra_v3(0.0095f, 0.0080f, 0.0120f);
+        } else {
+            box.pose = ra_offp(finger, ra_v3(0, 0.0144f, 0.0150f));
+            box.half_extents = ra_v3(0.0105f, 0.0120f, 0.0150f);
+        }
+    }
+    return box;
+}
+
+RA_HD static RA_INLINE RaVec3 ra_gctr(
+        RaVec3 end_effector, RaQuat hand_rotation) {
+    return ra_sub(end_effector, ra_rotate(hand_rotation,
+        ra_v3(0, 0, RA_BASKETBALL_GRASP_CENTER_OFFSET)));
+}
+
+RA_HD static RA_INLINE float ra_blq(
+        RaVec3 position, RaVec3 velocity) {
+    const float gravity = 9.81f;
+    const float drag = RA_BALL_LINEAR_DRAG;
+    RaVec3 delta = ra_sub(ra_hoop(), position);
+    float horizontal = sqrtf(delta.x*delta.x + delta.z*delta.z);
+    float flight_time = ra_clamp(horizontal / 2.20f, 0.45f, 0.75f);
+    float travel = (1.0f - expf(-drag * flight_time)) / drag;
+    RaVec3 target = ra_v3(delta.x / travel,
+        (delta.y + gravity * flight_time / drag) / travel - gravity / drag,
+        delta.z / travel);
+    RaVec3 error = ra_sub(velocity, target);
+    float error_squared = ra_dot(error, error);
+    const float sigma = 1.50f;
+    return expf(-0.5f * error_squared / (sigma*sigma));
+}
+
+RA_D static RA_INLINE void ra_obs_xyz(
+        float* observation, int* index, RaVec3 value) {
+    observation[(*index)++] = value.x;
+    observation[(*index)++] = value.y;
+    observation[(*index)++] = value.z;
+}
+
+RA_D static RA_INLINE void ra_obs3(
+        float* observation, int* index, RaVec3 value, float scale) {
+    observation[(*index)++] = ra_clamp(scale * value.x, -1.0f, 1.0f);
+    observation[(*index)++] = ra_clamp(scale * value.y, -1.0f, 1.0f);
+    observation[(*index)++] = ra_clamp(scale * value.z, -1.0f, 1.0f);
+}
+
+RA_D static RA_INLINE float ra_obs_pad(float impulse) {
+    return ra_clamp(impulse / (RA_PHYSICS_DT * RA_GRIPPER_MAX_FORCE),
+        0.0f, 1.0f);
+}
+
+RA_D static void ra_observe(const RaState* state, float* observation) {
+    int index = 0;
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        float low = ra_jmin(joint);
+        float high = ra_jmax(joint);
+        float midpoint = 0.5f * (low + high);
+        float half_range = 0.5f * (high - low);
+        observation[index++] = ra_clamp(
+            (state->q[joint] - midpoint) / half_range, -1.0f, 1.0f);
+    }
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        observation[index++] = ra_clamp(state->qd[joint] / 6.0f, -1.0f, 1.0f);
+    }
+    for (int action = 0; action < RA_ACTIONS; ++action) {
+        observation[index++] = ra_clamp(
+            state->previous_action[action], -1.0f, 1.0f);
+    }
+    RaPose gripper_links[RA_LINKS];
+    RaVec3 origins[RA_DOF];
+    RaVec3 axes[RA_DOF];
+    ra_fk(state->q, state->gripper_width, gripper_links, origins, axes, NULL);
+    RaQuat hand_rotation = gripper_links[RA_DOF + 1].rotation;
+    RaVec3 reach_origin = state->basketball_mode
+        ? ra_gctr(state->end_effector, hand_rotation)
+        : state->end_effector;
+    ra_obs3(observation, &index,
+        ra_sub(state->cube_position, reach_origin), RA_OBS_POS_SCALE);
+    ra_obs3(observation, &index,
+        ra_sub(state->target_position, state->cube_position),
+        RA_OBS_POS_SCALE);
+    ra_obs3(observation, &index, state->cube_velocity, RA_OBS_LIN_VEL_SCALE);
+    ra_obs3(observation, &index, state->end_effector, RA_OBS_POS_SCALE);
+    RaQuat gripper_in_cube = state->basketball_mode
+        ? hand_rotation
+        : ra_qmul(ra_qconj(state->cube_rotation), hand_rotation);
+    ra_obs_xyz(observation, &index,
+        ra_rotate(gripper_in_cube, ra_v3(0, 1, 0)));
+    ra_obs_xyz(observation, &index,
+        ra_rotate(gripper_in_cube, ra_v3(0, 0, 1)));
+    ra_obs3(observation, &index, state->cube_angular_velocity,
+        RA_OBS_ANG_VEL_SCALE);
+    float grip_vel = ra_clamp(
+        RA_OBS_GRIP_VEL_SCALE * state->gripper_velocity, -1.0f, 1.0f);
+    if (state->stack_mode) {
+        ra_obs_xyz(observation, &index,
+            ra_rotate(state->base_cube_rotation, ra_v3(1, 0, 0)));
+        ra_obs_xyz(observation, &index,
+            ra_rotate(state->base_cube_rotation, ra_v3(0, 1, 0)));
+        ra_obs3(observation, &index, state->base_cube_velocity,
+            RA_OBS_LIN_VEL_SCALE);
+        observation[index++] = ra_obs_pad(state->pad_normal_impulse[0]);
+        observation[index++] = ra_obs_pad(state->pad_normal_impulse[1]);
+        observation[index++] = ra_clamp(
+            RA_OBS_ANG_VEL_SCALE * ra_length(state->base_cube_angular_velocity),
+            0.0f, 1.0f);
+    } else if (state->basketball_mode) {
+        observation[index++] = ra_obs_pad(state->pad_normal_impulse[0]);
+        observation[index++] = ra_obs_pad(state->pad_normal_impulse[1]);
+        observation[index++] = grip_vel;
+        ra_obs3(observation, &index, state->cube_position, RA_OBS_POS_SCALE);
+        ra_obs3(observation, &index, ra_rotate(
+            ra_qconj(hand_rotation), state->cube_velocity),
+            RA_OBS_LIN_VEL_SCALE);
+        ra_obs3(observation, &index, ra_ptvel(
+            state->qd, origins, axes, RA_DOF - 1, state->end_effector),
+            RA_OBS_LIN_VEL_SCALE);
+    } else {
+        ra_obs3(observation, &index, state->target_position, RA_OBS_POS_SCALE);
+        ra_obs_xyz(observation, &index,
+            ra_rotate(state->cube_rotation, ra_v3(0, 1, 0)));
+        observation[index++] = ra_obs_pad(state->pad_normal_impulse[0]);
+        observation[index++] = ra_obs_pad(state->pad_normal_impulse[1]);
+        ra_obs_xyz(observation, &index,
+            ra_rotate(hand_rotation, ra_v3(0, 0, 1)));
+        observation[index++] = grip_vel;
+    }
+    observation[index++] = ra_clamp(
+        state->gripper_width / 0.08f, 0.0f, 1.0f);
+    observation[index++] = ra_clamp(
+        state->gripper_force / RA_GRIPPER_MAX_FORCE, 0.0f, 1.0f);
+    ra_obs3(observation, &index, ra_rotate(
+        ra_qconj(hand_rotation),
+        ra_scale(state->wrist_linear_impulse, 1.0f / RA_CONTROL_DT)), 0.01f);
+    ra_obs3(observation, &index, ra_rotate(
+        ra_qconj(hand_rotation),
+        ra_scale(state->wrist_angular_impulse, 1.0f / RA_CONTROL_DT)), 0.20f);
+    observation[index++] = state->transported ? 1.0f : 0.0f;
+    observation[index++] = state->basketball_mode
+        ? (state->basketball_close_ready ? 1.0f : 0.0f)
+        : (state->stack_aligned ? 1.0f : 0.0f);
+    observation[index++] = state->basketball_mode
+        ? (state->basketball_in_flight ? 1.0f : 0.0f)
+        : (state->released_near_target ? 1.0f : 0.0f);
+    observation[index++] = state->grasped ? 1.0f : 0.0f;
+    observation[index++] = state->lifted ? 1.0f : 0.0f;
+    int maximum_steps = state->basketball_mode
+        ? RA_BASKETBALL_MAX_STEPS : RA_MAX_STEPS;
+    observation[index++] = ra_clamp(
+        (float)state->step / (float)maximum_steps, 0.0f, 1.0f);
+    assert(index == OBS_SIZE);
+}
+
+RA_HD static void ra_resetb(RaState* state) {
+    state->cube_position = ra_v3(
+        ra_rand(&state->rng, 0.42f, 0.54f),
+        RA_TABLE_TOP + RA_BALL_RADIUS,
+        ra_rand(&state->rng, 0.20f, 0.32f));
+    state->cube_velocity = ra_v3(0, 0, 0);
+    state->cube_rotation = ra_quat(0, 0, 0, 1);
+    state->cube_angular_velocity = ra_v3(0, 0, 0);
+    state->previous_cube_position = state->cube_position;
+    state->target_position = ra_hoop();
+    state->basketball_in_flight = 0;
+    state->basketball_grounded_steps = 0;
+    state->grasped = 0;
+    state->grasp_cooldown = 0;
+    state->grasp_contact_misses = 0;
+    state->ever_grasped = 0;
+    state->lifted = 0;
+    state->transported = 0;
+    state->released_near_target = 0;
+    state->placement_settle_steps = 0;
+    state->basketball_close_ready = 0;
+    state->basketball_release_ready = 0;
+    state->basketball_release_commanded = 0;
+    state->gripper_force = 0.0f;
+    memset(state->pad_normal_impulse, 0,
+        sizeof(state->pad_normal_impulse));
+    RaPose links[RA_LINKS];
+    ra_fk(state->q, state->gripper_width, links, NULL, NULL, NULL);
+    RaVec3 grasp_center = ra_gctr(
+        state->end_effector, links[RA_DOF + 1].rotation);
+    state->previous_reach_distance = ra_length(
+        ra_sub(state->cube_position, grasp_center));
+    state->previous_place_distance = ra_length(
+        ra_sub(state->target_position, state->cube_position));
+    state->previous_lift_height = 0.0f;
+    state->previous_grip_error = fabsf(
+        state->gripper_width - RA_BASKETBALL_OPEN_WIDTH);
+    float launch_quality = ra_blq(
+        state->cube_position, state->cube_velocity);
+    float trajectory_quality = ra_btq(
+        state->cube_position, state->cube_velocity);
+    state->previous_throw_quality = 0.35f*launch_quality
+        + 0.65f*trajectory_quality;
+}
+
+RA_HD static void ra_reset(RaState* state) {
+    uint32_t rng = state->rng ? state->rng : 1u;
+    int no_timeout = state->no_timeout;
+    int stack_mode = state->stack_mode;
+    int basketball_mode = state->basketball_mode;
+    memset(state, 0, sizeof(*state));
+    state->rng = rng;
+    state->no_timeout = no_timeout;
+    state->stack_mode = stack_mode;
+    state->basketball_mode = basketball_mode;
+    state->cube_rotation = ra_quat(0, 0, 0, 1);
+    state->base_cube_rotation = ra_quat(0, 0, 0, 1);
+    for (int joint = 0; joint < RA_DOF; ++joint) {
+        state->q[joint] = ra_jhome(joint)
+            + ra_rand(&state->rng, -0.035f, 0.035f);
+        state->target_q[joint] = state->q[joint];
+    }
+    state->gripper_width = 0.080f;
+    RaPose links[RA_LINKS];
+    ra_fk(state->q, state->gripper_width, links, NULL, NULL,
+        &state->end_effector);
+
+    if (state->basketball_mode) {
+        ra_resetb(state);
+        return;
+    }
+
+    float cube_angle = ra_rand(&state->rng, -0.72f, -0.28f);
+    float cube_radius = ra_rand(&state->rng, 0.43f, 0.62f);
+    state->cube_position = ra_v3(cube_radius*cosf(cube_angle),
+        RA_TABLE_TOP + RA_CUBE_HALF, -cube_radius*sinf(cube_angle));
+    float target_angle = ra_rand(&state->rng, 0.28f, 0.72f);
+    float target_radius = ra_rand(&state->rng, 0.43f, 0.62f);
+    if (state->stack_mode) {
+        state->base_cube_position = ra_v3(target_radius*cosf(target_angle),
+            RA_TABLE_TOP + RA_CUBE_HALF, -target_radius*sinf(target_angle));
+        state->base_cube_start_position = state->base_cube_position;
+        state->previous_base_cube_position = state->base_cube_position;
+        state->target_position = ra_add(state->base_cube_position,
+            ra_v3(0, 2.0f * RA_CUBE_HALF, 0));
+    } else {
+        state->target_position = ra_v3(target_radius*cosf(target_angle),
+            RA_TABLE_TOP + 0.008f, -target_radius*sinf(target_angle));
+    }
+    state->previous_reach_distance = ra_length(
+        ra_sub(state->cube_position, state->end_effector));
+    state->previous_place_distance = ra_length(
+        ra_sub(state->target_position, state->cube_position));
+    state->previous_lift_height = 0.0f;
+    RaVec3 stack_delta = ra_sub(
+        state->cube_position, state->base_cube_position);
+    state->previous_stack_horizontal = sqrtf(
+        stack_delta.x*stack_delta.x + stack_delta.z*stack_delta.z);
+    float stack_clearance = stack_delta.y - 2.0f*RA_CUBE_HALF;
+    state->previous_stack_drop_error = fabsf(
+        stack_clearance - RA_STACK_HOVER_CLEARANCE);
+    state->previous_stack_orientation_error = 0.0f;
+}
+
+RA_D static float ra_stepb(RaState* state,
+        const float* actions, float energy, int first_grasp, int released,
+        const RaPose* links) {
+    RaVec3 hoop = ra_hoop();
+    RaVec3 grasp_center = ra_gctr(
+        state->end_effector, links[RA_DOF + 1].rotation);
+    float reach_distance = ra_length(
+        ra_sub(state->cube_position, grasp_center));
+    float hoop_distance = ra_length(ra_sub(hoop, state->cube_position));
+    float lift_height = ra_max(0.0f,
+        state->cube_position.y - RA_BALL_RADIUS - RA_TABLE_TOP);
+    float reward = -0.0001f;
+
+    if (!state->grasped && !state->basketball_in_flight) {
+        reward += 0.08f * ra_clamp(
+            state->previous_reach_distance - reach_distance,
+            -0.05f, 0.05f);
+    } else if (state->grasped && !state->lifted) {
+        reward += 0.08f * ra_clamp(
+            lift_height - state->previous_lift_height, -0.03f, 0.03f);
+    } else if (state->grasped) {
+        reward += 0.04f * ra_clamp(
+            state->previous_place_distance - hoop_distance,
+            -0.05f, 0.05f);
+    } else if (state->basketball_in_flight) {
+        reward += 0.02f * ra_clamp(
+            state->previous_place_distance - hoop_distance,
+            -0.05f, 0.05f);
+    }
+    int open_enough = state->gripper_width > 0.062f;
+    int entered_close_phase = !state->basketball_close_ready
+        && !state->grasped && !state->basketball_in_flight
+        && open_enough && reach_distance < 0.045f;
+    if (entered_close_phase) {
+        state->basketball_close_ready = 1;
+        state->previous_grip_error = fabsf(
+            state->gripper_width - RA_BASKETBALL_GRIP_WIDTH);
+    }
+    float target_width = state->basketball_close_ready
+        ? RA_BASKETBALL_GRIP_WIDTH : RA_BASKETBALL_OPEN_WIDTH;
+    float grip_error = fabsf(state->gripper_width - target_width);
+    if (!state->grasped && !state->basketball_in_flight
+            && !entered_close_phase) {
+        reward += 0.15f * ra_clamp(
+            state->previous_grip_error - grip_error, -0.02f, 0.02f);
+    }
+    if (first_grasp) {
+        state->basketball_grasps += 1;
+        reward += 0.050f;
+    }
+    if (!state->lifted && state->grasped && lift_height >= RA_LIFT_HEIGHT) {
+        state->lifted = 1;
+        reward += 0.025f;
+    }
+    if (!state->transported && state->grasped && state->lifted
+            && hoop_distance < RA_BASKETBALL_RELEASE_DISTANCE) {
+        state->transported = 1;
+        reward += 0.020f;
+    }
+    float launch_quality = ra_blq(
+        state->cube_position, state->cube_velocity);
+    float trajectory_quality = ra_btq(
+        state->cube_position, state->cube_velocity);
+    float release_quality = 0.35f*launch_quality
+        + 0.65f*trajectory_quality;
+    if (state->grasped && state->lifted) {
+        reward += 0.040f * ra_clamp(
+            release_quality - state->previous_throw_quality, -0.05f, 0.05f);
+        if (!state->basketball_release_ready
+                && release_quality >= RA_BASKETBALL_RELEASE_READY_QUALITY) {
+            state->basketball_release_ready = 1;
+        }
+        if (state->basketball_release_ready) {
+            reward -= 0.0005f;
+            if (actions[RA_DOF] > 0.25f) {
+                reward += 0.010f*release_quality;
+            }
+        }
+    }
+    int opening_for_release = state->lifted && state->ever_grasped
+        && !state->basketball_in_flight && actions[RA_DOF] > 0.25f
+        && (state->grasped || released);
+    if (opening_for_release && !state->basketball_release_commanded) {
+        state->basketball_release_commanded = 1;
+        reward += 0.015f + 0.015f*release_quality;
+    }
+    int thrown = state->lifted && !state->grasped
+        && state->ever_grasped && released;
+    if (!state->basketball_in_flight && thrown) {
+        state->basketball_in_flight = 1;
+        state->basketball_releases += 1;
+        RaVec3 predicted_crossing;
+        float center_miss = RA_BASKETBALL_PREDICTED_MISS_CAP;
+        if (ra_bxing(
+                state->cube_position, state->cube_velocity,
+                &predicted_crossing, NULL, NULL)) {
+            float dx = predicted_crossing.x - hoop.x;
+            float dz = predicted_crossing.z - hoop.z;
+            center_miss = ra_min(sqrtf(dx*dx + dz*dz),
+                RA_BASKETBALL_PREDICTED_MISS_CAP);
+        }
+        state->basketball_release_center_miss_cm_sum += 100.0f*center_miss;
+        state->basketball_release_ready = 0;
+        reward += 0.020f*launch_quality
+            + 0.100f*trajectory_quality;
+    }
+
+    int crossed_down = state->basketball_in_flight
+        && state->previous_cube_position.y > hoop.y
+        && state->cube_position.y <= hoop.y;
+    int scored = 0;
+    if (crossed_down) {
+        float height_delta = state->previous_cube_position.y
+            - state->cube_position.y;
+        float fraction = height_delta > 1.0e-7f
+            ? (state->previous_cube_position.y - hoop.y) / height_delta
+            : 0.0f;
+        RaVec3 crossing = ra_add(state->previous_cube_position,
+            ra_scale(ra_sub(state->cube_position,
+                state->previous_cube_position), fraction));
+        float offset_x = crossing.x - hoop.x;
+        float offset_z = crossing.z - hoop.z;
+        float clearance = RA_HOOP_INNER_RADIUS - RA_BALL_RADIUS;
+        scored = offset_x*offset_x + offset_z*offset_z
+            < clearance*clearance;
+    }
+    int grounded = !state->grasped
+        && state->cube_position.y <= RA_TABLE_TOP + RA_BALL_RADIUS
+            + RA_BASKETBALL_GROUNDED_HEIGHT_SLOP
+        && fabsf(state->cube_velocity.y)
+            <= RA_BASKETBALL_GROUNDED_MAX_VERTICAL_SPEED;
+    float ball_base_distance = ra_length(state->cube_position);
+    int out_of_reach = ball_base_distance - RA_BALL_RADIUS
+        > RA_ARM_GEOMETRIC_REACH_BOUND;
+    if (grounded && out_of_reach) {
+        state->basketball_grounded_steps += 1;
+    } else {
+        state->basketball_grounded_steps = 0;
+    }
+    int grounded_reset = state->basketball_grounded_steps
+        >= RA_BASKETBALL_GROUNDED_RESET_STEPS;
+    if (scored) {
+        state->baskets += 1;
+        state->attempts += 1;
+        state->success = 1;
+        reward = 1.0f;
+        state->basketball_in_flight = 0;
+    } else if (grounded && state->basketball_in_flight) {
+        state->attempts += 1;
+        reward = -0.010f;
+        state->basketball_in_flight = 0;
+        state->basketball_release_ready = 0;
+    }
+    if (grounded_reset) {
+        ra_resetb(state);
+        state->basketball_reset = 1;
+    }
+
+    if (!state->no_timeout && state->step >= RA_BASKETBALL_MAX_STEPS) {
+        state->done = 1;
+    }
+    if (!state->basketball_reset) {
+        state->previous_reach_distance = reach_distance;
+        state->previous_place_distance = hoop_distance;
+        state->previous_lift_height = lift_height;
+        state->previous_grip_error = grip_error;
+        state->previous_throw_quality = release_quality;
+    }
+    state->episode_energy += energy;
+    state->episode_return += reward;
+    for (int action = 0; action < RA_ACTIONS; ++action) {
+        state->previous_action[action] = ra_clamp(
+            actions[action], -1.0f, 1.0f);
+    }
+    return reward;
+}
+
+RA_D static float ra_stept(RaState* state, const float* actions,
+        float energy, int first_grasp, int released, const RaPose* links) {
+    float grip_action = ra_clamp(actions[RA_DOF], -1.0f, 1.0f);
+    float reach_distance = ra_length(
+        ra_sub(state->cube_position, state->end_effector));
+    RaQuat hand_rotation = links[RA_DOF + 1].rotation;
+    RaVec3 hand_position = ra_sub(state->end_effector,
+        ra_rotate(hand_rotation, ra_v3(0, 0, 0.115f)));
+    float half_width = 0.5f * state->gripper_width;
+    RaPose fingers[2];
+    fingers[0].position = ra_add(hand_position,
+        ra_rotate(hand_rotation, ra_v3(0, half_width, 0.0584f)));
+    fingers[0].rotation = hand_rotation;
+    fingers[1].position = ra_add(hand_position,
+        ra_rotate(hand_rotation, ra_v3(0, -half_width, 0.0584f)));
+    fingers[1].rotation = ra_qnorm(ra_qmul(hand_rotation,
+        ra_qaxis(ra_v3(0, 0, 1), 3.14159265359f)));
+    RaConvexContact clear_contact;
+    int gripper_clear = 1;
+    for (int finger = 0; finger < 2; ++finger) {
+        gripper_clear &= !ra_padhit(
+            state->cube_position, state->cube_rotation,
+            fingers[finger], RA_GRIPPER_CLEARANCE_MARGIN, &clear_contact);
+        if (state->stack_mode) {
+            gripper_clear &= !ra_padhit(
+                state->base_cube_position, state->base_cube_rotation,
+                fingers[finger], RA_GRIPPER_CLEARANCE_MARGIN, &clear_contact);
+        }
+    }
+    RaVec3 place_offset = ra_sub(
+        state->target_position, state->cube_position);
+    float place_distance = ra_length(place_offset);
+    float place_horizontal_distance = sqrtf(
+        place_offset.x*place_offset.x + place_offset.z*place_offset.z);
+    float main_support_y = ra_csup(
+        state->cube_rotation, ra_v3(0, 1, 0));
+    float base_support_y = ra_csup(
+        state->base_cube_rotation, ra_v3(0, 1, 0));
+    float expected_stack_separation = main_support_y + base_support_y;
+    float stack_height_error = fabsf(
+        (state->cube_position.y - state->base_cube_position.y)
+            - expected_stack_separation);
+    float stack_clearance = (state->cube_position.y
+        - state->base_cube_position.y) - expected_stack_separation;
+    float stack_drop_error = fabsf(
+        stack_clearance - RA_STACK_HOVER_CLEARANCE);
+    float stack_orientation_error = ra_cup(
+        state->cube_rotation);
+    RaVec3 base_motion_delta = ra_sub(
+        state->base_cube_position, state->previous_base_cube_position);
+    float base_motion = sqrtf(base_motion_delta.x*base_motion_delta.x
+        + base_motion_delta.z*base_motion_delta.z);
+    int stack_release_pose = place_horizontal_distance
+            < RA_STACK_RELEASE_RADIUS
+        && stack_clearance >= -RA_STACK_HEIGHT_TOLERANCE
+        && stack_clearance < RA_STACK_RELEASE_CLEARANCE;
+    int stack_alignment_pose = place_horizontal_distance < 0.050f
+        && stack_clearance >= -RA_STACK_HEIGHT_TOLERANCE
+        && stack_clearance < 0.080f;
+    float lift_height = ra_max(0.0f,
+        state->cube_position.y - main_support_y - RA_TABLE_TOP);
+    int stack_contact = state->stack_mode && !state->grasped
+        && place_horizontal_distance < 2.0f*RA_CUBE_HALF
+        && stack_height_error < RA_STACK_HEIGHT_TOLERANCE;
+    if (stack_contact) {
+        state->ever_stacked = 1;
+    }
+    int placement_disturbed = state->released_near_target
+        && (state->grasped
+            || place_horizontal_distance >= (state->stack_mode
+                ? RA_STACK_RELEASE_RADIUS : RA_PLACE_RADIUS));
+    if (placement_disturbed) {
+        state->released_near_target = 0;
+        state->placement_settle_steps = 0;
+    }
+    float reward = -0.002f;
+    if (!state->grasped) {
+        if (state->released_near_target) {
+            reward += (state->stack_mode ? 8.0f : 1.8f) * ra_clamp(
+                reach_distance - state->previous_reach_distance,
+                -0.05f, 0.05f);
+        } else {
+            reward += 1.8f * ra_clamp(
+                state->previous_reach_distance - reach_distance,
+                -0.05f, 0.05f);
+        }
+    } else if (!state->lifted) {
+        reward += (state->stack_mode ? 12.0f : 5.0f) * ra_clamp(
+            lift_height - state->previous_lift_height, -0.03f, 0.03f);
+        if (lift_height >= RA_LIFT_HEIGHT) {
+            state->lifted = 1;
+            reward += state->stack_mode ? 2.0f : 0.75f;
+        }
+    }
+    if (state->grasped && state->lifted) {
+        if (state->stack_mode) {
+            reward += RA_STACK_HORIZONTAL_PROGRESS_REWARD * ra_clamp(
+                state->previous_stack_horizontal
+                    - place_horizontal_distance,
+                -0.05f, 0.05f);
+            if (place_horizontal_distance < 0.12f) {
+                reward += RA_STACK_HEIGHT_PROGRESS_REWARD * ra_clamp(
+                    state->previous_stack_drop_error - stack_drop_error,
+                    -0.04f, 0.04f);
+                reward += RA_STACK_UPRIGHT_PROGRESS_REWARD * ra_clamp(
+                    state->previous_stack_orientation_error
+                        - stack_orientation_error,
+                    -0.05f, 0.05f);
+            }
+        } else {
+            reward += 6.0f * ra_clamp(
+                state->previous_place_distance - place_distance,
+                -0.05f, 0.05f);
+        }
+    }
+    if (first_grasp) {
+        reward += state->stack_mode ? 0.40f : 0.5f;
+    }
+    if (released) {
+        if (state->stack_mode) {
+            if (grip_action <= 0.25f) {
+                float slip_penalty = state->stack_aligned ? 2.00f
+                    : (state->transported ? 1.00f
+                    : (state->lifted ? RA_STACK_SLIP_PENALTY : 0.10f));
+                reward -= slip_penalty;
+            } else if (!state->transported) {
+                reward -= state->lifted ? 0.75f : 0.15f;
+            }
+        } else if (!state->transported) {
+            reward -= state->lifted ? 0.50f : 0.10f;
+        }
+    }
+    if (placement_disturbed) {
+        reward -= 0.25f;
+    }
+    int transport_pose = state->stack_mode
+        ? (place_horizontal_distance < RA_STACK_TRANSPORT_RADIUS
+            && stack_clearance >= -RA_STACK_HEIGHT_TOLERANCE
+            && stack_clearance < 0.10f)
+        : place_distance < 0.12f;
+    if (!state->transported && state->grasped && state->lifted
+            && lift_height >= RA_CARRY_HEIGHT && transport_pose) {
+        state->transported = 1;
+        reward += state->stack_mode ? 2.0f : 0.5f;
+    }
+    int stack_release_ready = stack_release_pose
+        && stack_orientation_error < 0.050f
+        && ra_length(state->cube_velocity) < 0.50f
+        && ra_length(state->cube_angular_velocity) < 2.0f;
+    if (state->stack_mode && state->transported && state->grasped
+            && stack_release_ready && !state->stack_aligned) {
+        state->stack_aligned = 1;
+        reward += 2.0f;
+    }
+    if (state->stack_mode && state->transported && state->stack_aligned
+            && state->grasped) {
+        reward -= 0.030f;
+        if (!state->stack_opening_credited && grip_action > 0.25f) {
+            state->stack_opening_credited = 1;
+            if (stack_release_ready) {
+                reward += 1.000f;
+            } else if (stack_alignment_pose) {
+                reward += 0.200f;
+            }
+        }
+    }
+    int valid_release = released && (state->stack_mode
+        ? (grip_action > 0.25f && state->stack_aligned
+            && stack_alignment_pose)
+        : place_distance < 0.12f);
+    int first_valid_release = !state->valid_release_achieved
+        && state->transported && valid_release;
+    if (!state->released_near_target && state->transported && valid_release) {
+        state->released_near_target = 1;
+        state->valid_release_achieved = 1;
+        if (state->stack_mode && first_valid_release) {
+            float release_quality_penalty = ra_clamp(
+                2.0f*ra_length(state->cube_velocity)
+                    + 0.5f*ra_length(state->cube_angular_velocity)
+                    + 20.0f*stack_orientation_error,
+                0.0f, 4.0f);
+            reward += 6.0f - release_quality_penalty;
+        } else if (!state->stack_mode) {
+            reward += 0.25f;
+        }
+    }
+    if (state->stack_mode && state->transported && released
+            && !valid_release && grip_action > 0.25f) {
+        reward -= 2.0f;
+    }
+    if (state->stack_mode && stack_contact
+            && state->valid_release_achieved
+            && !state->valid_stack_contact) {
+        state->valid_stack_contact = 1;
+        reward += 4.0f;
+    }
+    if (state->stack_mode && state->released_near_target
+            && gripper_clear
+            && !state->cleared_after_release) {
+        state->cleared_after_release = 1;
+        reward += 4.0f;
+    }
+    if (state->stack_mode && state->released_near_target
+            && place_horizontal_distance < 0.040f
+            && stack_height_error < 0.010f) {
+        if (stack_orientation_error < RA_STACK_UPRIGHT_ERROR) {
+            reward += 0.020f;
+        }
+        if (ra_length(state->cube_velocity) < RA_STACK_SETTLE_SPEED
+                && ra_length(state->base_cube_velocity)
+                    < RA_STACK_SETTLE_SPEED) {
+            reward += 0.020f;
+        }
+        if (ra_length(state->cube_angular_velocity)
+                < RA_STACK_SETTLE_ANGULAR_SPEED
+                && ra_length(state->base_cube_angular_velocity)
+                    < RA_STACK_SETTLE_ANGULAR_SPEED) {
+            reward += 0.020f;
+        }
+        if (gripper_clear) {
+            reward += 0.030f;
+        }
+    }
+    if (state->stack_mode) {
+        reward -= 8.0f * ra_min(base_motion, 0.03f);
+    }
+    float action_cost = 0.0f;
+    float action_delta = 0.0f;
+    for (int action = 0; action < RA_DOF; ++action) {
+        float value = ra_clamp(actions[action], -1.0f, 1.0f);
+        action_cost += value * value;
+        float delta = value - state->previous_action[action];
+        action_delta += delta * delta;
+    }
+
+    int placement_stable;
+    int settle_steps_required;
+    if (state->stack_mode) {
+        placement_stable = !state->grasped
+            && state->released_near_target
+            && state->lifted && state->transported
+            && place_horizontal_distance < RA_STACK_ALIGN_RADIUS
+            && stack_height_error < RA_STACK_HEIGHT_TOLERANCE
+            && ra_cup(state->cube_rotation)
+                < RA_STACK_UPRIGHT_ERROR
+            && ra_cup(state->base_cube_rotation)
+                < RA_STACK_UPRIGHT_ERROR
+            && state->base_cube_position.y
+                <= RA_TABLE_TOP + base_support_y + 0.004f
+            && ra_length(state->cube_velocity) < RA_STACK_SETTLE_SPEED
+            && ra_length(state->base_cube_velocity) < RA_STACK_SETTLE_SPEED
+            && ra_length(state->cube_angular_velocity)
+                < RA_STACK_SETTLE_ANGULAR_SPEED
+            && ra_length(state->base_cube_angular_velocity)
+                < RA_STACK_SETTLE_ANGULAR_SPEED
+            && gripper_clear;
+        settle_steps_required = RA_STACK_SETTLE_STEPS;
+    } else {
+        placement_stable = !state->grasped
+            && state->released_near_target
+            && state->lifted && state->transported
+            && place_horizontal_distance < RA_PLACE_RADIUS
+            && state->cube_position.y
+                <= RA_TABLE_TOP + main_support_y + 0.008f
+            && ra_length(state->cube_velocity) < RA_PLACE_SETTLE_SPEED
+            && ra_length(state->cube_angular_velocity)
+                < RA_PLACE_SETTLE_ANGULAR_SPEED
+            && reach_distance > RA_PLACE_CLEARANCE;
+        settle_steps_required = RA_PLACE_SETTLE_STEPS;
+    }
+    if (placement_stable) {
+        state->placement_settle_steps += 1;
+        if (state->placement_settle_steps
+                > state->max_placement_settle_steps) {
+            state->max_placement_settle_steps
+                = state->placement_settle_steps;
+        }
+        reward += state->stack_mode ? 0.12f : 0.01f;
+    } else {
+        state->placement_settle_steps = 0;
+    }
+    if (state->placement_settle_steps >= settle_steps_required) {
+        state->success = 1;
+        state->done = 1;
+        reward += state->stack_mode ? 20.0f : 10.0f;
+    }
+    if (!state->no_timeout && state->step >= RA_MAX_STEPS) {
+        state->done = 1;
+    }
+    if (state->cube_position.y < -0.25f) {
+        state->done = 1;
+        reward -= 0.25f;
+    }
+    if (state->stack_mode && state->base_cube_position.y < -0.25f) {
+        state->done = 1;
+        reward -= 0.25f;
+    }
+
+    reward *= state->stack_mode ? RA_STACK_REWARD_SCALE : RA_PICK_REWARD_SCALE;
+    reward -= 0.001f * action_cost + 0.0004f * action_delta;
+    reward -= 0.00002f * energy;
+
+    state->previous_reach_distance = reach_distance;
+    state->previous_place_distance = place_distance;
+    state->previous_lift_height = lift_height;
+    state->previous_stack_horizontal = place_horizontal_distance;
+    state->previous_stack_drop_error = stack_drop_error;
+    state->previous_stack_orientation_error = stack_orientation_error;
+    state->previous_base_cube_position = state->base_cube_position;
+    state->episode_energy += energy;
+    state->episode_return += reward;
+    for (int action = 0; action < RA_ACTIONS; ++action) {
+        state->previous_action[action] = ra_clamp(actions[action], -1.0f, 1.0f);
+    }
+    return reward;
 }
 
 RA_HD static RA_INLINE void ra_rbrst(
@@ -1876,14 +3091,9 @@ RA_HD static RA_INLINE void ra_rbrst(
         .velocity_iterations = RA_CONTACT_VELOCITY_ITERS,
         .position_iterations = RA_CONTACT_POSITION_ITERS,
         .velocity_impulse_tolerance = 1.0e-7f,
-        .warm_start = 1,
-        .split_position = 1,
         .position_beta = 0.80f,
         .slop = RA_CUDA_CONTACT_SLOP,
         .speculative_margin = RA_CONTACT_MARGIN,
-        .static_friction = 0.80f,
-        .dynamic_friction = 0.70f,
-        .restitution = 0.12f,
         .restitution_threshold = RA_RESTITUTION_THRESHOLD,
         .max_normal_impulse = 1.0e4f,
         .max_position_correction = 0.010f,
@@ -1952,7 +3162,7 @@ RA_D static RA_INLINE int ra_pair(
     if (candidate_count <= 0) {
         return 0;
     }
-    if (!ra_manok(world)) {
+    if (world->manifold_count >= PL_IMPULSE_MAX_MANIFOLDS) {
         return 0;
     }
     candidate_count = ra_min(candidate_count, PL_SAT_MAX_MANIFOLD_POINTS);
@@ -2052,10 +3262,11 @@ RA_D static RA_INLINE RaConvexSweep ra_boxccd(
 }
 
 RA_D static RA_INLINE void ra_bodies(
-        RaCudaProductionWorld* world) {
+        RaWorld* world) {
     RaState* state = &world->state;
     RaCudaRigidWorld* rigid = &world->rigid;
-    unsigned int topology = ra_topo(state);
+    unsigned int topology = state->basketball_mode ? 3u
+        : (state->stack_mode ? 2u : 1u);
     if (rigid->topology != topology) {
         pl_iclr(&rigid->cache);
         rigid->topology = topology;
@@ -2106,7 +3317,7 @@ RA_D static RA_INLINE void ra_bodies(
         RaVec3 velocity = ra_ptvel(
             state->qd, origins, axes, RA_DOF - 1, box.pose.position);
         ra_setbox(rigid, RA_CUDA_BODY_SHELL_START + item,
-            box.pose, box.half_extent, 0.0f, velocity, hand_angular);
+            box.pose, box.half_extents, 0.0f, velocity, hand_angular);
     }
     for (int item = 0; item < RA_DOF; ++item) {
         RaCollisionBox box = ra_linkb(links, item);
@@ -2115,7 +3326,7 @@ RA_D static RA_INLINE void ra_bodies(
         RaVec3 angular = ra_angvel(
             state->qd, axes, item);
         ra_setbox(rigid, RA_CUDA_BODY_LINK_START + item,
-            box.pose, box.half_extent, 0.0f, velocity, angular);
+            box.pose, box.half_extents, 0.0f, velocity, angular);
     }
     const RaVec3 hand_axis = ra_rotate(frame.hand.rotation, ra_v3(0, 1, 0));
     for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
@@ -2152,15 +3363,14 @@ RA_D static RA_INLINE void ra_bodies(
 }
 
 RA_D static RA_INLINE void ra_react(
-        RaCudaProductionWorld* world,
+        RaWorld* world,
         const float mass_factor[RA_DOF][RA_DOF]) {
     RaState* state = &world->state;
     RaCudaRigidWorld* rigid = &world->rigid;
     const RaPose* links = world->staged.links;
     const RaVec3* origins = world->staged.origins;
     const RaVec3* axes = world->staged.axes;
-    const int manifold_count = ra_min(ra_max(rigid->manifold_count, 0),
-        PL_IMPULSE_MAX_MANIFOLDS);
+    const int manifold_count = rigid->manifold_count;
     int robot_contact = 0;
     for (int index = 0; index < manifold_count; ++index) {
         int body = rigid->manifolds[index].body_b;
@@ -2212,14 +3422,14 @@ RA_D static RA_INLINE void ra_react(
                     hand_axis, side == 0 ? 1.0f : -1.0f);
                 for (int direction_index = 0; direction_index < 3;
                         ++direction_index) {
-                    float jaw_jacobian = 0.5f * ra_dot(outward,
+                    float gripper_jacobian = 0.5f * ra_dot(outward,
                         directions[direction_index]);
-                    reaction->jaw_jacobian[direction_index] = jaw_jacobian;
+                    reaction->gripper_jacobian[direction_index] = gripper_jacobian;
                     reaction->inverse_mass[direction_index] +=
-                        jaw_jacobian * jaw_jacobian
+                        gripper_jacobian * gripper_jacobian
                         / RA_GRIPPER_EFFECTIVE_MASS;
-                    reaction->jaw_velocity_response[direction_index]
-                        = -jaw_jacobian / RA_GRIPPER_EFFECTIVE_MASS;
+                    reaction->gripper_velocity_response[direction_index]
+                        = -gripper_jacobian / RA_GRIPPER_EFFECTIVE_MASS;
                 }
             }
             reaction->active = 1;
@@ -2229,7 +3439,9 @@ RA_D static RA_INLINE void ra_react(
                 for (int member = 0; member < manifold->point_count;
                         ++member) {
                     if (manifold->points[member].patch_group
-                            == point->patch_group) group_points++;
+                            == point->patch_group) {
+                        group_points++;
+                    }
                 }
                 float area = point->patch.area
                     / (float)ra_max(group_points, 1);
@@ -2341,12 +3553,12 @@ typedef struct RaCudaClipVertex {
 } RaCudaClipVertex;
 
 RA_D static RA_INLINE int ra_bpad(
-        RaCudaProductionWorld* production, int side) {
-    RaCudaRigidWorld* world = &production->rigid;
+        RaWorld* world, int side) {
+    RaCudaRigidWorld* rigid = &world->rigid;
     int pad_start = side == 0 ? RA_CUDA_BODY_PAD_LEFT_START
         : RA_CUDA_BODY_PAD_RIGHT_START;
     RaVec3 inward = ra_scale(ra_rotate(
-        world->shapes[pad_start].pose.rotation, ra_v3(0, 1, 0)), -1.0f);
+        rigid->shapes[pad_start].pose.rotation, ra_v3(0, 1, 0)), -1.0f);
     PlImpulseCandidate best;
     memset(&best, 0, sizeof(best));
     float best_separation = 3.402823466e+38f;
@@ -2354,13 +3566,13 @@ RA_D static RA_INLINE int ra_bpad(
     for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
         int body = pad_start + pad;
         PlSatQuery query = pl_sq(
-            &world->shapes[RA_CUDA_BODY_CUBE], &world->shapes[body],
+            &rigid->shapes[RA_CUDA_BODY_CUBE], &rigid->shapes[body],
             RA_CONTACT_MARGIN);
         if (ra_dot(query.contact.normal, inward) < 0.45f) {
             continue;
         }
-        const RaRigidBody* ball = &world->bodies[RA_CUDA_BODY_CUBE];
-        const RaRigidBody* pad_body = &world->bodies[body];
+        const RaRigidBody* ball = &rigid->bodies[RA_CUDA_BODY_CUBE];
+        const RaRigidBody* pad_body = &rigid->bodies[body];
         RaVec3 ball_velocity = ra_add(ball->linear_velocity,
             ra_cross(ball->angular_velocity,
                 ra_sub(query.contact.point_a, ball->pose.position)));
@@ -2385,19 +3597,19 @@ RA_D static RA_INLINE int ra_bpad(
     if (best_pad < 0) {
         return 0;
     }
-    if (!ra_manok(world)) {
+    if (rigid->manifold_count >= PL_IMPULSE_MAX_MANIFOLDS) {
         return 0;
     }
     int body = pad_start + best_pad;
-    PlImpulseManifold* manifold = &world->manifolds[world->manifold_count];
+    PlImpulseManifold* manifold = &rigid->manifolds[rigid->manifold_count];
     int count = pl_iman(RA_CUDA_BODY_CUBE, body,
-        &best, 1, RA_CONTACT_MARGIN, RA_FINGER_FRICTION,
-        RA_FINGER_FRICTION, 0.0f, manifold);
+        &best, 1, RA_CONTACT_MARGIN, RA_ROBOT_FRICTION,
+        RA_ROBOT_FRICTION, 0.0f, manifold);
     if (count <= 0) {
         return 0;
     }
-    world->compound_pad_component_mask[side] = 1u << best_pad;
-    world->manifold_count += 1;
+    rigid->compound_pad_component_mask[side] = 1u << best_pad;
+    rigid->manifold_count += 1;
     return 1;
 }
 
@@ -2421,8 +3633,8 @@ RA_D static RA_INLINE int ra_clipp(
             float fraction = previous_distance
                 / (previous_distance - current_distance);
             RaCudaClipVertex intersection;
-            intersection.point = ra_lerp(previous.point, current.point,
-                fraction);
+            intersection.point = ra_add(previous.point,
+                ra_scale(ra_sub(current.point, previous.point), fraction));
             uint32_t lower = previous.feature < current.feature
                 ? previous.feature : current.feature;
             uint32_t upper = previous.feature < current.feature
@@ -2444,27 +3656,30 @@ RA_D static RA_INLINE int ra_clipp(
 }
 
 RA_D static RA_INLINE int ra_padc(
-        RaCudaProductionWorld* production, int side, int cube_body) {
-    RaCudaRigidWorld* world = &production->rigid;
+        RaWorld* world, int side, int object_body) {
+    RaCudaRigidWorld* rigid = &world->rigid;
+    if (rigid->manifold_count >= PL_IMPULSE_MAX_MANIFOLDS) {
+        return 0;
+    }
     int pad_start = side == 0 ? RA_CUDA_BODY_PAD_LEFT_START
         : RA_CUDA_BODY_PAD_RIGHT_START;
     float margin = RA_CONTACT_MARGIN;
-    float static_friction = RA_FINGER_FRICTION;
-    float dynamic_friction = RA_FINGER_FRICTION;
+    float static_friction = RA_ROBOT_FRICTION;
+    float dynamic_friction = RA_ROBOT_FRICTION;
     float restitution = 0.0f;
-    PlImpulseCandidate* candidates = world->compound_candidate_scratch;
+    PlImpulseCandidate* candidates = rigid->compound_candidate_scratch;
     int candidate_count = 0;
     RaVec3 inward = ra_scale(ra_rotate(
-        world->shapes[pad_start].pose.rotation, ra_v3(0, 1, 0)), -1.0f);
-    const RaConvexShape* cube_shape = &world->shapes[cube_body];
-    const RaRigidBody* cube_body_state = &world->bodies[cube_body];
-    PlSatObb cube_obb = pl_sobb(cube_shape);
-    RaVec3 cube_axes[3];
-    ra_caxes(cube_shape->pose.rotation, cube_axes);
-    const RaVec3 cube_half = cube_shape->half_extents;
-    const RaVec3 frame_origin = world->shapes[pad_start].pose.position;
+        rigid->shapes[pad_start].pose.rotation, ra_v3(0, 1, 0)), -1.0f);
+    const RaConvexShape* object_shape = &rigid->shapes[object_body];
+    const RaRigidBody* object_state = &rigid->bodies[object_body];
+    PlSatObb object_obb = pl_sobb(object_shape);
+    RaVec3 object_axes[3];
+    ra_caxes(object_shape->pose.rotation, object_axes);
+    const RaVec3 object_extents = object_shape->half_extents;
+    const RaVec3 frame_origin = rigid->shapes[pad_start].pose.position;
     RaVec3 pad_axes[3];
-    ra_caxes(world->shapes[pad_start].pose.rotation, pad_axes);
+    ra_caxes(rigid->shapes[pad_start].pose.rotation, pad_axes);
     float frame_axis_x = ra_dot(frame_origin, pad_axes[0]);
     float frame_axis_z = ra_dot(frame_origin, pad_axes[2]);
     float rect_min_x[RA_PAD_BOXES];
@@ -2482,7 +3697,7 @@ RA_D static RA_INLINE int ra_padc(
     int x_bound_count = 0;
     int z_bound_count = 0;
     for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
-        const RaConvexShape* pad_shape = &world->shapes[pad_start + pad];
+        const RaConvexShape* pad_shape = &rigid->shapes[pad_start + pad];
         RaVec3 rectangle_delta = ra_sub(pad_shape->pose.position,
             frame_origin);
         float center_x = ra_dot(rectangle_delta, pad_axes[0]);
@@ -2537,31 +3752,31 @@ RA_D static RA_INLINE int ra_padc(
     }
     for (int pad = 0; pad < RA_PAD_BOXES; ++pad) {
         int body = pad_start + pad;
-            const RaConvexShape* pad_shape = &world->shapes[body];
+            const RaConvexShape* pad_shape = &rigid->shapes[body];
         PlSatQuery sat_query = pl_sq(
-            cube_shape, pad_shape, margin);
+            object_shape, pad_shape, margin);
 
-        RaVec3 delta = ra_sub(cube_shape->pose.position,
+        RaVec3 delta = ra_sub(object_shape->pose.position,
             pad_shape->pose.position);
         if (ra_dot(delta, inward) < 0.0f) {
             continue;
         }
-        RaVec3 cube_surface = pl_ssup(&cube_obb,
+        RaVec3 object_surface = pl_ssup(&object_obb,
             ra_scale(inward, -1.0f));
         float face_separation = ra_dot(
-            ra_sub(cube_surface, inner_surface[pad]), inward);
-        const RaRigidBody* pad_body_state = &world->bodies[body];
-        float angular_bound = ra_length(cube_body_state->angular_velocity)
-                * ra_brad(cube_shape)
+            ra_sub(object_surface, inner_surface[pad]), inward);
+        const RaRigidBody* pad_body_state = &rigid->bodies[body];
+        float angular_bound = ra_length(object_state->angular_velocity)
+                * ra_brad(object_shape)
             + ra_length(pad_body_state->angular_velocity)
                 * ra_brad(pad_shape);
         RaVec3 sat_normal = pl_inrm(
             sat_query.contact.normal, ra_sub(
                 sat_query.contact.point_a, sat_query.contact.point_b));
-        RaVec3 sat_velocity_a = ra_add(cube_body_state->linear_velocity,
-            ra_cross(cube_body_state->angular_velocity,
+        RaVec3 sat_velocity_a = ra_add(object_state->linear_velocity,
+            ra_cross(object_state->angular_velocity,
                 ra_sub(sat_query.contact.point_a,
-                    cube_body_state->pose.position)));
+                    object_state->pose.position)));
         RaVec3 sat_velocity_b = ra_add(pad_body_state->linear_velocity,
             ra_cross(pad_body_state->angular_velocity,
                 ra_sub(sat_query.contact.point_b,
@@ -2572,26 +3787,30 @@ RA_D static RA_INLINE int ra_padc(
             - angular_bound * RA_PHYSICS_DT;
         if (!sat_query.contact.hit
                 && sat_query.contact.separation > margin
-                && sat_projected_separation > margin) continue;
-        float cube_radius_x = ra_oboxr(
-            cube_axes, cube_half, pad_axes[0]);
-        float cube_radius_z = ra_oboxr(
-            cube_axes, cube_half, pad_axes[2]);
+                && sat_projected_separation > margin) {
+            continue;
+        }
+        float object_radius_x = ra_oboxr(
+            object_axes, object_extents, pad_axes[0]);
+        float object_radius_z = ra_oboxr(
+            object_axes, object_extents, pad_axes[2]);
         float local_x = ra_dot(delta, pad_axes[0]);
         float local_z = ra_dot(delta, pad_axes[2]);
         if (fabsf(local_x) > pad_shape->half_extents.x
-                + cube_radius_x + margin
+                + object_radius_x + margin
             || fabsf(local_z) > pad_shape->half_extents.z
-                + cube_radius_z + margin) continue;
+                + object_radius_z + margin) {
+            continue;
+        }
 
-        RaVec3 cube_velocity = ra_add(cube_body_state->linear_velocity,
-            ra_cross(cube_body_state->angular_velocity,
-                ra_sub(cube_surface, cube_body_state->pose.position)));
+        RaVec3 object_velocity = ra_add(object_state->linear_velocity,
+            ra_cross(object_state->angular_velocity,
+                ra_sub(object_surface, object_state->pose.position)));
         RaVec3 pad_velocity = ra_add(pad_body_state->linear_velocity,
             ra_cross(pad_body_state->angular_velocity,
                 ra_sub(inner_surface[pad], pad_body_state->pose.position)));
         float normal_velocity = ra_dot(
-            ra_sub(cube_velocity, pad_velocity), inward);
+            ra_sub(object_velocity, pad_velocity), inward);
         float projected_separation = face_separation
             + (normal_velocity - angular_bound) * RA_PHYSICS_DT;
         if (face_separation > margin && projected_separation > margin) {
@@ -2614,12 +3833,12 @@ RA_D static RA_INLINE int ra_padc(
     float patch_raw_12[RA_PAD_BOXES] = {0.0f};
     int candidate_overflow = 0;
 
-    int incident_axis = pl_saxis(&cube_obb,
+    int incident_axis = pl_saxis(&object_obb,
         ra_scale(inward, -1.0f));
-    float incident_sign = ra_dot(cube_obb.axis[incident_axis],
+    float incident_sign = ra_dot(object_obb.axis[incident_axis],
         ra_scale(inward, -1.0f)) < 0.0f ? -1.0f : 1.0f;
     RaVec3 incident_face[4];
-    pl_sface(&cube_obb, incident_axis, incident_sign,
+    pl_sface(&object_obb, incident_axis, incident_sign,
         incident_face);
     float face_x_offset = frame_axis_x;
     float face_z_offset = frame_axis_z;
@@ -2633,7 +3852,9 @@ RA_D static RA_INLINE int ra_padc(
             float cell_min_z = z_bounds[z_cell];
             float cell_max_z = z_bounds[z_cell + 1];
             if (cell_max_z - cell_min_z
-                    <= RA_PAD_CSG_BOUNDARY_EPSILON) continue;
+                    <= RA_PAD_CSG_BOUNDARY_EPSILON) {
+                continue;
+            }
             float cell_center_x = 0.5f * (cell_min_x + cell_max_x);
             float cell_center_z = 0.5f * (cell_min_z + cell_max_z);
             int owner = -1;
@@ -2646,7 +3867,9 @@ RA_D static RA_INLINE int ra_padc(
                     || cell_center_z < rect_min_z[pad]
                         - RA_PAD_CSG_BOUNDARY_EPSILON
                     || cell_center_z > rect_max_z[pad]
-                        + RA_PAD_CSG_BOUNDARY_EPSILON) continue;
+                        + RA_PAD_CSG_BOUNDARY_EPSILON) {
+                    continue;
+                }
                 if (owner < 0
                         || support_plane[pad] > best_support
                             + RA_PAD_SUPPORT_PLANE_TOLERANCE
@@ -2725,7 +3948,9 @@ RA_D static RA_INLINE int ra_padc(
                         || point_z < rect_min_z[pad]
                             - RA_PAD_CSG_BOUNDARY_EPSILON
                         || point_z > rect_max_z[pad]
-                            + RA_PAD_CSG_BOUNDARY_EPSILON) continue;
+                            + RA_PAD_CSG_BOUNDARY_EPSILON) {
+                        continue;
+                    }
                     if (point_owner < 0
                             || support_plane[pad] > point_support
                                 + RA_PAD_SUPPORT_PLANE_TOLERANCE
@@ -2746,7 +3971,9 @@ RA_D static RA_INLINE int ra_padc(
                         - pad_angular_bound[owner]) * RA_PHYSICS_DT;
                 if (separation > margin + RA_PAD_CSG_BOUNDARY_EPSILON
                         && projected > margin
-                            + RA_PAD_CSG_BOUNDARY_EPSILON) continue;
+                            + RA_PAD_CSG_BOUNDARY_EPSILON) {
+                    continue;
+                }
                 if (candidate_count >= RA_CUDA_PAD_MAX_VISIBLE_CANDIDATES) {
                     candidate_overflow = 1;
                     continue;
@@ -2803,7 +4030,7 @@ RA_D static RA_INLINE int ra_padc(
     if (candidate_count <= 0) {
         return 0;
     }
-    if (!ra_manok(world)) {
+    if (rigid->manifold_count >= PL_IMPULSE_MAX_MANIFOLDS) {
         return 0;
     }
     int unique_count = 0;
@@ -2826,10 +4053,10 @@ RA_D static RA_INLINE int ra_padc(
     if (candidate_count <= 0) {
         return 0;
     }
-    if (!ra_manok(world)) {
+    if (rigid->manifold_count >= PL_IMPULSE_MAX_MANIFOLDS) {
         return 0;
     }
-    int selected[PL_IMPULSE_MAX_POINTS];
+    int selected[PL_SAT_MAX_MANIFOLD_POINTS];
     int selected_count = 0;
     int deepest = 0;
     for (int index = 1; index < candidate_count; ++index) {
@@ -2842,7 +4069,7 @@ RA_D static RA_INLINE int ra_padc(
         }
     }
     selected[selected_count++] = deepest;
-    while (selected_count < PL_IMPULSE_MAX_POINTS
+    while (selected_count < PL_SAT_MAX_MANIFOLD_POINTS
             && selected_count < candidate_count) {
         int best = -1;
         float best_score = -1.0f;
@@ -2877,13 +4104,13 @@ RA_D static RA_INLINE int ra_padc(
         }
         selected[selected_count++] = best;
     }
-    PlImpulseCandidate reduced[PL_IMPULSE_MAX_POINTS];
+    PlImpulseCandidate reduced[PL_SAT_MAX_MANIFOLD_POINTS];
     for (int index = 0; index < selected_count; ++index) {
         reduced[index] = candidates[selected[index]];
     }
-    PlImpulseManifold* manifold = &world->manifolds[
-        world->manifold_count];
-    int made_count = pl_iman(cube_body, pad_start, reduced,
+    PlImpulseManifold* manifold = &rigid->manifolds[
+        rigid->manifold_count];
+    int made_count = pl_iman(object_body, pad_start, reduced,
         selected_count, margin, static_friction, dynamic_friction,
         restitution, manifold);
     int selected_manifold_count = made_count;
@@ -2963,13 +4190,13 @@ RA_D static RA_INLINE int ra_padc(
         ? sqrtf(ra_max(manifold->patch_second_moment / patch_area, 0.0f))
         : 0.0f;
     manifold->torsional_radius = effective_radius;
-    world->compound_pad_component_mask[side] |= component_mask;
-    world->manifold_count++;
+    rigid->compound_pad_component_mask[side] |= component_mask;
+    rigid->manifold_count++;
     return 1;
 }
 
 RA_D static RA_INLINE void ra_advbox(
-        RaCudaProductionWorld* world, int body_index, int other_index) {
+        RaWorld* world, int body_index, int other_index) {
     RaCudaRigidWorld* rigid = &world->rigid;
     RaRigidBody* body = &rigid->bodies[body_index];
     const RaRigidBody* other = &rigid->bodies[other_index];
@@ -2994,40 +4221,6 @@ RA_D static RA_INLINE void ra_advbox(
     }
 }
 
-RA_D static RA_INLINE RaConvexSweep ra_rimccd(
-        const RaRigidBody* ball, float maximum_time) {
-    RaConvexSweep sweep;
-    memset(&sweep, 0, sizeof(sweep));
-    sweep.toi = maximum_time;
-    float speed = ra_length(ball->linear_velocity);
-    float time = 0.0f;
-    for (int iteration = 0; iteration < 12; ++iteration) {
-        sweep.iterations = iteration + 1;
-        RaVec3 position = ra_add(ball->pose.position,
-            ra_scale(ball->linear_velocity, time));
-        sweep.contact = ra_rimq(position, 0.0f);
-        if (sweep.contact.hit) {
-            sweep.hit = 1;
-            sweep.toi = time;
-            return sweep;
-        }
-        if (speed <= 1.0e-8f) {
-            return sweep;
-        }
-        float advance = sweep.contact.separation / speed;
-        if (advance <= 1.0e-7f) {
-            sweep.hit = 1;
-            sweep.toi = time;
-            return sweep;
-        }
-        time += advance;
-        if (time > maximum_time) {
-            return sweep;
-        }
-    }
-    return sweep;
-}
-
 RA_D static RA_INLINE float ra_toi(
         RaConvexSweep sweep, RaVec3 velocity, float advance) {
     float normal_speed = ra_dot(velocity, sweep.contact.normal);
@@ -3037,60 +4230,20 @@ RA_D static RA_INLINE float ra_toi(
     return advance;
 }
 
-RA_D static RA_INLINE void ra_advb(
-        RaCudaProductionWorld* world) {
-    RaCudaRigidWorld* rigid = &world->rigid;
-    RaRigidBody* ball = &rigid->bodies[RA_CUDA_BODY_CUBE];
-    RaVec3 velocity = ball->linear_velocity;
-    float advance = RA_PHYSICS_DT;
-    advance = ra_toi(ra_boxccd(
-        &rigid->shapes[RA_CUDA_BODY_CUBE], &rigid->shapes[RA_CUDA_BODY_TABLE],
-        velocity, ball->angular_velocity, ra_v3(0, 0, 0), ra_v3(0, 0, 0),
-        RA_PHYSICS_DT, 0.0f), velocity, advance);
-    advance = ra_toi(ra_boxccd(
-        &rigid->shapes[RA_CUDA_BODY_CUBE],
-        &rigid->shapes[RA_CUDA_BODY_BACKBOARD],
-        velocity, ball->angular_velocity, ra_v3(0, 0, 0), ra_v3(0, 0, 0),
-        RA_PHYSICS_DT, 0.0f), velocity, advance);
-    advance = ra_toi(
-        ra_rimccd(ball, RA_PHYSICS_DT), velocity, advance);
-    ball->pose.position = ra_add(ball->pose.position,
-        ra_scale(velocity, advance));
-    ball->pose.rotation = ra_qint(
-        ball->pose.rotation, ball->angular_velocity, advance);
-}
-
-RA_D static RA_INLINE void ra_copyb(
-        RaCudaProductionWorld* world) {
-    RaState* state = &world->state;
-    const RaRigidBody* cube = &world->rigid.bodies[RA_CUDA_BODY_CUBE];
-    state->cube_position = cube->pose.position;
-    state->cube_rotation = cube->pose.rotation;
-    state->cube_velocity = cube->linear_velocity;
-    state->cube_angular_velocity = cube->angular_velocity;
-    if (state->stack_mode) {
-        const RaRigidBody* base = &world->rigid.bodies[RA_CUDA_BODY_BASE];
-        state->base_cube_position = base->pose.position;
-        state->base_cube_rotation = base->pose.rotation;
-        state->base_cube_velocity = base->linear_velocity;
-        state->base_cube_angular_velocity = base->angular_velocity;
-    }
-}
-
 RA_D static RA_INLINE int ra_tbllo(
-        RaPose pose, RaVec3 half_extent, float margin) {
+        RaPose pose, RaVec3 half_extents, float margin) {
     RaVec3 axis_x = ra_rotate(pose.rotation, ra_v3(1, 0, 0));
     RaVec3 axis_y = ra_rotate(pose.rotation, ra_v3(0, 1, 0));
     RaVec3 axis_z = ra_rotate(pose.rotation, ra_v3(0, 0, 1));
-    float radius_x = fabsf(axis_x.x)*half_extent.x
-        + fabsf(axis_y.x)*half_extent.y
-        + fabsf(axis_z.x)*half_extent.z;
-    float radius_y = fabsf(axis_x.y)*half_extent.x
-        + fabsf(axis_y.y)*half_extent.y
-        + fabsf(axis_z.y)*half_extent.z;
-    float radius_z = fabsf(axis_x.z)*half_extent.x
-        + fabsf(axis_y.z)*half_extent.y
-        + fabsf(axis_z.z)*half_extent.z;
+    float radius_x = fabsf(axis_x.x)*half_extents.x
+        + fabsf(axis_y.x)*half_extents.y
+        + fabsf(axis_z.x)*half_extents.z;
+    float radius_y = fabsf(axis_x.y)*half_extents.x
+        + fabsf(axis_y.y)*half_extents.y
+        + fabsf(axis_z.y)*half_extents.z;
+    float radius_z = fabsf(axis_x.z)*half_extents.x
+        + fabsf(axis_y.z)*half_extents.y
+        + fabsf(axis_z.z)*half_extents.z;
     float table_min_x = RA_TABLE_CENTER_X - 0.5f*RA_TABLE_SIZE_X;
     float table_max_x = RA_TABLE_CENTER_X + 0.5f*RA_TABLE_SIZE_X;
     float table_min_z = -0.5f*RA_TABLE_SIZE_Z;
@@ -3103,8 +4256,8 @@ RA_D static RA_INLINE int ra_tbllo(
 }
 
 RA_D static RA_INLINE int ra_tblhit(
-        RaPose pose, RaVec3 half_extent, float margin) {
-    if (!ra_tbllo(pose, half_extent, margin)) {
+        RaPose pose, RaVec3 half_extents, float margin) {
+    if (!ra_tbllo(pose, half_extents, margin)) {
         return 0;
     }
     RaConvexShape table = {};
@@ -3117,7 +4270,7 @@ RA_D static RA_INLINE int ra_tblhit(
     RaConvexShape shape = {};
     shape.type = RA_CONVEX_BOX;
     shape.pose = pose;
-    shape.half_extents = half_extent;
+    shape.half_extents = half_extents;
     RaConvexContact contact = pl_sq(
         &table, &shape, margin).contact;
     return contact.hit && contact.separation < margin;
@@ -3131,7 +4284,7 @@ RA_D static RA_INLINE int ra_tblpen(
     for (int link = 0; link < RA_DOF; ++link) {
         RaCollisionBox box = ra_linkb(links, link);
         if (ra_tblhit(
-                box.pose, box.half_extent, RA_CONTACT_MARGIN)) {
+                box.pose, box.half_extents, RA_CONTACT_MARGIN)) {
             return 1;
         }
     }
@@ -3146,7 +4299,7 @@ RA_D static RA_INLINE int ra_tblpen(
         RaCollisionBox box = ra_gripb(
             &frame, box_index);
         if (ra_tblhit(
-                box.pose, box.half_extent, RA_CONTACT_MARGIN)) {
+                box.pose, box.half_extents, RA_CONTACT_MARGIN)) {
             return 1;
         }
     }
@@ -3166,10 +4319,59 @@ RA_D static RA_INLINE int ra_tblpen(
 }
 
 RA_D static RA_INLINE void ra_intpos(
-        RaCudaProductionWorld* world) {
+        RaWorld* world) {
     RaState* state = &world->state;
     if (state->basketball_mode) {
-        ra_advb(world);
+        RaCudaRigidWorld* rigid = &world->rigid;
+        RaRigidBody* ball = &rigid->bodies[RA_CUDA_BODY_CUBE];
+        RaVec3 velocity = ball->linear_velocity;
+        float advance = RA_PHYSICS_DT;
+        advance = ra_toi(ra_boxccd(
+            &rigid->shapes[RA_CUDA_BODY_CUBE],
+            &rigid->shapes[RA_CUDA_BODY_TABLE],
+            velocity, ball->angular_velocity,
+            ra_v3(0, 0, 0), ra_v3(0, 0, 0),
+            RA_PHYSICS_DT, 0.0f), velocity, advance);
+        advance = ra_toi(ra_boxccd(
+            &rigid->shapes[RA_CUDA_BODY_CUBE],
+            &rigid->shapes[RA_CUDA_BODY_BACKBOARD],
+            velocity, ball->angular_velocity,
+            ra_v3(0, 0, 0), ra_v3(0, 0, 0),
+            RA_PHYSICS_DT, 0.0f), velocity, advance);
+        RaConvexSweep sweep;
+        memset(&sweep, 0, sizeof(sweep));
+        sweep.toi = RA_PHYSICS_DT;
+        float speed = ra_length(ball->linear_velocity);
+        float time = 0.0f;
+        for (int iteration = 0; iteration < 12; ++iteration) {
+            sweep.iterations = iteration + 1;
+            RaVec3 position = ra_add(ball->pose.position,
+                ra_scale(ball->linear_velocity, time));
+            sweep.contact = ra_rimq(position, 0.0f);
+            if (sweep.contact.hit) {
+                sweep.hit = 1;
+                sweep.toi = time;
+                break;
+            }
+            if (speed <= 1.0e-8f) {
+                break;
+            }
+            float rim_step = sweep.contact.separation / speed;
+            if (rim_step <= 1.0e-7f) {
+                sweep.hit = 1;
+                sweep.toi = time;
+                break;
+            }
+            time += rim_step;
+            if (time > RA_PHYSICS_DT) {
+                break;
+            }
+        }
+        advance = ra_toi(sweep, velocity, advance);
+        ball->pose.position = ra_add(ball->pose.position,
+            ra_scale(velocity, advance));
+        ball->pose.rotation = ra_qint(
+            ball->pose.rotation, ball->angular_velocity, advance);
     } else {
         ra_advbox(
             world, RA_CUDA_BODY_CUBE, RA_CUDA_BODY_TABLE);
@@ -3222,51 +4424,22 @@ RA_D static RA_INLINE void ra_intpos(
                 && state->gripper_velocity > 0.0f)) {
         state->gripper_velocity = 0.0f;
     }
-    ra_copyb(world);
-}
-
-RA_D static RA_INLINE void ra_colc(
-        RaCudaProductionWorld* world) {
-    RaState* state = &world->state;
-    state->pad_normal_impulse[0] = 0.0f;
-    state->pad_normal_impulse[1] = 0.0f;
-    state->wrist_linear_impulse = ra_v3(0, 0, 0);
-    state->wrist_angular_impulse = ra_v3(0, 0, 0);
-    for (int manifold_index = 0;
-            manifold_index < world->rigid.manifold_count; ++manifold_index) {
-        PlImpulseManifold* manifold =
-            &world->rigid.manifolds[manifold_index];
-        int robot_contact = manifold->body_b >= RA_CUDA_BODY_SHELL_START
-            && manifold->body_b < RA_CUDA_ROBOT_BODY_END;
-        for (int point_index = 0; point_index < manifold->point_count;
-                ++point_index) {
-            PlImpulsePoint* point = &manifold->points[point_index];
-            float impulse = ra_max(point->normal_impulse, 0.0f);
-            if (manifold->body_b >= RA_CUDA_BODY_PAD_LEFT_START
-                    && manifold->body_b < RA_CUDA_BODY_PAD_RIGHT_START) {
-                state->pad_normal_impulse[0] += impulse;
-            } else if (manifold->body_b >= RA_CUDA_BODY_PAD_RIGHT_START
-                    && manifold->body_b < RA_CUDA_ROBOT_BODY_END) {
-                state->pad_normal_impulse[1] += impulse;
-            }
-            if (robot_contact && impulse > 0.0f) {
-                RaVec3 reaction = ra_scale(manifold->normal, -impulse);
-                state->wrist_linear_impulse = ra_add(
-                    state->wrist_linear_impulse, reaction);
-                state->wrist_angular_impulse = ra_add(
-                    state->wrist_angular_impulse,
-                    ra_cross(ra_sub(point->point_b, state->end_effector),
-                        reaction));
-            }
-        }
+    RaRigidBody* cube = &world->rigid.bodies[RA_CUDA_BODY_CUBE];
+    state->cube_position = cube->pose.position;
+    state->cube_rotation = cube->pose.rotation;
+    state->cube_velocity = cube->linear_velocity;
+    state->cube_angular_velocity = cube->angular_velocity;
+    if (state->stack_mode) {
+        RaRigidBody* base = &world->rigid.bodies[RA_CUDA_BODY_BASE];
+        state->base_cube_position = base->pose.position;
+        state->base_cube_rotation = base->pose.rotation;
+        state->base_cube_velocity = base->linear_velocity;
+        state->base_cube_angular_velocity = base->angular_velocity;
     }
-    state->gripper_force = 0.5f
-        * (state->pad_normal_impulse[0] + state->pad_normal_impulse[1])
-        / RA_PHYSICS_DT;
 }
 
 RA_D static RA_INLINE void ra_prep(
-        RaCudaProductionWorld* world,
+        RaWorld* world,
         float mass_factor[RA_DOF][RA_DOF]) {
     RaState* state = &world->state;
     RaPose* links = world->staged.links;
@@ -3283,20 +4456,32 @@ RA_D static RA_INLINE void ra_prep(
     float gravity[RA_DOF];
     float rhs[RA_DOF];
     float acceleration[RA_DOF] = {0};
-    ra_massm(state, matrix);
-    ra_gravt(state, gravity);
+    ra_massg(state, matrix, gravity);
     for (int joint = 0; joint < RA_DOF; ++joint) {
         float kp = joint < 2 ? 4500.0f : (joint < 4 ? 3500.0f : 2000.0f);
         float kd = joint < 2 ? 450.0f : (joint < 4 ? 350.0f : 200.0f);
+        float torque_limit = joint < 4 ? 87.0f : 12.0f;
         float arm_motor = ra_clamp(
             kp * (state->target_q[joint] - state->q[joint])
                 - kd * state->qd[joint],
-            -ra_mlim(joint), ra_mlim(joint));
+            -torque_limit, torque_limit);
         rhs[joint] = arm_motor - state->qd[joint] + gravity[joint];
         world->staged.energy += fabsf(arm_motor * state->qd[joint])
             * RA_PHYSICS_DT;
     }
-    ra_massf(matrix, mass_factor);
+    for (int row = 0; row < RA_DOF; ++row) {
+        for (int column = 0; column <= row; ++column) {
+            float sum = matrix[row][column];
+            for (int k = 0; k < column; ++k) {
+                sum -= mass_factor[row][k] * mass_factor[column][k];
+            }
+            if (row == column) {
+                mass_factor[row][column] = sqrtf(ra_max(sum, 1.0e-8f));
+            } else {
+                mass_factor[row][column] = sum / mass_factor[column][column];
+            }
+        }
+    }
     ra_masss(mass_factor, rhs, acceleration);
     for (int joint = 0; joint < RA_DOF; ++joint) {
         state->qd[joint] = ra_clamp(
@@ -3317,7 +4502,7 @@ RA_D static RA_INLINE void ra_prep(
 }
 
 RA_D static RA_INLINE void ra_solve(
-        RaCudaProductionWorld* world) {
+        RaWorld* world) {
     RaState* state = &world->state;
     RaPose* links = world->staged.links;
     float backboard_incoming_speed = 0.0f;
@@ -3360,7 +4545,41 @@ RA_D static RA_INLINE void ra_solve(
     }
     ra_intpos(world);
     ra_fk(state->q, state->gripper_width, links, NULL, NULL, &state->end_effector);
-    ra_colc(world);
+    state->pad_normal_impulse[0] = 0.0f;
+    state->pad_normal_impulse[1] = 0.0f;
+    state->wrist_linear_impulse = ra_v3(0, 0, 0);
+    state->wrist_angular_impulse = ra_v3(0, 0, 0);
+    for (int manifold_index = 0;
+            manifold_index < world->rigid.manifold_count; ++manifold_index) {
+        PlImpulseManifold* contact_manifold =
+            &world->rigid.manifolds[manifold_index];
+        int robot_contact = contact_manifold->body_b >= RA_CUDA_BODY_SHELL_START
+            && contact_manifold->body_b < RA_CUDA_ROBOT_BODY_END;
+        for (int point_index = 0; point_index < contact_manifold->point_count;
+                ++point_index) {
+            PlImpulsePoint* point = &contact_manifold->points[point_index];
+            float impulse = ra_max(point->normal_impulse, 0.0f);
+            if (contact_manifold->body_b >= RA_CUDA_BODY_PAD_LEFT_START
+                    && contact_manifold->body_b < RA_CUDA_BODY_PAD_RIGHT_START) {
+                state->pad_normal_impulse[0] += impulse;
+            } else if (contact_manifold->body_b >= RA_CUDA_BODY_PAD_RIGHT_START
+                    && contact_manifold->body_b < RA_CUDA_ROBOT_BODY_END) {
+                state->pad_normal_impulse[1] += impulse;
+            }
+            if (robot_contact && impulse > 0.0f) {
+                RaVec3 reaction = ra_scale(contact_manifold->normal, -impulse);
+                state->wrist_linear_impulse = ra_add(
+                    state->wrist_linear_impulse, reaction);
+                state->wrist_angular_impulse = ra_add(
+                    state->wrist_angular_impulse,
+                    ra_cross(ra_sub(point->point_b, state->end_effector),
+                        reaction));
+            }
+        }
+    }
+    state->gripper_force = 0.5f
+        * (state->pad_normal_impulse[0] + state->pad_normal_impulse[1])
+        / RA_PHYSICS_DT;
 
     int active_pad[2] = {0, 0};
     for (int manifold_index = 0;
@@ -3438,7 +4657,7 @@ RA_D static RA_INLINE void ra_solve(
 }
 
 RA_D static RA_INLINE void ra_objr(
-        RaCudaProductionWorld* world, int object_body, int pad_mask) {
+        RaWorld* world, int object_body, int pad_mask) {
     RaCudaRigidWorld* rigid = &world->rigid;
     for (int item = 0; item < RA_CUDA_SHELL_BOXES; ++item) {
         if (item < 3 && world->state.basketball_mode) {
@@ -3452,7 +4671,7 @@ RA_D static RA_INLINE void ra_objr(
         }
         ra_pair(rigid, object_body,
             RA_CUDA_BODY_SHELL_START + item, RA_CONTACT_MARGIN,
-            RA_HAND_COLLISION_FRICTION, RA_HAND_COLLISION_FRICTION, 0.0f);
+            RA_ROBOT_FRICTION, RA_ROBOT_FRICTION, 0.0f);
     }
     const RaConvexShape* object = &rigid->shapes[object_body];
     float object_radius = ra_brad(object)
@@ -3467,36 +4686,12 @@ RA_D static RA_INLINE void ra_objr(
             continue;
         }
         ra_pair(rigid, object_body, link_body, RA_CONTACT_MARGIN,
-            RA_HAND_COLLISION_FRICTION, RA_HAND_COLLISION_FRICTION, 0.0f);
-    }
-}
-
-RA_D static RA_INLINE void ra_botc(
-        RaCudaProductionWorld* world) {
-    RaCudaRigidWorld* rigid = &world->rigid;
-    if (world->state.basketball_mode) {
-        ra_bpad(world, 0);
-        ra_bpad(world, 1);
-    } else {
-        ra_padc(world, 0, RA_CUDA_BODY_CUBE);
-        ra_padc(world, 1, RA_CUDA_BODY_CUBE);
-        if (world->state.stack_mode) {
-            ra_padc(world, 0, RA_CUDA_BODY_BASE);
-            ra_padc(world, 1, RA_CUDA_BODY_BASE);
-        }
-    }
-    int pad_mask = (rigid->compound_pad_component_mask[0] != 0 ? 1 : 0)
-        | (rigid->compound_pad_component_mask[1] != 0 ? 2 : 0);
-    ra_objr(
-        world, RA_CUDA_BODY_CUBE, pad_mask);
-    if (world->state.stack_mode) {
-        ra_objr(
-            world, RA_CUDA_BODY_BASE, pad_mask);
+            RA_ROBOT_FRICTION, RA_ROBOT_FRICTION, 0.0f);
     }
 }
 
 RA_D static RA_INLINE void ra_buildc(
-        RaCudaProductionWorld* world) {
+        RaWorld* world) {
     RaState* state = &world->state;
     RaCudaRigidWorld* rigid = &world->rigid;
     const float friction = state->stack_mode
@@ -3527,7 +4722,7 @@ RA_D static RA_INLINE void ra_buildc(
             rigid->bodies[RA_CUDA_BODY_CUBE].pose.position,
             RA_CONTACT_MARGIN);
         if (rim_contact.hit
-                && ra_manok(rigid)) {
+                && rigid->manifold_count < PL_IMPULSE_MAX_MANIFOLDS) {
             PlImpulseCandidate rim_candidate;
             memset(&rim_candidate, 0, sizeof(rim_candidate));
             rim_candidate.contact = rim_contact;
@@ -3541,7 +4736,23 @@ RA_D static RA_INLINE void ra_buildc(
             rigid->manifold_count += rim_count > 0;
         }
     }
-    ra_botc(world);
+    if (state->basketball_mode) {
+        ra_bpad(world, 0);
+        ra_bpad(world, 1);
+    } else {
+        ra_padc(world, 0, RA_CUDA_BODY_CUBE);
+        ra_padc(world, 1, RA_CUDA_BODY_CUBE);
+        if (state->stack_mode) {
+            ra_padc(world, 0, RA_CUDA_BODY_BASE);
+            ra_padc(world, 1, RA_CUDA_BODY_BASE);
+        }
+    }
+    int pad_mask = (rigid->compound_pad_component_mask[0] != 0 ? 1 : 0)
+        | (rigid->compound_pad_component_mask[1] != 0 ? 2 : 0);
+    ra_objr(world, RA_CUDA_BODY_CUBE, pad_mask);
+    if (state->stack_mode) {
+        ra_objr(world, RA_CUDA_BODY_BASE, pad_mask);
+    }
     for (int body = RA_CUDA_BODY_SHELL_START;
             body < RA_CUDA_ROBOT_BODY_END; ++body) {
         if (body < RA_CUDA_BODY_SHELL_START + 3) {
@@ -3552,7 +4763,7 @@ RA_D static RA_INLINE void ra_buildc(
                 shape->pose, shape->half_extents,
                 RA_CONTACT_MARGIN + 0.002f)) {
             ra_pair(rigid, RA_CUDA_BODY_TABLE, body,
-                RA_CONTACT_MARGIN, 0.80f, 0.70f, 0.0f);
+                RA_CONTACT_MARGIN, RA_ROBOT_FRICTION, 0.70f, 0.0f);
         }
     }
 }
@@ -3566,7 +4777,7 @@ typedef struct Env {
     int tag;
     int boundary_reached;
     unsigned int rng;
-    RaCudaProductionWorld world;
+    RaWorld world;
 } Env;
 
 static_assert(sizeof(RaState) % sizeof(unsigned int) == 0,
@@ -3595,16 +4806,18 @@ __global__ void ra_kbegin(Env* envs, int start, int count,
         return;
     }
     int state_index = start + local;
-    RaCudaProductionWorld* world = &envs[state_index].world;
+    RaWorld* world = &envs[state_index].world;
     RaState* state = &world->state;
     for (int action = 0; action < RA_ACTIONS; ++action) {
         world->staged.actions[action] = actions[state_index * RA_ACTIONS
             + action];
     }
+    float span[RA_DOF] = {2.30f, 1.45f, 2.30f, 1.20f,
+        2.30f, 1.50f, 2.20f};
     for (int joint = 0; joint < RA_DOF; ++joint) {
         float action = ra_clamp(world->staged.actions[joint], -1.0f, 1.0f);
         state->target_q[joint] = ra_clamp(ra_jhome(joint)
-            + action * ra_aspan(joint),
+            + action * span[joint],
             ra_jmin(joint), ra_jmax(joint));
     }
     float grip_action = ra_clamp(world->staged.actions[RA_DOF], -1.0f, 1.0f);
@@ -3618,7 +4831,7 @@ __global__ void ra_kbegin(Env* envs, int start, int count,
         state->grasp_cooldown -= 1;
     }
     if (state->basketball_mode) {
-        state->previous_ball_position = state->cube_position;
+        state->previous_cube_position = state->cube_position;
     }
     ra_fk(state->q, state->gripper_width, world->staged.links,
         NULL, NULL, &state->end_effector);
@@ -3631,7 +4844,7 @@ __global__ void ra_kphys(Env* envs, int start,
     if (local >= count) {
         return;
     }
-    RaCudaProductionWorld* world = &envs[start + local].world;
+    RaWorld* world = &envs[start + local].world;
     for (int substep = 0; substep < RA_SUBSTEPS; ++substep) {
         float mass_factor[RA_DOF][RA_DOF];
         ra_prep(world, mass_factor);
@@ -3649,7 +4862,7 @@ __global__ void ra_kfin(Env* envs, int start, int count,
     }
     int state_index = start + local;
     Env* env = envs + state_index;
-    RaCudaProductionWorld* world = &env->world;
+    RaWorld* world = &env->world;
     float reward = world->state.basketball_mode
         ? ra_stepb(&world->state, world->staged.actions,
             world->staged.energy, world->staged.first_grasp,
@@ -3659,9 +4872,83 @@ __global__ void ra_kfin(Env* envs, int start, int count,
             world->staged.released, world->staged.links);
     float terminal = world->state.done ? 1.0f : 0.0f;
     if (terminal != 0.0f) {
-        ra_logep(&world->state, &env->log);
-        unsigned int topology = ra_topo(&world->state);
-        ra_reset(&world->state);
+        RaState* state = &world->state;
+        struct Log* log = &env->log;
+        if (state->basketball_mode) {
+            float grasp_denominator = ra_max(
+                (float)state->attempts, (float)state->basketball_grasps);
+            float release_denominator = ra_max(
+                (float)state->basketball_grasps, 1.0f);
+            log->basketball_mode += 1.0f;
+            log->score += (float)state->baskets;
+            log->baskets += (float)state->baskets;
+            log->grasp_rate += grasp_denominator > 0.0f
+                ? (float)state->basketball_grasps / grasp_denominator
+                : 0.0f;
+            log->lift_rate += state->lifted ? 1.0f : 0.0f;
+            log->slip_rate += state->slip_events > 0 ? 1.0f : 0.0f;
+            log->release_rate += (float)state->basketball_releases
+                / release_denominator;
+            log->release_center_miss_cm_sum +=
+                state->basketball_release_center_miss_cm_sum;
+            log->release_center_miss_count +=
+                (float)state->basketball_releases;
+            log->episode_length += (float)state->step;
+            log->n += 1.0f;
+        } else {
+            log->score += state->success ? 1.0f : 0.0f;
+            log->episode_length += (float)state->step;
+            log->success_rate += state->success ? 1.0f : 0.0f;
+            log->grasp_rate += state->ever_grasped ? 1.0f : 0.0f;
+            log->lift_rate += state->lifted ? 1.0f : 0.0f;
+            log->transport_rate += state->transported ? 1.0f : 0.0f;
+            log->release_rate += state->stack_mode
+                ? (state->valid_release_achieved ? 1.0f : 0.0f)
+                : (state->released_near_target ? 1.0f : 0.0f);
+            log->return_value += state->episode_return;
+            log->reach_distance += ra_length(
+                ra_sub(state->cube_position, state->end_effector));
+            log->place_distance += ra_length(
+                ra_sub(state->target_position, state->cube_position));
+            log->energy += state->episode_energy
+                / ra_max((float)state->step, 1.0f);
+            log->pinch_force += state->episode_pinch_force
+                / ra_max((float)state->pinch_substeps, 1.0f);
+            log->slip_rate += state->slip_events > 0 ? 1.0f : 0.0f;
+            log->cube_angular_speed += ra_length(
+                state->cube_angular_velocity);
+            log->base_angular_speed += state->stack_mode
+                ? ra_length(state->base_cube_angular_velocity) : 0.0f;
+            log->orientation_error += state->stack_mode
+                ? ra_max(ra_cup(state->cube_rotation),
+                    ra_cup(state->base_cube_rotation))
+                : ra_cup(state->cube_rotation);
+            if (state->stack_mode) {
+                RaVec3 alignment = ra_sub(
+                    state->cube_position, state->base_cube_position);
+                RaVec3 base_slide = ra_sub(
+                    state->base_cube_position,
+                    state->base_cube_start_position);
+                log->stack_rate += state->ever_stacked ? 1.0f : 0.0f;
+                log->stable_stack_rate += state->success ? 1.0f : 0.0f;
+                log->stack_alignment_rate += state->stack_aligned
+                    ? 1.0f : 0.0f;
+                log->valid_stack_contact_rate +=
+                    state->valid_stack_contact ? 1.0f : 0.0f;
+                log->clearance_rate += state->cleared_after_release
+                    ? 1.0f : 0.0f;
+                log->settle_rate += state->max_placement_settle_steps > 0
+                    ? 1.0f : 0.0f;
+                log->stack_alignment += sqrtf(
+                    alignment.x*alignment.x + alignment.z*alignment.z);
+                log->base_slide_distance += sqrtf(
+                    base_slide.x*base_slide.x + base_slide.z*base_slide.z);
+            }
+            log->n += 1.0f;
+        }
+        unsigned int topology = state->basketball_mode ? 3u
+            : (state->stack_mode ? 2u : 1u);
+        ra_reset(state);
         ra_rbrst(&world->rigid, topology);
     } else if (world->state.basketball_reset) {
         ra_rbrst(&world->rigid, 3u);

@@ -3,6 +3,15 @@
 
 #define PUF_BACKEND PUF_GPU
 
+#ifndef RA_OBS_T_DEFINED
+#define RA_OBS_T_DEFINED
+#if defined(from_float) && !defined(PRECISION_FLOAT)
+typedef precision_t obs_t;
+#else
+typedef float obs_t;
+#endif
+#endif
+
 #include <cuda_bf16.h>
 #include <cuda_runtime.h>
 #include <stdio.h>
@@ -32,6 +41,48 @@ static int ra_flag(Dict* kwargs, const char* key) {
     return item != NULL && item->value != 0.0;
 }
 
+void puf_log(Log* log, Dict* out) {
+    dict_set(out, "score", log->score);
+    dict_set(out, "perf", log->score);
+    if (log->basketball_mode > 0.5f) {
+        dict_set(out, "baskets", log->baskets);
+        dict_set(out, "grasp_rate", log->grasp_rate);
+        dict_set(out, "lift_rate", log->lift_rate);
+        dict_set(out, "release_rate", log->release_rate);
+        dict_set(out, "slip_rate", log->slip_rate);
+        float release_count = log->release_center_miss_count;
+        dict_set(out, "avg_release_miss_cm", release_count > 0.0f
+            ? log->release_center_miss_cm_sum / release_count : 0.0f);
+        dict_set(out, "episode_length", log->episode_length);
+        return;
+    }
+    dict_set(out, "success_rate", log->success_rate);
+    dict_set(out, "grasp_rate", log->grasp_rate);
+    dict_set(out, "lift_rate", log->lift_rate);
+    dict_set(out, "transport_rate", log->transport_rate);
+    dict_set(out, "release_rate", log->release_rate);
+    dict_set(out, "episode_return", log->return_value);
+    dict_set(out, "episode_length", log->episode_length);
+    dict_set(out, "reach_distance", log->reach_distance);
+    dict_set(out, "place_distance", log->place_distance);
+    dict_set(out, "energy", log->energy);
+    dict_set(out, "pinch_force", log->pinch_force);
+    dict_set(out, "slip_rate", log->slip_rate);
+    dict_set(out, "stack_rate", log->stack_rate);
+    dict_set(out, "stable_stack_rate", log->stable_stack_rate);
+    dict_set(out, "stack_alignment_rate", log->stack_alignment_rate);
+    dict_set(out, "valid_stack_contact_rate",
+        log->valid_stack_contact_rate);
+    dict_set(out, "clearance_rate", log->clearance_rate);
+    dict_set(out, "settle_rate", log->settle_rate);
+    dict_set(out, "stack_alignment", log->stack_alignment);
+    dict_set(out, "base_slide_distance", log->base_slide_distance);
+    dict_set(out, "cube_angular_speed", log->cube_angular_speed);
+    dict_set(out, "base_angular_speed", log->base_angular_speed);
+    dict_set(out, "orientation_error", log->orientation_error);
+    dict_set(out, "n", log->n);
+}
+
 static void ra_fill(Env* env, unsigned int rng) {
     memset(env, 0, sizeof(*env));
     env->num_agents = 1;
@@ -41,7 +92,8 @@ static void ra_fill(Env* env, unsigned int rng) {
     env->world.state.stack_mode = g_ra_stack;
     env->world.state.basketball_mode = g_ra_basketball;
     ra_reset(&env->world.state);
-    ra_rbrst(&env->world.rigid, ra_topo(&env->world.state));
+    ra_rbrst(&env->world.rigid, env->world.state.basketball_mode ? 3u
+        : (env->world.state.stack_mode ? 2u : 1u));
 }
 
 Env* puf_vec_create(int n, Dict* env_kwargs,
@@ -59,6 +111,8 @@ Env* puf_vec_create(int n, Dict* env_kwargs,
     g_ra_render_host.camera_distance = g_ra_basketball ? 2.35f : 1.55f;
     g_ra_render_host.camera_yaw = 0.78f;
     g_ra_render_host.camera_pitch = 0.48f;
+    g_ra_render_host.renderer = (RaRenderer*)calloc(1, sizeof(RaRenderer));
+    assert(g_ra_render_host.renderer != NULL);
 
     Env* host_envs = (Env*)calloc(n, sizeof(Env));
     for (int i = 0; i < n; i++) {
