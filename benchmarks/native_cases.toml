@@ -1,0 +1,130 @@
+version = 1
+
+[profiles.affine578]
+args = [
+  "base.seed=73",
+  "base.async=1",
+  "base.cudagraphs=1",
+  "base.reset_every_horizon=0",
+  "env.seed=42",
+  "env.start_depth=2",
+  "env.max_depth=16",
+  "env.num_agents=1",
+  "env.num_bots=0",
+  "env.step_grace=0",
+  "env.perf_weighting=1",
+  "train.gpus=1",
+  "train.horizon=64",
+  "train.minibatch_size=8192",
+  "train.replay_ratio=1.87008977",
+  "train.learning_rate=0.00326743093",
+  "train.anneal_lr=1",
+  "train.min_lr_ratio=0",
+  "train.gamma=0.999899983",
+  "train.gae_lambda=0.921891332",
+  "train.clip_coef=0.366497159",
+  "train.vf_coef=0.100000001",
+  "train.vf_clip_coef=0.00100000005",
+  "train.ent_coef=0.0405269228",
+  "train.anneal_ent_coef=0",
+  "train.min_ent_coef_ratio=0.1",
+  "train.momentum=0.924182773",
+  "train.max_grad_norm=0.881812513",
+  "train.vtrace=0",
+  "train.verb_eps=0",
+  "policy.hidden_size=512",
+  "policy.num_layers=3",
+  "selfplay.enabled=0",
+  "vec.total_agents=4096",
+  "vec.num_threads=16",
+]
+
+[groups]
+affine = ["affine578-h", "affine578-cu", "affine1024x4-h", "affine1024x4-cu"]
+goldens = ["breakout-h", "breakout-cu", "g2048-h", "maze-h", "boxoban-h"]
+all = ["affine", "goldens"]
+
+[cases."affine578-h"]
+binary = "affine_lock_h"
+env = "affine_lock"
+backend = "h"
+profile = "affine578"
+timesteps = 134217728
+precondition_timesteps = 8388608
+description = "Run 578 resolved recipe with the CPU environment backend"
+overrides = { "vec.num_buffers" = "2" }
+
+[cases."affine578-cu"]
+binary = "affine_lock_cu"
+env = "affine_lock"
+backend = "cu"
+profile = "affine578"
+timesteps = 134217728
+precondition_timesteps = 8388608
+description = "Run 578 resolved recipe with the CUDA-required one-buffer adjustment"
+overrides = { "vec.num_buffers" = "1" }
+
+[cases."affine1024x4-h"]
+binary = "affine_lock_h"
+env = "affine_lock"
+backend = "h"
+profile = "affine578"
+timesteps = 134217728
+precondition_timesteps = 8388608
+description = "Run 578 with only hidden size doubled and one effective layer added"
+overrides = { "vec.num_buffers" = "2", "policy.hidden_size" = "1024", "policy.num_layers" = "4" }
+
+[cases."affine1024x4-cu"]
+binary = "affine_lock_cu"
+env = "affine_lock"
+backend = "cu"
+profile = "affine578"
+timesteps = 134217728
+precondition_timesteps = 8388608
+description = "1024x4 Affine stress profile with the CUDA-required one-buffer adjustment"
+overrides = { "vec.num_buffers" = "1", "policy.hidden_size" = "1024", "policy.num_layers" = "4" }
+
+[cases."breakout-h"]
+binary = "breakout_h"
+env = "breakout"
+backend = "h"
+timesteps = 134217728
+precondition_timesteps = 8388608
+description = "Canonical small-network CPU-environment control"
+args = ["base.seed=73", "base.async=1", "base.cudagraphs=1"]
+
+[cases."breakout-cu"]
+binary = "breakout_cu"
+env = "breakout"
+backend = "cu"
+timesteps = 134217728
+precondition_timesteps = 8388608
+description = "Canonical small-network CUDA-environment control"
+args = ["base.seed=73", "base.async=1", "base.cudagraphs=1", "vec.num_buffers=1"]
+
+[cases."g2048-h"]
+binary = "g2048_h"
+env = "g2048"
+backend = "h"
+timesteps = 33554432
+precondition_timesteps = 8388608
+description = "Canonical large-network learner-dominated control"
+args = ["base.seed=73", "base.async=1", "base.cudagraphs=1"]
+
+[cases."maze-h"]
+binary = "maze_h"
+env = "maze"
+backend = "h"
+timesteps = 33554432
+precondition_timesteps = 8388608
+description = "Canonical long-horizon MinGRU control"
+args = ["base.seed=73", "base.async=1", "base.cudagraphs=1"]
+
+[cases."boxoban-h"]
+binary = "boxoban_h"
+env = "boxoban"
+backend = "h"
+timesteps = 33554432
+precondition_timesteps = 8388608
+description = "Canonical large-observation puzzle control with an explicitly staged map"
+args = ["base.seed=73", "base.async=1", "base.cudagraphs=1"]
