@@ -12,6 +12,7 @@ import ast
 import time
 import argparse
 import configparser
+import subprocess
 from collections import defaultdict
 import multiprocessing as mp
 from copy import deepcopy
@@ -465,6 +466,17 @@ def sweep(env_name, args=None, pareto=False):
         train(env_name, exp_args, range(gpu_id, gpu_id + exp_gpus),
             sweep_obj=sweep_obj, result_queue=result_queue)
 
+def _start_ffmpeg_gif(path, width, height, fps):
+    return subprocess.Popen([
+        'ffmpeg', '-y', '-loglevel', 'warning',
+        '-f', 'rawvideo',
+        '-pix_fmt', 'rgba',
+        '-s', f'{width}x{height}',
+        '-r', str(fps),
+        '-i', '-',
+        path,
+    ], stdin=subprocess.PIPE)
+
 def eval(env_name, args=None, load_path=None):
     '''Evaluate a trained policy. Supports both native and --slowly torch backends.'''
     args = args or load_config(env_name)
@@ -488,11 +500,38 @@ def eval(env_name, args=None, load_path=None):
         backend.load_weights(pufferl, load_path)
         print(f'Loaded weights from {load_path}')
 
-    while True:
-        backend.render(pufferl, 0)
-        backend.rollouts(pufferl)
+    frame_count = 0
+    ffmpeg = None
+    num_frames = args.get('num_frames')
+    for name in ('pipe_frame_fd', 'screen_width', 'screen_height'):
+        if not hasattr(_C, name):
+            raise RuntimeError(f'Current native backend does not expose {name}; rebuild _C')
+    out_dir = os.path.dirname(args['gif_path'])
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
-    backend.close(pufferl)
+    try:
+        while True:
+            backend.render(pufferl, 0)
+            if ffmpeg is None:
+                ffmpeg = _start_ffmpeg_gif(
+                    args['gif_path'], _C.screen_width(), _C.screen_height(), args['fps'])
+            _C.pipe_frame_fd(ffmpeg.stdin.fileno())
+            frame_count += 1
+            if frame_count % 100 == 0:
+                if num_frames == -1:
+                    print(f'Recorded {frame_count} frames to {args["gif_path"]}')
+                else:
+                    percent = 100.0 * frame_count / num_frames
+                    print(f'Recorded {frame_count}/{num_frames} frames [{percent:.3f}%] to {args["gif_path"]}')
+            if num_frames != -1 and frame_count >= num_frames:
+                break
+            backend.rollouts(pufferl)
+    finally:
+        if ffmpeg is not None:
+            ffmpeg.stdin.close()
+            ffmpeg.wait()
+        backend.close(pufferl)
 
 def match(env_name, policy_a_path, policy_b_path, num_games=4096, args=None, verbose=True):
     '''Head-to-head match between two trained policies in a 2-agent selfplay env.
@@ -603,7 +642,8 @@ def load_config(env_name):
     parser.add_argument('--wandb-group', type=str, default='debug')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
     parser.add_argument('--slowly', action='store_true', help='Use PyTorch training backend')
-    parser.add_argument('--save-frames', type=int, default=0)
+    parser.add_argument('--num-frames', type=int, default=300,
+        help='Number of rendered frames to save to --gif-path with ffmpeg. (Default 300, set to -1 to record until interrupted)')
     parser.add_argument('--gif-path', type=str, default='eval.gif')
     parser.add_argument('--fps', type=float, default=15)
     parser.description = f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]' \

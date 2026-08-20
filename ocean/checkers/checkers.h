@@ -752,10 +752,10 @@ void c_render(Checkers *env) {
       case AGENT_PAWN:
         piece_color = BLUE;
         DrawCircle(center_x, center_y, radius, piece_color);
-        DrawCircleGradient(center_x - radius / 3, center_y - radius / 3,
+        DrawCircleGradient((Vector2){center_x - radius / 3, center_y - radius / 3},
                            radius / 3, (Color){255, 255, 255, 80},
                            (Color){255, 255, 255, 10});
-        DrawCircleGradient(center_x, center_y, radius,
+        DrawCircleGradient((Vector2){center_x, center_y}, radius,
                            (Color){255, 255, 255, 50},
                            (Color){255, 255, 255, 5});
         break;
@@ -763,17 +763,17 @@ void c_render(Checkers *env) {
       case AGENT_KING:
         piece_color = BLUE;
         DrawCircle(center_x, center_y, radius, piece_color);
-        DrawCircleGradient(center_x, center_y, radius,
+        DrawCircleGradient((Vector2){center_x, center_y}, radius,
                            (Color){255, 255, 255, 50},
                            (Color){255, 255, 255, 5});
 
-        DrawCircleGradient(center_x, center_y - king_offset / 2, radius,
+        DrawCircleGradient((Vector2){center_x, center_y - king_offset / 2}, radius,
                            (Color){20, 20, 20, 60}, (Color){20, 20, 20, 30});
         DrawCircle(center_x, center_y - king_offset, radius, piece_color);
         DrawCircleGradient(
-            center_x - radius / 3, center_y - radius / 3 - king_offset,
+            (Vector2){center_x - radius / 3, center_y - radius / 3 - king_offset},
             radius / 3, (Color){255, 255, 255, 80}, (Color){255, 255, 255, 10});
-        DrawCircleGradient(center_x, center_y - king_offset, radius,
+        DrawCircleGradient((Vector2){center_x, center_y - king_offset}, radius,
                            (Color){255, 255, 255, 50},
                            (Color){255, 255, 255, 5});
         break;
@@ -781,10 +781,10 @@ void c_render(Checkers *env) {
       case OPPONENT_PAWN:
         piece_color = RED;
         DrawCircle(center_x, center_y, radius, piece_color);
-        DrawCircleGradient(center_x - radius / 3, center_y - radius / 3,
+        DrawCircleGradient((Vector2){center_x - radius / 3, center_y - radius / 3},
                            radius / 3, (Color){255, 255, 255, 80},
                            (Color){255, 255, 255, 10});
-        DrawCircleGradient(center_x, center_y, radius,
+        DrawCircleGradient((Vector2){center_x, center_y}, radius,
                            (Color){255, 255, 255, 50},
                            (Color){255, 255, 255, 5});
         break;
@@ -792,17 +792,17 @@ void c_render(Checkers *env) {
       case OPPONENT_KING:
         piece_color = RED;
         DrawCircle(center_x, center_y, radius, piece_color);
-        DrawCircleGradient(center_x, center_y, radius,
+        DrawCircleGradient((Vector2){center_x, center_y}, radius,
                            (Color){255, 255, 255, 50},
                            (Color){255, 255, 255, 5});
 
-        DrawCircleGradient(center_x, center_y - king_offset / 2, radius,
+        DrawCircleGradient((Vector2){center_x, center_y - king_offset / 2}, radius,
                            (Color){20, 20, 20, 60}, (Color){20, 20, 20, 30});
         DrawCircle(center_x, center_y - king_offset, radius, piece_color);
         DrawCircleGradient(
-            center_x - radius / 3, center_y - radius / 3 - king_offset,
+            (Vector2){center_x - radius / 3, center_y - radius / 3 - king_offset},
             radius / 3, (Color){255, 255, 255, 80}, (Color){255, 255, 255, 10});
-        DrawCircleGradient(center_x, center_y - king_offset, radius,
+        DrawCircleGradient((Vector2){center_x, center_y - king_offset}, radius,
                            (Color){255, 255, 255, 50},
                            (Color){255, 255, 255, 5});
         break;

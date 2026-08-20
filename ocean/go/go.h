@@ -969,11 +969,11 @@ void c_render(CGo* env) {
         int inner = (env->grid_square_size / 2) - 4;
         int outer = (env->grid_square_size / 2) - 2;
         if (position_state == 1) {
-            DrawCircleGradient(circle_x, circle_y, outer, STONE_GRAY, BLACK);
+            DrawCircleGradient((Vector2){circle_x, circle_y}, outer, STONE_GRAY, BLACK);
         }
         // if enemy draw circle tile for white
         if (position_state == 2) {
-            DrawCircleGradient(circle_x, circle_y, inner, WHITE, GRAY);
+            DrawCircleGradient((Vector2){circle_x, circle_y}, inner, WHITE, GRAY);
         }
     }
     // design a pass button

@@ -8,6 +8,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include <errno.h>
+#include <unistd.h>
+#include "raylib.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -121,6 +124,9 @@ void create_static_threads(StaticVec* vec, int num_threads, int horizon,
 void static_vec_omp_step(StaticVec* vec);
 void static_vec_seq_step(StaticVec* vec);
 void static_vec_render(StaticVec* vec, int env_id);
+int static_vec_pipe_frame_fd(int fd);
+int static_vec_screen_width(void);
+int static_vec_screen_height(void);
 void static_vec_read_profile(StaticVec* vec, float out[NUM_EVAL_PROF]);
 
 // Env info
@@ -726,9 +732,75 @@ void static_vec_read_profile(StaticVec* vec, float out[NUM_EVAL_PROF]) {
 }
 
 void static_vec_render(StaticVec* vec, int env_id) {
+#if defined(PLATFORM_MEMORY)
+    SetTraceLogLevel(LOG_WARNING);
+#endif
     Env* envs = (Env*)vec->envs;
     c_render(&envs[env_id]);
+#if defined(PLATFORM_MEMORY)
+    SetTargetFPS(0);
+#endif
 }
+
+static int static_vec_write_all(int fd, const void* data, size_t size) {
+    const char* cursor = (const char*)data;
+    while (size > 0) {
+        ssize_t written = write(fd, cursor, size);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            return 0;
+        }
+        if (written == 0) return 0;
+        cursor += written;
+        size -= (size_t)written;
+    }
+    return 1;
+}
+
+int static_vec_pipe_frame_fd(int fd) {
+    static int muted_raylib_info_logs = 0;
+    if (!muted_raylib_info_logs) {
+        SetTraceLogLevel(LOG_WARNING);
+        muted_raylib_info_logs = 1;
+    }
+
+    Image frame = LoadImageFromScreen();
+    ImageFormat(&frame, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    int ok = 1;
+
+#if defined(PLATFORM_MEMORY) || defined(GRAPHICS_API_OPENGL_SOFTWARE)
+    // rlsw's glReadPixels path emits BGRA rows that LoadImageFromScreen()
+    // flips again as if they were OpenGL bottom-left-origin RGBA pixels.
+    // Convert back to top-left-origin RGBA for ffmpeg's `-pix_fmt rgba`.
+    size_t row_size = (size_t)frame.width * 4;
+    unsigned char* row = (unsigned char*)malloc(row_size);
+    if (row == NULL) {
+        ok = 0;
+    } else {
+        unsigned char* pixels = (unsigned char*)frame.data;
+        for (int y = frame.height - 1; ok && y >= 0; y--) {
+            unsigned char* src = pixels + (size_t)y * row_size;
+            for (int x = 0; x < frame.width; x++) {
+                row[x*4 + 0] = src[x*4 + 2];
+                row[x*4 + 1] = src[x*4 + 1];
+                row[x*4 + 2] = src[x*4 + 0];
+                row[x*4 + 3] = src[x*4 + 3];
+            }
+            ok = static_vec_write_all(fd, row, row_size);
+        }
+        free(row);
+    }
+#else
+    size_t size = (size_t)frame.width * (size_t)frame.height * 4;
+    ok = static_vec_write_all(fd, frame.data, size);
+#endif
+
+    UnloadImage(frame);
+    return ok;
+}
+
+int static_vec_screen_width(void) { return GetScreenWidth(); }
+int static_vec_screen_height(void) { return GetScreenHeight(); }
 
 int get_obs_size(void) { return OBS_SIZE; }
 int get_num_atns(void) { return NUM_ATNS; }

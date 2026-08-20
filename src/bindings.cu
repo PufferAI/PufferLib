@@ -132,6 +132,12 @@ void render(pybind11::object pufferl_obj, int env_id) {
     static_vec_render(pufferl.vec, env_id);
 }
 
+void pipe_frame_fd(int fd) {
+    if (!static_vec_pipe_frame_fd(fd)) {
+        throw std::runtime_error("Failed to pipe frame to ffmpeg");
+    }
+}
+
 void rollouts(pybind11::object pufferl_obj) {
     PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
     pybind11::gil_scoped_release no_gil;
@@ -595,6 +601,9 @@ PYBIND11_MODULE(_C, m) {
         return now - pufferl.start_time;
     });
     m.def("puff_advantage", &py_puff_advantage);
+    m.def("pipe_frame_fd", &pipe_frame_fd);
+    m.def("screen_width", &static_vec_screen_width);
+    m.def("screen_height", &static_vec_screen_height);
     m.def("create_vec", &create_vec, py::arg("args"), py::arg("gpu") = 1);
     py::class_<VecEnv, std::unique_ptr<VecEnv>>(m, "VecEnv")
         .def_readonly("total_agents",  &VecEnv::total_agents)
