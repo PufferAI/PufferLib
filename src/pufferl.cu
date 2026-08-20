@@ -1250,14 +1250,21 @@ static void rollout_start(PuffeRL* p) {
                 && "cudaStreamBeginCapture failed");
         }
         int H = p->hypers.horizon;
-        for (int t = 0; t < H; t++) {
-            int base = t * EV_T;
+    bool record_step_timing = !p->hypers.cudagraphs;
+    for (int t = 0; t < H; t++) {
+        int base = t * EV_T;
+        if (record_step_timing) {
             cudaEventRecord(ev[base + MODEL_START], stream);
-            pufferl_forward_step(p, 0, t, stream);
+        }
+        pufferl_forward_step(p, 0, t, stream);
+        if (record_step_timing) {
             cudaEventRecord(ev[base + MODEL_END], stream);
-            puf_step(p->vec->envs);
+        }
+        puf_step(p->vec->envs);
+        if (record_step_timing) {
             cudaEventRecord(ev[base + ENV_END], stream);
         }
+    }
         if (first) {
             cudaGraph_t graph;
             assert(cudaStreamEndCapture(stream, &graph) == cudaSuccess
