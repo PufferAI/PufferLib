@@ -21,8 +21,6 @@ int main(void) {
         .gravity = 9.8f,
         .force_mag = 10.0f,
         .dt = 0.02f,
-        .substeps = 4,
-        .balance_bonus_weight = 0.5f,
     };
 
     init(&env);

@@ -18,9 +18,6 @@ void my_init(Env* env, Dict* kwargs) {
     env->gravity = dict_get(kwargs, "gravity")->value;
     env->force_mag = dict_get(kwargs, "force_mag")->value;
     env->dt = dict_get(kwargs, "dt")->value;
-    env->substeps = (int)dict_get(kwargs, "substeps")->value;
-    env->balance_bonus_weight = dict_get(kwargs, "balance_bonus_weight")->value;
-    if (env->substeps < 1) env->substeps = 1;
     init(env);
 }
 

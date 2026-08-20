@@ -16,15 +16,6 @@
 #define DP_HEIGHT 420
 #define DP_SCALE 65.0f
 
-// DeepMind Control Suite-style dense reward constants.
-#define DP_CENTER_MARGIN  2.0f
-#define DP_ANG_VEL_MARGIN 5.0f
-#define DP_VELOCITY_FLOOR 0.60f
-#define DP_LN_10          2.302585093f
-#define DP_BALANCE_ANGLE_SCALE   0.30f
-#define DP_BALANCE_ANG_VEL_SCALE 1.0f
-#define DP_BALANCE_CART_SCALE    2.0f
-
 typedef struct Log {
     float perf;
     float score;
@@ -64,8 +55,6 @@ typedef struct DoublePendulum {
     float gravity;
     float force_mag;
     float dt;
-    int substeps;         // physics substeps per control step (RK4)
-    float balance_bonus_weight;  // blend between deepmind term and balance_quality
 } DoublePendulum;
 
 const Color PUFF_RED = (Color){187, 0, 0, 255};
@@ -123,6 +112,8 @@ void c_reset(DoublePendulum* env) {
     env->episode_return = 0.0f;
     env->upright_steps = 0;
     env->max_upright_steps = 0;
+    env->rewards[0] = 0.0f;
+    env->terminals[0] = 0.0f;
     compute_observations(env);
 }
 
@@ -163,20 +154,16 @@ static void solve_3x3(float A[3][3], float b[3], float x[3]) {
     x[2] = b[2];
 }
 
-// Acceleration is a pure function of the angles, angular velocities and force
-// (it does not depend on cart position/velocity), so RK4 can evaluate it at
-// trial states.  qdd = [xdd, th1dd, th2dd].
-static void dp_accel(DoublePendulum* env, const float th[2], const float w[2],
-                     float force, float qdd[3]) {
+void integrate_physics(DoublePendulum* env, float force) {
     float m0 = env->cart_mass;
     float m1 = env->link1_mass;
     float m2 = env->link2_mass;
     float l1 = env->link1_length;
     float l2 = env->link2_length;
-    float t1 = th[0];
-    float t2 = th[1];
-    float w1 = w[0];
-    float w2 = w[1];
+    float t1 = env->theta1;
+    float t2 = env->theta2;
+    float w1 = env->theta1_dot;
+    float w2 = env->theta2_dot;
     float c1 = cosf(t1);
     float c2 = cosf(t2);
     float s1 = sinf(t1);
@@ -194,55 +181,22 @@ static void dp_accel(DoublePendulum* env, const float th[2], const float w[2],
         (m1 + m2) * env->gravity * l1 * s1 - m2 * l1 * l2 * s12 * w2 * w2,
         m2 * env->gravity * l2 * s2 + m2 * l1 * l2 * s12 * w1 * w1,
     };
+    float qdd[3];
     solve_3x3(A, b, qdd);
-}
 
-// q = [x, theta1, theta2], v = [x_dot, theta1_dot, theta2_dot].
-static void dp_state_deriv(DoublePendulum* env, const float q[3], const float v[3],
-                           float force, float dq[3], float dv[3]) {
-    for (int i = 0; i < 3; i++) dq[i] = v[i];
-    float th[2] = {q[1], q[2]};
-    float w[2] = {v[1], v[2]};
-    dp_accel(env, th, w, force, dv);
-}
-
-static void dp_rk4_step(DoublePendulum* env, float force, float h,
-                        float q[3], float v[3]) {
-    float k1q[3], k1v[3], k2q[3], k2v[3], k3q[3], k3v[3], k4q[3], k4v[3];
-    float tq[3], tv[3];
-    dp_state_deriv(env, q, v, force, k1q, k1v);
-    for (int i = 0; i < 3; i++) { tq[i] = q[i] + 0.5f*h*k1q[i]; tv[i] = v[i] + 0.5f*h*k1v[i]; }
-    dp_state_deriv(env, tq, tv, force, k2q, k2v);
-    for (int i = 0; i < 3; i++) { tq[i] = q[i] + 0.5f*h*k2q[i]; tv[i] = v[i] + 0.5f*h*k2v[i]; }
-    dp_state_deriv(env, tq, tv, force, k3q, k3v);
-    for (int i = 0; i < 3; i++) { tq[i] = q[i] + h*k3q[i]; tv[i] = v[i] + h*k3v[i]; }
-    dp_state_deriv(env, tq, tv, force, k4q, k4v);
-    for (int i = 0; i < 3; i++) {
-        q[i] += (h/6.0f) * (k1q[i] + 2.0f*k2q[i] + 2.0f*k3q[i] + k4q[i]);
-        v[i] += (h/6.0f) * (k1v[i] + 2.0f*k2v[i] + 2.0f*k3v[i] + k4v[i]);
-    }
-}
-
-void integrate_physics(DoublePendulum* env, float force) {
-    float q[3] = {env->x, env->theta1, env->theta2};
-    float v[3] = {env->x_dot, env->theta1_dot, env->theta2_dot};
-    int substeps = env->substeps > 0 ? env->substeps : 1;
-    float h = env->dt / (float)substeps;
-    for (int s = 0; s < substeps; s++) {
-        dp_rk4_step(env, force, h, q, v);
-        v[0] = fminf(fmaxf(v[0], -20.0f), 20.0f);
-        v[1] = fminf(fmaxf(v[1], -30.0f), 30.0f);
-        v[2] = fminf(fmaxf(v[2], -30.0f), 30.0f);
-    }
-    env->x = q[0];
-    env->x_dot = v[0];
-    env->theta1 = wrap_pi(q[1]);
-    env->theta1_dot = v[1];
-    env->theta2 = wrap_pi(q[2]);
-    env->theta2_dot = v[2];
+    env->x_dot += env->dt * qdd[0];
+    env->theta1_dot += env->dt * qdd[1];
+    env->theta2_dot += env->dt * qdd[2];
+    env->x_dot = fminf(fmaxf(env->x_dot, -20.0f), 20.0f);
+    env->theta1_dot = fminf(fmaxf(env->theta1_dot, -30.0f), 30.0f);
+    env->theta2_dot = fminf(fmaxf(env->theta2_dot, -30.0f), 30.0f);
+    env->x += env->dt * env->x_dot;
+    env->theta1 = wrap_pi(env->theta1 + env->dt * env->theta1_dot);
+    env->theta2 = wrap_pi(env->theta2 + env->dt * env->theta2_dot);
 }
 
 float upright_reward(DoublePendulum* env, float force) {
+    (void)force;
     float tip_y = env->link1_length * cosf(env->theta1)
         + env->link2_length * cosf(env->theta2);
     float max_y = env->link1_length + env->link2_length;
@@ -258,30 +212,10 @@ float upright_reward(DoublePendulum* env, float force) {
         env->max_upright_steps = env->upright_steps;
     }
 
-    // Reward: (1-w) * [h * centered * small_control * small_velocity] + w * balance_quality
-    float h = fminf(fmaxf(height, 0.0f), 1.0f);
-    float sw1 = env->theta1_dot / DP_ANG_VEL_MARGIN;
-    float sw2 = env->theta2_dot / DP_ANG_VEL_MARGIN;
-    float min_vel_tol = fminf(expf(-DP_LN_10 * sw1 * sw1),
-                              expf(-DP_LN_10 * sw2 * sw2));
-    float small_velocity = DP_VELOCITY_FLOOR
-        + (1.0f - DP_VELOCITY_FLOOR) * min_vel_tol;
-    float scaled_x = env->x / DP_CENTER_MARGIN;
-    float centered = 0.5f * (1.0f + expf(-DP_LN_10 * scaled_x * scaled_x));
-    float a = env->force_mag > 0.0f ? force / env->force_mag : 0.0f;
-    float small_control = 0.2f * (4.0f + fmaxf(0.0f, 1.0f - a * a));
-    float deepmind = h * centered * small_control * small_velocity;
-    float angle_mse = 0.5f * (env->theta1 * env->theta1
-        + env->theta2 * env->theta2);
-    float ang_vel_mse = 0.5f * (env->theta1_dot * env->theta1_dot
-        + env->theta2_dot * env->theta2_dot);
-    float balance_x = env->x / DP_BALANCE_CART_SCALE;
-    float balance_quality = expf(
-        -angle_mse / (DP_BALANCE_ANGLE_SCALE * DP_BALANCE_ANGLE_SCALE)
-        -ang_vel_mse / (DP_BALANCE_ANG_VEL_SCALE * DP_BALANCE_ANG_VEL_SCALE)
-        -balance_x * balance_x);
-    float w = env->balance_bonus_weight;
-    return (1.0f - w) * deepmind + w * balance_quality;
+    float hold_bonus = fminf((float)env->upright_steps / 100.0f, 1.0f);
+    // Reward combines tip height and stable hold streak: 0.5*height + hold_bonus.
+    float reward = 0.5f * height + hold_bonus;
+    return fminf(fmaxf(reward, 0.0f), 1.5f);
 }
 
 void c_step(DoublePendulum* env) {
