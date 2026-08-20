@@ -1447,7 +1447,7 @@ static void train_epoch_gpu(PuffeRL* pufferl, RolloutBuf src, int slot,
     int mask_c = src.action_mask.shape[2];
     transpose_102<<<grid_size(T * B * obs_size), BLOCK_SIZE, 0, stream>>>(
         rollouts->observations.data, src.observations.data, T, B, obs_size);
-    transpose_102_float<<<grid_size(T * B * num_atns), BLOCK_SIZE, 0, stream>>>(
+    transpose_102<<<grid_size(T * B * num_atns), BLOCK_SIZE, 0, stream>>>(
         rollouts->actions.data, src.actions.data, T, B, num_atns);
     transpose_102<<<grid_size(T * B), BLOCK_SIZE, 0, stream>>>(
         rollouts->logprobs.data, src.logprobs.data, T, B, 1);
