@@ -10,7 +10,9 @@
 #include <math.h>
 #include <stdint.h>
 #include "raylib.h"
+#ifndef OVERCOOKED_H
 typedef float obs_t;
+#endif
 #include "pufferenv.h"
 
 // Tile types

@@ -392,6 +392,10 @@ static inline void puf_ini_put(Ini* ini, const char* full_key, const char* raw) 
 
 static inline void puf_ini_apply_arg(Ini* ini, const char* default_section,
         const char* arg, int idx) {
+    if (arg[0] != '-' || arg[1] != '-') {
+        fprintf(stderr, "unexpected argument '%s'\n", arg);
+        exit(1);
+    }
     char tmp[2048];
     if (strlen(arg) >= sizeof(tmp)) {
         fprintf(stderr, "argv:%d: argument too long\n", idx);

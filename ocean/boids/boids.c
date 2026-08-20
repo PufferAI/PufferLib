@@ -1,5 +1,5 @@
 // Standalone C demo for Boids environment
-// Compile using: ./build.sh boids --local
+// Compile using: ./build.sh boids --debug
 // Run with: ./boids
 
 #include <time.h>

@@ -62,7 +62,7 @@ int grid_size(int N) {
     return (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
 }
 
-// Exclusive env: -DENV_HEADER=ocean/<env>/<env>.h or .cu (--gpu). Never both.
+// Exclusive env: -DENV_HEADER=ocean/<env>/<env>.h or .cu (--cu). Never both.
 #include ENV_HEADER
 
 typedef struct {
@@ -2754,9 +2754,9 @@ void run_sweep(Ini* ini, const char* exe_path) {
                     }
                     snprintf(full_key, sizeof(full_key), "%s.%s",
                         dict->name, item->key);
-                    size_t n = strlen(full_key) + strlen(src) + 2;
+                    size_t n = strlen(full_key) + strlen(src) + 4;
                     argv[argc] = (char*)malloc(n);
-                    snprintf(argv[argc], n, "%s=%s", full_key, src);
+                    snprintf(argv[argc], n, "--%s=%s", full_key, src);
                     argc++;
                 }
             }
@@ -2822,8 +2822,7 @@ void run_sweep(Ini* ini, const char* exe_path) {
 
 // board!=NULL: merge env/* into train last_log (uptime + util/* stay frozen).
 static EvalResult eval_loop(Ini* ini, PuffeRL* p, int mode, int verbose,
-        long eval_episodes, Dict* board, int epoch) {
-    int render = mode == EVAL_RENDER;
+        int render, long eval_episodes, Dict* board, int epoch) {
     int match = mode == EVAL_MATCH;
     EvalResult result = {0};
     if (!render) {
@@ -2835,6 +2834,9 @@ static EvalResult eval_loop(Ini* ini, PuffeRL* p, int mode, int verbose,
     while (true) {
         if (render) {
             puf_render(p->vec->envs);
+            if (WindowShouldClose()) {
+                return result;
+            }
         }
         rollouts(p);
         Dict el = {0};
@@ -2850,7 +2852,7 @@ static EvalResult eval_loop(Ini* ini, PuffeRL* p, int mode, int verbose,
         }
         Dict* show = board ? board : &el;
         double now = wall_clock();
-        if (render || (verbose && now - last_dash >= 0.6)) {
+        if (!render && verbose && now - last_dash >= 0.6) {
             puf_dashboard_print(ini, p, show, board ? epoch : 0);
             last_dash = now;
         }
@@ -2878,8 +2880,7 @@ static EvalResult eval_loop(Ini* ini, PuffeRL* p, int mode, int verbose,
     }
 }
 
-static PuffeRL* eval_make(Ini* ini, TrainContext* ctx, int mode) {
-    int render = mode == EVAL_RENDER;
+static PuffeRL* eval_make(Ini* ini, TrainContext* ctx, int mode, int render) {
     int match = mode == EVAL_MATCH;
     long eval_agents = puf_ini_get(ini, "base", "eval_agents");
     if (!render && eval_agents != -1) {
@@ -2923,19 +2924,22 @@ static PuffeRL* eval_make(Ini* ini, TrainContext* ctx, int mode) {
     return p;
 }
 
-EvalResult run_eval(Ini* ini, TrainContext* ctx, int mode, int verbose) {
+EvalResult run_eval(Ini* ini, TrainContext* ctx, int mode, int verbose,
+        int render) {
     long n = puf_ini_get(ini, "base", "eval_episodes");
-    assert((mode == EVAL_RENDER || n > 0) && "eval requires positive base.eval_episodes");
-    PuffeRL* p = eval_make(ini, ctx, mode);
-    EvalResult r = eval_loop(ini, p, mode, verbose, n, NULL, 0);
-    long nparams = 0;
-    if (p && p->policies) {
-        nparams = numel(p->policies[0].master_weights.shape);
+    assert((render || n > 0) && "eval requires positive base.eval_episodes");
+    PuffeRL* p = eval_make(ini, ctx, mode, render);
+    EvalResult r = eval_loop(ini, p, mode, verbose, render, n, NULL, 0);
+    if (!render) {
+        long nparams = 0;
+        if (p && p->policies) {
+            nparams = numel(p->policies[0].master_weights.shape);
+        }
+        printf("CUDA_EVAL env=%s score=%.6f perf=%.6f games=%d params=%ld\n",
+            puf_ini_get_str(ini, "base", "env_name"),
+            r.score, r.perf, r.games, nparams);
+        fflush(stdout);
     }
-    printf("CUDA_EVAL env=%s score=%.6f perf=%.6f games=%d params=%ld\n",
-        puf_ini_get_str(ini, "base", "env_name"),
-        r.score, r.perf, r.games, nparams);
-    fflush(stdout);
     close_pufferl(p);
     return r;
 }
@@ -3185,7 +3189,7 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
     int pool_eval = use_selfplay && max_opp > 0 && pool_games > 0 && final_checkpoint[0];
     long eval_episodes = puf_ini_get(ini, "base", "eval_episodes");
     if (ctx->artifact_owner && !pool_eval && eval_episodes > 0) {
-        EvalResult r = eval_loop(ini, pufferl, EVAL_SCORE, 1, eval_episodes,
+        EvalResult r = eval_loop(ini, pufferl, EVAL_SCORE, 1, 0, eval_episodes,
             &last_log, (int)pufferl->epoch);
         result.score = result.scores[result.points - 1] = r.score;
     }
@@ -3200,8 +3204,8 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
                 continue;
             }
             puf_ini_put(ini, "base.load_enemy_model_path", selfplay.pool[i]);
-            PuffeRL* ep = eval_make(ini, ctx, EVAL_MATCH);
-            EvalResult r = eval_loop(ini, ep, EVAL_MATCH, 0, pool_games, NULL, 0);
+            PuffeRL* ep = eval_make(ini, ctx, EVAL_MATCH, 0);
+            EvalResult r = eval_loop(ini, ep, EVAL_MATCH, 0, 0, pool_games, NULL, 0);
             close_pufferl(ep);
             sum += r.score;
             n_opp++;
@@ -3335,7 +3339,9 @@ int main(int argc, char** argv) {
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
     if (argc < 2) {
-        fprintf(stderr, "usage: %s train|eval|match|sweep [section.key=value ...]\n", argv[0]);
+        fprintf(stderr,
+            "usage: %s train|eval|match|sweep [latest|MODEL.bin] [--headless] [--section.key=value ...]\n",
+            argv[0]);
         exit(1);
     }
     int total_gpus = 0;
@@ -3343,18 +3349,38 @@ int main(int argc, char** argv) {
         && "no CUDA devices available");
 
     const char* mode = argv[1];
+    int argi = 2;
+    const char* model = NULL;
+    if (strcmp(mode, "eval") == 0 && argi < argc && argv[argi][0] &&
+            argv[argi][0] != '-' && strchr(argv[argi], '=') == NULL) {
+        model = argv[argi++];
+    }
+    int headless = 0;
+    char* ini_argv[argc > 0 ? (size_t)argc : 1];
+    int ini_argc = 0;
+    for (int i = argi; i < argc; i++) {
+        if (strcmp(argv[i], "--headless") == 0) {
+            headless = 1;
+            continue;
+        }
+        ini_argv[ini_argc++] = argv[i];
+    }
     Ini ini = {0};
-    puf_ini_load_env(&ini, PUFFER_ENV_NAME, argc - 2, argv + 2);
+    puf_ini_load_env(&ini, PUFFER_ENV_NAME, ini_argc, ini_argv);
+    if (model) {
+        puf_ini_put(&ini, "base.load_model_path", model);
+    }
     TrainContext ctx = {.world_size = 1, .artifact_owner = 1};
+    int render = !headless;
 
     if (strcmp(mode, "train") == 0) {
         launch_train(&ini);
     } else if (strcmp(mode, "sweep") == 0) {
         run_sweep(&ini, argv[0]);
     } else if (strcmp(mode, "eval") == 0) {
-        run_eval(&ini, &ctx, EVAL_SCORE, 1);
+        run_eval(&ini, &ctx, EVAL_SCORE, 1, render);
     } else if (strcmp(mode, "match") == 0) {
-        run_eval(&ini, &ctx, EVAL_MATCH, 1);
+        run_eval(&ini, &ctx, EVAL_MATCH, 1, render);
     } else {
         assert(0 && "unknown mode (train|eval|match|sweep)");
     }

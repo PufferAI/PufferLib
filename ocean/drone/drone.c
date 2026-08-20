@@ -29,7 +29,7 @@
 #define GIF_CAMERA_ZOOM 1.25f
 #define GIF_CAMERA_DISTANCE_DEFAULT 40.0f
 
-// Standalone demo (./build.sh drone --local|--fast|--web).
+// Standalone demo (./build.sh drone --cpu|--debug|--web).
 // Fin multitask policy from PR #599 — TAB cycles tasks.
 //   ./drone --gif [out.gif]   automated capture schedule
 

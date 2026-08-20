@@ -1,4 +1,5 @@
 #include "raylib.h"
+#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,14 +7,18 @@
 typedef float obs_t;
 #include "pufferenv.h"
 
-#define MAX_PARTICLES 10
-#define MAX_ASTEROIDS 20
+#define MAX_PARTICLES 4
+#define MAX_ASTEROIDS 26
+#define SHOT_LIFE 32
+#define WAVE_START 4
+#define WAVE_STEP 2
+#define WAVE_MAX 11
 
 // Entity encoder layout (fixed slots, no distance sort):
 // self 4: sin(angle), cos(angle), fwd_vel/VEL_NORM, right_vel/VEL_NORM
 // each of MAX_ASTEROIDS (ship frame, Euclidean wrap):
 //   rel_fwd/size, rel_right/size, vel_fwd, vel_right, radius/40.
-// Empty / off-playfield slots are zeros (radius==0).
+// Empty slots are zeros (radius==0).
 #define ACT_SIZES {4}
 #define OBS_SIZE (4 + MAX_ASTEROIDS * 5)
 #define NUM_ATNS 1
@@ -33,7 +38,7 @@ const float SPEED = 0.6f;
 const float PARTICLE_SPEED = 7.0f;
 const float ROTATION_SPEED = 0.1f;
 const float ASTEROID_SPEED = 3.0f;
-const int SHOOT_DELAY = 18;
+const int SHOOT_DELAY = 30;
 
 const int MAX_TICK = 3600;
 
@@ -42,7 +47,6 @@ const int DEBUG = 0;
 // for render only game over state
 static int global_game_over_timer = 0;
 static int global_game_over_started = 0;
-static int global_render_flag = 0;
 
 struct Log {
     float perf;
@@ -55,6 +59,7 @@ struct Log {
 typedef struct {
     Vector2 position;
     Vector2 velocity;
+    int life;
 } Particle;
 
 typedef struct {
@@ -79,9 +84,8 @@ struct Env {
     int player_radius;
     int thruster_on;
     Particle particles[MAX_PARTICLES];
-    int particle_index;
     Asteroid asteroids[MAX_ASTEROIDS];
-    int asteroid_index;
+    int wave;
     int last_shot;
     int tick;
     int score;
@@ -105,10 +109,6 @@ void generate_asteroid_shape(Asteroid *as, unsigned int *rng) {
         as->shape[v].x = cosf(angle) * radius_variation;
         as->shape[v].y = sinf(angle) * radius_variation;
     }
-}
-
-float clamp(float val, float low, float high) {
-    return fmin(fmax(val, low), high);
 }
 
 Vector2 rotate_vector(Vector2 point, Vector2 center, float angle) {
@@ -158,18 +158,21 @@ static float wrap_delta(float d, float size) {
 }
 
 void move_particles(Asteroids *env) {
-    Particle p;
     float size = (float)env->size;
     for (int i = 0; i < MAX_PARTICLES; i++) {
-        p = env->particles[i];
-        if (p.position.x == 0 && p.position.y == 0) {
+        Particle *p = &env->particles[i];
+        if (p->life <= 0) {
             continue;
         }
-        p.position.x = wrap_pos(
-            p.position.x + p.velocity.x * PARTICLE_SPEED, size);
-        p.position.y = wrap_pos(
-            p.position.y + p.velocity.y * PARTICLE_SPEED, size);
-        env->particles[i] = p;
+        p->life--;
+        if (p->life <= 0) {
+            memset(p, 0, sizeof(*p));
+            continue;
+        }
+        p->position.x = wrap_pos(
+            p->position.x + p->velocity.x * PARTICLE_SPEED, size);
+        p->position.y = wrap_pos(
+            p->position.y + p->velocity.y * PARTICLE_SPEED, size);
     }
 }
 
@@ -196,112 +199,80 @@ Vector2 angle_to_vector(float angle) {
     return v;
 }
 
-void spawn_asteroids(Asteroids *env) {
-    float px, py;
-    float angle;
-    if (rand_r(&env->rng) % 10 == 0) {
+int free_asteroid(Asteroids *env) {
+    for (int i = 0; i < MAX_ASTEROIDS; i++) {
+        if (env->asteroids[i].radius == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void spawn_wave(Asteroids *env) {
+    int n = WAVE_START + WAVE_STEP * env->wave;
+    if (n > WAVE_MAX) {
+        n = WAVE_MAX;
+    }
+    for (int k = 0; k < n; k++) {
+        int slot = free_asteroid(env);
+        assert(slot >= 0);
+        float px, py, angle;
         switch (rand_r(&env->rng) % 4) {
             case 0:
-                // left edge
                 px = 0;
                 py = rand_r(&env->rng) % env->size;
                 angle = random_float(&env->rng, -PI / 2, PI / 2);
                 break;
             case 1:
-                // right edge
                 px = env->size;
                 py = rand_r(&env->rng) % env->size;
                 angle = random_float(&env->rng, PI / 2, 3 * PI / 2);
                 break;
             case 2:
-                // top edge
                 px = rand_r(&env->rng) % env->size;
                 py = 0;
                 angle = random_float(&env->rng, PI, 2 * PI);
                 break;
             default:
-                // bottom edge
                 px = rand_r(&env->rng) % env->size;
                 py = env->size;
                 angle = random_float(&env->rng, 0, PI);
                 break;
         }
-
-        Vector2 direction = angle_to_vector(angle);
-        Vector2 start_pos = (Vector2){px, py};
-        Asteroid as;
-        switch (rand_r(&env->rng) % 3) {
-            case 0:
-                // small
-                as = (Asteroid){start_pos, direction, 10, 100};
-                break;
-            case 1:
-                // medium
-                as = (Asteroid){start_pos, direction, 20, 400};
-                break;
-            default:
-                // big
-                as = (Asteroid){start_pos, direction, 40, 1600};
-                break;
-        }
-        env->asteroid_index = (env->asteroid_index + 1) % MAX_ASTEROIDS;
-        env->asteroids[env->asteroid_index] = as;
-        if (global_render_flag) {
-            generate_asteroid_shape(
-                &env->asteroids[env->asteroid_index], &env->rng);
-        }
+        Vector2 vel = angle_to_vector(angle);
+        vel.x *= 0.6f;
+        vel.y *= 0.6f;
+        env->asteroids[slot] = (Asteroid){
+            .position = {px, py},
+            .velocity = vel,
+            .radius = 40,
+            .radius_sq = 1600,
+        };
+        generate_asteroid_shape(&env->asteroids[slot], &env->rng);
     }
-}
-
-int particle_asteroid_collision(Asteroids *env, Particle *p, Asteroid *as) {
-    float size = (float)env->size;
-    float dx = wrap_delta(p->position.x - as->position.x, size);
-    float dy = wrap_delta(p->position.y - as->position.y, size);
-    return as->radius_sq > dx * dx + dy * dy;
 }
 
 void split_asteroid(Asteroids *env, Asteroid *as) {
     int new_radius = as->radius == 40 ? 20 : 10;
-
-    float original_angle = atan2f(as->velocity.y, as->velocity.x);
-
-    float offset1 = random_float(&env->rng, -PI / 4, PI / 4);
-    float offset2 = random_float(&env->rng, -PI / 4, PI / 4);
-
-    float angle1 = original_angle + offset1;
-    float angle2 = original_angle + offset2;
-
-    Vector2 direction1 = angle_to_vector(angle1);
-    Vector2 direction2 = angle_to_vector(angle2);
-
-    float len1 = sqrtf(
-        direction1.x * direction1.x + direction1.y * direction1.y);
-    float len2 = sqrtf(
-        direction2.x * direction2.x + direction2.y * direction2.y);
-    if (len1 > 0) {
-        direction1.x /= len1;
-        direction1.y /= len1;
-    }
-    if (len2 > 0) {
-        direction2.x /= len2;
-        direction2.y /= len2;
-    }
-
-    Vector2 start_pos = (Vector2){as->position.x, as->position.y};
-
-    int new_index1 = (env->asteroid_index + 1) % MAX_ASTEROIDS;
-    int new_index2 = (new_index1 + 1) % MAX_ASTEROIDS;
-
-    as->position = start_pos;
-    as->velocity = direction1;
+    float base = atan2f(as->velocity.y, as->velocity.x);
+    as->velocity = angle_to_vector(
+        base + random_float(&env->rng, -PI / 4, PI / 4));
     as->radius = new_radius;
     as->radius_sq = new_radius * new_radius;
-    env->asteroids[new_index1] = (Asteroid){
-        start_pos, direction2, new_radius, new_radius * new_radius};
-    env->asteroid_index = new_index2;
-
     generate_asteroid_shape(as, &env->rng);
-    generate_asteroid_shape(&env->asteroids[new_index1], &env->rng);
+
+    int slot = free_asteroid(env);
+    if (slot < 0) {
+        return;
+    }
+    env->asteroids[slot] = (Asteroid){
+        .position = as->position,
+        .velocity = angle_to_vector(
+            base + random_float(&env->rng, -PI / 4, PI / 4)),
+        .radius = new_radius,
+        .radius_sq = new_radius * new_radius,
+    };
+    generate_asteroid_shape(&env->asteroids[slot], &env->rng);
 }
 
 void check_particle_asteroid_collision(Asteroids *env) {
@@ -309,7 +280,7 @@ void check_particle_asteroid_collision(Asteroids *env) {
     Asteroid *as;
     for (int i = 0; i < MAX_PARTICLES; i++) {
         p = &env->particles[i];
-        if (p->position.x == 0 && p->position.y == 0) {
+        if (p->life <= 0) {
             continue;
         }
 
@@ -319,21 +290,17 @@ void check_particle_asteroid_collision(Asteroids *env) {
                 continue;
             }
 
-            if (particle_asteroid_collision(env, p, as)) {
+            float size = (float)env->size;
+            float dx = wrap_delta(p->position.x - as->position.x, size);
+            float dy = wrap_delta(p->position.y - as->position.y, size);
+            if (as->radius_sq > dx * dx + dy * dy) {
                 memset(p, 0, sizeof(*p));
                 env->score += 1;
                 env->agents[0].rewards[0] += 1.0f;
-
-                switch (as->radius) {
-                    case 10:
-                        memset(as, 0, sizeof(*as));
-                        break;
-                    case 20:
-                        split_asteroid(env, as);
-                        break;
-                    default:
-                        split_asteroid(env, as);
-                        break;
+                if (as->radius == 10) {
+                    memset(as, 0, sizeof(*as));
+                } else {
+                    split_asteroid(env, as);
                 }
                 break;
             }
@@ -423,12 +390,12 @@ void puf_reset(Asteroids *env) {
     env->thruster_on = 0;
     memset(env->particles, 0, sizeof(Particle) * MAX_PARTICLES);
     memset(env->asteroids, 0, sizeof(Asteroid) * MAX_ASTEROIDS);
-    env->particle_index = 0;
-    env->asteroid_index = 0;
+    env->wave = 0;
     env->tick = 0;
     env->score = 0;
     env->episode_return = 0;
     env->last_shot = 0;
+    spawn_wave(env);
     compute_observations(env);
 }
 
@@ -454,12 +421,21 @@ void step_frame(Asteroids *env, int action) {
     int elapsed = env->tick - env->last_shot;
 
     if (action == SHOOT && elapsed >= SHOOT_DELAY) {
-        env->last_shot = env->tick;
-        env->particle_index = (env->particle_index + 1) % MAX_PARTICLES;
-        Vector2 start_pos = (Vector2){
-            env->player_position.x + 20 * dir.x,
-            env->player_position.y + 20 * dir.y};
-        env->particles[env->particle_index] = (Particle){start_pos, dir};
+        for (int i = 0; i < MAX_PARTICLES; i++) {
+            if (env->particles[i].life > 0) {
+                continue;
+            }
+            env->last_shot = env->tick;
+            env->particles[i] = (Particle){
+                .position = {
+                    env->player_position.x + 20 * dir.x,
+                    env->player_position.y + 20 * dir.y,
+                },
+                .velocity = dir,
+                .life = SHOT_LIFE,
+            };
+            break;
+        }
     }
 
     // Wrap before collisions so edge hits match wrap obs.
@@ -469,10 +445,20 @@ void step_frame(Asteroids *env, int action) {
         env->player_position.y + env->player_vel.y, (float)env->size);
 
     move_particles(env);
-    spawn_asteroids(env);
     move_asteroids(env);
     check_particle_asteroid_collision(env);
     check_player_asteroid_collision(env);
+    int alive = 0;
+    for (int i = 0; i < MAX_ASTEROIDS; i++) {
+        if (env->asteroids[i].radius) {
+            alive = 1;
+            break;
+        }
+    }
+    if (!alive) {
+        env->wave++;
+        spawn_wave(env);
+    }
 }
 
 // Hold Left Shift + WASD/arrows/space. CPU eval is forward→step→render, so
@@ -573,6 +559,9 @@ void draw_player(Asteroids *env) {
 
 void draw_particles(Asteroids *env) {
     for (int i = 0; i < MAX_PARTICLES; i++) {
+        if (env->particles[i].life <= 0) {
+            continue;
+        }
         DrawCircle(
             env->particles[i].position.x,
             env->particles[i].position.y,
@@ -611,7 +600,6 @@ void puf_render(Asteroids *env) {
         InitWindow(env->size, env->size, "PufferLib Asteroids");
         SetConfigFlags(FLAG_MSAA_4X_HINT);
         SetTargetFPS(60);
-        global_render_flag = 1;
     }
 
     if (IsKeyDown(KEY_ESCAPE)) {

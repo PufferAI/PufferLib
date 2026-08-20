@@ -1,4 +1,4 @@
-// GPU Breakout — standalone env source for --gpu builds.
+// CUDA Breakout — standalone env source for --cu builds.
 // Completely separate from breakout.h (CPU). No trainer macros
 // (precision_t / from_float / BLOCK_SIZE / grid_size). Obs is always bf16;
 // pufferl casts to train precision when they differ.

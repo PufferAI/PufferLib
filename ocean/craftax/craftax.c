@@ -1,8 +1,8 @@
 // Standalone viewer for Craftax (random-action policy).
 //
 // Build:
-//   ./build.sh craftax --fast         # optimized
-//   ./build.sh craftax --local        # debug with sanitizers
+//   ./build.sh craftax --cpu          # optimized
+//   ./build.sh craftax --debug        # debug with sanitizers
 // Run:
 //   ./craftax
 

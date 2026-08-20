@@ -177,9 +177,20 @@ static void nethack_init_settings(Nethack* env) {
     }
     env->settings.spawn_monsters = 1;
     env->settings.underfoot_glyphs = 1; // underfoot shows objects
+    const char* role = getenv("NH_ROLE");
+    char optbuf[512], rcbuf[512];
+    const char* opts;
+    if (role && role[0]) {
+        snprintf(optbuf, sizeof(optbuf),
+            "name:Agent,role:%s,race:random,gender:random,align:random,"
+            NETHACK_OPTIONS_TAIL "!status_updates", role);
+        opts = optbuf;
+    } else {
+        opts = nethack_options_override ? nethack_options_override
+                                        : NETHACK_DEFAULT_OPTIONS;
+    }
     snprintf(env->settings.options, sizeof(env->settings.options), "@%s",
-             nethack_rc_path(nethack_options_override
-                 ? nethack_options_override : NETHACK_DEFAULT_OPTIONS));
+             nethack_rc_path_opts(rcbuf, sizeof(rcbuf), opts));
     env->settings.fix_moon_phase = true; // moon phase from seed
 }
 

@@ -5,7 +5,7 @@
 #ifndef OVERCOOKED_H
 #define OVERCOOKED_H
 
-// Re-export for build.sh ENV_HEADER check (also in overcooked_types.h)
+typedef float obs_t;
 #ifndef OBS_SIZE
 #define ACT_SIZES {6}
 #define OBS_SIZE 43

@@ -31,6 +31,12 @@ WEIGHT_NAMES = [
     "dec_lin_w", "dec_q_w", "dec_k_w", "dec_tau",
 ]
 
+# NH_TEST_IDEMB=1: build and check the identity-embedding arm (NH_ID_EMBED)
+IDEMB = bool(os.environ.get("NH_TEST_IDEMB"))
+IDE_NAMES = ["ide_role_w", "ide_race_w", "ide_gend_w", "ide_algn_w"]
+if IDEMB:
+    WEIGHT_NAMES += IDE_NAMES
+
 
 def build():
     root = os.path.dirname(HERE)
@@ -64,6 +70,7 @@ def build():
                 "-L" + os.path.join(nccl, "lib"), "-lnccl"]
     except ImportError:
         cmd += ["-lnccl"]
+    cmd.append(f"-DNH_ID_EMBED={int(IDEMB)}")  # default is 1; arm A needs explicit 0
     print("building:", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
@@ -127,6 +134,11 @@ def make_obs(B, obs_size, grid, max_glyph_used):
             rng.integers(0, 101, size=(B, 1)),    # slot fail%
             rng.integers(0, 20001, size=(B, 1)),  # slot retention turns
         ]
+    # identity one-hots (challenge layout): exactly one bit per block
+    oh = np.zeros((B, 20), dtype=np.int64)
+    oh[np.arange(B), rng.integers(0, 13, size=B)] = 1
+    oh[np.arange(B), 13 + rng.integers(0, 5, size=B)] = 1
+    oh[np.arange(B), 18 + rng.integers(0, 2, size=B)] = 1
     ex = np.concatenate([
         rng.integers(0, 3, size=(B, 1)),      # engraving state 0/1/2
         rng.integers(-1, 14, size=(B, 1)),
@@ -137,11 +149,12 @@ def make_obs(B, obs_size, grid, max_glyph_used):
     ] + spell_cols + [
         rng.integers(0, 320, size=(B, 1)),    # encumbrance percent (unclipped)
         rng.integers(50, 1001, size=(B, 1)),  # carry capacity
+        oh,
     ], axis=1).astype(np.int64).astype(np.uint32)
     for k in range(4):
-        obs[:, bl_off + k::4][:, 27:84] = ((ex >> (8 * k)) & 0xFF).astype(np.float32)
+        obs[:, bl_off + k::4][:, 27:104] = ((ex >> (8 * k)) & 0xFF).astype(np.float32)
     # inventory entities: 55 slot glyphs int16 LE, tail padded (5976)
-    inv_off = bl_off + 84 * 4
+    inv_off = bl_off + 104 * 4
     inv = rng.integers(0, max_glyph_used, size=(B, 55)).astype(np.int32)
     inv[:, ::2] = rng.integers(1906, 2359, size=(B, 28))  # object glyphs: armcat coverage
     n_items = rng.integers(3, 12, size=B)
@@ -335,6 +348,9 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
     d = ex_vals[:, 55] * 0.01 - 1.0
     f[:, j] = d / (1.0 + np.abs(d)); j += 1
     f[:, j] = ex_vals[:, 56] * 0.001; j += 1
+    if not IDEMB:  # identity one-hots (dead features under NH_ID_EMBED)
+        f[:, j:j + 20] = ex_vals[:, 57:77]
+    j += 20
     f = np.clip(f, -1.0, 1.0)   # strict clamp, mirrors the kernel
     fb = torch.tensor(f)
     blh = torch.relu(fb @ bl_w.T + bl_b)
@@ -403,7 +419,21 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
         spkeys.append(torch.relu(torch.cat([emb, sc], dim=1) @ spk_w.T))  # (B,16)
     sk = torch.stack(spkeys, dim=1)                            # (B,8,16)
     spool = torch.relu((sk @ spk2_w.T).max(dim=1).values + spk2_b)
-    concat = torch.cat([loc, glb, invp, blh, fb, msg_sum, spool], dim=1)
+    parts = [loc, glb, invp, blh, fb, msg_sum, spool]
+    if IDEMB:
+        # identity embeddings: direct table rows, indices per the kernel
+        for nm, rows, dims in [("ide_role_w", 13, 16), ("ide_race_w", 5, 8),
+                               ("ide_gend_w", 2, 8), ("ide_algn_w", 3, 8)]:
+            w[nm] = getw(lib, nm, (rows, dims))
+        role = ex_vals[:, 57:70].argmax(axis=1)
+        race = ex_vals[:, 70:75].argmax(axis=1)
+        gend = ex_vals[:, 75:77].argmax(axis=1)
+        al = np.clip(1 - bl_vals[:, 26], 0, 2)
+        parts += [w["ide_role_w"][torch.tensor(role)],
+                  w["ide_race_w"][torch.tensor(race)],
+                  w["ide_gend_w"][torch.tensor(gend)],
+                  w["ide_algn_w"][torch.tensor(al)]]
+    concat = torch.cat(parts, dim=1)
     out = torch.relu(concat @ proj_w.T + proj_b)
     return out, invh, w, torch.stack(spkeys, dim=1)
 
@@ -420,6 +450,11 @@ def run(lib):
     # glb1_xy zero-inits; randomize it so a broken dx,dy forward term is visible
     wxy = np.random.default_rng(5).standard_normal(lib.nh_numel_glb1_xy()).astype(np.float32)
     lib.nh_set_glb1_xy(wxy.ctypes.data_as(VP))
+    if IDEMB:  # same idiom: zero-init tables would hide forward bugs
+        for i, nm in enumerate(IDE_NAMES):
+            wv = np.random.default_rng(6 + i).standard_normal(
+                getattr(lib, f"nh_numel_{nm}")()).astype(np.float32)
+            getattr(lib, f"nh_set_{nm}")(wv.ctypes.data_as(VP))
 
     max_glyph_used = 40  # keep embedding usage dense & checkable
     obs, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, msg = make_obs(B, obs_size, grid, max_glyph_used)
@@ -443,6 +478,8 @@ def run(lib):
     enc_names = ["ekind_w", "esub_w", "proj_w", "proj_b", "bl_w", "bl_b", "loc_w", "loc_b",
                  "glb1_w", "glb1_xy", "glb1_b", "glb2_w", "glb2_b",
                  "inv1_w", "inv1_b", "inv1s_w", "invt_w", "inv2_w", "inv2_b", "embed_w", "msg_w"]
+    if IDEMB:
+        enc_names += IDE_NAMES
 
     # Central finite differences of L = sum(out*g_out). The encoder ends in a
     # ReLU (and the blstats branch has its own), so a perturbation that flips a

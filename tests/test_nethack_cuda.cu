@@ -113,6 +113,12 @@ TENSOR_ACC(msg_w,   msg_w)
 TENSOR_ACC(spk_w,   spk_w)
 TENSOR_ACC(spk2_w,  spk2_w)
 TENSOR_ACC(spk2_b,  spk2_b)
+#if NH_ID_EMBED
+TENSOR_ACC(ide_role_w, ide_role_w)
+TENSOR_ACC(ide_race_w, ide_race_w)
+TENSOR_ACC(ide_gend_w, ide_gend_w)
+TENSOR_ACC(ide_algn_w, ide_algn_w)
+#endif
 
 #define GRAD_ACC(name, field) \
     void nh_grad_##name(void* dst) { cudaMemcpy(dst, g_a->field.data, numel(g_a->field.shape) * sizeof(float), cudaMemcpyDeviceToDevice); }
@@ -140,6 +146,13 @@ GRAD_ACC(msg_w,   msg_wgrad)
 GRAD_ACC(spk_w,   spk_wgrad)
 GRAD_ACC(spk2_w,  spk2_wgrad)
 GRAD_ACC(spk2_b,  spk2_bgrad)
+#if NH_ID_EMBED
+GRAD_ACC(ide_role_w, ide_role_wgrad)
+GRAD_ACC(ide_race_w, ide_race_wgrad)
+GRAD_ACC(ide_gend_w, ide_gend_wgrad)
+GRAD_ACC(ide_algn_w, ide_algn_wgrad)
+#endif
+int nh_id_embed() { return NH_ID_EMBED; }
 
 // ---- pointer decoder (fed by the encoder's inv_out keys) ----
 // forward: encoder -> decoder directly (no mingru in the harness); the

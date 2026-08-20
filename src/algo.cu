@@ -239,7 +239,7 @@ struct PrefixScan {
 };
 
 // Train scan: match rollout's precision_t recurrent state between steps.
-__global__ void mingru_scan_forward_seq(PrefixScan scan) {
+__global__ void mingru_scan_forward(PrefixScan scan) {
     int T_seq = scan.T, H = scan.H, B = scan.B;
     precision_t* __restrict__ out = scan.out.data;
     precision_t* __restrict__ next_state = scan.next_state.data;
@@ -394,6 +394,140 @@ __global__ void mingru_scan_backward(PrefixScan scan,
     }
 
     grad_state[state_idx] = from_float(dh);
+}
+
+// Coalesced T-tile load + sequential apply. 32 h-threads apply after the load.
+// Use when T is long and seq occupancy B*H is not already huge.
+#define MINGRU_TILE 32
+
+__global__ void mingru_scan_forward_row(PrefixScan scan) {
+    int T_seq = scan.T, H = scan.H;
+    int hx = threadIdx.x, t_local = threadIdx.y;
+    int h = blockIdx.y * MINGRU_TILE + hx;
+    int h_ok = h < H;
+    int b = blockIdx.x, H3 = 3 * H, bHT = b * H * T_seq, cbase = 3 * bHT;
+    float h_t = h_ok ? to_float(scan.state_ptr[b * H + h]) : 0.0f;
+    __shared__ float sm_z[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_ht[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_s[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_x[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_term[MINGRU_TILE][MINGRU_TILE];
+    for (int c = 0; c < (T_seq + MINGRU_TILE - 1) / MINGRU_TILE; c++) {
+        int t = c * MINGRU_TILE + t_local;
+        float z = 0.0f, h_tilde = 0.0f, s = 0.0f, x = 0.0f, term = 0.0f;
+        if (t < T_seq && h_ok) {
+            int off = t * H3 + h;
+            float hidden = to_float(scan.combined_ptr[cbase + off]);
+            float gate = to_float(scan.combined_ptr[cbase + H + off]);
+            float proj = to_float(scan.combined_ptr[cbase + 2 * H + off]);
+            x = to_float(scan.input_ptr[bHT + t * H + h]);
+            z = sigmoid(gate);
+            h_tilde = (hidden >= 0.0f) ? hidden + 0.5f : sigmoid(hidden);
+            s = sigmoid(proj);
+            term = scan.terminals_ptr != NULL &&
+                to_float(scan.terminals_ptr[b * T_seq + t]) != 0.0f;
+        }
+        sm_z[t_local][hx] = z;
+        sm_ht[t_local][hx] = h_tilde;
+        sm_s[t_local][hx] = s;
+        sm_x[t_local][hx] = x;
+        sm_term[t_local][hx] = term;
+        __syncthreads();
+        if (t_local == 0 && h_ok) {
+            int nloc = min(MINGRU_TILE, T_seq - c * MINGRU_TILE);
+            for (int i = 0; i < nloc; i++) {
+                if (sm_term[i][hx] != 0.0f) {
+                    h_t = 0.0f;
+                }
+                int tt = c * MINGRU_TILE + i;
+                scan.scan_h.data[bHT + tt * H + h] = from_float(h_t);
+                h_t = lerp(h_t, sm_ht[i][hx], sm_z[i][hx]);
+                float sv = sm_s[i][hx];
+                scan.out.data[bHT + tt * H + h] =
+                    from_float(sv * h_t + (1.0f - sv) * sm_x[i][hx]);
+                h_t = to_float(from_float(h_t));
+            }
+        }
+        __syncthreads();
+    }
+    if (t_local == 0 && h_ok) {
+        scan.next_state.data[b * H + h] = from_float(h_t);
+    }
+}
+
+__global__ void mingru_scan_backward_row(PrefixScan scan,
+        const precision_t* __restrict__ grad_out,
+        const precision_t* __restrict__ grad_next_state) {
+    int T_seq = scan.T, H = scan.H;
+    int hx = threadIdx.x, t_local = threadIdx.y;
+    int h = blockIdx.y * MINGRU_TILE + hx;
+    int h_ok = h < H;
+    int b = blockIdx.x, H3 = 3 * H, bHT = b * H * T_seq, cbase = 3 * bHT;
+    float dh = h_ok ? to_float(grad_next_state[b * H + h]) : 0.0f;
+    __shared__ float sm_z[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_ht[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_s[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_x[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_hp[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_go[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_hid[MINGRU_TILE][MINGRU_TILE];
+    __shared__ float sm_term[MINGRU_TILE][MINGRU_TILE];
+    for (int c = (T_seq + MINGRU_TILE - 1) / MINGRU_TILE - 1; c >= 0; c--) {
+        int t = c * MINGRU_TILE + t_local;
+        float z = 0.0f, h_tilde = 0.0f, s = 0.0f, x = 0.0f;
+        float h_prev = 0.0f, gout = 0.0f, hidden = 0.0f, term = 0.0f;
+        if (t < T_seq && h_ok) {
+            int off = t * H3 + h;
+            hidden = to_float(scan.combined_ptr[cbase + off]);
+            float gate = to_float(scan.combined_ptr[cbase + H + off]);
+            float proj = to_float(scan.combined_ptr[cbase + 2 * H + off]);
+            x = to_float(scan.input_ptr[bHT + t * H + h]);
+            h_prev = to_float(scan.scan_h.data[bHT + t * H + h]);
+            gout = to_float(grad_out[bHT + t * H + h]);
+            z = sigmoid(gate);
+            h_tilde = (hidden >= 0.0f) ? hidden + 0.5f : sigmoid(hidden);
+            s = sigmoid(proj);
+            term = scan.terminals_ptr != NULL &&
+                to_float(scan.terminals_ptr[b * T_seq + t]) != 0.0f;
+        }
+        sm_z[t_local][hx] = z;
+        sm_ht[t_local][hx] = h_tilde;
+        sm_s[t_local][hx] = s;
+        sm_x[t_local][hx] = x;
+        sm_hp[t_local][hx] = h_prev;
+        sm_go[t_local][hx] = gout;
+        sm_hid[t_local][hx] = hidden;
+        sm_term[t_local][hx] = term;
+        __syncthreads();
+        if (t_local == 0 && h_ok) {
+            for (int i = min(MINGRU_TILE, T_seq - c * MINGRU_TILE) - 1; i >= 0; i--) {
+                int tt = c * MINGRU_TILE + i;
+                z = sm_z[i][hx];
+                s = sm_s[i][hx];
+                gout = sm_go[i][hx];
+                h_tilde = sm_ht[i][hx];
+                h_prev = sm_hp[i][hx];
+                float h_t = lerp(h_prev, h_tilde, z);
+                float dh_total = dh + gout * s;
+                float d_h_tilde = dh_total * z;
+                int off = tt * H3 + h;
+                scan.grad_input.data[bHT + tt * H + h] =
+                    from_float(gout * (1.0f - s));
+                scan.grad_combined.data[cbase + off] = from_float(
+                    sm_hid[i][hx] >= 0.0f ? d_h_tilde
+                    : d_h_tilde * h_tilde * (1.0f - h_tilde));
+                scan.grad_combined.data[cbase + H + off] =
+                    from_float(dh_total * (h_tilde - h_prev) * z * (1.0f - z));
+                scan.grad_combined.data[cbase + 2 * H + off] =
+                    from_float(gout * (h_t - sm_x[i][hx]) * s * (1.0f - s));
+                dh = sm_term[i][hx] != 0.0f ? 0.0f : dh_total * (1.0f - z);
+            }
+        }
+        __syncthreads();
+    }
+    if (t_local == 0 && h_ok) {
+        scan.grad_state.data[b * H + h] = from_float(dh);
+    }
 }
 
 __global__ void sum_rows_to_precision_kernel(precision_t* __restrict__ dst,
@@ -708,7 +842,14 @@ Prec mingru_forward_train(void* w, Prec x, Prec state, Prec terminals,
         scan.state_ptr = state_i.data;
         scan.input_ptr = a->saved_inputs[i].data;
         scan.terminals_ptr = terminals.data;
-        mingru_scan_forward_seq<<<grid_size(scan.B * scan.H), BLOCK_SIZE, 0, stream>>>(scan);
+        if (scan.T >= 256 && scan.B * scan.H <= 32768
+                || scan.T >= 128 && scan.H <= 32) {
+            dim3 block(MINGRU_TILE, MINGRU_TILE);
+            dim3 grid(scan.B, (scan.H + MINGRU_TILE - 1) / MINGRU_TILE);
+            mingru_scan_forward_row<<<grid, block, 0, stream>>>(scan);
+        } else {
+            mingru_scan_forward<<<grid_size(scan.B * scan.H), BLOCK_SIZE, 0, stream>>>(scan);
+        }
         x = scan.out;
     }
     return x;
@@ -727,8 +868,16 @@ Prec mingru_backward(void* w, Prec grad, void* activations, cudaStream_t stream)
     MinGRUActivations* a = (MinGRUActivations*)activations;
     for (int i = m->num_layers - 1; i >= 0; i--) {
         PrefixScan& scan = a->scan_bufs[i];
-        mingru_scan_backward<<<grid_size(scan.B*scan.H), BLOCK_SIZE, 0, stream>>>(
-            scan, grad.data, a->grad_next_state.data);
+        if (scan.T >= 256 && scan.B * scan.H <= 32768
+                || scan.T >= 128 && scan.H <= 32) {
+            dim3 block(MINGRU_TILE, MINGRU_TILE);
+            dim3 grid(scan.B, (scan.H + MINGRU_TILE - 1) / MINGRU_TILE);
+            mingru_scan_backward_row<<<grid, block, 0, stream>>>(
+                scan, grad.data, a->grad_next_state.data);
+        } else {
+            mingru_scan_backward<<<grid_size(scan.B * scan.H), BLOCK_SIZE, 0,
+                stream>>>(scan, grad.data, a->grad_next_state.data);
+        }
         // dW on side stream (per-layer scratch); dX on main continues the bwd chain.
         puf_mm_tn_async_after(&scan.grad_combined, &a->saved_inputs[i],
             &a->wgrad_scratch[i], stream);

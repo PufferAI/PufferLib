@@ -255,12 +255,12 @@ void perlin_noise(float* map, int width, int height,
 }
 
 void init(Battle* env) {
-    env->units = calloc(env->num_units, sizeof(Entity));
-    env->bases = calloc(env->num_armies, sizeof(Entity));
+    env->units = (Entity*)calloc(env->num_units, sizeof(Entity));
+    env->bases = (Entity*)calloc(env->num_armies, sizeof(Entity));
     // 64 samples/unit: cheap enough for web rAF, same mesh in train and eval.
     env->terrain_width = 64 * env->size_x;
     env->terrain_height = 64 * env->size_z;
-    env->terrain = calloc(env->terrain_width * env->terrain_height, sizeof(float));
+    env->terrain = (float*)calloc(env->terrain_width * env->terrain_height, sizeof(float));
     int ox = (int)(env->rng * 17u);
     int oy = (int)(env->rng * 31u);
     perlin_noise(env->terrain, env->terrain_width, env->terrain_height,

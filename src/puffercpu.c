@@ -720,53 +720,29 @@ static const char* puf_model_path(const char* env_name, const char* cli_path,
     return out;
 }
 
-static const char* puf_arg_eq(const char* arg, const char* name) {
-    while (*arg == '-') {
-        arg++;
-    }
-    size_t n = strlen(name);
-    if (strncmp(arg, name, n) == 0 && arg[n] == '=') {
-        return arg + n + 1;
-    }
-    return NULL;
-}
-
 int main(int argc, char** argv) {
     const char* env_name = PUFFER_ENV_NAME;
     int argi = 1;
     if (argc >= 2 && argv[1][0] && argv[1][0] != '-' &&
             strchr(argv[1], '=') == NULL && strchr(argv[1], '/') == NULL &&
-            strstr(argv[1], ".bin") == NULL) {
+            strstr(argv[1], ".bin") == NULL && strcmp(argv[1], "latest") != 0) {
         env_name = argv[1];
         argi = 2;
     }
     Ini ini = {0};
     int headless = 0;
-    int headless_episodes = 128;
-    int headless_max_steps = 100000;
     const char* cli_path = NULL;
     int cli_latest = 0;
 
     char* ini_argv[argc > 0 ? (size_t)argc : 1];
     int ini_argc = 0;
     for (int i = argi; i < argc; i++) {
-        const char* v;
-        if (strcmp(argv[i], "--headless") == 0 ||
-                puf_arg_eq(argv[i], "headless")) {
+        if (strcmp(argv[i], "--headless") == 0) {
             headless = 1;
             continue;
         }
-        if (strcmp(argv[i], "--latest") == 0 ||
-                puf_arg_eq(argv[i], "latest")) {
+        if (strcmp(argv[i], "latest") == 0) {
             cli_latest = 1;
-            continue;
-        }
-        if ((v = puf_arg_eq(argv[i], "episodes"))) {
-            headless_episodes = atoi(v);
-            continue;
-        }
-        if ((v = puf_arg_eq(argv[i], "max_steps"))) {
-            headless_max_steps = atoi(v);
             continue;
         }
         if (strchr(argv[i], '=') == NULL &&
@@ -777,6 +753,7 @@ int main(int argc, char** argv) {
         ini_argv[ini_argc++] = argv[i];
     }
     puf_ini_load_env(&ini, env_name, ini_argc, ini_argv);
+    int eval_episodes = (int)puf_ini_get(&ini, "base", "eval_episodes");
 
     int act_sizes[] = ACT_SIZES;
     int num_actions = (int)(sizeof(act_sizes) / sizeof(act_sizes[0]));
@@ -899,8 +876,8 @@ int main(int argc, char** argv) {
         puf_render(&env);
     }
     while (headless
-            ? (steps < headless_max_steps && env.log.n < (float)headless_episodes)
-            : !WindowShouldClose()) {
+            ? (env.log.n < (float)eval_episodes)
+            : !IsWindowReady() || !WindowShouldClose()) {
         int do_step = headless || (step_hold == 0);
         int ticks = 1;
         if (!headless && (int)PUF_STEPS_PER_SEC > 60) {

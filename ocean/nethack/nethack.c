@@ -99,7 +99,16 @@ static void env_close(Nethack* env) {
 #define DEMO_MSG_HID 32
 #define DEMO_MSG_CONCAT_OFF (DEMO_LOC_HID + DEMO_GLB_HID + DEMO_INV_POOL + 64 + DEMO_BL_FEAT)
 #define DEMO_SPELL_CONCAT_OFF (DEMO_MSG_CONCAT_OFF + DEMO_MSG_HID)
-#define DEMO_CONCAT (DEMO_SPELL_CONCAT_OFF + DEMO_SPKEY)
+// identity-table channel (NH_ID_EMBED in nethack.cu); presence is inferred
+// per-checkpoint so one binary loads both eras
+#define DEMO_IDE_ROLE 16
+#define DEMO_IDE_RACE 8
+#define DEMO_IDE_GEND 8
+#define DEMO_IDE_ALGN 8
+#define DEMO_IDE_DIM (DEMO_IDE_ROLE + DEMO_IDE_RACE + DEMO_IDE_GEND + DEMO_IDE_ALGN)
+#define DEMO_IDE_NUMEL (13*DEMO_IDE_ROLE + 5*DEMO_IDE_RACE + 2*DEMO_IDE_GEND + 3*DEMO_IDE_ALGN)
+#define DEMO_IDE_CONCAT_OFF (DEMO_SPELL_CONCAT_OFF + DEMO_SPKEY)
+#define DEMO_CONCAT (DEMO_IDE_CONCAT_OFF + DEMO_IDE_DIM) // buffer max; live dim = net->concat_dim
 
 // per-blstat normalization, mirroring NH_BL_SCALE / NH_BL_ISLOG in ocean/nethack/nethack.cu
 static const float DEMO_BL_SCALE[27] = {
@@ -128,6 +137,7 @@ typedef struct {
     float *msg_w; // (4096, 32) trigram embedding table
     float *spk_w; // (16, 36) spell slot-rep projection
     float *spk2_w, *spk2_b; // (16, 16), (16) spell pool (inv2 idiom)
+    float *ide_role_w, *ide_race_w, *ide_gend_w, *ide_algn_w; // identity tables (ide era)
     float *dec_lin; // (DEMO_DEC_PAD, H) bias-free; rows [26 verb | 48 dir | value], 75 used
     float *dec_q; // (DEMO_QDIM, H): thirteen stacked 16-dim queries (12 item + spell)
     float *dec_k; // (16, 16): key projection over slot features
@@ -135,6 +145,7 @@ typedef struct {
     MinGRU* mingru;
     Multidiscrete* md;
     int hidden_size, num_layers, num_actions;
+    int ide, concat_dim; // per-checkpoint layout (identity-table era or not)
     float x[DEMO_LOC_IN]; // crop cell embeds, flattened
     float px[DEMO_GLB_IN]; // one patch's cell embeds, flattened
     float t16[DEMO_P1];
@@ -163,11 +174,13 @@ typedef struct {
                         + DEMO_SPKEY*DEMO_SPIN + DEMO_SPKEY*DEMO_SPKEY + DEMO_SPKEY)
 #define DEMO_DEC_FIXED (DEMO_INV_HID*DEMO_INV_HID + 16) // k_w + tau padded 12->16
 // ambiguities are possible; prefer the fewest layers (real configs have <= 8)
-static int demo_infer_arch(int total, int* hidden, int* layers, int* actions) {
+static int demo_infer_arch(int total, int* hidden, int* layers, int* actions, int* ide) {
     int best_l = 1 << 30;
+    for (int e = 0; e <= 1; e++)
     for (int H = 8; H <= 4096; H += 8) {
-        long rem = (long)total - DEMO_ENC_FIXED - DEMO_DEC_FIXED
-                 - (long)H * (DEMO_CONCAT + 1 + DEMO_DEC_PAD + DEMO_QDIM);
+        long rem = (long)total - DEMO_ENC_FIXED - DEMO_DEC_FIXED - (e ? DEMO_IDE_NUMEL : 0)
+                 - (long)H * (DEMO_IDE_CONCAT_OFF + (e ? DEMO_IDE_DIM : 0)
+                              + 1 + DEMO_DEC_PAD + DEMO_QDIM);
         long per_layer = 3L * H * H;
         if (rem <= 0) break;
         if (rem % per_layer) continue;
@@ -177,6 +190,7 @@ static int demo_infer_arch(int total, int* hidden, int* layers, int* actions) {
             *hidden = H;
             *layers = (int)L;
             *actions = NETHACK_NUM_ACTIONS;
+            *ide = e;
         }
     }
     return best_l == 1 << 30 ? -1 : 0;
@@ -184,14 +198,16 @@ static int demo_infer_arch(int total, int* hidden, int* layers, int* actions) {
 
 static NethackNet* make_nethack_net(Weights* w) {
     NethackNet* net = (NethackNet*)calloc(1, sizeof(NethackNet));
-    if (demo_infer_arch(w->size - 7, &net->hidden_size, &net->num_layers, &net->num_actions) != 0) {
+    if (demo_infer_arch(w->size - 7, &net->hidden_size, &net->num_layers,
+                        &net->num_actions, &net->ide) != 0) {
         fprintf(stderr, "nethack demo: cannot infer arch from %d floats — "
                 "checkpoint is not a nethack policy with %d actions?\n",
                 w->size - 7, NETHACK_NUM_ACTIONS);
         exit(1);
     }
-    fprintf(stderr, "nethack demo: hidden=%d layers=%d actions=%d (%d floats)\n",
-            net->hidden_size, net->num_layers, net->num_actions, w->size - 7);
+    net->concat_dim = DEMO_IDE_CONCAT_OFF + (net->ide ? DEMO_IDE_DIM : 0);
+    fprintf(stderr, "nethack demo: hidden=%d layers=%d actions=%d ide=%d (%d floats)\n",
+            net->hidden_size, net->num_layers, net->num_actions, net->ide, w->size - 7);
     net->hidden = (float*)calloc(net->hidden_size, sizeof(float));
     net->embed = get_weights_aligned(w, DEMO_VOCAB * DEMO_EMBED);
     net->ekind_w = get_weights_aligned(w, NH_GM_NKIND * DEMO_EMBED);
@@ -211,12 +227,18 @@ static NethackNet* make_nethack_net(Weights* w) {
     net->inv2_b = get_weights_aligned(w, DEMO_INV_POOL);
     net->bl_w = get_weights_aligned(w, 64 * DEMO_BL_FEAT);
     net->bl_b = get_weights_aligned(w, 64);
-    net->proj_w = get_weights_aligned(w, net->hidden_size * DEMO_CONCAT);
+    net->proj_w = get_weights_aligned(w, net->hidden_size * net->concat_dim);
     net->proj_b = get_weights_aligned(w, net->hidden_size);
     net->msg_w = get_weights_aligned(w, DEMO_MSG_VOCAB * DEMO_MSG_HID);
     net->spk_w = get_weights_aligned(w, DEMO_SPKEY * DEMO_SPIN);
     net->spk2_w = get_weights_aligned(w, DEMO_SPKEY * DEMO_SPKEY);
     net->spk2_b = get_weights_aligned(w, DEMO_SPKEY);
+    if (net->ide) {
+        net->ide_role_w = get_weights_aligned(w, 13 * DEMO_IDE_ROLE);
+        net->ide_race_w = get_weights_aligned(w, 5 * DEMO_IDE_RACE);
+        net->ide_gend_w = get_weights_aligned(w, 2 * DEMO_IDE_GEND);
+        net->ide_algn_w = get_weights_aligned(w, 3 * DEMO_IDE_ALGN);
+    }
     net->dec_lin = get_weights_aligned(w, DEMO_DEC_PAD * net->hidden_size);
     net->dec_q = get_weights_aligned(w, DEMO_QDIM * net->hidden_size);
     net->dec_k = get_weights_aligned(w, DEMO_INV_HID * DEMO_INV_HID);
@@ -407,8 +429,8 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
       float d = (float)demo_i32(ex + 4*(NETHACK_EXTRA_WEIGHT+0)) * 0.01f - 1.0f;
       f[j++] = d / (1.0f + fabsf(d));
       f[j++] = (float)demo_i32(ex + 4*(NETHACK_EXTRA_WEIGHT+1)) * 0.001f; }
-    for (int k = 0; k < 20; k++) // role/race/gender one-hots; mirrors NH_F_ROLE
-        f[j++] = (float)demo_i32(ex + 4*(NETHACK_EXTRA_ROLEOH + k));
+    for (int k = 0; k < 20; k++) // role/race/gender one-hots; zeroed in the ide era
+        f[j++] = net->ide ? 0.f : (float)demo_i32(ex + 4*(NETHACK_EXTRA_ROLEOH + k));
     for (int k = 0; k < DEMO_BL_FEAT; k++) f[k] = fminf(fmaxf(f[k], -1.f), 1.f);
 
     float* blout = net->concat + DEMO_LOC_HID + DEMO_GLB_HID + DEMO_INV_POOL;
@@ -454,7 +476,20 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
           sp[d] = v > 0.f ? v : 0.f;
       }
     }
-    _linear(net->concat, net->proj_w, net->proj_b, net->hidden, 1, DEMO_CONCAT, net->hidden_size);
+    if (net->ide) { // identity table tail; mirrors nh_idemb_kernel (last set bit wins)
+      float* ide = net->concat + DEMO_IDE_CONCAT_OFF;
+      int r = 0, rc = 0, g = 0;
+      for (int k = 0; k < 13; k++) if (demo_i32(ex + 4*(NETHACK_EXTRA_ROLEOH + k))) r = k;
+      for (int k = 0; k < 5; k++) if (demo_i32(ex + 4*(NETHACK_EXTRA_ROLEOH + 13 + k))) rc = k;
+      for (int k = 0; k < 2; k++) if (demo_i32(ex + 4*(NETHACK_EXTRA_ROLEOH + 18 + k))) g = k;
+      int al = 1 - demo_i32(bl + 4*26);
+      al = al < 0 ? 0 : (al > 2 ? 2 : al);
+      for (int d = 0; d < DEMO_IDE_ROLE; d++) *ide++ = net->ide_role_w[r * DEMO_IDE_ROLE + d];
+      for (int d = 0; d < DEMO_IDE_RACE; d++) *ide++ = net->ide_race_w[rc * DEMO_IDE_RACE + d];
+      for (int d = 0; d < DEMO_IDE_GEND; d++) *ide++ = net->ide_gend_w[g * DEMO_IDE_GEND + d];
+      for (int d = 0; d < DEMO_IDE_ALGN; d++) *ide++ = net->ide_algn_w[al * DEMO_IDE_ALGN + d];
+    }
+    _linear(net->concat, net->proj_w, net->proj_b, net->hidden, 1, net->concat_dim, net->hidden_size);
     _relu(net->hidden, net->hidden, net->hidden_size);
 
     mingru(net->mingru, net->hidden);

@@ -3,16 +3,16 @@
 // Included by src/ocean.cu — requires precision_t, Prec, Allocator, puf_mm, etc.
 
 // ---- Asteroids entity encoder ----
-// Must match OBS_SIZE in asteroids.h: self 4 + 20 points * 5 feats.
+// Must match OBS_SIZE in asteroids.h: self 4 + 26 points * 5 feats.
 
 static constexpr int AE_SELF_DIM = 4;
 static constexpr int AE_POINT_DIM = 5;
-static constexpr int AE_NUM_POINTS = 20;
+static constexpr int AE_NUM_POINTS = 26;
 static constexpr int AE_ENTITY_IN = AE_SELF_DIM + AE_POINT_DIM;
 static constexpr int AE_ENTITY_HIDDEN = 16;
 static constexpr int AE_OBS_SIZE = AE_SELF_DIM + AE_NUM_POINTS * AE_POINT_DIM;
 // Do not compare to OBS_SIZE: this file is included for every env.
-static_assert(AE_OBS_SIZE == 4 + 20 * 5, "asteroids encoder layout mismatch");
+static_assert(AE_OBS_SIZE == 4 + 26 * 5, "asteroids encoder layout mismatch");
 static constexpr int AE_BATCH_TILE = 8;
 static constexpr int AE_HIDDEN_TILE = 32;
 static constexpr int AE_FC_THREADS = AE_BATCH_TILE * AE_HIDDEN_TILE;
