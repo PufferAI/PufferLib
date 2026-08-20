@@ -660,3 +660,206 @@ Exact canaries and production performance runs are deliberately separate.
 Production async runs use paired statistics and record checkpoint variation;
 full-budget, multi-seed learning-quality results remain mandatory before a
 core trainer PR can merge.
+
+## Exact optimization experiment log
+
+These candidates were tested against the committed exact-cleanup binaries.
+They are retained here even when rejected so later work does not repeat a
+failed optimization.
+
+### Muon scalar broadcast: rejected
+
+Computing the clip coefficient and matrix inverse norm once per CUDA block
+instead of once per element preserved byte-identical Affine checkpoints. A
+balanced two-pair production screen measured `0.9983x` on Affine 578 CUDA,
+`1.0060x` on 1024x4 CUDA, and `1.0021x` combined. This is below a credible
+signal and not a universal win, so the source change was removed. Artifacts:
+`/tmp/puffer-muon-scalar-DOOmXEUF/puffer-throughput-dcmitjed`.
+
+### Batched Muon norm launches: rejected
+
+Batching the identical per-matrix partial reduction, final reduction, and
+normalization work from `3P` graph nodes to three preserved byte-identical
+checkpoints. A balanced two-pair production screen measured `1.0040x` on
+Affine 578 CUDA, `0.9983x` on 1024x4 CUDA, and `1.0011x` combined; the
+1024x4 pairs disagreed in direction. The source change was removed. Artifacts:
+`/tmp/puffer-muon-batchnorm-pKIiyQFT/puffer-throughput-0t98qn5h`.
+
+### Actor snapshot host-wait removal: rejected as non-C0
+
+Replacing the per-epoch host synchronization with explicit actor-ready
+stream events passed the Affine 578 CUDA checkpoint but changed the 1024x4
+CUDA checkpoint under production async settings. The speed screen was skipped
+and the source change was removed. Artifacts:
+`/tmp/puffer-actor-ready-iHjn6riQ/puffer-throughput-4vrgbtor`.
+
+These results reinforce the corrected profile interpretation: fixed graph
+bookkeeping is not the 5090 bottleneck. Further work must reduce or overlap
+the dominant Muon GEMMs/copies or optimize MinGRU computation while continuing
+to apply the exact-checkpoint gate first.
+
+### Concurrent per-matrix Muon: promoted
+
+Running each independent 2D parameter's unchanged Muon pipeline on a disjoint
+stream, handle, workspace, norm scratch, and NS scratch produced the first
+clear C0 gain. The main stream forks after global clip/Nesterov and rejoins all
+lanes before the unchanged flat weight update.
+
+- All Affine, Breakout, G2048, Maze, and Boxoban deterministic canaries
+  produced byte-identical baseline/candidate checkpoints.
+- The final balanced two-pair production build measured `1.1926x` on run 578
+  CUDA and `1.0665x` on 1024x4 CUDA, for `1.1278x` combined. Every pair
+  improved and every checkpoint matched. Artifacts:
+  `/tmp/puffer-muon-final2-b6gIHRz7/puffer-throughput-9y3xw5y0`.
+- A deterministic Breakout CUDA sentinel measured `1.1565x`. The broader
+  exact promotion screen measured `1.1963x` Breakout CUDA, `1.0243x`
+  Breakout CPU, `1.0995x` Maze, and `1.0095x` Boxoban in one pair each.
+- G2048 initially measured `0.9973x` in a balanced two-pair production run. A
+  shape-based saturated-workload fallback now selects the legacy serial path
+  only when there are at least seven matrices, at least five heavy
+  `3072x1024`-class lanes, and at least 15 Mi matrix elements. With that gate,
+  G2048 produced byte-identical checkpoints and `1.0009x` across two balanced
+  pairs during selector qualification. Artifacts:
+  `/tmp/puffer-muon-concurrent-gated-Bp5B17Q6/puffer-throughput-35l7l3c4`.
+
+The final two-pair production golden screen measured `1.1129x` Breakout CUDA,
+`1.0292x` Breakout CPU, and `1.0281x` Maze. Boxoban at `0.9972x` and the
+G2048 serial fallback at `0.9953x` were statistically flat; all pairs remained
+above `0.987x`. Production checkpoint variation was recorded rather than
+treated as candidate divergence because those async configurations are not
+self-repeatable. The deterministic final-build canaries were byte-identical in
+all cases. Artifacts:
+`/tmp/puffer-muon-final2-b6gIHRz7/puffer-throughput-_vlevnd0`.
+
+The selected implementation uses one private 32 MiB cuBLAS workspace per
+enabled matrix. Concurrency is capped at eight matrices, bounding private
+workspace use at 256 MiB; larger models use the allocation-free serial path.
+The two legacy 32 MiB allocations were removed because their per-call
+`cublasSetStream` reset them to the default pool before every GEMM. A fixed
+three-lane experiment reduced memory but lost `5.5%` relative throughput on
+Affine 512. An 8 MiB-per-lane experiment stayed exact but lost about `0.5-0.7%`
+relative throughput. The 32 MiB per-matrix version remains the measured speed
+Pareto point for this 5090 campaign.
+## Concurrent Muon cleanup validation
+
+Removed the experimental CUDA/cuBLAS/host assertion-and-abort wrappers. The
+optimization now follows the existing direct-call style; the max-eight lane
+gate, saturated-workload serial fallback, workspace policy, scheduling,
+fork/join topology, and optimizer arithmetic are unchanged.
+
+Fresh binaries:
+
+- `/tmp/puffer-clean-bin-dW4YM5Cg`
+
+Deterministic exact-checkpoint results against the immutable pre-optimization
+baseline `/tmp/puffer-c0-golden-jCEYhkTm/candidate-bin`:
+
+- Affine 578 `.h` and `.cu`: exact.
+- Affine 1024x4 `.h` and `.cu`: exact.
+- Breakout `.h` and `.cu`: exact.
+- G2048 `.h`: exact.
+- Maze `.h`: exact.
+- Boxoban `.h`: exact.
+- Affine artifact (the combined campaign stopped after these successful cases
+  when the following short case lacked enough uptime samples):
+  `/tmp/puffer-clean-validate-kFHz6jz5/puffer-throughput-7jkeeli3`.
+- Breakout artifact:
+  `/tmp/puffer-clean-breakout-v9mapnzs/puffer-throughput-6mh11ek9`.
+- G2048/Maze/Boxoban artifact:
+  `/tmp/puffer-clean-heavy-goldens-DJVTxiOy/puffer-throughput-78q3o_ak`.
+
+Balanced production throughput:
+
+- Affine 578 CUDA: `1.176870159x` geomean, pair range
+  `1.153879229x` to `1.200319180x`.
+- Affine 1024x4 CUDA: `1.076241413x` geomean, pair range
+  `1.072833497x` to `1.079660154x`.
+- Combined Affine geomean: `1.125431651x`.
+- All Affine checkpoints matched exactly.
+- Artifact:
+  `/tmp/puffer-clean-affine-balanced-nqAzWvrl/puffer-throughput-50ps5sl8`.
+
+The single deterministic G2048 timing pair was noisy (`0.962639308x`), so the
+unchanged serial-fallback case was repeated for three production pairs. The
+repeat measured `1.000669099x` geomean with a `0.997054066x` worst pair and
+matching checkpoints:
+`/tmp/puffer-clean-g2048-repeat-lwKRoN0E/puffer-throughput-l4dudlth`.
+## Minimum-code concurrent Muon ablations
+
+Goal for this pass: retain only code that is required for measured throughput,
+bit-identical arithmetic, CUDA-graph fork/join, or bounded resources. New
+defensive wrappers and unused generalizations are not part of the optimization.
+
+### Retained cleanup
+
+- Removed all custom CUDA/cuBLAS/allocation assert-and-abort wrappers.
+- Restored the original legacy cuBLAS initializer and call sites.
+- Removed redundant pointer initialization and optional-workspace plumbing.
+- Removed the abandoned shared-lane load balancer, matrix-to-lane indices,
+  max-scratch aggregation, and duplicate warmup search.
+- Replaced heap metadata/lane arrays with fixed eight-entry storage, matching
+  the measured and qualified eight-lane cap.
+- Folded parameter discovery and matrix descriptor construction into one scan.
+- Replaced duplicate concurrency state with `num_lanes` (`0` means serial).
+- Removed the redundant total-element saturation threshold; five heavy
+  `3072x1024`-or-larger matrices already imply the same 15 Mi-element bound.
+- Reused the existing maximum-dimension scan for the 4096 qualification gate.
+- Replaced unused tensor-shaped lane scratch metadata with raw device pointers.
+- Packed each lane's 256 norm partials and one norm scalar into one allocation.
+- Kept the original shared serial scratch allocation/registration unchanged.
+- Removed the separate lane cuBLAS initializer. Lane setup uses the original
+  initializer, binds the private stream, then restores the private workspace
+  because `cublasSetStream` resets it.
+
+### Ablation: remove lane GEMM warmup - kept removed
+
+The entire per-lane cuBLAS warmup helper and calls were deleted. Fresh lane
+handles successfully captured and replayed without it. Affine 578 CUDA remained
+byte-identical and measured `1.006785243x` versus the already-clean concurrent
+candidate in the initial canary.
+
+Artifact:
+`/tmp/puffer-min-canary-XSgjuhth/puffer-throughput-9bnq23jd`.
+
+Decision: keep the warmup deleted.
+
+### Ablation: remove largest-first scheduling - rejected
+
+Removing `MuonMatrix::work` and the stable insertion sort preserved exact
+checkpoints but reduced throughput versus the sorted minimum-code candidate:
+
+- Affine 578 CUDA: `0.974554593x` (`-2.54%`).
+- Affine 1024x4 CUDA: `0.987948112x` (`-1.21%`).
+- Combined: `0.981228501x`.
+
+Artifact:
+`/tmp/puffer-nosort-ab-dBHD6INB/puffer-throughput-hcr26xye`.
+
+Decision: restore the small work field and stable largest-first insertion sort.
+Those lines have measured value and remain in the implementation.
+
+### Final minimum-code validation
+
+Fresh binaries:
+`/tmp/puffer-min-final-bin-e985GY0q`.
+
+Deterministic checkpoint comparison against the immutable pre-optimization
+baseline passed exactly for Affine 578 `.h/.cu`, Affine 1024x4 `.h/.cu`,
+Breakout `.h/.cu`, G2048 `.h`, Maze `.h`, and Boxoban `.h`.
+
+- Affine/G2048/Maze/Boxoban artifact:
+  `/tmp/puffer-min-final-exact-Gwxuuy1H/puffer-throughput-zthgmrb4`.
+- Breakout artifact:
+  `/tmp/puffer-min-final-breakout-JHe4038Y/puffer-throughput-_ib_t7di`.
+
+Three-pair production Affine result against the immutable pre-optimization
+baseline:
+
+- Affine 578 CUDA: `1.167157783x` geomean, range `1.159652395x` to
+  `1.181321136x`.
+- Affine 1024x4 CUDA: `1.073290530x` geomean, range `1.063182301x` to
+  `1.079850177x`.
+- Combined Affine geomean: `1.119240544x`.
+- Every paired checkpoint matched exactly.
+- Artifact:
+  `/tmp/puffer-min-final-affine-yxtO2Tb8/puffer-throughput-ud3m_3ae`.
