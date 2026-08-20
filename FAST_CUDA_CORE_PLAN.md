@@ -863,3 +863,51 @@ baseline:
 - Every paired checkpoint matched exactly.
 - Artifact:
   `/tmp/puffer-min-final-affine-yxtO2Tb8/puffer-throughput-ud3m_3ae`.
+
+## 2026-08-20: post-Muon hotspot profiling and strict-C0 ablations
+
+Baseline for this round: commit `9a2afdae` (`cuda: overlap independent Muon matrix updates`) on RTX 5090 with CUDA 13.1. All candidates below used the native throughput harness, isolated `/tmp` binaries/artifacts, and exact checkpoint comparison. No candidate was retained in `src/algo.cu`; the committed Muon implementation remains the source baseline.
+
+### Nsight Systems attribution
+
+| GPU work class | Affine 578 | Affine 1024x4 |
+| --- | ---: | ---: |
+| Model/non-Muon GEMMs | 43.21% | 46.95% |
+| Muon lane GEMMs | 31.26% | 35.29% |
+| MinGRU custom kernels | 14.24% | 10.09% |
+| Muon lane D2D copies | 4.23% | 2.57% |
+| Muon lane custom kernels | 2.46% | 1.61% |
+
+Reports: `/tmp/puffer-nsys-affine578-AeLPq6DN/affine578.nsys-rep` and `/tmp/puffer-nsys-affine1024-xrrO5zxs/affine1024.nsys-rep`. MinGRU scan backward was about 7.6% of summed kernel time on 578 and 4.7% on 1024x4; forward was about 3.8% and 2.4%. Nsight Compute hardware-counter collection was attempted but rejected by the driver with `ERR_NVGPUCTRPERM`; no permission or driver setting was changed. Log: `/tmp/puffer-ncu-gemm-4bbRUQRm/ncu.log`.
+
+### Ablation ledger
+
+| Candidate | Exact checkpoints | Result | Decision |
+| --- | --- | --- | --- |
+| Rollout MinGRU state update in place, deleting one D2D copy per layer | Yes | Affine suite `1.000075x`; isolated Boxoban at original 256-thread scans `0.992227x` over 3 pairs | Reject: not universally free |
+| Ordinary MinGRU scans at 128 threads, initially stacked on in-place rollout | Yes | Short Affine test: 578 `1.002227x`, 1024x4 `1.010714x`, suite `1.006461x` | Promising short result, required clean isolation |
+| Ordinary MinGRU scans at 512 threads, stacked on in-place rollout | Yes | 578 `1.009817x`, 1024x4 `0.999703x`, suite `1.004747x` | Reject: size-dependent |
+| Ordinary MinGRU scans at 64 threads, stacked on in-place rollout | Yes | Versus in-place 256: 578 `1.013120x`, 1024x4 `1.013406x`; versus committed baseline over 3 pairs: suite `1.010901x` | Reject: Boxoban `0.985530x` over 3 pairs |
+| Ordinary MinGRU scans at 128 threads with the in-place change removed | Yes | Affine 578 `0.999373x`, 1024x4 `0.997186x`, suite `0.998279x`; Boxoban `0.998644x` | Reject: no repeatable gain |
+
+The positive short 128/64 results were not accepted because the better-isolated repeats contradicted them or exposed an environment regression. This is why throughput changes need paired repeats and the golden suite even when arithmetic is trivially bit-preserving.
+
+Ordinary scan shapes were: Affine 578 `B*H=65,536,T=64`; Affine 1024x4 `131,072,64`; Breakout `65,536,32`; G2048 `1,048,576,64`; Boxoban `524,288,128`. Maze (`32,768,256`) uses the existing row-scan path and was unaffected. All ordinary totals divide both 128 and 256 exactly, so the rejected geometry experiments changed scheduling only, not arithmetic or tail behavior.
+
+### Golden results for the rejected 64-thread/in-place candidate
+
+All nine deterministic backend/config checkpoints matched exactly: Affine 578 `.h/.cu`, Affine 1024x4 `.h/.cu`, Breakout `.h/.cu`, G2048 `.h`, Maze `.h`, and Boxoban `.h`. The full one-pair artifact roots are `/tmp/puffer-hotspots-golden-UecOhctF/standard/puffer-throughput-f9kt97kw` and `/tmp/puffer-hotspots-golden-UecOhctF/breakout/puffer-throughput-l9sef9qv`. Repeat artifacts are `/tmp/puffer-hotspots-regression-check-c4BKFlvl/maze-boxoban/puffer-throughput-uwk0wf_t` and `/tmp/puffer-hotspots-regression-check-c4BKFlvl/breakout-h/puffer-throughput-kpyhrbuu`.
+
+### Muon copy-overlap result
+
+The private-copy-stream experiment preserved every GEMM, copy, coefficient, and checkpoint bit, but it did not clear the performance gate. Over two Affine pairs, 578 was noisy at `1.008304x`, 1024x4 consistently regressed to `0.997829x`, and the suite result was only `1.003053x`. The added stream/events were reverted. Artifact: `/tmp/puffer-muon-copy-overlap-ab-I2JJdU62/puffer-throughput-7p1jziev`.
+
+### Next direction
+
+Further work should target arithmetic-preserving work removal rather than more dW scheduling. Trace parsing found a median final dW tail of only `9.920 us` on Affine 578 (about `0.79%` of iteration time) and `7.745 us` on 1024x4 (about `0.12%`). The previous dW was still running when the next layer became ready only once in 7,552 opportunities on 578 and never in 5,577 opportunities on 1024x4, so neither a second dW stream nor stream-priority tuning is justified. cuBLASLt separate-C/D and GEMM autotuning remain deferred because different kernels/reduction orders are not guaranteed bit-identical.
+
+### MinGRU training-fusion ablations
+
+Inter-layer backward-add fusion was also rejected. Instead of materializing each upper-layer `BF16_round(FP32(dX) + FP32(highway))`, the next lower scan reconstructed that exact rounded value from the two BF16 sources before its unchanged arithmetic. The bottom add remained materialized for encoder backward, and both ordinary and row scans were supported. The cleaned implementation was roughly 25-30 net lines. A three-pair run measured Affine 578 `1.008689x`, 1024x4 `1.001612x`, suite `1.005144x`, with exact checkpoints and worst pair `0.995648x`. All nine final golden checkpoints matched exactly, but the repeated Breakout-h performance gate measured `0.995334x` with a `0.960713x` worst pair. That is not enough gain or stability to justify the code. Affine artifact: `/tmp/puffer-grad-add-clean-ab-MZ967oyD/puffer-throughput-s2g89pvp`; golden artifacts: `/tmp/puffer-grad-add-clean-golden-ObwQjjBP/standard/puffer-throughput-2lplq623` and `/tmp/puffer-grad-add-clean-golden-ObwQjjBP/breakout/puffer-throughput-mxvbxckj`; repeat artifact: `/tmp/puffer-grad-add-clean-regression-tFpJLK6m/breakout-h/puffer-throughput-tswg4v27`.
+
+An additional saved-input-copy fusion was rejected. It raw-copied the exact loaded `precision_t` input from each forward scan into the existing backward-save buffer, removing one serialized D2D node per layer while preserving allocator layout and bits. Combined with backward-add fusion it measured 578 `1.011174x` but 1024x4 `0.995644x`, including a `0.980087x` pair; the extra scan-store pressure outweighed the removed copy on the larger net. Artifact: `/tmp/puffer-scan-fusions-ab-HdiVwMZc/puffer-throughput-x68n0j3o`.
