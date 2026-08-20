@@ -151,6 +151,45 @@ static py::dict vec_log(VecEnv& ve) {
     return result;
 }
 
+static size_t state_dtype_size(const char* dtype) {
+    if (!strcmp(dtype, "int8") || !strcmp(dtype, "uint8")) return 1;
+    if (!strcmp(dtype, "int16") || !strcmp(dtype, "uint16")) return 2;
+    if (!strcmp(dtype, "int32") || !strcmp(dtype, "uint32") || !strcmp(dtype, "float32")) return 4;
+    if (!strcmp(dtype, "int64") || !strcmp(dtype, "uint64") || !strcmp(dtype, "float64")) return 8;
+    throw std::runtime_error(std::string("my_state: unknown dtype ") + dtype);
+}
+
+// Snapshot of env-exported state (my_state hook). Fields are copied into
+// Python-owned bytes unless the env flags them PUFF_STATE_ZERO_COPY, in which
+// case a read-only view of the C buffer is returned (invalidated by close()).
+// Returns an empty dict for envs that do not implement the hook.
+static py::dict vec_state(VecEnv& ve, int env_id) {
+    if (env_id < 0 || env_id >= ve.vec->size)
+        throw std::runtime_error("state: env_id out of range");
+    StateField fields[PUFF_MAX_STATE_FIELDS];
+    int n = my_state(static_vec_env_at(ve.vec, env_id), fields, PUFF_MAX_STATE_FIELDS);
+    py::dict result;
+    for (int i = 0; i < n; i++) {
+        size_t count = 1;
+        py::tuple shape(fields[i].ndim);
+        for (int d = 0; d < fields[i].ndim; d++) {
+            shape[d] = fields[i].dims[d];
+            count *= (size_t)fields[i].dims[d];
+        }
+        size_t nbytes = count * state_dtype_size(fields[i].dtype);
+        py::dict entry;
+        if (fields[i].flags & PUFF_STATE_ZERO_COPY) {
+            entry["data"] = py::memoryview::from_memory(fields[i].data, (py::ssize_t)nbytes);
+        } else {
+            entry["data"] = py::bytes((const char*)fields[i].data, nbytes);
+        }
+        entry["dtype"] = fields[i].dtype;
+        entry["shape"] = shape;
+        result[fields[i].name] = entry;
+    }
+    return result;
+}
+
 static void vec_close(VecEnv& ve) {
     static_vec_close(ve.vec);
     ve.vec = nullptr;
@@ -182,6 +221,7 @@ PYBIND11_MODULE(_C, m) {
         .def("reset", &vec_reset)
         .def("cpu_step", &cpu_vec_step_py)
         .def("render", [](VecEnv& ve, int env_id) { static_vec_render(ve.vec, env_id); })
+        .def("state", &vec_state, py::arg("env_id") = 0)
         .def("log", &vec_log)
         .def("close", &vec_close);
 }

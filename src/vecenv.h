@@ -153,6 +153,34 @@ void my_shared_close(void* env);
 void* my_get(void* env, Dict* out);
 int my_put(void* env, Dict* kwargs);
 
+// Optional structured state export for rendering/telemetry. An env opts in by
+// defining MY_STATE before including vecenv.h and implementing my_state to fill
+// `fields` with up to `max_fields` entries, returning the count. By default a
+// field's data pointer must remain valid until the next my_state call on the
+// same env; the Python binding copies immediately, so per-binding static
+// scratch buffers are fine. Fields whose buffer is allocated once and whose
+// pointer stays valid for the env's lifetime may set PUFF_STATE_ZERO_COPY in
+// flags; the binding then returns a read-only view instead of a copy (views
+// are invalidated by close). Must not be called concurrently with env
+// stepping. The default implementation exports nothing.
+typedef struct StateField {
+    const char* name;
+    const void* data;
+    const char* dtype;   // numpy-style: "int8", "uint8", "int32", "float32", ...
+    int ndim;
+    int dims[4];
+    int flags;
+} StateField;
+
+#define PUFF_MAX_STATE_FIELDS 16
+#define PUFF_STATE_ZERO_COPY 1
+
+int my_state(void* env, StateField* fields, int max_fields);
+
+// Address of env `env_id` inside vec->envs. Implemented in the env's
+// translation unit, where sizeof(Env) is known.
+void* static_vec_env_at(StaticVec* vec, int env_id);
+
 #ifdef __cplusplus
 }
 #endif
@@ -738,6 +766,11 @@ int get_num_act_sizes(void) { return (int)(sizeof(_act_sizes) / sizeof(_act_size
 const char* get_obs_dtype(void) { return dtype_symbol; }
 size_t get_obs_elem_size(void) { return obs_element_size(); }
 
+void* static_vec_env_at(StaticVec* vec, int env_id) {
+    assert(env_id >= 0 && env_id < vec->size);
+    return &((Env*)vec->envs)[env_id];
+}
+
 static inline void _static_vec_env_step(StaticVec* vec) {
     memset(vec->rewards, 0, vec->total_agents * sizeof(float));
     memset(vec->terminals, 0, vec->total_agents * sizeof(float));
@@ -792,6 +825,13 @@ void* my_get(void* env, Dict* out) {
 
 #ifndef MY_PUT
 int my_put(void* env, Dict* kwargs) {
+    return 0;
+}
+#endif
+
+#ifndef MY_STATE
+int my_state(void* env, StateField* fields, int max_fields) {
+    (void)env; (void)fields; (void)max_fields;
     return 0;
 }
 #endif
