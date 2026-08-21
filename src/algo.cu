@@ -113,8 +113,9 @@ struct PinnedLtPlan {
 };
 
 thread_local cublasLtHandle_t g_cublaslt_handle = NULL;
-thread_local PinnedLtPlan g_cublaslt_plans[2] = {};
+thread_local PinnedLtPlan g_cublaslt_plans[4] = {};
 thread_local bool g_cublaslt_enabled = false;
+thread_local bool g_cublaslt_muon_enabled = false;
 
 static bool cublaslt_make_row_layout(cublasLtMatrixLayout_t* layout,
         uint64_t rows, uint64_t cols, int64_t ld) {
@@ -127,7 +128,8 @@ static bool cublaslt_make_row_layout(cublasLtMatrixLayout_t* layout,
 }
 
 static bool cublaslt_init_plan(PinnedLtPlan* plan,
-        int M, int N, int K, cublasOperation_t op_b) {
+        int M, int N, int K, cublasOperation_t op_b,
+        uint32_t tile = 15, uint32_t stages = 12) {
     plan->M = M;
     plan->N = N;
     plan->K = K;
@@ -158,12 +160,10 @@ static bool cublaslt_init_plan(PinnedLtPlan* plan,
         return false;
     }
 
-    uint32_t tile = 15;
     uint32_t split_k = 1;
     uint32_t reduction = 0;
     uint32_t swizzle = 0;
     uint32_t custom = 0;
-    uint32_t stages = 12;
     return cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
             CUBLASLT_ALGO_CONFIG_TILE_ID, &tile,
             sizeof(tile)) == CUBLAS_STATUS_SUCCESS
@@ -211,6 +211,11 @@ static void cublaslt_init_pinned() {
             8192, 1536, 512, CUBLAS_OP_T)
         && cublaslt_init_plan(&g_cublaslt_plans[1],
             8192, 512, 1536, CUBLAS_OP_N);
+    g_cublaslt_muon_enabled =
+        cublaslt_init_plan(&g_cublaslt_plans[2],
+            512, 512, 512, CUBLAS_OP_N, 11, 19)
+        && cublaslt_init_plan(&g_cublaslt_plans[3],
+            1536, 512, 512, CUBLAS_OP_N, 18, 15);
 }
 
 static bool cublaslt_try_pinned(cublasHandle_t handle,
@@ -224,7 +229,8 @@ static bool cublaslt_try_pinned(cublasHandle_t handle,
             || (((uintptr_t)A | (uintptr_t)B | (uintptr_t)C) & 255) != 0) {
         return false;
     }
-    for (PinnedLtPlan& plan : g_cublaslt_plans) {
+    for (int i = 0; i < 2; i++) {
+        PinnedLtPlan& plan = g_cublaslt_plans[i];
         if (plan.M == M && plan.N == N && plan.K == K
                 && plan.op_b == op_b) {
             return cublasLtMatmul(g_cublaslt_handle, plan.op,
@@ -1296,6 +1302,32 @@ constexpr double ns_coeffs[5][3] = {
     {2.8366, -3.0525, 1.2012},
 };
 
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+// H512 separate-C/D removes Newton-Schulz copies: about 0.8% Affine578 SPS,
+// bit-identical across the golden environments.
+static bool cublaslt_try_muon_nn(int M, int N, int K,
+        void* A, void* B, void* C, void* D,
+        cudaStream_t stream, int round, bool square) {
+    if (!g_cublaslt_muon_enabled
+            || (((uintptr_t)A | (uintptr_t)B
+                | (uintptr_t)C | (uintptr_t)D) & 255) != 0) {
+        return false;
+    }
+    float alpha = square ? (float)ns_coeffs[round][2] : 1.0f;
+    float beta = square
+        ? (float)ns_coeffs[round][1] : (float)ns_coeffs[round][0];
+    PinnedLtPlan& plan = g_cublaslt_plans[square ? 2 : 3];
+    if (plan.M != M || plan.N != N || plan.K != K) {
+        return false;
+    }
+    cublasLtMatmul(g_cublaslt_handle, plan.op,
+        &alpha, A, plan.a_layout, B, plan.b_layout,
+        &beta, C, plan.c_layout, D, plan.c_layout,
+        &plan.algo, NULL, 0, stream);
+    return true;
+}
+#endif
+
 struct MuonMatrix {
     long offset;
     long rows;
@@ -1445,19 +1477,39 @@ static void muon_matrix_step(precision_t* gc_ptr, long R, long C,
             puf_mm(&src, &src, &gram, stream, 1.0f, 0.0f,
                 handle, handle_bound_to_stream);
         }
-        puf_copy(&gram_buf, &gram, stream);
-        puf_mm_nn(&gram, &gram, &gram_buf, stream,
-            (float)ns_coeffs[i][2], (float)ns_coeffs[i][1],
-            handle, handle_bound_to_stream);
-        puf_copy(&dst, &src, stream);
-        if (tall) {
-            puf_mm_nn(&src, &gram_buf, &dst,
-                stream, 1.0f, (float)ns_coeffs[i][0],
+        bool lt_square = false;
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+        if (handle_bound_to_stream) {
+            lt_square = cublaslt_try_muon_nn(M, M, M,
+                gram.data, gram.data, gram.data, gram_buf.data,
+                stream, i, true);
+        }
+#endif
+        if (!lt_square) {
+            puf_copy(&gram_buf, &gram, stream);
+            puf_mm_nn(&gram, &gram, &gram_buf, stream,
+                (float)ns_coeffs[i][2], (float)ns_coeffs[i][1],
                 handle, handle_bound_to_stream);
-        } else {
-            puf_mm_nn(&gram_buf, &src, &dst,
-                stream, 1.0f, (float)ns_coeffs[i][0],
-                handle, handle_bound_to_stream);
+        }
+        bool lt_x = false;
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+        if (handle_bound_to_stream && tall) {
+            lt_x = cublaslt_try_muon_nn(R, C, C,
+                src.data, gram_buf.data, src.data, dst.data,
+                stream, i, false);
+        }
+#endif
+        if (!lt_x) {
+            puf_copy(&dst, &src, stream);
+            if (tall) {
+                puf_mm_nn(&src, &gram_buf, &dst,
+                    stream, 1.0f, (float)ns_coeffs[i][0],
+                    handle, handle_bound_to_stream);
+            } else {
+                puf_mm_nn(&gram_buf, &src, &dst,
+                    stream, 1.0f, (float)ns_coeffs[i][0],
+                    handle, handle_bound_to_stream);
+            }
         }
     }
     float scale = sqrtf(fmaxf(1.0f, (float)R / (float)C));

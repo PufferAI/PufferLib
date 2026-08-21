@@ -1026,3 +1026,49 @@ fallback regression. Artifact:
 `/tmp/puffer-muon-clip-maze-repeat-RVJS5MqK/puffer-throughput-w0_7udpj`.
 
 Decision: accept the cleaned clip-side fusion.
+
+### Accepted: H512 Muon separate-C/D cuBLASLt plans
+
+The final path keeps the legacy Gram GEMM and pins only two H512,
+zero-workspace cuBLASLt plans with separate C and D. This removes ten
+intermediate copies per Muon matrix while retaining the exact intermediate
+BF16 boundaries. Enablement requires the qualified platform, exact
+shape/operation, pointer alignment, and concurrent-Muon path; every miss uses
+the complete legacy implementation. Cleanup reduced dispatch to direct plan
+indexing.
+
+Standalone DAG qualification covered both homogeneous and mixed algorithms.
+Intermediate and final outputs matched exactly in the mixed checks, with DAG
+speedups of `1.057064x` for Affine 578 and `1.026971x` for Affine 1024x4.
+Artifacts: `/tmp/puffer_muon_lt_dag_results.txt` and
+`/tmp/puffer_muon_lt_mixed_dag_results.txt`.
+
+The initial four-plan production screen was exact and measured Affine 578
+`1.013303x` and Affine 1024x4 `0.999484x`. Artifact:
+`/tmp/puffer-muon-lt-screen-PVUjMwcb/puffer-throughput-xnjxu1ia`. Its exact
+long confirmation measured `1.004826x` and `1.003628x`. Artifact:
+`/tmp/puffer-muon-lt-long-jWvXrcOw/puffer-throughput-5q9xs6cz`. The H1024
+plans were then ablated because their pooled SPS contribution was marginal;
+removing them also deleted four lines from the production path.
+
+H512-only qualification remained exact:
+
+- Screen: Affine 578 `1.007749x`, Affine 1024x4 legacy fallback `1.002107x`;
+  artifact
+  `/tmp/puffer-muon-lt-h512-screen-SUJfPhvu/puffer-throughput-8mkep5z1`.
+- Five-pair long run: Affine 578 `1.008373x` with every pair positive, Affine
+  1024x4 fallback `0.998299x`; artifact
+  `/tmp/puffer-muon-lt-h512-final-bUnngM4U/puffer-throughput-44_3abuy`.
+- Final-clean screen: Affine 578 `1.017608x`, Affine 1024x4 fallback
+  `0.999136x`; artifact
+  `/tmp/puffer-muon-lt-final-screen-xNW8oq08/puffer-throughput-mfexwvxh`.
+
+All nine golden backend/configuration checkpoints matched exactly. Artifacts:
+`/tmp/puffer-muon-lt-final-golden-HuZIm3Hk/standard/puffer-throughput-dmm5i97r`
+and
+`/tmp/puffer-muon-lt-final-golden-HuZIm3Hk/breakout/puffer-throughput-cu9w63s5`.
+The H512 Maze repeat was exact and measured `1.004782x`. Artifact:
+`/tmp/puffer-muon-lt-maze-repeat-5OQIpmuE/puffer-throughput-baupfgty`.
+
+Decision: accept the minimized H512-only separate-C/D plans with unconditional
+legacy fallback outside their strict gate.
