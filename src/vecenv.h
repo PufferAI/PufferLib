@@ -209,6 +209,22 @@ extern const char* cudaGetErrorString(cudaError_t);
 void my_init(Env* env, Dict* kwargs);
 void my_log(Log* log, Dict* out);
 
+#ifdef MY_GPU_ENV
+// Device-resident env hooks. An env opts in by defining MY_GPU_ENV before
+// including this header and linking a CUDA translation unit that implements
+// these (extern "C"). When the vec runs in gpu mode, the per-step
+// D2H-actions / OpenMP c_step / H2D-obs sequence is replaced by a single
+// my_gpu_step launched on the buffer stream: the env steps entirely on the
+// GPU and writes obs/rewards/terminals directly into the vec's gpu_* buffers.
+// Host envs are still created and resettable, so the CPU path (cpu_vec_step)
+// remains usable for parity checks against the device env.
+void my_gpu_init(StaticVec* vec, Dict* vec_kwargs, Dict* env_kwargs);
+void my_gpu_reset(StaticVec* vec);   // write initial obs into vec->gpu_observations
+void my_gpu_step(StaticVec* vec, cudaStream_t stream);
+void my_gpu_sync_logs(StaticVec* vec);  // fold device logs into host envs' logs
+void my_gpu_close(StaticVec* vec);
+#endif
+
 #ifdef MY_USES_PERM
 // Env-provided: populate per-slot pointer arrays on env, given the global slot
 // base for slot 0. Reads vec->agent_perm (NULL = identity) to compute physical
@@ -276,6 +292,17 @@ static void* static_omp_threadmanager(void* arg) {
             clock_gettime(CLOCK_MONOTONIC, &t0);
             net_callback(ctx, buf, t);
 
+#ifdef MY_GPU_ENV
+            if (vec->gpu) {
+                clock_gettime(CLOCK_MONOTONIC, &t1);
+                my_accum[EVAL_GPU] += (t1.tv_sec - t0.tv_sec) * 1000.0f + (t1.tv_nsec - t0.tv_nsec) / 1e6f;
+                clock_gettime(CLOCK_MONOTONIC, &t0);
+                my_gpu_step(vec, stream);
+                clock_gettime(CLOCK_MONOTONIC, &t1);
+                my_accum[EVAL_ENV_STEP] += (t1.tv_sec - t0.tv_sec) * 1000.0f + (t1.tv_nsec - t0.tv_nsec) / 1e6f;
+                continue;
+            }
+#endif
             cudaMemcpyAsync(
                 &vec->actions[agent_start * NUM_ATNS],
                 &vec->gpu_actions[agent_start * NUM_ATNS],
@@ -490,6 +517,12 @@ StaticVec* create_static_vec(int total_agents, int num_buffers, int gpu, Dict* v
         }
     }
 
+#ifdef MY_GPU_ENV
+    if (gpu) {
+        my_gpu_init(vec, vec_kwargs, env_kwargs);
+    }
+#endif
+
     return vec;
 }
 
@@ -577,6 +610,11 @@ void static_vec_reset(StaticVec* vec) {
             cudaMemcpyHostToDevice);
 #endif
         cudaDeviceSynchronize();
+#ifdef MY_GPU_ENV
+        // Device env owns the gpu buffers: overwrite the host-env obs upload
+        // with the device-side initial obs.
+        my_gpu_reset(vec);
+#endif
     } else {
         memset(vec->rewards, 0, vec->total_agents * sizeof(float));
         memset(vec->terminals, 0, vec->total_agents * sizeof(float));
@@ -622,6 +660,11 @@ void static_vec_close(StaticVec* vec) {
         c_close(env);
     }
 
+#ifdef MY_GPU_ENV
+    if (vec->gpu) {
+        my_gpu_close(vec);
+    }
+#endif
     my_vec_close(envs);
     free(vec->envs);
     if (vec->threading != NULL) {
@@ -687,6 +730,11 @@ static inline float static_vec_aggregate_logs(StaticVec* vec, Log* out) {
 
 void static_vec_log(StaticVec* vec, Dict* out) {
     Env* envs = (Env*)vec->envs;
+#ifdef MY_GPU_ENV
+    if (vec->gpu) {
+        my_gpu_sync_logs(vec);
+    }
+#endif
     Log aggregate;
     float n = static_vec_aggregate_logs(vec, &aggregate);
     if (n == 0) {
@@ -700,6 +748,11 @@ void static_vec_log(StaticVec* vec, Dict* out) {
 }
 
 void static_vec_eval_log(StaticVec* vec, Dict* out) {
+#ifdef MY_GPU_ENV
+    if (vec->gpu) {
+        my_gpu_sync_logs(vec);
+    }
+#endif
     Log aggregate;
     float n = static_vec_aggregate_logs(vec, &aggregate);
     if (n == 0) {
@@ -750,6 +803,11 @@ static inline void _static_vec_env_step(StaticVec* vec) {
 
 void gpu_vec_step(StaticVec* vec) {
     assert(vec->buffers == 1);
+#ifdef MY_GPU_ENV
+    my_gpu_step(vec, (cudaStream_t)0);
+    cudaDeviceSynchronize();
+    return;
+#endif
     cudaMemcpy(vec->actions, vec->gpu_actions,
         (size_t)vec->total_agents * NUM_ATNS * sizeof(float),
         cudaMemcpyDeviceToHost);

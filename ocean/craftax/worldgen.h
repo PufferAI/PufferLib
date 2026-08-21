@@ -65,6 +65,16 @@
     CRAFTAX_WG_PACKED_MAP_OBS_SIZE + CRAFTAX_WG_INVENTORY_OBS_SIZE \
 )
 
+// Compact byte observation: every packed map channel is a small integer ID
+// (block < 37, item+1 <= 5, visible bit, mob type+1 <= 8), so the 792 map
+// channels fit in uint8 losslessly. The 51-float scalar tail is appended as
+// raw float32 bytes; the GPU expands map bytes with .float() and reinterprets
+// the tail, reproducing the float observation bit-for-bit at 3.4x less DMA.
+#define CRAFTAX_WG_COMPACT_OBS_SIZE ( \
+    CRAFTAX_WG_PACKED_MAP_OBS_SIZE \
+    + CRAFTAX_WG_INVENTORY_OBS_SIZE * (int)sizeof(float) \
+)
+
 // Lookup tables for fast binary bit writing (eliminates loops/branches)
 static const float CRAFTAX_WG_BLOCK_LUT[64][6] = {
     {0.0f,0.0f,0.0f,0.0f,0.0f,0.0f},{1.0f,0.0f,0.0f,0.0f,0.0f,0.0f},{0.0f,1.0f,0.0f,0.0f,0.0f,0.0f},{1.0f,1.0f,0.0f,0.0f,0.0f,0.0f},
@@ -291,6 +301,13 @@ typedef struct CraftaxWorldState {
     int32_t up_ladders[CRAFTAX_WG_NUM_LEVELS][2];
     bool chests_opened[CRAFTAX_WG_NUM_LEVELS];
     int32_t monsters_killed[CRAFTAX_WG_NUM_LEVELS];
+
+    // Lazy floor generation. Bit L of lazy_floors_pending set means floor L
+    // has not been generated yet; its worldgen key is in lazy_floor_keys[L].
+    // Zero-initialized states (test fixtures, JAX mirrors) read as
+    // "all floors generated", so laziness is opt-in per state.
+    uint32_t lazy_floor_keys[CRAFTAX_WG_NUM_LEVELS][2];
+    uint32_t lazy_floors_pending;
 } CraftaxWorldState;
 
 typedef struct CraftaxSmoothGenConfig {
@@ -715,47 +732,28 @@ static inline int craftax_dungeon_config_index_for_floor(int floor_idx) {
     }
 }
 
-static inline void craftax_generate_smoothworld_config(
-    CraftaxThreefryKey rng,
-    int config_idx,
+// ============================================================
+// Smoothworld tile passes: scalar reference implementations plus AVX-512
+// twins. The SIMD versions use only IEEE-exact per-lane operations in the
+// same order as the scalar code (no FMA, no reassociation), so their output
+// is bit-identical; g_craftax_wg_force_scalar exists for testing that claim.
+// ============================================================
+static int g_craftax_wg_force_scalar = 0;
+
+static inline void craftax_smoothworld_classify_scalar(
+    const CraftaxSmoothGenConfig* config,
+    CraftaxThreefryKey tree_uniform_key,
+    float* water,
+    float* mountain,
+    const float* path_x,
+    const float* tree_noise,
     uint8_t map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
     uint8_t item_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
-    uint8_t light_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
-    int32_t ladder_down[2],
-    int32_t ladder_up[2]
+    uint8_t light_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE]
 ) {
-    const CraftaxSmoothGenConfig* config = &CRAFTAX_SMOOTHGEN_CONFIGS[config_idx];
     const int size = CRAFTAX_WG_MAP_SIZE;
     const int player_row = CRAFTAX_WG_MAP_SIZE / 2;
     const int player_col = CRAFTAX_WG_MAP_SIZE / 2;
-    const size_t cells = CRAFTAX_WG_MAP_CELLS;
-
-    CraftaxThreefryKey subkey;
-    float water[CRAFTAX_WG_MAP_CELLS];
-    float mountain[CRAFTAX_WG_MAP_CELLS];
-    float path_x[CRAFTAX_WG_MAP_CELLS];
-    float tree_noise[CRAFTAX_WG_MAP_CELLS];
-    bool lava_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE];
-
-    craftax_threefry_split(rng, &rng, &subkey);
-    craftax_generate_fractal_noise_2d(subkey, size, size, 3, 3, 1, 0.5f, 2, NULL, water);
-
-    craftax_threefry_split(rng, &rng, &subkey);
-    (void)subkey;
-
-    craftax_threefry_split(rng, &rng, &subkey);
-    craftax_generate_fractal_noise_2d(subkey, size, size, 3, 3, 1, 0.5f, 2, NULL, mountain);
-
-    craftax_threefry_split(rng, &rng, &subkey);
-    craftax_generate_fractal_noise_2d(subkey, size, size, 6, 24, 1, 0.5f, 2, NULL, path_x);
-
-    craftax_threefry_split(rng, &rng, &subkey);
-    (void)subkey;
-
-    craftax_threefry_split(rng, &rng, &subkey);
-    CraftaxThreefryKey tree_uniform_key = rng;
-    craftax_generate_fractal_noise_2d(subkey, size, size, 12, 12, 1, 0.5f, 2, NULL, tree_noise);
-
     for (int row = 0; row < size; row++) {
         int dr = row > player_row ? row - player_row : player_row - row;
         for (int col = 0; col < size; col++) {
@@ -815,24 +813,35 @@ static inline void craftax_generate_smoothworld_config(
             light_map[row][col] = (uint8_t)(config->default_light * 255.0f);
         }
     }
+}
 
-    CraftaxThreefryKey ore_rng;
-    craftax_threefry_split(rng, &rng, &ore_rng);
-    for (int ore_index = 0; ore_index < 5; ore_index++) {
-        CraftaxThreefryKey ore_key;
-        craftax_threefry_split(ore_rng, &ore_rng, &ore_key);
-        for (int row = 0; row < size; row++) {
-            for (int col = 0; col < size; col++) {
-                size_t idx = craftax_wg_index(row, col);
-                bool is_ore = map[row][col] == config->ore_requirement_blocks[ore_index]
-                    && craftax_threefry_uniform_f32_at(ore_key, idx) < config->ore_chances[ore_index];
-                if (is_ore) {
-                    map[row][col] = (uint8_t)config->ores[ore_index];
-                }
+static inline void craftax_smoothworld_ore_scalar(
+    const CraftaxSmoothGenConfig* config,
+    int ore_index,
+    CraftaxThreefryKey ore_key,
+    uint8_t map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE]
+) {
+    const int size = CRAFTAX_WG_MAP_SIZE;
+    for (int row = 0; row < size; row++) {
+        for (int col = 0; col < size; col++) {
+            size_t idx = craftax_wg_index(row, col);
+            bool is_ore = map[row][col] == config->ore_requirement_blocks[ore_index]
+                && craftax_threefry_uniform_f32_at(ore_key, idx) < config->ore_chances[ore_index];
+            if (is_ore) {
+                map[row][col] = (uint8_t)config->ores[ore_index];
             }
         }
     }
+}
 
+static inline void craftax_smoothworld_lava_scalar(
+    const CraftaxSmoothGenConfig* config,
+    const float* mountain,
+    const float* tree_noise,
+    uint8_t map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
+    bool lava_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE]
+) {
+    const int size = CRAFTAX_WG_MAP_SIZE;
     for (int row = 0; row < size; row++) {
         for (int col = 0; col < size; col++) {
             size_t idx = craftax_wg_index(row, col);
@@ -841,6 +850,308 @@ static inline void craftax_generate_smoothworld_config(
                 map[row][col] = (uint8_t)config->lava;
             }
         }
+    }
+}
+
+#if defined(__AVX512F__) && defined(__AVX512DQ__) && !defined(CRAFTAX_NO_SIMD_NOISE)
+#define CRAFTAX_WG_SIMD 1
+#include <immintrin.h>
+
+static inline __m512i craftax_wg_mix64_v(__m512i x) {
+    x = _mm512_xor_si512(x, _mm512_srli_epi64(x, 33));
+    x = _mm512_mullo_epi64(x, _mm512_set1_epi64((long long)0xff51afd7ed558ccdULL));
+    x = _mm512_xor_si512(x, _mm512_srli_epi64(x, 33));
+    x = _mm512_mullo_epi64(x, _mm512_set1_epi64((long long)0xc4ceb9fe1a85ec53ULL));
+    x = _mm512_xor_si512(x, _mm512_srli_epi64(x, 33));
+    return x;
+}
+
+// craftax_threefry_uniform_f32_at for 16 consecutive counters [base, base+16).
+static inline __m512 craftax_wg_uniform_f32x16(uint64_t key, uint64_t base) {
+    __m512i lane8 = _mm512_setr_epi64(0, 1, 2, 3, 4, 5, 6, 7);
+    __m512i k = _mm512_set1_epi64((long long)key);
+    __m512i idx_lo = _mm512_add_epi64(_mm512_set1_epi64((long long)base), lane8);
+    __m512i idx_hi = _mm512_add_epi64(_mm512_set1_epi64((long long)(base + 8)), lane8);
+    __m512i h_lo = craftax_wg_mix64_v(_mm512_xor_si512(k, idx_lo));
+    __m512i h_hi = craftax_wg_mix64_v(_mm512_xor_si512(k, idx_hi));
+    // u32 = (uint32_t)h ^ (uint32_t)(h >> 32), then keep low 32 of each lane
+    h_lo = _mm512_xor_si512(h_lo, _mm512_srli_epi64(h_lo, 32));
+    h_hi = _mm512_xor_si512(h_hi, _mm512_srli_epi64(h_hi, 32));
+    __m256i lo32 = _mm512_cvtepi64_epi32(h_lo);
+    __m256i hi32 = _mm512_cvtepi64_epi32(h_hi);
+    __m512i bits = _mm512_inserti64x4(_mm512_castsi256_si512(lo32), hi32, 1);
+    // float in [0,1): ((bits >> 9) | 0x3F800000) - 1.0f
+    bits = _mm512_or_si512(_mm512_srli_epi32(bits, 9),
+                           _mm512_set1_epi32(0x3F800000));
+    return _mm512_sub_ps(_mm512_castsi512_ps(bits), _mm512_set1_ps(1.0f));
+}
+
+static inline void craftax_smoothworld_classify_avx512(
+    const CraftaxSmoothGenConfig* config,
+    CraftaxThreefryKey tree_uniform_key,
+    float* water,
+    float* mountain,
+    const float* path_x,
+    const float* tree_noise,
+    uint8_t map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
+    uint8_t item_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
+    uint8_t light_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE]
+) {
+    const int size = CRAFTAX_WG_MAP_SIZE;
+    const int player_col = CRAFTAX_WG_MAP_SIZE / 2;
+    uint64_t tree_key = craftax_key_to_u64(tree_uniform_key);
+
+    __m512i lane = _mm512_setr_epi32(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
+    __m512 zero = _mm512_setzero_ps();
+    __m512 one = _mm512_set1_ps(1.0f);
+    __m512 inv_w_strength =
+        _mm512_set1_ps(config->player_proximity_map_water_strength);
+    __m512 inv_m_strength =
+        _mm512_set1_ps(config->player_proximity_map_mountain_strength);
+    __m512 w_max = _mm512_set1_ps(config->player_proximity_map_water_max);
+    __m512 m_max = _mm512_set1_ps(config->player_proximity_map_mountain_max);
+    __m512 water_thresh = _mm512_set1_ps(config->water_threshold);
+    __m512 sand_thresh = _mm512_set1_ps(config->sand_threshold);
+    __m512 c07 = _mm512_set1_ps(0.7f);
+    __m512 c08 = _mm512_set1_ps(0.8f);
+    __m512 c085 = _mm512_set1_ps(0.85f);
+    __m512 c04 = _mm512_set1_ps(0.4f);
+    __m512 c005 = _mm512_set1_ps(0.05f);
+    __m512 tree_perlin = _mm512_set1_ps(config->tree_threshold_perlin);
+    __m512 tree_uniform = _mm512_set1_ps(config->tree_threshold_uniform);
+    __m512i default_b = _mm512_set1_epi32(config->default_block);
+    __m512i sea_b = _mm512_set1_epi32(config->sea_block);
+    __m512i coast_b = _mm512_set1_epi32(config->coast_block);
+    __m512i mountain_b = _mm512_set1_epi32(config->mountain_block);
+    __m512i path_b = _mm512_set1_epi32(config->path_block);
+    __m512i inner_b = _mm512_set1_epi32(config->inner_mountain_block);
+    __m512i tree_req_b = _mm512_set1_epi32(config->tree_requirement_block);
+    __m512i tree_b = _mm512_set1_epi32(config->tree);
+    __m128i item_zero = _mm_setzero_si128();
+    __m128i light_fill =
+        _mm_set1_epi8((char)(uint8_t)(config->default_light * 255.0f));
+
+    for (int row = 0; row < size; row++) {
+        int player_row = CRAFTAX_WG_MAP_SIZE / 2;
+        int dr = row > player_row ? row - player_row : player_row - row;
+        __m512i dr2 = _mm512_set1_epi32(dr * dr);
+
+        for (int col = 0; col < size; col += 16) {
+            __m512i c = _mm512_add_epi32(_mm512_set1_epi32(col), lane);
+            __m512i dc = _mm512_abs_epi32(
+                _mm512_sub_epi32(c, _mm512_set1_epi32(player_col)));
+            __m512 distance = _mm512_sqrt_ps(_mm512_cvtepi32_ps(
+                _mm512_add_epi32(dr2, _mm512_mullo_epi32(dc, dc))));
+
+            // clampf(distance / strength, 0, max) == min(max(v, 0), max)
+            __m512 prox_w = _mm512_min_ps(
+                _mm512_max_ps(_mm512_div_ps(distance, inv_w_strength), zero),
+                w_max);
+            __m512 prox_m = _mm512_min_ps(
+                _mm512_max_ps(_mm512_div_ps(distance, inv_m_strength), zero),
+                m_max);
+
+            size_t idx = (size_t)row * (size_t)size + (size_t)col;
+            __m512 w = _mm512_loadu_ps(&water[idx]);
+            w = _mm512_sub_ps(_mm512_add_ps(w, prox_w), one);
+            _mm512_storeu_ps(&water[idx], w);
+
+            __mmask16 sea = _mm512_cmp_ps_mask(w, water_thresh, _CMP_GT_OQ);
+            __m512i block = _mm512_mask_blend_epi32(sea, default_b, sea_b);
+            // Scalar condition is `block != sea_block`, which differs from
+            // `!sea` when default_block == sea_block (configs 1 and 4).
+            __mmask16 sand = _mm512_kand(
+                _mm512_cmpneq_epi32_mask(block, sea_b),
+                _mm512_cmp_ps_mask(w, sand_thresh, _CMP_GT_OQ));
+            block = _mm512_mask_blend_epi32(sand, block, coast_b);
+
+            __m512 m = _mm512_loadu_ps(&mountain[idx]);
+            m = _mm512_sub_ps(
+                _mm512_add_ps(_mm512_add_ps(m, c005), prox_m), one);
+            _mm512_storeu_ps(&mountain[idx], m);
+
+            __mmask16 mnt = _mm512_cmp_ps_mask(m, c07, _CMP_GT_OQ);
+            block = _mm512_mask_blend_epi32(mnt, block, mountain_b);
+
+            __m512 px = _mm512_loadu_ps(&path_x[idx]);
+            __mmask16 path = _mm512_kand(
+                mnt, _mm512_cmp_ps_mask(px, c08, _CMP_GT_OQ));
+            block = _mm512_mask_blend_epi32(path, block, path_b);
+
+            // path_x transposed: path_x[col * size + row]
+            __m512i t_idx = _mm512_add_epi32(
+                _mm512_mullo_epi32(c, _mm512_set1_epi32(size)),
+                _mm512_set1_epi32(row));
+            __m512 py = _mm512_i32gather_ps(t_idx, path_x, 4);
+            path = _mm512_kand(mnt, _mm512_cmp_ps_mask(py, c08, _CMP_GT_OQ));
+            block = _mm512_mask_blend_epi32(path, block, path_b);
+
+            __mmask16 cave = _mm512_kand(
+                _mm512_cmp_ps_mask(m, c085, _CMP_GT_OQ),
+                _mm512_cmp_ps_mask(w, c04, _CMP_GT_OQ));
+            block = _mm512_mask_blend_epi32(cave, block, inner_b);
+
+            __m512 draw = craftax_wg_uniform_f32x16(tree_key, (uint64_t)idx);
+            __m512 tn = _mm512_loadu_ps(&tree_noise[idx]);
+            __mmask16 tree = _mm512_kand(
+                _mm512_cmp_ps_mask(tn, tree_perlin, _CMP_GT_OQ),
+                _mm512_cmp_ps_mask(draw, tree_uniform, _CMP_GT_OQ));
+            tree = _mm512_kand(
+                tree, _mm512_cmpeq_epi32_mask(block, tree_req_b));
+            block = _mm512_mask_blend_epi32(tree, block, tree_b);
+
+            _mm_storeu_si128((__m128i*)&map[row][col],
+                             _mm512_cvtepi32_epi8(block));
+            _mm_storeu_si128((__m128i*)&item_map[row][col], item_zero);
+            _mm_storeu_si128((__m128i*)&light_map[row][col], light_fill);
+        }
+    }
+}
+
+static inline void craftax_smoothworld_ore_avx512(
+    const CraftaxSmoothGenConfig* config,
+    int ore_index,
+    CraftaxThreefryKey ore_key,
+    uint8_t map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE]
+) {
+    const int size = CRAFTAX_WG_MAP_SIZE;
+    uint64_t key = craftax_key_to_u64(ore_key);
+    __m512i req = _mm512_set1_epi32(config->ore_requirement_blocks[ore_index]);
+    __m512i ore = _mm512_set1_epi32(config->ores[ore_index]);
+    __m512 chance = _mm512_set1_ps(config->ore_chances[ore_index]);
+    for (int row = 0; row < size; row++) {
+        for (int col = 0; col < size; col += 16) {
+            size_t idx = (size_t)row * (size_t)size + (size_t)col;
+            __m512i blocks = _mm512_cvtepu8_epi32(
+                _mm_loadu_si128((const __m128i*)&map[row][col]));
+            __mmask16 is_req = _mm512_cmpeq_epi32_mask(blocks, req);
+            if (!is_req) continue;
+            __m512 draw = craftax_wg_uniform_f32x16(key, (uint64_t)idx);
+            __mmask16 is_ore = _mm512_kand(
+                is_req, _mm512_cmp_ps_mask(draw, chance, _CMP_LT_OQ));
+            blocks = _mm512_mask_blend_epi32(is_ore, blocks, ore);
+            _mm_storeu_si128((__m128i*)&map[row][col],
+                             _mm512_cvtepi32_epi8(blocks));
+        }
+    }
+}
+
+static inline void craftax_smoothworld_lava_avx512(
+    const CraftaxSmoothGenConfig* config,
+    const float* mountain,
+    const float* tree_noise,
+    uint8_t map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
+    bool lava_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE]
+) {
+    const int size = CRAFTAX_WG_MAP_SIZE;
+    __m512 c085 = _mm512_set1_ps(0.85f);
+    __m512 c07 = _mm512_set1_ps(0.7f);
+    __m512i lava_b = _mm512_set1_epi32(config->lava);
+    __m512i one32 = _mm512_set1_epi32(1);
+    for (int row = 0; row < size; row++) {
+        for (int col = 0; col < size; col += 16) {
+            size_t idx = (size_t)row * (size_t)size + (size_t)col;
+            __mmask16 lava = _mm512_kand(
+                _mm512_cmp_ps_mask(
+                    _mm512_loadu_ps(&mountain[idx]), c085, _CMP_GT_OQ),
+                _mm512_cmp_ps_mask(
+                    _mm512_loadu_ps(&tree_noise[idx]), c07, _CMP_GT_OQ));
+            _mm_storeu_si128((__m128i*)&lava_map[row][col],
+                             _mm512_cvtepi32_epi8(
+                                 _mm512_maskz_mov_epi32(lava, one32)));
+            __m512i blocks = _mm512_cvtepu8_epi32(
+                _mm_loadu_si128((const __m128i*)&map[row][col]));
+            blocks = _mm512_mask_blend_epi32(lava, blocks, lava_b);
+            _mm_storeu_si128((__m128i*)&map[row][col],
+                             _mm512_cvtepi32_epi8(blocks));
+        }
+    }
+}
+#endif  // CRAFTAX_WG_SIMD
+
+static inline void craftax_generate_smoothworld_config(
+    CraftaxThreefryKey rng,
+    int config_idx,
+    uint8_t map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
+    uint8_t item_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
+    uint8_t light_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE],
+    int32_t ladder_down[2],
+    int32_t ladder_up[2]
+) {
+    const CraftaxSmoothGenConfig* config = &CRAFTAX_SMOOTHGEN_CONFIGS[config_idx];
+    const int size = CRAFTAX_WG_MAP_SIZE;
+    const int player_row = CRAFTAX_WG_MAP_SIZE / 2;
+    const int player_col = CRAFTAX_WG_MAP_SIZE / 2;
+    const size_t cells = CRAFTAX_WG_MAP_CELLS;
+
+    CraftaxThreefryKey subkey;
+    float water[CRAFTAX_WG_MAP_CELLS];
+    float mountain[CRAFTAX_WG_MAP_CELLS];
+    float path_x[CRAFTAX_WG_MAP_CELLS];
+    float tree_noise[CRAFTAX_WG_MAP_CELLS];
+    bool lava_map[CRAFTAX_WG_MAP_SIZE][CRAFTAX_WG_MAP_SIZE];
+
+    craftax_threefry_split(rng, &rng, &subkey);
+    craftax_generate_fractal_noise_2d(subkey, size, size, 3, 3, 1, 0.5f, 2, NULL, water);
+
+    craftax_threefry_split(rng, &rng, &subkey);
+    (void)subkey;
+
+    craftax_threefry_split(rng, &rng, &subkey);
+    craftax_generate_fractal_noise_2d(subkey, size, size, 3, 3, 1, 0.5f, 2, NULL, mountain);
+
+    craftax_threefry_split(rng, &rng, &subkey);
+    craftax_generate_fractal_noise_2d(subkey, size, size, 6, 24, 1, 0.5f, 2, NULL, path_x);
+
+    craftax_threefry_split(rng, &rng, &subkey);
+    (void)subkey;
+
+    craftax_threefry_split(rng, &rng, &subkey);
+    CraftaxThreefryKey tree_uniform_key = rng;
+    craftax_generate_fractal_noise_2d(subkey, size, size, 12, 12, 1, 0.5f, 2, NULL, tree_noise);
+
+#ifdef CRAFTAX_WG_SIMD
+    bool use_simd = !g_craftax_wg_force_scalar;
+#else
+    bool use_simd = false;
+#endif
+    (void)use_simd;
+
+#ifdef CRAFTAX_WG_SIMD
+    if (use_simd) {
+        craftax_smoothworld_classify_avx512(
+            config, tree_uniform_key, water, mountain, path_x, tree_noise,
+            map, item_map, light_map);
+    } else
+#endif
+    {
+        craftax_smoothworld_classify_scalar(
+            config, tree_uniform_key, water, mountain, path_x, tree_noise,
+            map, item_map, light_map);
+    }
+    (void)player_col;
+
+    CraftaxThreefryKey ore_rng;
+    craftax_threefry_split(rng, &rng, &ore_rng);
+    for (int ore_index = 0; ore_index < 5; ore_index++) {
+        CraftaxThreefryKey ore_key;
+        craftax_threefry_split(ore_rng, &ore_rng, &ore_key);
+#ifdef CRAFTAX_WG_SIMD
+        if (use_simd) {
+            craftax_smoothworld_ore_avx512(config, ore_index, ore_key, map);
+            continue;
+        }
+#endif
+        craftax_smoothworld_ore_scalar(config, ore_index, ore_key, map);
+    }
+
+#ifdef CRAFTAX_WG_SIMD
+    if (use_simd) {
+        craftax_smoothworld_lava_avx512(config, mountain, tree_noise, map, lava_map);
+    } else
+#endif
+    {
+        craftax_smoothworld_lava_scalar(config, mountain, tree_noise, map, lava_map);
     }
 
     craftax_threefry_split(rng, &rng, &subkey);
@@ -1206,9 +1517,35 @@ static inline void craftax_init_empty_mobs2(CraftaxWGMobs2* mobs) {
     }
 }
 
-static inline void craftax_generate_world_from_key(
-    CraftaxThreefryKey rng,
+// Per-level generator dispatch: floors {0,2,5,6,7,8} are smoothworld configs
+// 0..5, floors {1,3,4} are dungeon configs 0..2 (must match the floor orders
+// in craftax_generate_world_from_key_lazy below).
+static inline void craftax_generate_floor_from_key(
+    CraftaxThreefryKey key,
+    int level,
     CraftaxWorldState* out
+) {
+    static const int8_t is_dungeon[CRAFTAX_WG_NUM_LEVELS] =
+        {0, 1, 0, 1, 1, 0, 0, 0, 0};
+    static const int8_t cfg_index[CRAFTAX_WG_NUM_LEVELS] =
+        {0, 0, 1, 1, 2, 2, 3, 4, 5};
+    if (is_dungeon[level]) {
+        craftax_generate_dungeon_config(
+            key, cfg_index[level],
+            out->map[level], out->item_map[level], out->light_map[level],
+            out->down_ladders[level], out->up_ladders[level]);
+    } else {
+        craftax_generate_smoothworld_config(
+            key, cfg_index[level],
+            out->map[level], out->item_map[level], out->light_map[level],
+            out->down_ladders[level], out->up_ladders[level]);
+    }
+}
+
+static inline void craftax_generate_world_from_key_lazy(
+    CraftaxThreefryKey rng,
+    CraftaxWorldState* out,
+    bool lazy
 ) {
     memset(out, 0, sizeof(*out));
 
@@ -1219,6 +1556,9 @@ static inline void craftax_generate_world_from_key(
     static const int smooth_floor_order[6] = {0, 2, 5, 6, 7, 8};
     for (int i = 0; i < 6; i++) {
         int level = smooth_floor_order[i];
+        out->lazy_floor_keys[level][0] = smooth_split[i + 1].word[0];
+        out->lazy_floor_keys[level][1] = smooth_split[i + 1].word[1];
+        if (lazy && level != 0) continue;
         craftax_generate_smoothworld_config(
             smooth_split[i + 1],
             i,
@@ -1237,6 +1577,9 @@ static inline void craftax_generate_world_from_key(
     static const int dungeon_floor_order[3] = {1, 3, 4};
     for (int i = 0; i < 3; i++) {
         int level = dungeon_floor_order[i];
+        out->lazy_floor_keys[level][0] = dungeon_split[i + 1].word[0];
+        out->lazy_floor_keys[level][1] = dungeon_split[i + 1].word[1];
+        if (lazy) continue;
         craftax_generate_dungeon_config(
             dungeon_split[i + 1],
             i,
@@ -1247,6 +1590,8 @@ static inline void craftax_generate_world_from_key(
             out->up_ladders[level]
         );
     }
+
+    out->lazy_floors_pending = lazy ? 0x1FEu : 0u;  // floors 1..8 deferred
 
     craftax_init_empty_mobs3(&out->melee_mobs);
     craftax_init_empty_mobs3(&out->passive_mobs);
@@ -1289,6 +1634,13 @@ static inline void craftax_generate_world_from_key(
     out->player_intelligence = 1;
     out->boss_timesteps_to_spawn_this_round = CRAFTAX_WG_BOSS_FIGHT_SPAWN_TURNS;
     out->light_level = craftax_calculate_initial_light_level();
+}
+
+static inline void craftax_generate_world_from_key(
+    CraftaxThreefryKey rng,
+    CraftaxWorldState* out
+) {
+    craftax_generate_world_from_key_lazy(rng, out, false);
 }
 
 static inline void craftax_generate_world_from_seed(
@@ -1859,4 +2211,129 @@ static inline void craftax_encode_reset_observation(
     craftax_encode_packed_map_base_observation(state, obs);
     craftax_encode_packed_mobs_observation(state, obs);
     craftax_encode_scalar_observation_tail_at(state, obs, CRAFTAX_WG_PACKED_MAP_OBS_SIZE);
+}
+
+static inline void craftax_encode_compact_map_base_observation(
+    const CraftaxWorldState* state,
+    uint8_t* obs
+) {
+    const int channels = CRAFTAX_WG_PACKED_CHANNELS_PER_CELL;
+    const int top = state->player_position[0] - CRAFTAX_WG_OBS_ROWS / 2;
+    const int left = state->player_position[1] - CRAFTAX_WG_OBS_COLS / 2;
+    const int level = state->player_level;
+
+    memset(obs, 0, CRAFTAX_WG_PACKED_MAP_OBS_SIZE);
+    for (int row = 0; row < CRAFTAX_WG_OBS_ROWS; row++) {
+        int world_row = top + row;
+        bool row_in_bounds = world_row >= 0 && world_row < CRAFTAX_WG_MAP_SIZE;
+        for (int col = 0; col < CRAFTAX_WG_OBS_COLS; col++) {
+            int world_col = left + col;
+            int obs_base = (row * CRAFTAX_WG_OBS_COLS + col) * channels;
+            if (row_in_bounds && world_col >= 0 && world_col < CRAFTAX_WG_MAP_SIZE
+                && state->light_map[level][world_row][world_col] > 12) {
+                obs[obs_base + 0] = (uint8_t)state->map[level][world_row][world_col];
+                obs[obs_base + 1] = (uint8_t)(state->item_map[level][world_row][world_col] + 1);
+                obs[obs_base + 2] = 1;
+            }
+        }
+    }
+}
+
+static inline void craftax_encode_mobs3_compact(
+    const CraftaxWorldState* state,
+    const CraftaxWGMobs3* mobs,
+    int mob_class_index,
+    uint8_t* obs
+) {
+    const int level = craftax_wg_jax_index(state->player_level, CRAFTAX_WG_NUM_LEVELS);
+    const int mob_slot_offset = 3 + mob_class_index;
+    for (int i = 0; i < 3; i++) {
+        int type_id = mobs->type_id[level][i];
+        if (type_id < 0 || type_id >= CRAFTAX_WG_NUM_MOB_TYPES
+            || !mobs->mask[level][i]) {
+            continue;
+        }
+
+        int local_row = mobs->position[level][i][0]
+            - state->player_position[0]
+            + CRAFTAX_WG_OBS_ROWS / 2;
+        int local_col = mobs->position[level][i][1]
+            - state->player_position[1]
+            + CRAFTAX_WG_OBS_COLS / 2;
+        if (local_row < 0 || local_row >= CRAFTAX_WG_OBS_ROWS
+            || local_col < 0 || local_col >= CRAFTAX_WG_OBS_COLS) {
+            continue;
+        }
+
+        int world_row = mobs->position[level][i][0];
+        int world_col = mobs->position[level][i][1];
+        if (world_row < 0 || world_row >= CRAFTAX_WG_MAP_SIZE
+            || world_col < 0 || world_col >= CRAFTAX_WG_MAP_SIZE
+            || state->light_map[level][world_row][world_col] <= 12) {
+            continue;
+        }
+
+        int obs_base = (local_row * CRAFTAX_WG_OBS_COLS + local_col)
+            * CRAFTAX_WG_PACKED_CHANNELS_PER_CELL;
+        obs[obs_base + mob_slot_offset] = (uint8_t)(type_id + 1);
+    }
+}
+
+static inline void craftax_encode_mobs2_compact(
+    const CraftaxWorldState* state,
+    const CraftaxWGMobs2* mobs,
+    int mob_class_index,
+    uint8_t* obs
+) {
+    const int level = craftax_wg_jax_index(state->player_level, CRAFTAX_WG_NUM_LEVELS);
+    const int mob_slot_offset = 3 + mob_class_index;
+    for (int i = 0; i < 2; i++) {
+        int type_id = mobs->type_id[level][i];
+        if (type_id < 0 || type_id >= CRAFTAX_WG_NUM_MOB_TYPES
+            || !mobs->mask[level][i]) {
+            continue;
+        }
+
+        int local_row = mobs->position[level][i][0]
+            - state->player_position[0]
+            + CRAFTAX_WG_OBS_ROWS / 2;
+        int local_col = mobs->position[level][i][1]
+            - state->player_position[1]
+            + CRAFTAX_WG_OBS_COLS / 2;
+        if (local_row < 0 || local_row >= CRAFTAX_WG_OBS_ROWS
+            || local_col < 0 || local_col >= CRAFTAX_WG_OBS_COLS) {
+            continue;
+        }
+
+        int world_row = mobs->position[level][i][0];
+        int world_col = mobs->position[level][i][1];
+        if (world_row < 0 || world_row >= CRAFTAX_WG_MAP_SIZE
+            || world_col < 0 || world_col >= CRAFTAX_WG_MAP_SIZE
+            || state->light_map[level][world_row][world_col] <= 12) {
+            continue;
+        }
+
+        int obs_base = (local_row * CRAFTAX_WG_OBS_COLS + local_col)
+            * CRAFTAX_WG_PACKED_CHANNELS_PER_CELL;
+        obs[obs_base + mob_slot_offset] = (uint8_t)(type_id + 1);
+    }
+}
+
+// See CRAFTAX_WG_COMPACT_OBS_SIZE for the layout contract. The scalar tail
+// goes through the float encoder and is memcpy'd, so the reinterpreted floats
+// on the learner side are bit-identical to the float observation path.
+static inline void craftax_encode_compact_observation(
+    const CraftaxWorldState* state,
+    uint8_t* obs
+) {
+    craftax_encode_compact_map_base_observation(state, obs);
+    craftax_encode_mobs3_compact(state, &state->melee_mobs, 0, obs);
+    craftax_encode_mobs3_compact(state, &state->passive_mobs, 1, obs);
+    craftax_encode_mobs2_compact(state, &state->ranged_mobs, 2, obs);
+    craftax_encode_mobs3_compact(state, &state->mob_projectiles, 3, obs);
+    craftax_encode_mobs3_compact(state, &state->player_projectiles, 4, obs);
+
+    float tail[CRAFTAX_WG_INVENTORY_OBS_SIZE];
+    craftax_encode_scalar_observation_tail_at(state, tail, 0);
+    memcpy(obs + CRAFTAX_WG_PACKED_MAP_OBS_SIZE, tail, sizeof(tail));
 }

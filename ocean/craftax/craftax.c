@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     env.rng = (uint32_t)seed;
 
     // Minimal buffers for a single agent
-    env.observations = calloc(CRAFTAX_OBS_SIZE, sizeof(float));
+    env.observations = calloc(CRAFTAX_OBS_SIZE, sizeof(CraftaxObs));
     env.actions = calloc(1, sizeof(float));
     env.rewards = calloc(1, sizeof(float));
     env.terminals = calloc(1, sizeof(float));

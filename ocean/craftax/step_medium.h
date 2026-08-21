@@ -314,6 +314,7 @@ static inline void craftax_change_floor_native(
             state->player_level + 1,
             CRAFTAX_NUM_LEVELS
         );
+        craftax_ensure_floor_generated(state, ladder_level);
         state->player_position[0] = state->up_ladders[ladder_level][0];
         state->player_position[1] = state->up_ladders[ladder_level][1];
     } else if (is_moving_up) {
@@ -321,6 +322,7 @@ static inline void craftax_change_floor_native(
             state->player_level - 1,
             CRAFTAX_NUM_LEVELS
         );
+        craftax_ensure_floor_generated(state, ladder_level);
         state->player_position[0] = state->down_ladders[ladder_level][0];
         state->player_position[1] = state->down_ladders[ladder_level][1];
     }
