@@ -413,13 +413,20 @@ def sweep(env_name, args=None, pareto=False):
 
     sweep_config = args['sweep']
     method = sweep_config.pop('method')
-    import pufferlib.sweep
-    try:
-        sweep_cls = getattr(pufferlib.sweep, method)
-    except:
-        raise ValueError(f'Invalid sweep method {method}. See pufferlib.sweep')
-
-    sweep_obj = sweep_cls(sweep_config)
+    sweep_obj = None
+    if method == 'Protein':
+        try:
+            from pufferlib._C import Protein as _CProtein
+            sweep_obj = _CProtein(sweep_config)
+        except Exception:
+            pass
+    if sweep_obj is None:
+        import pufferlib.sweep
+        try:
+            sweep_cls = getattr(pufferlib.sweep, method)
+        except:
+            raise ValueError(f'Invalid sweep method {method}. See pufferlib.sweep')
+        sweep_obj = sweep_cls(sweep_config)
     num_experiments = args['sweep']['max_runs']
     ts_default = args['train']['total_timesteps']
     ts_config = sweep_config.get('train', {}).get('total_timesteps', {'min': ts_default, 'max': ts_default})
