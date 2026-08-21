@@ -925,3 +925,32 @@ The accepted five-pair production result is Affine 578 `1.015413x`, with every p
 All nine deterministic golden/backend checkpoints matched exactly. Affine 578 measured `1.038142x` on `.cu` and `1.032719x` on `.h`; unqualified 1024x4, G2048, Maze, Boxoban, and Breakout cases remained effectively flat on legacy fallback. Artifacts: `/tmp/puffer-lt-h512-golden-6l11xVS2/standard/puffer-throughput-g67kpoi0` and `/tmp/puffer-lt-h512-golden-6l11xVS2/breakout/puffer-throughput-nfpyrrfp`.
 
 Two qualified H1024 plans were rejected despite faster isolated kernels. Rollout projection was `1.169x` faster at kernel median in Nsight, and train projection was `1.026x` in aligned graph replay, but the four-plan end-to-end gate regressed 1024x4 to `0.990571x` over five pairs. Both entries were removed rather than trading large-net SPS for run-578 speed. Artifact: `/tmp/puffer-lt-four-plan-ab-ib0QWhyt/puffer-throughput-d0m8ianh`. A bounded broader H1024 dX search checked 49,326 configurations and found zero strict-bit, zero-workspace survivors; results are `/tmp/puffer_cublaslt_h1024_dx_search_results_v3.txt`.
+
+## 2026-08-20: agent-oriented terminal-state reset
+
+Accepted `zero_term_state_agents`: one block handles one agent, thread 0 loads
+that agent's terminal once into shared memory, the block uniformly returns for
+a nonterminal, and its threads coalescently zero the compact state across all
+layers. The optimized launch is gated on
+`num_layers * hidden_size > BLOCK_SIZE && count >= BLOCK_SIZE`; smaller shapes
+retain the original flat kernel. State offsets, stream ordering, and
+`from_float(0.0f)` writes are unchanged, so every written BF16 zero bit remains
+exact.
+
+Cleaned three-pair Affine result:
+
+- Affine 578: `1.004842x`.
+- Affine 1024x4: `1.004952x`.
+- Combined suite: `1.004897x`.
+- Artifact: `/tmp/puffer-agent-reset-clean-ab-sxhyHfJi/puffer-throughput-fu0uydwm`.
+
+All nine one-pair golden/backend cases matched exactly: Affine 578 `.h/.cu`,
+Affine 1024x4 `.h/.cu`, Breakout `.h/.cu`, G2048 `.h`, Maze `.h`, and Boxoban
+`.h`. Artifacts:
+`/tmp/puffer-agent-reset-clean-golden-ogVgLH6U/standard/puffer-throughput-eoaa5404`
+and
+`/tmp/puffer-agent-reset-clean-golden-ogVgLH6U/breakout/puffer-throughput-_wa3tayd`.
+
+The repeated three-pair Affine 1024x4 CUDA gate was exact and measured
+`1.004387x`, with every pair positive and a `1.003429x` minimum. Artifact:
+`/tmp/puffer-agent-reset-repeat-WYhbJQq7/puffer-throughput-1oc4_66g`.
