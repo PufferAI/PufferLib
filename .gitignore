@@ -178,6 +178,7 @@ resources/drive/data/*
 resources/drive/binaries/*
 resources/boxoban/levels/
 resources/boxoban/boxoban_maps_*.bin
+resources/mujoco/*.bin
 
 # Policy weights live in the website repo (docs/assets/models/)
 resources/**/*_weights.bin
