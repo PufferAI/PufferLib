@@ -954,3 +954,75 @@ and
 The repeated three-pair Affine 1024x4 CUDA gate was exact and measured
 `1.004387x`, with every pair positive and a `1.003429x` minimum. Artifact:
 `/tmp/puffer-agent-reset-repeat-WYhbJQq7/puffer-throughput-1oc4_66g`.
+
+### Ablation: Muon normalization dual-write/copy elision - rejected
+
+Writing the normalized Muon matrix directly to both required destinations
+removed its following D2D copy and preserved exact checkpoints. The initial
+five-pair gate measured Affine 578 `1.004766x`, Affine 1024x4 `1.007477x`, and
+the combined suite `1.006121x`. Artifact:
+`/tmp/puffer-muon-dualnorm-ab-96JJXWVX/puffer-throughput-2k0gyi23`.
+
+An independent three-pair confirmation contradicted that result: Affine 578
+was `1.002256x`, Affine 1024x4 was `0.992711x`, the suite was `0.997472x`, and
+the worst pair was `0.979177x`. Artifact:
+`/tmp/puffer-muon-dualnorm-confirm-P2RcsY8U/puffer-throughput-u5ceobdw`.
+The pooled nominal result was about `1.00287x`, but the instability and paired
+confidence interval did not establish a gain. Decision: reject the ablation;
+the source change was reverted.
+
+### Ablation: Muon update-side endpoint fusion - rejected
+
+This candidate used an all-matrix exact-coverage gate and fused
+`store_update` with `weight_update` while preserving the intervening BF16
+boundary. The implementation was subsequently hardened to advance its source
+with each registration's allocator cursor rather than assuming packed tensor
+sizes.
+
+The exact three-pair screen measured Affine 578 `1.009736x`, Affine 1024x4
+`1.007901x`, and the combined suite `1.008818x`. Artifact:
+`/tmp/puffer-muon-weight-fuse-screen-1YXtRhOB/puffer-throughput-r4k10yja`.
+An independent exact three-pair run of the hardened candidate fell to
+`0.999061x`, `1.001957x`, and `1.000508x`, respectively. Artifact:
+`/tmp/puffer-muon-weight-fuse-confirm-1Dr4Ocxe/puffer-throughput-6dw9n3u5`.
+
+A decisive exact three-pair run at four times the duration measured Affine 578
+`0.999569x`, Affine 1024x4 `0.998889x`, and the suite `0.999229x`. Artifact:
+`/tmp/puffer-muon-weight-fuse-long-dyHU2XR0/puffer-throughput-xoytjwwf`.
+Decision: reject and revert; the longer run establishes no SPS gain.
+
+### Accepted: Muon clip-side endpoint fusion
+
+The retained path has a strict all-matrix concurrent-local gate. It leaves the
+global raw gradient norm unchanged, then fuses clip/Nesterov with each
+matrix's norm partial while preserving the original BF16 round and reload and
+the exact reduction mapping. Serial and mixed-coverage cases retain the
+original path. Cleanup removed the persistent eligibility flag and derives the
+condition locally without changing dispatch.
+
+All Affine checkpoints were exact across four independent rounds:
+
+- Three-pair screen: Affine 578 `1.001991x`, Affine 1024x4 `1.007118x`, suite
+  `1.004551x`; artifact
+  `/tmp/puffer-muon-clip-fuse-screen-yQdQ6Ddg/puffer-throughput-7661ejf1`.
+- Three-pair long run: `1.005827x`, `1.001692x`, suite `1.003758x`; artifact
+  `/tmp/puffer-muon-clip-fuse-long-6CtCrAxy/puffer-throughput-gfnjx_vb`.
+- Three-pair preconditioned long run: `1.007203x`, `1.000872x`, suite
+  `1.004032x`; artifact
+  `/tmp/puffer-muon-clip-fuse-final-XmgXUMzz/puffer-throughput-13zp5sba`.
+- Cleaned five-pair long run: `1.004353x`, `1.018761x`, suite `1.011531x`;
+  artifact
+  `/tmp/puffer-muon-clip-clean-final-OFyMj0Ju/puffer-throughput-5c05c2uh`.
+
+The conservative equal-batch pool of the first three rounds was Affine 578
+`1.005005x`, Affine 1024x4 `1.003224x`, and suite `1.004114x`. All nine golden
+backend/configuration checkpoints matched exactly. Artifacts:
+`/tmp/puffer-muon-clip-clean-golden-MczA66kv/standard/puffer-throughput-y3eqf016`
+and
+`/tmp/puffer-muon-clip-clean-golden-MczA66kv/breakout/puffer-throughput-9il5s6g5`.
+The negative one-pair Maze timing was repeated for five preconditioned exact
+pairs and measured `0.999185x`, consistent with noise rather than a meaningful
+fallback regression. Artifact:
+`/tmp/puffer-muon-clip-maze-repeat-RVJS5MqK/puffer-throughput-w0_7udpj`.
+
+Decision: accept the cleaned clip-side fusion.
