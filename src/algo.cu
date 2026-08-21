@@ -1,3 +1,7 @@
+#include <cublasLt.h>
+#include <cstdint>
+#include <cstring>
+
 // PufferNet model API + architecture
 // Writing custom nets in 4.0+ requires a fair bit of code because you are
 // responsible for defining your own activation and gradient buffers.
@@ -99,6 +103,140 @@ thread_local cudaEvent_t g_dw_done = NULL;
 // https://docs.nvidia.com/cuda/archive/13.1.0/cublas/index.html#cublassetworkspace
 static constexpr size_t CUBLAS_WORKSPACE_BYTES = 32 * 1024 * 1024;
 
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+struct PinnedLtPlan {
+    int M, N, K;
+    cublasOperation_t op_b;
+    cublasLtMatmulDesc_t op;
+    cublasLtMatrixLayout_t a_layout, b_layout, c_layout;
+    cublasLtMatmulAlgo_t algo;
+};
+
+thread_local cublasLtHandle_t g_cublaslt_handle = NULL;
+thread_local PinnedLtPlan g_cublaslt_plans[2] = {};
+thread_local bool g_cublaslt_enabled = false;
+
+static bool cublaslt_make_row_layout(cublasLtMatrixLayout_t* layout,
+        uint64_t rows, uint64_t cols, int64_t ld) {
+    cublasLtOrder_t order = CUBLASLT_ORDER_ROW;
+    return cublasLtMatrixLayoutCreate(
+            layout, CUDA_R_16BF, rows, cols, ld) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatrixLayoutSetAttribute(*layout,
+            CUBLASLT_MATRIX_LAYOUT_ORDER, &order,
+            sizeof(order)) == CUBLAS_STATUS_SUCCESS;
+}
+
+static bool cublaslt_init_plan(PinnedLtPlan* plan,
+        int M, int N, int K, cublasOperation_t op_b) {
+    plan->M = M;
+    plan->N = N;
+    plan->K = K;
+    plan->op_b = op_b;
+    cublasOperation_t op_a = CUBLAS_OP_N;
+    if (cublasLtMatmulDescCreate(
+            &plan->op, CUBLAS_COMPUTE_32F,
+            CUDA_R_32F) != CUBLAS_STATUS_SUCCESS
+            || cublasLtMatmulDescSetAttribute(plan->op,
+                CUBLASLT_MATMUL_DESC_TRANSA, &op_a,
+                sizeof(op_a)) != CUBLAS_STATUS_SUCCESS
+            || cublasLtMatmulDescSetAttribute(plan->op,
+                CUBLASLT_MATMUL_DESC_TRANSB, &op_b,
+                sizeof(op_b)) != CUBLAS_STATUS_SUCCESS
+            || !cublaslt_make_row_layout(
+                &plan->a_layout, M, K, K)
+            || !cublaslt_make_row_layout(&plan->b_layout,
+                op_b == CUBLAS_OP_T ? N : K,
+                op_b == CUBLAS_OP_T ? K : N,
+                op_b == CUBLAS_OP_T ? K : N)
+            || !cublaslt_make_row_layout(
+                &plan->c_layout, M, N, N)
+            || cublasLtMatmulAlgoInit(g_cublaslt_handle,
+                CUBLAS_COMPUTE_32F, CUDA_R_32F,
+                CUDA_R_16BF, CUDA_R_16BF,
+                CUDA_R_16BF, CUDA_R_16BF, 21,
+                &plan->algo) != CUBLAS_STATUS_SUCCESS) {
+        return false;
+    }
+
+    uint32_t tile = 15;
+    uint32_t split_k = 1;
+    uint32_t reduction = 0;
+    uint32_t swizzle = 0;
+    uint32_t custom = 0;
+    uint32_t stages = 12;
+    return cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_TILE_ID, &tile,
+            sizeof(tile)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_SPLITK_NUM, &split_k,
+            sizeof(split_k)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_REDUCTION_SCHEME, &reduction,
+            sizeof(reduction)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_CTA_SWIZZLING, &swizzle,
+            sizeof(swizzle)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_CUSTOM_OPTION, &custom,
+            sizeof(custom)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_STAGES_ID, &stages,
+            sizeof(stages)) == CUBLAS_STATUS_SUCCESS;
+}
+
+static void cublaslt_init_pinned() {
+    int runtime_version = 0;
+    int driver_version = 0;
+    int cublas_version = 0;
+    int device = 0;
+    cudaDeviceProp prop = {};
+    if (cudaRuntimeGetVersion(&runtime_version) != cudaSuccess
+            || runtime_version != 13010
+            || cudaDriverGetVersion(&driver_version) != cudaSuccess
+            || driver_version != 13000
+            || cublasGetVersion(
+                g_cublas_handle, &cublas_version) != CUBLAS_STATUS_SUCCESS
+            || cublas_version != 130201
+            || cudaGetDevice(&device) != cudaSuccess
+            || cudaGetDeviceProperties(&prop, device) != cudaSuccess
+            || prop.major != 12 || prop.minor != 0
+            || prop.multiProcessorCount != 170
+            || std::strcmp(prop.name, "NVIDIA GeForce RTX 5090") != 0
+            || cublasLtCreate(
+                &g_cublaslt_handle) != CUBLAS_STATUS_SUCCESS) {
+        return;
+    }
+    g_cublaslt_enabled =
+        cublaslt_init_plan(&g_cublaslt_plans[0],
+            8192, 1536, 512, CUBLAS_OP_T)
+        && cublaslt_init_plan(&g_cublaslt_plans[1],
+            8192, 512, 1536, CUBLAS_OP_N);
+}
+
+static bool cublaslt_try_pinned(cublasHandle_t handle,
+        cublasOperation_t op_a, cublasOperation_t op_b,
+        int M, int N, int K, void* A, void* B, void* C,
+        cudaStream_t stream, float alpha, float beta) {
+    uint32_t beta_bits = 0;
+    std::memcpy(&beta_bits, &beta, sizeof(beta_bits));
+    if (!g_cublaslt_enabled || handle != g_cublas_handle
+            || op_a != CUBLAS_OP_N || alpha != 1.0f || beta_bits != 0
+            || (((uintptr_t)A | (uintptr_t)B | (uintptr_t)C) & 255) != 0) {
+        return false;
+    }
+    for (PinnedLtPlan& plan : g_cublaslt_plans) {
+        if (plan.M == M && plan.N == N && plan.K == K
+                && plan.op_b == op_b) {
+            return cublasLtMatmul(g_cublaslt_handle, plan.op,
+                &alpha, A, plan.a_layout, B, plan.b_layout,
+                &beta, C, plan.c_layout, C, plan.c_layout,
+                &plan.algo, NULL, 0, stream) == CUBLAS_STATUS_SUCCESS;
+        }
+    }
+    return false;
+}
+#endif
+
 static void cublas_init_one(cublasHandle_t* handle, void** workspace) {
     const size_t ws_bytes = 32 * 1024 * 1024;
     cublasCreate(handle);
@@ -110,6 +248,9 @@ static void cublas_init_one(cublasHandle_t* handle, void** workspace) {
 void cublas_init_handle() {
     cublas_init_one(&g_cublas_handle, &g_cublas_workspace);
     cublas_init_one(&g_cublas_dw_handle, &g_cublas_dw_workspace);
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+    cublaslt_init_pinned();
+#endif
     cudaStreamCreateWithFlags(&g_dw_stream, cudaStreamNonBlocking);
     cudaEventCreateWithFlags(&g_dw_done, cudaEventDisableTiming);
     cudaEventCreateWithFlags(&g_main_ready, cudaEventDisableTiming);
@@ -121,6 +262,12 @@ static void cublasGemmExDense(cublasHandle_t handle,
         int M, int N, int K, void* A, void* B, void* C,
         cudaStream_t stream, float alpha = 1.0f, float beta = 0.0f,
         bool handle_bound_to_stream = false) {
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+    if (cublaslt_try_pinned(handle, op_a, op_b,
+            M, N, K, A, B, C, stream, alpha, beta)) {
+        return;
+    }
+#endif
     int lda = (op_a == CUBLAS_OP_N) ? K : M;
     int ldb = (op_b == CUBLAS_OP_N) ? N : K;
     if (!handle_bound_to_stream) {

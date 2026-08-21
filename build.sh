@@ -385,7 +385,7 @@ if [ "$MODE" = "native" ]; then
         "${LINK_ARCHIVES[@]}" \
         -L$CUDA_HOME/lib64 $NCCL_LFLAG \
         "${EXTRA_LDFLAGS[@]}" \
-        -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand \
+        -lcudart -lnccl -lnvidia-ml -lcublas -lcublasLt -lcusolver -lcurand \
         -lm -lpthread $OMP_LIB "${STANDALONE_LDFLAGS[@]}" \
         -o "$TRAIN_BIN"
     echo "Built: ./$TRAIN_BIN"
@@ -408,7 +408,7 @@ elif [ "$MODE" = "profile" ]; then
         tests/profile_kernels.cu \
         "$RAYLIB_A" \
         -L$CUDA_HOME/lib64 \
-        -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand \
+        -lnccl -lnvidia-ml -lcublas -lcublasLt -lcusolver -lcurand \
         -lGL -lm -lpthread $OMP_LIB \
         -o "$PROFILE_BIN"
     echo "Built: ./$PROFILE_BIN"
