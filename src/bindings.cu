@@ -10,6 +10,12 @@
 
 namespace py = pybind11;
 
+static void throw_if_cuda_error(cudaError_t err, const char* context) {
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string(context) + ": " + cudaGetErrorString(err));
+    }
+}
+
 // Wrapper functions for Python bindings
 pybind11::dict puf_log(pybind11::object pufferl_obj) {
     auto& pufferl = pufferl_obj.cast<PuffeRL&>();
@@ -209,11 +215,16 @@ void load_weights(pybind11::object pufferl_obj, const std::string& path) {
         throw std::runtime_error("Failed to read weight file");
     }
     fclose(f);
-    cudaMemcpy(pufferl.master_weights.data, buf.data(), nbytes, cudaMemcpyHostToDevice);
+    throw_if_cuda_error(
+        cudaMemcpy(pufferl.master_weights.data, buf.data(), nbytes, cudaMemcpyHostToDevice),
+        "Failed to copy weights to device");
     if (USE_BF16) {
         int n = numel(pufferl.param_puf.shape);
         cast<<<grid_size(n), BLOCK_SIZE, 0, pufferl.default_stream>>>(
             pufferl.param_puf.data, pufferl.master_weights.data, n);
+        throw_if_cuda_error(cudaGetLastError(), "Failed to launch BF16 weight cast");
+        throw_if_cuda_error(cudaStreamSynchronize(pufferl.default_stream),
+            "Failed to synchronize BF16 weight load");
     }
 }
 
