@@ -1125,3 +1125,82 @@ gate for this optimizer-only change.
 
 Decision: accept the one-line fusion and its repeatable marginal combined gain
 of about `0.17%`.
+
+### Ablation: isolated H1024 train-projection cuBLASLt plan - rejected
+
+Adding the previously qualified fixed H1024 train-projection plan cost two
+lines and preserved exact checkpoints, but its five-pair production screen
+measured Affine 578 legacy fallback `0.997998x`, Affine 1024x4 `0.996658x`, and
+suite `0.997328x`, with a `0.987755x` worst pair. Artifact:
+`/tmp/puffer-h1024-train-lt-screen-OfsEmK2I/puffer-throughput-fr6o_0l5`.
+Production overlap reverses the graph-local kernel gain. Decision: reject;
+the source was reverted and the plan was not committed.
+
+### Ablation: Muon lane scheduling tuner - rejected
+
+All tuner variants preserved exact outputs. Endpoint-high scheduling measured
+median DAG gains of `1.004146x` at H512 and `1.001934x` at H1024, but its
+projected end-to-end value was well below `0.1%`. Recurrent-high scheduling
+regressed H512 by `8.37%` and H1024 by `1.16%`. Restricting execution to pools
+of two, three, or four lanes regressed H512 by `21.77%`, `19.89%`, and
+`11.23%`, and H1024 by `5.57%`, `7.42%`, and `3.76%`, respectively. Artifact:
+`/tmp/puffer_muon_lane_schedule_results.txt`. Decision: no production change.
+
+### Ablation: H512/H1024 rollout MinGRU gate mapping - rejected
+
+The 20-line specialization replaced per-thread divide/modulo and the tail check
+with exact 2D agent/chunk mapping for H512 and H1024. All checkpoints matched,
+but the five-pair screen measured Affine 578 `1.002590x`, Affine 1024x4
+`1.000172x`, and suite `1.001380x`, with a `0.987519x` worst pair. Artifact:
+`/tmp/puffer-mingru-gate-map-screen-19VbjWvm/puffer-throughput-5j2zmj3j`.
+Decision: reject because the gain was below the `0.2%` threshold and variance
+was high; restore the committed gate.
+
+### Ablation: isolated H1024 Muon cuBLASLt re-addition - rejected
+
+Re-adding the H1024 Muon plans cost four lines and preserved exact checkpoints.
+The first five-pair long batch measured `1.003779x`; artifact:
+`/tmp/puffer-muon-lt-h1024-long-QM4p8zxG/puffer-throughput-hps4mgry`. An
+independent exact five-pair batch measured `1.002997x`; artifact:
+`/tmp/puffer-muon-lt-h1024-confirm-fM90dWXC/puffer-throughput-dikx4mst`.
+
+Across all ten pairs, the geomean was `1.003388x` and seven pairs were
+positive, but the paired-log Student-t 95% interval was approximately
+`[0.99914x, 1.00765x]`. Decision: reject because the interval includes parity;
+the four lines were reverted and no commit was made.
+
+### Ablation: ordinary MinGRU forward compile-time T64 - rejected
+
+The net five-line specialization preserved exact checkpoints in every pair,
+but measured Affine 578 `0.999050x`, Affine 1024x4 `0.994973x`, and suite
+`0.997010x`, with a `0.991014x` worst pair. Artifact:
+`/tmp/puffer-mingru-fwd-t64-screen-8w6xqioM/puffer-throughput-foljj5nm`.
+Decision: reject; the specialization was reverted and not committed.
+
+### Ablation: exhaustive H1024 Muon cuBLASLt search - rejected
+
+The search covered 20 algorithm IDs and used the widened 200,000-evaluation
+cap per shape, still reporting truncation. The best result used square algo 21,
+tile 18, stage 12 and X algo 67, tile 29, stage 35, custom 30. Every
+coefficient, intermediate node, final output, and graph replay check matched
+exactly.
+
+The X operation was about `1.103x` faster, but the complete four-lane mixed DAG
+reached only `1.023230x` median and `1.024480x` mean, below the `1.05x`
+pre-integration threshold. Artifact:
+`/tmp/puffer_h1024_muon_lt_exhaustive_results.txt`. Decision: no production
+integration.
+
+### Ablation: exhaustive H512 Muon cuBLASLt search - rejected
+
+The accepted-relative search covered all 20 algorithm IDs and all 485,194
+tuples per shape without truncation, yielding 13,460 valid zero-workspace
+configurations. The best result retained square algo 21, tile 15, stage 12 and
+used X algo 67, tile 318, stage 35, custom 133. All coefficient, intermediate
+node, final output, and graph replay checks matched exactly.
+
+Despite a raw X speedup of about `1.464x`, the complete three-lane DAG improved
+from `0.220416 ms` accepted to `0.217664 ms` candidate: only `1.012643x`
+median and `1.011507x` by means. This is below the `1.05x` pre-integration
+threshold. Artifact: `/tmp/puffer_h512_muon_lt_exhaustive_results.txt`.
+Decision: no source integration.
