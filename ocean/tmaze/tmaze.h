@@ -27,11 +27,13 @@ typedef struct {
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
     unsigned char* observations; // Required. You can use any obs type, but make sure it matches in Python!
-    int* actions; // Required. int* for discrete/multidiscrete, float* for box
+    float* actions; // Required. float* to match vecenv.h allocation
     float* rewards; // Required
-    unsigned char* terminals; // Required. We don't yet have truncations as standard yet
+    float* terminals; // Required. float* to match vecenv.h allocation
     int size; // length of the corridor
     int tick;
+    int num_agents; // Required by vecenv.h default my_vec_init
+    unsigned int rng; // Required by vecenv.h default my_vec_init
 
     unsigned char state; // Internal current position in the maze
     unsigned char starting_state; // Starting state (2 or 3)
@@ -42,9 +44,9 @@ typedef struct {
 
 TMaze* allocate_TMaze(TMaze *env) {
     env->observations = calloc(4, sizeof(unsigned char));
-    env->actions = calloc(1, sizeof(int));
+    env->actions = calloc(1, sizeof(float));
     env->rewards = calloc(1, sizeof(float));
-    env->terminals = calloc(1, sizeof(unsigned char));
+    env->terminals = calloc(1, sizeof(float));
     return env;
 }
 
@@ -99,7 +101,7 @@ void c_step(TMaze* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0;
 
-    int action = env->actions[0];
+    int action = (int)env->actions[0];
 
     if (env->state == env->size -1) {
         const int left_reward = (env->starting_state == 2) ? 1 : -1;

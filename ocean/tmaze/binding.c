@@ -9,8 +9,8 @@
 #include "vecenv.h"
 
 void my_init(Env* env, Dict* kwargs) {
-    env->size = dict_get(kwargs, "size", 15);
-    allocate_TMaze(env);
+    env->size = (int)dict_get(kwargs, "size")->value;
+    env->num_agents = 1;
 }
 
 void my_log(Log* log, Dict* out) {
