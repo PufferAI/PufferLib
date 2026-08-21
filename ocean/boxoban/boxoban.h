@@ -24,6 +24,7 @@ typedef struct {
     float episode_length; // Recommended metric: number of steps of agent episode
     // Any extra fields you add here may be exported to Python in binding.c
     float on_targets; // Number of targets currently boxed
+    float puzzle_ticks; // Steps spent on the final puzzle of the episode
     float n; // Required as the last field 
 } Log;
 
@@ -48,6 +49,7 @@ typedef struct {
     int size;
     int num_agents;
     int tick;
+    int puzzle_tick;
     int max_steps;
     int agent_x;
     int agent_y;
@@ -62,11 +64,24 @@ typedef struct {
     Client* client;
     int win;
     float episode_return;
+    int curriculum_mode; // 1 when using incremental difficulty mode
+    int curriculum_difficulty; // current active difficulty in curriculum mode
+    int largest_solved_difficulty; // highest difficulty solved this episode, -1 if none
+    int episode_maps_solved; // number of puzzles solved this episode
 } Boxoban;
 
 void ensure_map_loaded(void);
 
 static int boxoban_configure_maps_from_env(Boxoban* env) {
+    if (env->difficulty_id == BOXOBAN_DIFFICULTY_INCREMENTAL) {
+        reset_incremental_map_cache();
+        if (boxoban_load_incremental_bins() != 0) {
+            fprintf(stderr, "Failed to load incremental Boxoban map bins\n");
+            return -1;
+        }
+        return 0;
+    }
+
     if (env->difficulty_id == -1) {
         return 0;
     }
@@ -107,8 +122,8 @@ static inline unsigned char get_intermediate_reward_status(Boxoban *env, int x, 
     return env->intermediate_rewards[(y)*env->size + (x)];
 }
 
-static inline const uint32_t get_random_puzzle_idx(const Boxoban *env) {
-    int idx = rand_r(&env->rng) % PUZZLE_COUNT;
+static inline const uint32_t get_random_puzzle_idx(const Boxoban *env, size_t puzzle_count) {
+    int idx = rand_r(&env->rng) % puzzle_count;
     return idx;
 }
 
@@ -130,14 +145,29 @@ void init (Boxoban* env) {
 
 
 void add_log(Boxoban* env) {
-    float denom = (float)env->n_boxes;
-    float num = (float)env->on_target;
-    float perf = (env->win== 1) ? 1.0f : 0.0f;
+    float perf;
+    float score;
+    float targets_hit = 0.0f;
+    if (env->n_targets > 0) {
+        targets_hit = (float)env->on_target / (float)env->n_targets;
+    }
+    if (env->curriculum_mode) {
+        score = 0.0f;
+        if (env->largest_solved_difficulty >= 0) {
+            score = (float)(env->largest_solved_difficulty + 1);
+        }
+        perf = (score + targets_hit) /
+            (float)(BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES + 1);
+    } else {
+        perf = (env->win == 1) ? 1.0f : 0.0f;
+        score = perf;
+    }
     env->log.perf += perf;
-    env->log.score += perf;
+    env->log.score += score;
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
-    env->log.on_targets += env->on_target;
+    env->log.on_targets += targets_hit;
+    env->log.puzzle_ticks += env->puzzle_tick;
     env->log.n++;
 }
 
@@ -149,10 +179,16 @@ bool clear(Boxoban* env, int x, int y) {
     return (get_entity(env, WALLS, x, y) == 0) && (get_entity(env, BOXES, x, y) == 0);
 }
 
-// Required function
-void c_reset(Boxoban* env) {
-    const uint32_t i = get_random_puzzle_idx(env);
-    const uint8_t* puzzle = MAP_BASE + (size_t)i * PUZZLE_SIZE;
+static void load_random_puzzle(Boxoban* env) {
+    const uint8_t* map_base = MAP_BASE;
+    size_t puzzle_count = PUZZLE_COUNT;
+    if (env->curriculum_mode) {
+        map_base = INCREMENTAL_MAP_BASES[env->curriculum_difficulty];
+        puzzle_count = INCREMENTAL_PUZZLE_COUNTS[env->curriculum_difficulty];
+    }
+
+    const uint32_t i = get_random_puzzle_idx(env, puzzle_count);
+    const uint8_t* puzzle = map_base + (size_t)i * PUZZLE_SIZE;
     memcpy(env->observations, puzzle, PUZZLE_OBS_BYTES);
 
     const uint8_t* meta = puzzle + PUZZLE_OBS_BYTES;
@@ -164,13 +200,26 @@ void c_reset(Boxoban* env) {
 
     memcpy(env->intermediate_rewards,
             env->observations + TARGET * env->size * env->size,env->size * env->size);
+    env->puzzle_tick = 0;
+}
 
+// Required function
+void c_reset(Boxoban* env) {
     env->tick = 0;
+    env->puzzle_tick = 0;
     env->win = 0;
     env->episode_return = 0;
+    if (env->curriculum_mode) {
+        env->curriculum_difficulty = 0;
+        env->largest_solved_difficulty = -1;
+        env->episode_maps_solved = 0;
+    }
+
+    load_random_puzzle(env);
 
     if (!env->initialized) {
         env->tick = rand_r(&env->rng) % env->max_steps;
+        env->puzzle_tick = env->tick;
         env->initialized = true;
     }
 }
@@ -243,6 +292,7 @@ int take_action(Boxoban* env, int action) {
 // Required function
 void c_step(Boxoban* env) {
     env->tick += 1;
+    env->puzzle_tick += 1;
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
        
@@ -260,16 +310,27 @@ void c_step(Boxoban* env) {
 
     //Terminals
     if (env->on_target == env->n_targets) {
-        env->terminals[0] = 1;
         env->rewards[0] += 1.0;
         env->win = 1;
         env->episode_return += env->rewards[0];
+        if (env->curriculum_mode) {
+            if (env->curriculum_difficulty > env->largest_solved_difficulty) {
+                env->largest_solved_difficulty = env->curriculum_difficulty;
+            }
+            env->episode_maps_solved += 1;
+            if (env->curriculum_difficulty < BOXOBAN_INCREMENTAL_MAX_DIFFICULTY) {
+                env->curriculum_difficulty += 1;
+            }
+            load_random_puzzle(env);
+            return;
+        }
+        env->terminals[0] = 1;
         add_log(env);
         c_reset(env);
         return;
     }
 
-    if (env->tick >= env->max_steps) {
+    if (env->puzzle_tick >= env->max_steps) {
         env->terminals[0] = 1;
         env->rewards[0] -= 1.0; 
         env->episode_return += env->rewards[0];

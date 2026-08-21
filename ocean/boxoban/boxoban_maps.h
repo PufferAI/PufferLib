@@ -25,6 +25,22 @@ extern size_t PUZZLE_COUNT;
 extern size_t PUZZLE_SIZE;
 extern size_t PUZZLE_OBS_BYTES;
 
+#define BOXOBAN_DIFFICULTY_BASIC 0
+#define BOXOBAN_DIFFICULTY_EASY 1
+#define BOXOBAN_DIFFICULTY_MEDIUM 2
+#define BOXOBAN_DIFFICULTY_HARD 3
+#define BOXOBAN_DIFFICULTY_UNFILTERED 4
+#define BOXOBAN_DIFFICULTY_INCREMENTAL 5
+
+#define BOXOBAN_INCREMENTAL_MIN_DIFFICULTY BOXOBAN_DIFFICULTY_BASIC
+#define BOXOBAN_INCREMENTAL_MAX_DIFFICULTY BOXOBAN_DIFFICULTY_HARD
+#define BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES 4
+
+extern uint8_t *INCREMENTAL_MAP_BASES[BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES];
+extern size_t INCREMENTAL_MAP_FILESIZES[BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES];
+extern size_t INCREMENTAL_PUZZLE_COUNTS[BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES];
+
+int boxoban_ensure_bin_for_difficulty(const char* difficulty, char* out_path, size_t out_cap);
 int boxoban_prepare_maps_for_difficulty(const char* difficulty, char* out_path, size_t out_cap);
 int boxoban_set_map_path(const char *path);
 int boxoban_difficulty_id_from_name(const char* difficulty_name);
@@ -38,6 +54,9 @@ size_t MAP_FILESIZE = 0;
 size_t PUZZLE_COUNT = 0;
 size_t PUZZLE_SIZE = BOXOBAN_PUZZLE_BYTES;
 size_t PUZZLE_OBS_BYTES = BOXOBAN_PUZZLE_OBS_BYTES;
+uint8_t *INCREMENTAL_MAP_BASES[BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES] = {0};
+size_t INCREMENTAL_MAP_FILESIZES[BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES] = {0};
+size_t INCREMENTAL_PUZZLE_COUNTS[BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES] = {0};
 static char* BOXOBAN_MAP_PATH = NULL;
 static const char* BOXOBAN_LEVEL_ROOT = "resources/boxoban/levels";
 
@@ -325,7 +344,7 @@ static int boxoban_bin_path(const char* difficulty, char* out_path, size_t out_c
     return 0;
 }
 
-int boxoban_prepare_maps_for_difficulty(const char* difficulty, char* out_path, size_t out_cap) {
+int boxoban_ensure_bin_for_difficulty(const char* difficulty, char* out_path, size_t out_cap) {
     if (difficulty == NULL || out_path == NULL) {
         return -1;
     }
@@ -356,10 +375,85 @@ int boxoban_prepare_maps_for_difficulty(const char* difficulty, char* out_path, 
         fprintf(stdout, "[Boxoban] Generated %zu puzzles for '%s' at %s\n", puzzle_count, difficulty, out_path);
     }
 
+    return 0;
+}
+
+int boxoban_prepare_maps_for_difficulty(const char* difficulty, char* out_path, size_t out_cap) {
+    if (boxoban_ensure_bin_for_difficulty(difficulty, out_path, out_cap) != 0) {
+        return -1;
+    }
     if (boxoban_set_map_path(out_path) != 0) {
         return -1;
     }
     return 0;
+}
+
+static int boxoban_load_incremental_bin_slot(int slot, const char* difficulty) {
+    char bin_path[512];
+    int fd;
+    struct stat st;
+    uint8_t* map_base;
+
+    if (slot < 0 || slot >= BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES) {
+        return -1;
+    }
+    if (boxoban_ensure_bin_for_difficulty(difficulty, bin_path, sizeof(bin_path)) != 0) {
+        return -1;
+    }
+
+    fd = open(bin_path, O_RDONLY);
+    if (fd < 0) {
+        return -1;
+    }
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return -1;
+    }
+    if ((size_t)st.st_size % PUZZLE_SIZE != 0) {
+        close(fd);
+        return -1;
+    }
+
+    map_base = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (map_base == MAP_FAILED) {
+        return -1;
+    }
+
+    INCREMENTAL_MAP_BASES[slot] = map_base;
+    INCREMENTAL_MAP_FILESIZES[slot] = st.st_size;
+    INCREMENTAL_PUZZLE_COUNTS[slot] = (size_t)st.st_size / PUZZLE_SIZE;
+    return 0;
+}
+
+static int boxoban_load_incremental_bins(void) {
+    const char* difficulties[BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES] = {
+        "basic",
+        "easy",
+        "medium",
+        "hard",
+    };
+
+    for (int i = 0; i < BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES; i++) {
+        if (boxoban_load_incremental_bin_slot(i, difficulties[i]) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static void reset_incremental_map_cache(void) {
+    for (int i = 0; i < BOXOBAN_INCREMENTAL_NUM_DIFFICULTIES; i++) {
+        if (INCREMENTAL_MAP_BASES[i] != NULL &&
+                INCREMENTAL_MAP_BASES[i] != MAP_FAILED &&
+                INCREMENTAL_MAP_FILESIZES[i] > 0) {
+            munmap(INCREMENTAL_MAP_BASES[i], INCREMENTAL_MAP_FILESIZES[i]);
+        }
+        INCREMENTAL_MAP_BASES[i] = NULL;
+        INCREMENTAL_MAP_FILESIZES[i] = 0;
+        INCREMENTAL_PUZZLE_COUNTS[i] = 0;
+    }
 }
 
 static void reset_map_cache(void) {
