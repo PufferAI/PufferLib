@@ -3,6 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
+#include <cmath>
 #include "pufferlib.cu"
 
 #define _PUFFER_STRINGIFY(x) #x
@@ -286,6 +287,22 @@ double get_config(py::dict& kwargs, const char* key) {
     }
 }
 
+bool get_config_flag(py::dict& kwargs, const char* key) {
+    double value = get_config(kwargs, key);
+    if (value != 0.0 && value != 1.0) {
+        throw std::runtime_error(std::string(key) + " must be 0 or 1");
+    }
+    return value == 1.0;
+}
+
+double get_config_nonnegative(py::dict& kwargs, const char* key) {
+    double value = get_config(kwargs, key);
+    if (!std::isfinite(value) || value < 0.0) {
+        throw std::runtime_error(std::string(key) + " must be finite and nonnegative");
+    }
+    return value;
+}
+
 Dict* py_dict_to_c_dict(py::dict py_dict) {
     Dict* c_dict = create_dict(py_dict.size());
     for (auto item : py_dict) {
@@ -409,6 +426,8 @@ std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
     hypers.beta1 = get_config(train_kwargs, "beta1");
     hypers.beta2 = get_config(train_kwargs, "beta2");
     hypers.eps = get_config(train_kwargs, "eps");
+    hypers.aurora = get_config_flag(train_kwargs, "aurora");
+    hypers.aurora_weight_decay = get_config_nonnegative(train_kwargs, "aurora_weight_decay");
     // Training
     hypers.minibatch_size = get_config(train_kwargs, "minibatch_size");
     hypers.replay_ratio = get_config(train_kwargs, "replay_ratio");
@@ -549,6 +568,8 @@ PYBIND11_MODULE(_C, m) {
         .def_readwrite("beta1", &HypersT::beta1)
         .def_readwrite("beta2", &HypersT::beta2)
         .def_readwrite("eps", &HypersT::eps)
+        .def_readwrite("aurora", &HypersT::aurora)
+        .def_readwrite("aurora_weight_decay", &HypersT::aurora_weight_decay)
         .def_readwrite("total_timesteps", &HypersT::total_timesteps)
         .def_readwrite("max_grad_norm", &HypersT::max_grad_norm)
         .def_readwrite("clip_coef", &HypersT::clip_coef)
