@@ -745,12 +745,24 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
     }
 
     if (capturing) {
+        // Throw, don't assert: capture runs on the main thread during
+        // create_pufferl_impl warmup, so this reaches the existing OOM-skip
+        // handler in pufferl.py instead of abort()ing the whole sweep.
         cudaGraph_t _graph;
-        assert(cudaStreamEndCapture(current_stream, &_graph) == cudaSuccess
-                && "cudaStreamEndCapture failed");
-        assert(cudaGraphInstantiate(&pufferl->fused_rollout_cudagraphs[graph], _graph, 0) == cudaSuccess
-                && "cudaGraphInstantiate failed");
-        assert(cudaGraphDestroy(_graph) == cudaSuccess && "cudaGraphDestroy failed");
+        cudaError_t end_err = cudaStreamEndCapture(current_stream, &_graph);
+        if (end_err != cudaSuccess)
+            throw std::runtime_error(std::string("cudaStreamEndCapture (rollout) failed: ")
+                    + cudaGetErrorString(end_err));
+        cudaError_t inst_err = cudaGraphInstantiate(&pufferl->fused_rollout_cudagraphs[graph], _graph, 0);
+        if (inst_err != cudaSuccess) {
+            cudaGraphDestroy(_graph);
+            throw std::runtime_error(std::string("cudaGraphInstantiate (rollout) failed: ")
+                    + cudaGetErrorString(inst_err));
+        }
+        cudaError_t destroy_err = cudaGraphDestroy(_graph);
+        if (destroy_err != cudaSuccess)
+            throw std::runtime_error(std::string("cudaGraphDestroy (rollout) failed: ")
+                    + cudaGetErrorString(destroy_err));
         cudaDeviceSynchronize();
     }
     profile_end(hypers.profile);
@@ -1702,12 +1714,22 @@ void train_impl(PuffeRL& pufferl) {
                     pufferl.param_puf.data, pufferl.master_weights.data, n);
             }
             if (capturing) {
+                // Throw not assert (see net_callback_wrapper): skip the trial, don't abort.
                 cudaGraph_t _graph;
-                assert(cudaStreamEndCapture(train_stream, &_graph) == cudaSuccess
-                        && "cudaStreamEndCapture failed");
-                assert(cudaGraphInstantiate(&pufferl.train_cudagraph, _graph, 0) == cudaSuccess
-                        && "cudaGraphInstantiate failed");
-                assert(cudaGraphDestroy(_graph) == cudaSuccess && "cudaGraphDestroy failed");
+                cudaError_t end_err = cudaStreamEndCapture(train_stream, &_graph);
+                if (end_err != cudaSuccess)
+                    throw std::runtime_error(std::string("cudaStreamEndCapture (train) failed: ")
+                            + cudaGetErrorString(end_err));
+                cudaError_t inst_err = cudaGraphInstantiate(&pufferl.train_cudagraph, _graph, 0);
+                if (inst_err != cudaSuccess) {
+                    cudaGraphDestroy(_graph);
+                    throw std::runtime_error(std::string("cudaGraphInstantiate (train) failed: ")
+                            + cudaGetErrorString(inst_err));
+                }
+                cudaError_t destroy_err = cudaGraphDestroy(_graph);
+                if (destroy_err != cudaSuccess)
+                    throw std::runtime_error(std::string("cudaGraphDestroy (train) failed: ")
+                            + cudaGetErrorString(destroy_err));
                 cudaDeviceSynchronize();
                 pufferl.train_captured = true;
             }
