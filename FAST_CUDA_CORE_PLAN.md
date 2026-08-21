@@ -1072,3 +1072,56 @@ The H512 Maze repeat was exact and measured `1.004782x`. Artifact:
 
 Decision: accept the minimized H512-only separate-C/D plans with unconditional
 legacy fallback outside their strict gate.
+
+### Ablation: exhaustive H512 rollout cuBLASLt search - rejected
+
+The bounded search checked 49,326 configurations, including 1,398 legal
+zero-workspace candidates and 1,147 that matched the legacy output directly.
+The fastest 64 graph finalists all remained exact, but every one was slower:
+legacy mean `0.034835 ms` versus best cuBLASLt `0.038926 ms` (`0.8949x`).
+Artifact: `/tmp/puffer_cublaslt_h512_rollout_search_results.txt`. Decision: no
+production integration.
+
+### Ablation: ordinary MinGRU backward compile-time T64 - rejected
+
+Making only the ordinary backward scan's `T=64` loop bound compile-time
+constant preserved exact checkpoints but regressed both Affine cases: 578
+`0.995279x`, 1024x4 `0.998330x`, suite `0.996803x`, with a `0.988153x` worst
+pair. Artifact:
+`/tmp/puffer-mingru-bwd-t64-screen-EifWk50K/puffer-throughput-h6uw3oz2`.
+Decision: reject the constant-only specialization.
+
+### Ablation: ordinary MinGRU backward T64 unroll-4 - rejected
+
+The isolated T64-only kernel with `#pragma unroll 4` preserved exact
+checkpoints and measured Affine 578 `1.004573x`, Affine 1024x4 `0.997249x`,
+and suite `1.000904x`, with a `0.995564x` worst pair. Artifact:
+`/tmp/puffer-mingru-bwd-unroll4-screen-8SAFL9nf/puffer-throughput-8hkvlc00`.
+Decision: reject because H1024 regressed and the temporary specialization cost
+99 lines; restore the committed ordinary scan.
+
+### Accepted: master-weight BF16 cast fusion
+
+`muon_weight_update` already materializes the exact FP32 `new_weight`; the
+retained change stores that value to the master weights and writes
+`from_float(new_weight)` to the BF16 mirror in the same kernel. It removes only
+the immediate post-Muon cast. Initialization and model-load casts remain, and
+the float compile-time path is unchanged. The final implementation is one net
+line across `algo.cu` and `pufferl.cu`.
+
+The exact three-pair screen measured Affine 578 `1.001907x`, Affine 1024x4
+`1.001135x`, and suite `1.001521x`. Artifact:
+`/tmp/puffer-weight-cast-fuse-screen-qdBiX1E7/puffer-throughput-vorooe3a`.
+The exact five-pair long run measured `1.001355x`, `1.002141x`, and
+`1.001748x`, respectively. Artifact:
+`/tmp/puffer-weight-cast-fuse-long-jK2weCV6/puffer-throughput-p0pwattw`.
+
+All nine golden backend/configuration checkpoints matched exactly. Artifacts:
+`/tmp/puffer-weight-cast-fuse-golden-MaFJtGi7/standard/puffer-throughput-u7goii9y`
+and
+`/tmp/puffer-weight-cast-fuse-golden-MaFJtGi7/breakout/puffer-throughput-7b2vf3q5`.
+Their one-pair SPS values were noisy; exactness is the authoritative golden
+gate for this optimizer-only change.
+
+Decision: accept the one-line fusion and its repeatable marginal combined gain
+of about `0.17%`.

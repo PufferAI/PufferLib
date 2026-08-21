@@ -1568,13 +1568,8 @@ static void train_epoch_gpu(PuffeRL* pufferl, RolloutBuf src, int slot,
                 numel(pufferl->grad.shape), NCCL_PRECISION, ncclAvg,
                 pufferl->nccl_comm, stream);
         }
-        muon_step(&pufferl->muon, primary->master_weights,
+        muon_step(&pufferl->muon, primary->master_weights, primary->param,
             pufferl->grad, hypers->max_grad_norm, stream);
-        if (USE_BF16) {
-            int n = numel(primary->param.shape);
-            cast<<<grid_size(n), BLOCK_SIZE, 0, stream>>>(
-                primary->param.data, primary->master_weights.data, n);
-        }
     }
     cudaEventRecord(ev[TE_FE], stream);
 }
