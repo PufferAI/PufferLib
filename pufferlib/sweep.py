@@ -962,7 +962,7 @@ class Protein:
                 logs['is_loss_nan'] = True
                 return True
 
-        if 'uptime' not in logs or target_key not in logs:
+        if 'uptime' not in logs or target_key not in logs['env']:
             return False
 
         metric_val, cost = logs['env'][target_key], logs['uptime']
