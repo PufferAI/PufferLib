@@ -328,6 +328,20 @@ __device__ __forceinline__ int nh_bl_read_i32(const precision_t* p) {
 
 // Decode int16 LE glyph ids into an fp32 index buffer (full grid).
 // v5 semantic-class LUTs (host-built once at create, before graph capture)
+// (dx,dy) -> sector*4+band, dx in [-78,78], dy in [-20,20]; built on device
+// with the exact atan2f expression of the original featurizer (ULP-identical).
+static unsigned char* nh_secband_lut_dev = NULL;
+__global__ void nh_secband_init_kernel(unsigned char* lut) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= 157 * 41) return;
+    int dy = idx / 157 - 20, dx = idx % 157 - 78;
+    int ady = dy < 0 ? -dy : dy, adx = dx < 0 ? -dx : dx;
+    int cheb = adx > ady ? adx : ady;
+    float a = atan2f((float)dy, (float)dx) + 3.14159265358979f;
+    int sct = ((int)(a / 0.78539816339745f)) & 7;
+    int band = cheb < 3 ? 0 : cheb < 7 ? 1 : cheb < 15 ? 2 : 3;
+    lut[idx] = (unsigned char)(sct * 4 + band);
+}
 static unsigned char* nh_locc_lut_dev = NULL;  // glyph -> 9-class local id
 static unsigned char* nh_terrc_lut_dev = NULL; // glyph -> 17-class terrain id
 static void nh_v5_luts_init(void) {
@@ -368,6 +382,8 @@ static void nh_v5_luts_init(void) {
     }
     cudaMalloc(&nh_locc_lut_dev, NH_GLYPH_VOCAB);
     cudaMalloc(&nh_terrc_lut_dev, NH_GLYPH_VOCAB);
+    cudaMalloc(&nh_secband_lut_dev, 157 * 41);
+    nh_secband_init_kernel<<<grid_size(157 * 41), BLOCK_SIZE>>>(nh_secband_lut_dev);
     cudaMemcpy(nh_locc_lut_dev, loc, NH_GLYPH_VOCAB, cudaMemcpyHostToDevice);
     cudaMemcpy(nh_terrc_lut_dev, ter, NH_GLYPH_VOCAB, cudaMemcpyHostToDevice);
     free(loc); free(ter);
@@ -409,41 +425,51 @@ __global__ void nh_loc3_scatter_kernel(long long* __restrict__ acc,
 // hero cell counts as floor, all 17 classes counted incl. landmarks.
 __global__ void nh_terr_feat_kernel(precision_t* __restrict__ tf,
     const float* __restrict__ gidx, const precision_t* __restrict__ obs,
-    const unsigned char* __restrict__ lut, int B) {
-    int b = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned char* __restrict__ lut, const unsigned char* __restrict__ sblut,
+    int B) {
+    int b = blockIdx.x;
     if (b >= B) return;
+    __shared__ int sec[8 * 4 * 17];
+    __shared__ unsigned int lmkey[12]; // (cheb << 11) | cell: min == serial first-hit
+    for (int i = threadIdx.x; i < 8 * 4 * 17; i += blockDim.x) sec[i] = 0;
+    if (threadIdx.x < 12) lmkey[threadIdx.x] = 0xFFFFFFFFu;
+    __syncthreads();
     const precision_t* bl = obs + (int64_t)b * NH_OBS_SIZE + NH_BL_OFF;
     int hx = nh_bl_read_i32(bl), hy = nh_bl_read_i32(bl + 4);
     int hcell = hy * NH_MAPW + hx;
-    float lm[48];
-    for (int i = 0; i < 48; i++) lm[i] = 0.0f;
-    int lmd[12];
-    for (int i = 0; i < 12; i++) lmd[i] = 1 << 30;
-    float sec[8 * 4 * 17];
-    for (int i = 0; i < 8 * 4 * 17; i++) sec[i] = 0.0f;
-    for (int cell = 0; cell < NH_MGRID; cell++) {
+    for (int cell = threadIdx.x; cell < NH_MGRID; cell += blockDim.x) {
         int g = (int)gidx[(int64_t)b * NH_MGRID + cell];
         int tc = cell == hcell ? 13 : (int)lut[g];
         if (tc == 255) continue;
         int dy = cell / NH_MAPW - hy, dx = cell % NH_MAPW - hx;
-        int ady = dy < 0 ? -dy : dy, adx = dx < 0 ? -dx : dx;
-        int cheb = adx > ady ? adx : ady;
-        if (tc < 12 && cheb < lmd[tc]) {
-            lmd[tc] = cheb;
-            lm[tc * 4 + 0] = 1.0f;
-            lm[tc * 4 + 1] = (float)dx * (1.0f / 78.0f);
-            lm[tc * 4 + 2] = (float)dy * (1.0f / 20.0f);
-            lm[tc * 4 + 3] = (float)(cheb < 30 ? cheb : 30) * (1.0f / 30.0f);
+        if (tc < 12) {
+            int ady = dy < 0 ? -dy : dy, adx = dx < 0 ? -dx : dx;
+            int cheb = adx > ady ? adx : ady;
+            atomicMin(&lmkey[tc], ((unsigned int)cheb << 11) | (unsigned int)cell);
         }
-        float a = atan2f((float)dy, (float)dx) + 3.14159265358979f;
-        int s = ((int)(a / 0.78539816339745f)) & 7;
-        int band = cheb < 3 ? 0 : cheb < 7 ? 1 : cheb < 15 ? 2 : 3;
-        sec[(s * 4 + band) * 17 + tc] += 1.0f;
+        atomicAdd(&sec[(int)sblut[(dy + 20) * 157 + (dx + 78)] * 17 + tc], 1);
     }
+    __syncthreads();
     precision_t* o = tf + (int64_t)b * NH_TERRF;
-    for (int i = 0; i < 48; i++) o[i] = from_float(lm[i]);
+    if (threadIdx.x < 12) {
+        int t = threadIdx.x;
+        unsigned int key = lmkey[t];
+        if (key == 0xFFFFFFFFu) {
+            o[t * 4 + 0] = from_float(0.0f); o[t * 4 + 1] = from_float(0.0f);
+            o[t * 4 + 2] = from_float(0.0f); o[t * 4 + 3] = from_float(0.0f);
+        } else {
+            int cell = (int)(key & 2047u);
+            int cheb = (int)(key >> 11);
+            int dy = cell / NH_MAPW - hy, dx = cell % NH_MAPW - hx;
+            o[t * 4 + 0] = from_float(1.0f);
+            o[t * 4 + 1] = from_float((float)dx * (1.0f / 78.0f));
+            o[t * 4 + 2] = from_float((float)dy * (1.0f / 20.0f));
+            o[t * 4 + 3] = from_float((float)(cheb < 30 ? cheb : 30) * (1.0f / 30.0f));
+        }
+    }
     float inv_log = 1.0f / logf(1660.0f);
-    for (int i = 0; i < 8 * 4 * 17; i++) o[48 + i] = from_float(log1pf(sec[i]) * inv_log);
+    for (int i = threadIdx.x; i < 8 * 4 * 17; i += blockDim.x)
+        o[48 + i] = from_float(log1pf((float)sec[i]) * inv_log);
 }
 // hard wield readout: sum of slot vectors gated by the wielded state bit
 // (inv_sfeat flag bit1 = feature index 10). Parameterless.
@@ -1876,8 +1902,9 @@ static Prec nethack_encoder_forward(void* w, void* activations, Prec input, cuda
 
     // terrain branch replaces the patch encoder: featurize (fwd-only, no
     // input grads) -> 592 -> 256 -> 128 into the glb slot
-    nh_terr_feat_kernel<<<grid_size(B), BLOCK_SIZE, 0, stream>>>(
-        a->terr_tf.data, a->glyph_idx.data, input.data, nh_terrc_lut_dev, B);
+    nh_terr_feat_kernel<<<B, 256, 0, stream>>>(
+        a->terr_tf.data, a->glyph_idx.data, input.data, nh_terrc_lut_dev,
+        nh_secband_lut_dev, B);
     puf_mm(&a->terr_tf, &ew->terr1_w, &a->terr_h, stream);
     nh_bias_relu_kernel<<<grid_size(B * NH_TERR_H1), BLOCK_SIZE, 0, stream>>>(
         a->terr_h.data, ew->terr1_b.data, B * NH_TERR_H1, NH_TERR_H1);

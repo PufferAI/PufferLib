@@ -33,8 +33,8 @@ nsys profile \
     --trace=cuda,nvtx \
     -o "$OUT" \
     ./puffer train \
-        "base.profile=1" \
-        "train.total_timesteps=$STEPS" \
+        "--base.profile=1" \
+        "--train.total_timesteps=$STEPS" \
         "${EXTRA[@]}"
 
 REP="${OUT}.nsys-rep"
