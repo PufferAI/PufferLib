@@ -35,13 +35,8 @@ extern int nle_inside_shop(nle_ctx_t*);
 extern int nle_container_at(nle_ctx_t*);
 extern int nle_food_underfoot(nle_ctx_t*);
 extern int nle_discoveries(nle_ctx_t*);
-extern int nle_special_level(nle_ctx_t*);
-extern int nle_vanquished(nle_ctx_t*);
 extern int nle_peaceful_at(nle_ctx_t*, int, int);
 extern int nle_lnc_bits(nle_ctx_t*);
-extern int nle_wield_class(nle_ctx_t*);
-extern int nle_throw_fire_kind(nle_ctx_t*, int);
-extern void nle_killer_name(nle_ctx_t*, char*, int);
 extern void nle_weight(nle_ctx_t*, int*, int*);
 extern int nle_spells(nle_ctx_t*, short*, signed char*, signed char*, int*, int);
 extern int nle_cast_blocked(nle_ctx_t*);
@@ -132,7 +127,6 @@ struct Env {
     unsigned int rng; // required by vecenv.h
     unsigned long seed; // advanced each reset
     int role_idx, race_idx, gend_idx; // multi-role identity (read back)
-    int ep_special; // NH_EPDUMP: special-level flags visited this episode
 };
 
 #include "macros.h"
@@ -628,14 +622,6 @@ static void nethack_pack_obs(Nethack* env) {
 // logging
 
 static void nethack_add_log(Nethack* env, int how) { // how: nle how_done, -1 = truncated
-    { // NH_EPSCORE: per-episode "score max_depth how" dump (median/percentiles;
-      // all other logging is means-only). Inert unless the env var is set.
-        const char* eps = getenv("NH_EPSCORE");
-        if (eps && eps[0]) {
-            FILE* f = fopen(eps, "a");
-            if (f) { fprintf(f, "%ld %d %d\n", (long)env->prev_score, (int)env->stats.max_depth, how); fclose(f); }
-        }
-    }
     for (int v = 0; v < NETHACK_NUM_ACTIONS; v++)
         env->log.verb_uses[v] += (float)env->stats.verb_uses[v];
     env->log.perf += (float)env->prev_score;
@@ -676,41 +662,6 @@ static void nethack_add_log(Nethack* env, int how) { // how: nle how_done, -1 = 
     if (how >= 0) env->log.death_ac += (float)env->stats.last_ac;
     env->log.n += 1.0f;
 
-    // NH_EPDUMP: one line per episode (ctx still alive here, pre-reset).
-    // glibc locks FILE* per fprintf, so concurrent env threads are safe.
-    static FILE* epdump_f = NULL;
-    static int epdump_state = -1; // -1 unchecked, 0 off, 1 on
-    if (epdump_state != 0) {
-        if (epdump_state < 0) {
-            const char* p = getenv("NH_EPDUMP");
-            if (p != NULL && p[0]) epdump_f = fopen(p, "a");
-            epdump_state = epdump_f != NULL;
-        }
-        if (epdump_state > 0) {
-            char kn[80] = "";
-            if (how >= 0) nle_killer_name(env->ctx, kn, sizeof kn);
-            for (char* c = kn; *c; c++) if (*c == ' ') *c = '_';
-            fprintf(epdump_f, "%d %ld %d %d %ld %ld %ld %d %d %d %d %d %d %d "
-                "%d %d %d %d %d %d %s %ld %ld %ld %ld %ld %ld %ld %ld %ld\n",
-                env->role_idx, (long)env->prev_score, (int)env->stats.max_depth,
-                nle_vanquished(env->ctx), env->stats.last_gold,
-                (long)env->stats.last_xlvl, (long)env->prev_time,
-                (int)env->stats.sells, (int)env->stats.buys,
-                (int)env->stats.verb_uses[NETHACK_ACT_DROP],
-                (int)env->stats.verb_uses[NETHACK_ACT_APPLY],
-                (int)env->stats.verb_uses[NETHACK_ACT_CAST],
-                env->ep_special, how,
-                (int)env->internal[9] - 1, (int)env->internal[10],
-                env->stats.last_hp, env->stats.last_hpmax,
-                env->stats.last_hunger, env->stats.last_depth,
-                kn[0] ? kn : "-",
-                env->stats.fires, env->stats.ammo_hand, env->stats.nonammo_throws,
-                env->stats.wield_steps[0], env->stats.wield_steps[1],
-                env->stats.wield_steps[2], env->stats.wield_steps[3],
-                env->stats.wield_steps[4], (long)env->stats.length);
-            fflush(epdump_f);
-        }
-    }
 }
 
 // reset
@@ -773,7 +724,6 @@ static void nethack_do_reset(Nethack* env) {
     env->engid_tested = 0;
     env->enh_ready = 0;
     memset(&env->stats, 0, sizeof(env->stats));
-    env->ep_special = 0;
     memset(env->terr_mem, 0, sizeof(env->terr_mem));
     memset(env->obj_mem, 0, sizeof(env->obj_mem));
     env->terr_floor = 0xFFFFFFFFu;
@@ -974,15 +924,10 @@ static void nethack_execute(Nethack* env, int verb, int slot, int dirkey, int* b
     case NETHACK_ACT_QUAFF:
         nethack_item_use(env, 'q', "want to drink", "rink from the", slot, &st->verb_uses[verb], bad_pick);
         break;
-    case NETHACK_ACT_THROW: {
-        int fk = nle_throw_fire_kind(env->ctx, env->inv_letters[slot]);
-        if (nethack_item_use(env, 't', "want to throw", NULL, slot, &st->verb_uses[verb], bad_pick)) {
+    case NETHACK_ACT_THROW:
+        if (nethack_item_use(env, 't', "want to throw", NULL, slot, &st->verb_uses[verb], bad_pick))
             nethack_answer_direction(env, dirkey);
-            if (fk == 1) st->fires++;
-            else if (fk == 2) st->ammo_hand++;
-            else if (fk == 3) st->nonammo_throws++;
-        }
-        break; }
+        break;
     case NETHACK_ACT_ZAP:
         if (nethack_item_use(env, 'z', "want to zap", NULL, slot, &st->verb_uses[verb], bad_pick))
             nethack_answer_direction(env, dirkey);
@@ -1094,14 +1039,6 @@ void puf_step(Nethack* env) {
     if (bad_pick) env->stats.illegal_actions++;
     if (env->blstats[NLE_BL_TIME] > time_before) env->stats.valid_moves++;
     env->stats.length++;
-    {
-        static int track_special = -1; // benign shared init race: same value
-        if (track_special < 0) track_special = getenv("NH_EPDUMP") != NULL;
-        if (track_special) {
-            env->ep_special |= nle_special_level(env->ctx);
-            env->stats.wield_steps[nle_wield_class(env->ctx)]++;
-        }
-    }
 
     float reward = nethack_reward(env);
     env->agents[0].rewards[0] = reward;

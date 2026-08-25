@@ -91,9 +91,6 @@ static const signed char nh_obj_armcat[NH_NUM_OBJECTS] = {
 #define NETHACK_EXTRA_INTRINS (NETHACK_EXTRA_ROLEOH + 20)
 // threat block: [dist, bearing, adj_cnt, near3_cnt, vis_cnt, diff, speed]
 #define NETHACK_EXTRA_THREAT (NETHACK_EXTRA_INTRINS + 1)
-// aux supervised targets (labels for aux heads; NEVER featurized):
-// [ds_seen, ds_dx, ds_dy, nh_dist, nh_dx, nh_dy, nh_count, n_items,
-//  has_food, wield_class]
 #define NETHACK_EXTRA_SHOP (2 + NETHACK_NUM_OCLASSES)
 #define NETHACK_EXTRA_SPELL (NETHACK_EXTRA_SHOP + 2)
 #define NETHACK_EXTRA_WEIGHT (NETHACK_EXTRA_SPELL + 1 + 4 * NETHACK_SPELL_SLOTS)
@@ -344,10 +341,6 @@ typedef struct Log {
 // per-episode stats; cleared with one memset per reset
 typedef struct Stats {
     long verb_uses[NETHACK_NUM_ACTIONS];
-    long fires;          // THROW of ammo matching the wielded launcher
-    long ammo_hand;      // ammo thrown without matching wielded launcher
-    long nonammo_throws; // daggers etc.
-    long wield_steps[5]; // per-step census: none|launcher|melee|ammo|other
     long valid_moves;
     long illegal_actions;
     long new_tiles;
