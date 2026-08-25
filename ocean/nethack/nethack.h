@@ -35,11 +35,18 @@ extern int nle_inside_shop(nle_ctx_t*);
 extern int nle_container_at(nle_ctx_t*);
 extern int nle_food_underfoot(nle_ctx_t*);
 extern int nle_discoveries(nle_ctx_t*);
+extern int nle_special_level(nle_ctx_t*);
+extern int nle_vanquished(nle_ctx_t*);
 extern int nle_peaceful_at(nle_ctx_t*, int, int);
+extern int nle_lnc_bits(nle_ctx_t*);
+extern int nle_wield_class(nle_ctx_t*);
+extern int nle_throw_fire_kind(nle_ctx_t*, int);
+extern void nle_killer_name(nle_ctx_t*, char*, int);
 extern int nle_spellprot(nle_ctx_t*);
 extern void nle_weight(nle_ctx_t*, int*, int*);
 extern int nle_spells(nle_ctx_t*, short*, signed char*, signed char*, int*, int);
 extern int nle_cast_blocked(nle_ctx_t*);
+extern int nle_intrinsics(nle_ctx_t*);
 extern void nle_end(nle_ctx_t*);
 extern void nle_identity(nle_ctx_t*, int*, int*, int*, int*);
 #ifdef __cplusplus
@@ -109,6 +116,9 @@ struct Env {
     unsigned prev_floor; // dnum << 8 | dlevel at last reward; guards path attribution
     int disc0; // discoveries count at reset (episode delta = types learned)
     unsigned long long engid_tested; // letters engrave-tested this episode
+    unsigned char terr_mem[NH_GRID]; // remembered terrain (cmap_index+1; 0 unseen)
+    unsigned short obj_mem[NH_GRID]; // v3: remembered floor object (item row+1; 0 none)
+    unsigned terr_floor; // dnum<<8|dlevel the memory belongs to
 
     // reward coefs
     float gold_coef;
@@ -128,6 +138,7 @@ struct Env {
     unsigned int rng; // required by vecenv.h
     unsigned long seed; // advanced each reset
     int role_idx, race_idx, gend_idx; // multi-role identity (read back)
+    int ep_special; // NH_EPDUMP: special-level flags visited this episode
 };
 
 #include "macros.h"
@@ -177,20 +188,9 @@ static void nethack_init_settings(Nethack* env) {
     }
     env->settings.spawn_monsters = 1;
     env->settings.underfoot_glyphs = 1; // underfoot shows objects
-    const char* role = getenv("NH_ROLE");
-    char optbuf[512], rcbuf[512];
-    const char* opts;
-    if (role && role[0]) {
-        snprintf(optbuf, sizeof(optbuf),
-            "name:Agent,role:%s,race:random,gender:random,align:random,"
-            NETHACK_OPTIONS_TAIL "!status_updates", role);
-        opts = optbuf;
-    } else {
-        opts = nethack_options_override ? nethack_options_override
-                                        : NETHACK_DEFAULT_OPTIONS;
-    }
     snprintf(env->settings.options, sizeof(env->settings.options), "@%s",
-             nethack_rc_path_opts(rcbuf, sizeof(rcbuf), opts));
+             nethack_rc_path(nethack_options_override
+                 ? nethack_options_override : NETHACK_DEFAULT_OPTIONS));
     env->settings.fix_moon_phase = true; // moon phase from seed
 }
 
@@ -203,6 +203,7 @@ void init(Nethack* env) {
 }
 
 // masking
+
 
 static int nethack_slot_usable(const Nethack* env, const Verb* verb, int i) {
     if (!(verb->item_classes & (1u << env->inv_oclasses[i]))) return 0;
@@ -444,9 +445,8 @@ static void nethack_compute_mask(Nethack* env) {
 // observations
 
 static void nethack_pack_obs(Nethack* env) {
-    obs_t* obs_buf = env->agents[0].observations;
-    memcpy(obs_buf + NETHACK_OFF_GLYPHS, env->glyphs, sizeof(env->glyphs));
-    unsigned char* bl = obs_buf + NETHACK_OFF_BLSTATS;
+    memcpy(((obs_t*)env->agents[0].observations) + NETHACK_OFF_GLYPHS, env->glyphs, sizeof(env->glyphs));
+    unsigned char* bl = ((obs_t*)env->agents[0].observations) + NETHACK_OFF_BLSTATS;
     for (int i = 0; i < NLE_BLSTATS_SIZE; i++) {
         uint32_t v = (uint32_t)(int32_t)env->blstats[i];
         bl[4*i + 0] = (unsigned char)(v & 0xffu);
@@ -478,6 +478,7 @@ static void nethack_pack_obs(Nethack* env) {
         q[3] = known ? env->spell_knows[s] : 0;
     }
 
+    extra[NETHACK_EXTRA_INTRINS] = nle_intrinsics(env->ctx);
     extra[NETHACK_EXTRA_ROLEOH + env->role_idx] = 1;
     extra[NETHACK_EXTRA_ROLEOH + 13 + env->race_idx] = 1;
     extra[NETHACK_EXTRA_ROLEOH + 18 + env->gend_idx] = 1;
@@ -495,7 +496,7 @@ static void nethack_pack_obs(Nethack* env) {
     extra[NETHACK_EXTRA_SHOP + 1] = (price > 0)
         ? (int32_t)(gold >= price ? 100 : (gold * 100) / price) : 0;
 
-    unsigned char* ex = obs_buf + NETHACK_OFF_EXTRA;
+    unsigned char* ex = ((obs_t*)env->agents[0].observations) + NETHACK_OFF_EXTRA;
     for (int i = 0; i < NETHACK_EXTRA_INTS; i++) {
         uint32_t v = (uint32_t)extra[i];
         ex[4*i + 0] = (unsigned char)(v & 0xffu);
@@ -510,7 +511,7 @@ static void nethack_pack_obs(Nethack* env) {
         const char* e = getenv("NH_DISC_SWAP");
         dsw = e && e[0] && e[0] != '0';
     }
-    unsigned char* iv = obs_buf + NETHACK_OFF_INV;
+    unsigned char* iv = ((obs_t*)env->agents[0].observations) + NETHACK_OFF_INV;
     for (int i = 0; i < NETHACK_INV_SLOTS; i++) {
         uint16_t g = env->inv_oclasses[i] < NETHACK_NUM_OCLASSES
                    ? (dsw && env->inv_true[i] != NETHACK_PAD_GLYPH
@@ -520,9 +521,9 @@ static void nethack_pack_obs(Nethack* env) {
         iv[2*i + 1] = (unsigned char)((g >> 8) & 0xffu);
     }
     // item state
-    memcpy(obs_buf + NETHACK_OFF_INVST, env->inv_state, sizeof(env->inv_state));
+    memcpy(((obs_t*)env->agents[0].observations) + NETHACK_OFF_INVST, env->inv_state, sizeof(env->inv_state));
     // discovered-type glyphs (engine pads with NO_GLYPH == NETHACK_PAD_GLYPH)
-    unsigned char* it = obs_buf + NETHACK_OFF_INVTRUE;
+    unsigned char* it = ((obs_t*)env->agents[0].observations) + NETHACK_OFF_INVTRUE;
     for (int i = 0; i < NETHACK_INV_SLOTS; i++) {
         uint16_t g = !dsw && env->inv_oclasses[i] < NETHACK_NUM_OCLASSES
                    ? (uint16_t)env->inv_true[i] : (uint16_t)NETHACK_PAD_GLYPH;
@@ -545,8 +546,84 @@ static void nethack_pack_obs(Nethack* env) {
         env->stall_ctr = 0;
         env->stall_prev_turn = turn;
     }
+    { // typed level planes: terrain memory, floor-object memory, two token lists
+        unsigned fl = (unsigned)((env->blstats[NLE_BL_DNUM] << 8) | env->blstats[NLE_BL_DLEVEL]);
+        if (fl != env->terr_floor) {
+            memset(env->terr_mem, 0, sizeof(env->terr_mem));
+            memset(env->obj_mem, 0, sizeof(env->obj_mem));
+            env->terr_floor = fl;
+        }
+        long hx = env->blstats[NLE_BL_X], hy = env->blstats[NLE_BL_Y];
+        int mon_cell[256], mon_g[256], nmon = 0;
+        for (int cell = 0; cell < NH_GRID; cell++) {
+            int g = env->glyphs[cell];
+            int r = cell / NH_COLS, c = cell % NH_COLS;
+            if (g >= NETHACK_GLYPH_CMAP_OFF && g < NETHACK_GLYPH_CMAP_OFF + 96) {
+                env->terr_mem[cell] = (unsigned char)(g - NETHACK_GLYPH_CMAP_OFF + 1);
+                env->obj_mem[cell] = 0; // bare floor shown: no object here
+            } else if (g >= NETHACK_GLYPH_OBJ_LO && g < NETHACK_GLYPH_OBJ_HI) {
+                env->obj_mem[cell] = (unsigned short)(g - NETHACK_GLYPH_OBJ_LO + 1);
+            } else if (g >= NETHACK_GLYPH_BODY_OFF && g < NETHACK_GLYPH_BODY_HI) {
+                env->obj_mem[cell] = (unsigned short)(g - NETHACK_GLYPH_BODY_OFF + 454);
+            } else if (((g >= 0 && g < NETHACK_GLYPH_BODY_OFF && !(r == hy && c == hx)))
+                       && nmon < 256) { // monsters, pets and detected alike
+                mon_cell[nmon] = cell; mon_g[nmon] = g; nmon++;
+                // monster on top: obj_mem/terr_mem memories stay as last seen
+            }
+        }
+        // lean token block: lists only, memory planes stay env-internal
+        unsigned char* mp = ((obs_t*)env->agents[0].observations) + NETHACK_OFF_TOKM;
+        // monster tokens: K nearest by Chebyshev (selection sort)
+        memset(mp, 0, NETHACK_V3_K * NETHACK_V3_MONF);
+        for (int k = 0; k < NETHACK_V3_K && k < nmon; k++) {
+            int best = -1, bd = 1 << 30;
+            for (int i = 0; i < nmon; i++) {
+                if (mon_cell[i] < 0) continue;
+                int dx = mon_cell[i] % NH_COLS - (int)hx, dy = mon_cell[i] / NH_COLS - (int)hy;
+                int d = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
+                if (d < bd) { bd = d; best = i; }
+            }
+            if (best < 0) break;
+            int cell = mon_cell[best], g = mon_g[best]; mon_cell[best] = -1;
+            int dx = cell % NH_COLS - (int)hx, dy = cell / NH_COLS - (int)hy;
+            int det = g >= NETHACK_GLYPH_DET_OFF;
+            int pet = g >= NETHACK_GLYPH_PET_OFF && g < NETHACK_GLYPH_DET_OFF;
+            int sp = g % NETHACK_NUMMONS; // mon/pet/detect ranges all stride NUMMONS
+            int peace = pet || nle_peaceful_at(env->ctx, cell % NH_COLS + 1, cell / NH_COLS);
+            unsigned char* e = mp + k * NETHACK_V3_MONF;
+            e[0] = (unsigned char)((sp + 1) & 0xff); e[1] = (unsigned char)(((sp + 1) >> 8) & 0xff);
+            e[2] = (unsigned char)(signed char)dx; e[3] = (unsigned char)(signed char)dy;
+            e[4] = (unsigned char)((peace ? 0 : 1) | (peace ? 2 : 0) | (det ? 4 : 0) | (pet ? 8 : 0));
+            e[5] = NH_MON_DIFF[sp]; e[6] = NH_MON_SPEED[sp]; e[7] = 0;
+        }
+        // item tokens from the object memory (includes remembered/occluded items)
+        int it_cell[256], nit = 0;
+        for (int cell = 0; cell < NH_GRID && nit < 256; cell++)
+            if (env->obj_mem[cell]) it_cell[nit++] = cell;
+        unsigned char* ip = ((obs_t*)env->agents[0].observations) + NETHACK_OFF_TOKI;
+        memset(ip, 0, NETHACK_V3_K * NETHACK_V3_ITEMF);
+        for (int k = 0; k < NETHACK_V3_K && k < nit; k++) {
+            int best = -1, bd = 1 << 30;
+            for (int i = 0; i < nit; i++) {
+                if (it_cell[i] < 0) continue;
+                int dx = it_cell[i] % NH_COLS - (int)hx, dy = it_cell[i] / NH_COLS - (int)hy;
+                int d = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
+                if (d < bd) { bd = d; best = i; }
+            }
+            if (best < 0) break;
+            int cell = it_cell[best]; it_cell[best] = -1;
+            int row = env->obj_mem[cell];
+            int dx = cell % NH_COLS - (int)hx, dy = cell / NH_COLS - (int)hy;
+            unsigned char* e = ip + k * NETHACK_V3_ITEMF;
+            e[0] = (unsigned char)(row & 0xff); e[1] = (unsigned char)((row >> 8) & 0xff);
+            e[2] = (unsigned char)(signed char)dx; e[3] = (unsigned char)(signed char)dy;
+            e[4] = 0; // oclass placeholder (item row already encodes type)
+            e[5] = (unsigned char)(((dx == 0 && dy == 0) ? 1 : 0) | (row >= 454 ? 2 : 0));
+            e[6] = 0; e[7] = 0;
+        }
+    }
     // topline
-    unsigned char* mv = obs_buf + NETHACK_OFF_MSG;
+    unsigned char* mv = ((obs_t*)env->agents[0].observations) + NETHACK_OFF_MSG;
     size_t mlen = strnlen((const char*)env->message, NETHACK_MSG_LEN);
     memcpy(mv, env->message, mlen);
     if (mlen < (size_t)NETHACK_MSG_LEN) memset(mv + mlen, 0, NETHACK_MSG_LEN - mlen);
@@ -557,6 +634,14 @@ static void nethack_pack_obs(Nethack* env) {
 // logging
 
 static void nethack_add_log(Nethack* env, int how) { // how: nle how_done, -1 = truncated
+    { // NH_EPSCORE: per-episode "score max_depth how" dump (median/percentiles;
+      // all other logging is means-only). Inert unless the env var is set.
+        const char* eps = getenv("NH_EPSCORE");
+        if (eps && eps[0]) {
+            FILE* f = fopen(eps, "a");
+            if (f) { fprintf(f, "%ld %d %d\n", (long)env->prev_score, (int)env->stats.max_depth, how); fclose(f); }
+        }
+    }
     for (int v = 0; v < NETHACK_NUM_ACTIONS; v++)
         env->log.verb_uses[v] += (float)env->stats.verb_uses[v];
     env->log.perf += (float)env->prev_score;
@@ -597,6 +682,42 @@ static void nethack_add_log(Nethack* env, int how) { // how: nle how_done, -1 = 
         env->log.death_mon_level += (float)env->internal[NETHACK_INTERNAL_KILLER_MLEV];
     if (how >= 0) env->log.death_ac += (float)env->stats.last_ac;
     env->log.n += 1.0f;
+
+    // NH_EPDUMP: one line per episode (ctx still alive here, pre-reset).
+    // glibc locks FILE* per fprintf, so concurrent env threads are safe.
+    static FILE* epdump_f = NULL;
+    static int epdump_state = -1; // -1 unchecked, 0 off, 1 on
+    if (epdump_state != 0) {
+        if (epdump_state < 0) {
+            const char* p = getenv("NH_EPDUMP");
+            if (p != NULL && p[0]) epdump_f = fopen(p, "a");
+            epdump_state = epdump_f != NULL;
+        }
+        if (epdump_state > 0) {
+            char kn[80] = "";
+            if (how >= 0) nle_killer_name(env->ctx, kn, sizeof kn);
+            for (char* c = kn; *c; c++) if (*c == ' ') *c = '_';
+            fprintf(epdump_f, "%d %ld %d %d %ld %ld %ld %d %d %d %d %d %d %d "
+                "%d %d %d %d %d %d %s %ld %ld %ld %ld %ld %ld %ld %ld %ld\n",
+                env->role_idx, (long)env->prev_score, (int)env->stats.max_depth,
+                nle_vanquished(env->ctx), env->stats.last_gold,
+                (long)env->stats.last_xlvl, (long)env->prev_time,
+                (int)env->stats.sells, (int)env->stats.buys,
+                (int)env->stats.verb_uses[NETHACK_ACT_DROP],
+                (int)env->stats.verb_uses[NETHACK_ACT_APPLY],
+                (int)env->stats.verb_uses[NETHACK_ACT_CAST],
+                env->ep_special, how,
+                (int)env->internal[9] - 1, (int)env->internal[10],
+                env->stats.last_hp, env->stats.last_hpmax,
+                env->stats.last_hunger, env->stats.last_depth,
+                kn[0] ? kn : "-",
+                env->stats.fires, env->stats.ammo_hand, env->stats.nonammo_throws,
+                env->stats.wield_steps[0], env->stats.wield_steps[1],
+                env->stats.wield_steps[2], env->stats.wield_steps[3],
+                env->stats.wield_steps[4], (long)env->stats.length);
+            fflush(epdump_f);
+        }
+    }
 }
 
 // reset
@@ -615,8 +736,12 @@ static void nethack_do_reset(Nethack* env) {
 
     // seed advance
     env->seed = env->seed * 6364136223846793005UL + 1442695040888963407UL;
-    // engine-random character per reset; identity read back after start
-    if (env->multi_role != 0.0f) {
+    // engine-random character per reset; identity read back after start.
+    // Demo NH_ROLE sets nethack_options_override; keep it across deaths.
+    if (nethack_options_override) {
+        snprintf(env->settings.options, sizeof(env->settings.options), "@%s",
+                 nethack_rc_path(nethack_options_override));
+    } else if (env->multi_role != 0.0f) {
         char rcp[512];
         snprintf(env->settings.options, sizeof(env->settings.options), "@%s",
                  nethack_rc_path_opts(rcp, sizeof(rcp),
@@ -655,6 +780,10 @@ static void nethack_do_reset(Nethack* env) {
     env->engid_tested = 0;
     env->enh_ready = 0;
     memset(&env->stats, 0, sizeof(env->stats));
+    env->ep_special = 0;
+    memset(env->terr_mem, 0, sizeof(env->terr_mem));
+    memset(env->obj_mem, 0, sizeof(env->obj_mem));
+    env->terr_floor = 0xFFFFFFFFu;
     env->stats.max_depth = env->prev_depth;
     env->stats.max_xp = (int)env->blstats[NLE_BL_XP];
     env->stats.min_ac = (int)env->blstats[NLE_BL_AC];
@@ -801,6 +930,13 @@ static float nethack_reward(Nethack* env) {
     long ac = env->blstats[NLE_BL_AC];
     env->stats.last_ac = (int)ac;
     if ((int)ac < env->stats.min_ac) env->stats.min_ac = (int)ac;
+    if (!env->obs.done) { // death-step blstats are torn down
+        env->stats.last_gold = env->blstats[NLE_BL_GOLD];
+        env->stats.last_xlvl = (int)env->blstats[NLE_BL_XP];
+        env->stats.last_hp = (int)env->blstats[NLE_BL_HP];
+        env->stats.last_hpmax = (int)env->blstats[NLE_BL_HPMAX];
+        env->stats.last_depth = (int)env->blstats[NLE_BL_DEPTH];
+    }
 
     float ac_led = env->ac_nospell != 0.0f
         ? (float)ac + env->ac_nospell * (float)nle_spellprot(env->ctx) : (float)ac;
@@ -878,10 +1014,15 @@ static void nethack_execute(Nethack* env, int verb, int slot, int dirkey, int* b
     case NETHACK_ACT_QUAFF:
         nethack_item_use(env, 'q', "want to drink", "rink from the", slot, &st->verb_uses[verb], bad_pick);
         break;
-    case NETHACK_ACT_THROW:
-        if (nethack_item_use(env, 't', "want to throw", NULL, slot, &st->verb_uses[verb], bad_pick))
+    case NETHACK_ACT_THROW: {
+        int fk = nle_throw_fire_kind(env->ctx, env->inv_letters[slot]);
+        if (nethack_item_use(env, 't', "want to throw", NULL, slot, &st->verb_uses[verb], bad_pick)) {
             nethack_answer_direction(env, dirkey);
-        break;
+            if (fk == 1) st->fires++;
+            else if (fk == 2) st->ammo_hand++;
+            else if (fk == 3) st->nonammo_throws++;
+        }
+        break; }
     case NETHACK_ACT_ZAP:
         if (nethack_item_use(env, 'z', "want to zap", NULL, slot, &st->verb_uses[verb], bad_pick))
             nethack_answer_direction(env, dirkey);
@@ -993,6 +1134,14 @@ void puf_step(Nethack* env) {
     if (bad_pick) env->stats.illegal_actions++;
     if (env->blstats[NLE_BL_TIME] > time_before) env->stats.valid_moves++;
     env->stats.length++;
+    {
+        static int track_special = -1; // benign shared init race: same value
+        if (track_special < 0) track_special = getenv("NH_EPDUMP") != NULL;
+        if (track_special) {
+            env->ep_special |= nle_special_level(env->ctx);
+            env->stats.wield_steps[nle_wield_class(env->ctx)]++;
+        }
+    }
 
     float reward = nethack_reward(env);
     env->agents[0].rewards[0] = reward;
@@ -1099,7 +1248,6 @@ void puf_log(Log* log, Dict* out) {
     dict_set(out, "floors", log->floors);
     dict_set(out, "scout_held", log->scout_held);
     dict_set(out, "truncated", log->truncated);
-    dict_set(out, "n", log->n);
 }
 
 // Per-(verb,head) consumption map for PPO consumed-head gating (weak symbol

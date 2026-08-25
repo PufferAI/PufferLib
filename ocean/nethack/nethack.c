@@ -5,7 +5,7 @@
 #include <sys/select.h>
 #include <signal.h>
 #include "nethack.h"
-#include "../../src/puffercpu.c"
+#include "../../src/puffercpu.h"
 #include "glyph_map.h"
 
 // NH_TTY=1: the map panel shows the game's real tty screen instead of the obs
@@ -40,6 +40,59 @@ static void env_open(Nethack* env) {
                       + NETHACK_SPELL_SLOTS, 1);
     a->rewards = (float*)calloc(1, sizeof(float));
     a->terminals = (float*)calloc(1, sizeof(float));
+    // NH_ROLE=arc (demo only): pin that role; race/gender/align stay random.
+    {
+        const char* s = getenv("NH_ROLE");
+        if (s && s[0]) {
+            char buf[32];
+            size_t n = 0;
+            for (const char* p = s; *p && n + 1 < sizeof(buf); p++) {
+                char c = *p;
+                if (c >= 'A' && c <= 'Z') {
+                    c = (char)(c - 'A' + 'a');
+                }
+                if (c == ' ' || c == '_' || c == '-') {
+                    continue;
+                }
+                buf[n++] = c;
+            }
+            buf[n] = 0;
+            static const struct { const char* key; const char* role; } map[] = {
+                {"0", "archeologist"}, {"arc", "archeologist"},
+                {"arch", "archeologist"}, {"archeologist", "archeologist"},
+                {"archaeologist", "archeologist"}, {"archologist", "archeologist"},
+                {"1", "barbarian"}, {"bar", "barbarian"}, {"barbarian", "barbarian"},
+                {"2", "caveman"}, {"cav", "caveman"}, {"caveman", "caveman"},
+                {"3", "healer"}, {"hea", "healer"}, {"healer", "healer"},
+                {"4", "knight"}, {"kni", "knight"}, {"knight", "knight"},
+                {"5", "monk"}, {"mon", "monk"}, {"monk", "monk"},
+                {"6", "priest"}, {"pri", "priest"}, {"priest", "priest"},
+                {"7", "rogue"}, {"rog", "rogue"}, {"rogue", "rogue"},
+                {"8", "ranger"}, {"ran", "ranger"}, {"ranger", "ranger"},
+                {"9", "samurai"}, {"sam", "samurai"}, {"samurai", "samurai"},
+                {"10", "tourist"}, {"tou", "tourist"}, {"tourist", "tourist"},
+                {"11", "valkyrie"}, {"val", "valkyrie"}, {"valkyrie", "valkyrie"},
+                {"12", "wizard"}, {"wiz", "wizard"}, {"wizard", "wizard"},
+            };
+            const char* role = NULL;
+            for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+                if (strcmp(buf, map[i].key) == 0) {
+                    role = map[i].role;
+                    break;
+                }
+            }
+            if (!role) {
+                fprintf(stderr, "nethack: unknown NH_ROLE=%s (try arc, bar, cav, ...)\n", s);
+                exit(1);
+            }
+            static char opts[512];
+            snprintf(opts, sizeof(opts),
+                "name:Agent,role:%s,race:random,gender:random,align:random,"
+                NETHACK_OPTIONS_TAIL "!status_updates", role);
+            nethack_options_override = opts;
+            fprintf(stderr, "nethack demo: NH_ROLE=%s\n", role);
+        }
+    }
     init(env);
     // NH_MULTI=1: random role/race/gender/align per reset (challenge protocol)
     const char* mr = getenv("NH_MULTI");
@@ -67,7 +120,7 @@ static void env_close(Nethack* env) {
 #define DEMO_VOCAB 5977
 #define DEMO_EMBED 32
 #define DEMO_BL_FEAT (25 + 7 + 13 + NETHACK_NUM_ACTIONS + NETHACK_NUM_OCLASSES + 2 + 8 + 2 + 2 \
-                      + 1 + 2 + 20)
+                      + 1 + 2 + 20 + 8)
 #define DEMO_SPKEY 16
 #define DEMO_SPIN (DEMO_EMBED + 4)
 #define DEMO_INV_HID 16 // 16-dim slot rep: pool bottleneck + decoder key (unified)
@@ -81,24 +134,25 @@ static void env_close(Nethack* env) {
 #define DEMO_QDIM ((DEMO_PTR_HEADS + 1) * DEMO_INV_HID)
 #define DEMO_DEC_LIN (NETHACK_NUM_ACTIONS + NETHACK_DIR_HEADS * NETHACK_NUM_DIRS + 1)
 #define DEMO_DEC_PAD ((DEMO_DEC_LIN + 7) / 8 * 8)
-#define DEMO_LOC_IN (NETHACK_CROP_GRID * DEMO_EMBED) // 9x9 crop, per-cell embeds
+#define DEMO_LOCC_DIM 8
+#define DEMO_LOCC_CLASSES 9
+#define DEMO_LOC_IN (NETHACK_CROP_GRID * DEMO_LOCC_DIM) // 9x9 semantic-class crop
 #define DEMO_LOC_HID 256
-#define DEMO_PW 5
-#define DEMO_PH 5
-#define DEMO_PX 16
-#define DEMO_PY 5
-#define DEMO_TOK (DEMO_PX * DEMO_PY) // 5x5 patches over 79x21
-#define DEMO_PCELLS (DEMO_PW * DEMO_PH) // off-map cells read the pad glyph
-#define DEMO_P1 16
-#define DEMO_GLB_IN (DEMO_PCELLS * DEMO_EMBED) // per-patch flatten (glyph slice)
-#define DEMO_GLB_HID 128
+#define DEMO_LOC_H1 256
+#define DEMO_TERRF 592 // 12 landmarks x 4 + 8 sectors x 4 bands x 17 classes
+#define DEMO_TERR_H1 256
+#define DEMO_GLB_HID 128 // terrain branch output width
 // trigram message branch, mirroring NH_MSG_* in ocean/nethack/nethack.cu
 #define DEMO_MSG_LEN NETHACK_MSG_LEN
 #define DEMO_MSG_VOCAB 4096
 #define DEMO_MSG_LOG2V 12
 #define DEMO_MSG_HID 32
-#define DEMO_MSG_CONCAT_OFF (DEMO_LOC_HID + DEMO_GLB_HID + DEMO_INV_POOL + 64 + DEMO_BL_FEAT)
+#define DEMO_BLH 64
+#define DEMO_MSG_CONCAT_OFF (DEMO_LOC_HID + DEMO_GLB_HID + DEMO_BLH + DEMO_BL_FEAT)
 #define DEMO_SPELL_CONCAT_OFF (DEMO_MSG_CONCAT_OFF + DEMO_MSG_HID)
+#define DEMO_SP2_DIM 32
+#define DEMO_SPELL_SLICE (DEMO_SP2_DIM + 4) // sum channel + doorstep scalars
+#define DEMO_ISUM_DIM 64
 // identity-table channel (NH_ID_EMBED in nethack.cu); presence is inferred
 // per-checkpoint so one binary loads both eras
 #define DEMO_IDE_ROLE 16
@@ -107,8 +161,21 @@ static void env_close(Nethack* env) {
 #define DEMO_IDE_ALGN 8
 #define DEMO_IDE_DIM (DEMO_IDE_ROLE + DEMO_IDE_RACE + DEMO_IDE_GEND + DEMO_IDE_ALGN)
 #define DEMO_IDE_NUMEL (13*DEMO_IDE_ROLE + 5*DEMO_IDE_RACE + 2*DEMO_IDE_GEND + 3*DEMO_IDE_ALGN)
-#define DEMO_IDE_CONCAT_OFF (DEMO_SPELL_CONCAT_OFF + DEMO_SPKEY)
-#define DEMO_CONCAT (DEMO_IDE_CONCAT_OFF + DEMO_IDE_DIM) // buffer max; live dim = net->concat_dim
+#define DEMO_IDE_CONCAT_OFF (DEMO_SPELL_CONCAT_OFF + DEMO_SPELL_SLICE)
+// lab arm (NH_LAB in nethack.cu): typed token streams + invattn8; the aux
+// heads are train-only but live in the checkpoint (presence inferred)
+#define DEMO_IVA_M 8
+#define DEMO_LABK 16
+#define DEMO_LAB_IN 48
+#define DEMO_LAB_HID 64
+#define DEMO_LAB_HEADS 8
+#define DEMO_AUXH 32
+#define DEMO_IVA_CONCAT_OFF (DEMO_IDE_CONCAT_OFF + DEMO_IDE_DIM)
+#define DEMO_LABM_CONCAT_OFF (DEMO_IVA_CONCAT_OFF + DEMO_IVA_M*DEMO_INV_HID)
+#define DEMO_LABI_CONCAT_OFF (DEMO_LABM_CONCAT_OFF + DEMO_LAB_HID)
+#define DEMO_WLD_CONCAT_OFF (DEMO_LABI_CONCAT_OFF + DEMO_LAB_HID)
+#define DEMO_ISUM_CONCAT_OFF (DEMO_WLD_CONCAT_OFF + DEMO_INV_HID)
+#define DEMO_CONCAT (DEMO_ISUM_CONCAT_OFF + DEMO_ISUM_DIM)
 
 // per-blstat normalization, mirroring NH_BL_SCALE / NH_BL_ISLOG in ocean/nethack/nethack.cu
 static const float DEMO_BL_SCALE[27] = {
@@ -125,18 +192,18 @@ typedef struct {
     float *embed; // (5977, 32) E_res
     float *ekind_w, *esub_w; // (14, 32), (944, 32) factor tables
     float *e_eff; // materialized E_res + E_kind + E_sub
-    float *loc_w, *loc_b; // (256, 2592), (256)
-    float *g1_w, *g1_xy, *g1_b; // (16, 800), (16, 2), (16): per-patch embed+flatten + hero dx,dy -> 16
-    float *g2_w, *g2_b; // (128, 16), (128): 16 -> 128, maxed over tokens
+    float *loc_w, *loc_b; // (256, 648) over class-crop embeds
+    float *terr1_w, *terr1_b, *terr2_w, *terr2_b; // 592 -> 256 -> 128 terrain MLP
+    float *locc_w; // (9, 8) semantic-class embed table
     float *inv1_w, *inv1_b; // (16, 32), (16): per-slot features (pointer keys)
     float *inv1s_w; // (16, 24): gated item-state path into the slot MLP
     float *invt_w; // (16, 32): discovered-type channel (zero-init grown)
-    float *inv2_w, *inv2_b; // (128, 16), (128): pooled trunk summary (max over slots)
+    float *isum_w, *isum_b; // (64, 16): masked-sum inventory channel
     float *bl_w, *bl_b; // (64, DEMO_BL_FEAT), (64)
     float *proj_w, *proj_b; // (H, DEMO_CONCAT), (H)
     float *msg_w; // (4096, 32) trigram embedding table
     float *spk_w; // (16, 36) spell slot-rep projection
-    float *spk2_w, *spk2_b; // (16, 16), (16) spell pool (inv2 idiom)
+    float *ss_w, *ss_b; // (32, 36) spell sum channel over raw slot inputs
     float *ide_role_w, *ide_race_w, *ide_gend_w, *ide_algn_w; // identity tables (ide era)
     float *dec_lin; // (DEMO_DEC_PAD, H) bias-free; rows [26 verb | 48 dir | value], 75 used
     float *dec_q; // (DEMO_QDIM, H): thirteen stacked 16-dim queries (12 item + spell)
@@ -145,11 +212,14 @@ typedef struct {
     MinGRU* mingru;
     Multidiscrete* md;
     int hidden_size, num_layers, num_actions;
-    int ide, concat_dim; // per-checkpoint layout (identity-table era or not)
-    float x[DEMO_LOC_IN]; // crop cell embeds, flattened
-    float px[DEMO_GLB_IN]; // one patch's cell embeds, flattened
-    float t16[DEMO_P1];
-    float t128[DEMO_GLB_HID];
+    float *loc2_w, *loc2_b; float loc_h1[DEMO_LOC_H1];
+    float terr_tf[DEMO_TERRF]; float terr_h[DEMO_TERR_H1];
+    float *iaq_w;
+    float *lm1_w, *lm1_b, *lm2_w, *lm2_b, *lma_w, *lma_b; // monster stream
+    float *li1_w, *li1_b, *li2_w, *li2_b, *lia_w, *lia_b; // item stream
+    float x[DEMO_LOC_IN]; // crop class embeds, flattened
+    float wld[NETHACK_INV_SLOTS]; // per-slot wielded bit
+    int   occ[NETHACK_INV_SLOTS]; // per-slot occupancy
     float slots[DEMO_INV_FLAT]; // per-slot post-relu features (decoder keys)
     float spkeys[NETHACK_SPELL_SLOTS * DEMO_SPKEY]; // relu'd spell slot reps
     float concat[DEMO_CONCAT]; // [local hid | global hid | inv pool | bl hidden | bl feats | msg]
@@ -162,27 +232,33 @@ typedef struct {
 // All tensors land on 8-float boundaries; only tau (12) needs padding (+4).
 #define DEMO_ENC_FIXED (DEMO_VOCAB*DEMO_EMBED \
                         + NH_GM_NKIND*DEMO_EMBED + NH_GM_NSUB*DEMO_EMBED \
-                        + DEMO_LOC_HID*DEMO_LOC_IN + DEMO_LOC_HID \
-                        + DEMO_P1*DEMO_GLB_IN + DEMO_P1*2 + DEMO_P1 \
-                        + DEMO_GLB_HID*DEMO_P1 + DEMO_GLB_HID \
+                        + DEMO_LOC_H1*DEMO_LOC_IN + DEMO_LOC_H1 \
+                        + DEMO_LOC_HID*DEMO_LOC_H1 + DEMO_LOC_HID \
+                        + DEMO_IVA_M*DEMO_INV_HID \
+                        + DEMO_TERR_H1*DEMO_TERRF + DEMO_TERR_H1 \
+                        + DEMO_GLB_HID*DEMO_TERR_H1 + DEMO_GLB_HID \
+                        + DEMO_LOCC_CLASSES*DEMO_LOCC_DIM \
                         + DEMO_INV_HID*DEMO_EMBED + DEMO_INV_HID \
                         + DEMO_INV_HID*DEMO_SFEAT \
                         + DEMO_INV_HID*DEMO_EMBED \
-                        + DEMO_INV_POOL*DEMO_INV_HID + DEMO_INV_POOL \
-                        + 64*DEMO_BL_FEAT + 64 \
+                        + DEMO_ISUM_DIM*DEMO_INV_HID + DEMO_ISUM_DIM \
+                        + DEMO_BLH*DEMO_BL_FEAT + DEMO_BLH \
                         + DEMO_MSG_VOCAB*DEMO_MSG_HID \
-                        + DEMO_SPKEY*DEMO_SPIN + DEMO_SPKEY*DEMO_SPKEY + DEMO_SPKEY)
+                        + DEMO_SPKEY*DEMO_SPIN \
+                        + DEMO_SP2_DIM*DEMO_SPIN + DEMO_SP2_DIM \
+                        + DEMO_IDE_NUMEL \
+                        + 2*(DEMO_LAB_HID*DEMO_LAB_IN + DEMO_LAB_HID \
+                             + DEMO_LAB_HID*DEMO_LAB_HID + DEMO_LAB_HID \
+                             + DEMO_LAB_HEADS*DEMO_LAB_IN + DEMO_LAB_HEADS))
 #define DEMO_DEC_FIXED (DEMO_INV_HID*DEMO_INV_HID + 16) // k_w + tau padded 12->16
 // ambiguities are possible; prefer the fewest layers (real configs have <= 8)
-static int demo_infer_arch(int total, int* hidden, int* layers, int* actions, int* ide) {
+static int demo_infer_arch(int total, int* hidden, int* layers, int* actions) {
     int best_l = 1 << 30;
-    for (int e = 0; e <= 1; e++)
     for (int H = 8; H <= 4096; H += 8) {
-        long rem = (long)total - DEMO_ENC_FIXED - DEMO_DEC_FIXED - (e ? DEMO_IDE_NUMEL : 0)
-                 - (long)H * (DEMO_IDE_CONCAT_OFF + (e ? DEMO_IDE_DIM : 0)
-                              + 1 + DEMO_DEC_PAD + DEMO_QDIM);
+        long rem = (long)total - DEMO_ENC_FIXED - DEMO_DEC_FIXED
+                 - (long)H * (DEMO_CONCAT + 1 + DEMO_DEC_PAD + DEMO_QDIM);
         long per_layer = 3L * H * H;
-        if (rem <= 0) break;
+        if (rem <= 0) continue;
         if (rem % per_layer) continue;
         long L = rem / per_layer;
         if (L >= 1 && L < best_l) {
@@ -190,7 +266,6 @@ static int demo_infer_arch(int total, int* hidden, int* layers, int* actions, in
             *hidden = H;
             *layers = (int)L;
             *actions = NETHACK_NUM_ACTIONS;
-            *ide = e;
         }
     }
     return best_l == 1 << 30 ? -1 : 0;
@@ -199,46 +274,58 @@ static int demo_infer_arch(int total, int* hidden, int* layers, int* actions, in
 static NethackNet* make_nethack_net(Weights* w) {
     NethackNet* net = (NethackNet*)calloc(1, sizeof(NethackNet));
     if (demo_infer_arch(w->size - 7, &net->hidden_size, &net->num_layers,
-                        &net->num_actions, &net->ide) != 0) {
+                        &net->num_actions) != 0) {
         fprintf(stderr, "nethack demo: cannot infer arch from %d floats — "
                 "checkpoint is not a nethack policy with %d actions?\n",
                 w->size - 7, NETHACK_NUM_ACTIONS);
         exit(1);
     }
-    net->concat_dim = DEMO_IDE_CONCAT_OFF + (net->ide ? DEMO_IDE_DIM : 0);
-    fprintf(stderr, "nethack demo: hidden=%d layers=%d actions=%d ide=%d (%d floats)\n",
-            net->hidden_size, net->num_layers, net->num_actions, net->ide, w->size - 7);
+    fprintf(stderr, "nethack demo: hidden=%d layers=%d actions=%d (%d floats)\n",
+            net->hidden_size, net->num_layers, net->num_actions, w->size - 7);
     net->hidden = (float*)calloc(net->hidden_size, sizeof(float));
     net->embed = get_weights_aligned(w, DEMO_VOCAB * DEMO_EMBED);
     net->ekind_w = get_weights_aligned(w, NH_GM_NKIND * DEMO_EMBED);
     net->esub_w = get_weights_aligned(w, NH_GM_NSUB * DEMO_EMBED);
-    net->loc_w = get_weights_aligned(w, DEMO_LOC_HID * DEMO_LOC_IN);
-    net->loc_b = get_weights_aligned(w, DEMO_LOC_HID);
-    net->g1_w = get_weights_aligned(w, DEMO_P1 * DEMO_GLB_IN);
-    net->g1_xy = get_weights_aligned(w, DEMO_P1 * 2);
-    net->g1_b = get_weights_aligned(w, DEMO_P1);
-    net->g2_w = get_weights_aligned(w, DEMO_GLB_HID * DEMO_P1);
-    net->g2_b = get_weights_aligned(w, DEMO_GLB_HID);
+    net->loc_w = get_weights_aligned(w, DEMO_LOC_H1 * DEMO_LOC_IN);
+    net->loc_b = get_weights_aligned(w, DEMO_LOC_H1);
+    net->loc2_w = get_weights_aligned(w, DEMO_LOC_HID * DEMO_LOC_H1);
+    net->loc2_b = get_weights_aligned(w, DEMO_LOC_HID);
+    net->iaq_w = get_weights_aligned(w, DEMO_IVA_M * DEMO_INV_HID);
+    net->terr1_w = get_weights_aligned(w, DEMO_TERR_H1 * DEMO_TERRF);
+    net->terr1_b = get_weights_aligned(w, DEMO_TERR_H1);
+    net->terr2_w = get_weights_aligned(w, DEMO_GLB_HID * DEMO_TERR_H1);
+    net->terr2_b = get_weights_aligned(w, DEMO_GLB_HID);
+    net->locc_w = get_weights_aligned(w, DEMO_LOCC_CLASSES * DEMO_LOCC_DIM);
     net->inv1_w = get_weights_aligned(w, DEMO_INV_HID * DEMO_EMBED);
     net->inv1_b = get_weights_aligned(w, DEMO_INV_HID);
     net->inv1s_w = get_weights_aligned(w, DEMO_INV_HID * DEMO_SFEAT);
     net->invt_w = get_weights_aligned(w, DEMO_INV_HID * DEMO_EMBED);
-    net->inv2_w = get_weights_aligned(w, DEMO_INV_POOL * DEMO_INV_HID);
-    net->inv2_b = get_weights_aligned(w, DEMO_INV_POOL);
-    net->bl_w = get_weights_aligned(w, 64 * DEMO_BL_FEAT);
-    net->bl_b = get_weights_aligned(w, 64);
-    net->proj_w = get_weights_aligned(w, net->hidden_size * net->concat_dim);
+    net->isum_w = get_weights_aligned(w, DEMO_ISUM_DIM * DEMO_INV_HID);
+    net->isum_b = get_weights_aligned(w, DEMO_ISUM_DIM);
+    net->bl_w = get_weights_aligned(w, DEMO_BLH * DEMO_BL_FEAT);
+    net->bl_b = get_weights_aligned(w, DEMO_BLH);
+    net->proj_w = get_weights_aligned(w, net->hidden_size * DEMO_CONCAT);
     net->proj_b = get_weights_aligned(w, net->hidden_size);
     net->msg_w = get_weights_aligned(w, DEMO_MSG_VOCAB * DEMO_MSG_HID);
     net->spk_w = get_weights_aligned(w, DEMO_SPKEY * DEMO_SPIN);
-    net->spk2_w = get_weights_aligned(w, DEMO_SPKEY * DEMO_SPKEY);
-    net->spk2_b = get_weights_aligned(w, DEMO_SPKEY);
-    if (net->ide) {
-        net->ide_role_w = get_weights_aligned(w, 13 * DEMO_IDE_ROLE);
-        net->ide_race_w = get_weights_aligned(w, 5 * DEMO_IDE_RACE);
-        net->ide_gend_w = get_weights_aligned(w, 2 * DEMO_IDE_GEND);
-        net->ide_algn_w = get_weights_aligned(w, 3 * DEMO_IDE_ALGN);
-    }
+    net->ss_w = get_weights_aligned(w, DEMO_SP2_DIM * DEMO_SPIN);
+    net->ss_b = get_weights_aligned(w, DEMO_SP2_DIM);
+    net->ide_role_w = get_weights_aligned(w, 13 * DEMO_IDE_ROLE);
+    net->ide_race_w = get_weights_aligned(w, 5 * DEMO_IDE_RACE);
+    net->ide_gend_w = get_weights_aligned(w, 2 * DEMO_IDE_GEND);
+    net->ide_algn_w = get_weights_aligned(w, 3 * DEMO_IDE_ALGN);
+    net->lm1_w = get_weights_aligned(w, DEMO_LAB_HID * DEMO_LAB_IN);
+    net->lm1_b = get_weights_aligned(w, DEMO_LAB_HID);
+    net->lm2_w = get_weights_aligned(w, DEMO_LAB_HID * DEMO_LAB_HID);
+    net->lm2_b = get_weights_aligned(w, DEMO_LAB_HID);
+    net->lma_w = get_weights_aligned(w, DEMO_LAB_HEADS * DEMO_LAB_IN);
+    net->lma_b = get_weights_aligned(w, DEMO_LAB_HEADS);
+    net->li1_w = get_weights_aligned(w, DEMO_LAB_HID * DEMO_LAB_IN);
+    net->li1_b = get_weights_aligned(w, DEMO_LAB_HID);
+    net->li2_w = get_weights_aligned(w, DEMO_LAB_HID * DEMO_LAB_HID);
+    net->li2_b = get_weights_aligned(w, DEMO_LAB_HID);
+    net->lia_w = get_weights_aligned(w, DEMO_LAB_HEADS * DEMO_LAB_IN);
+    net->lia_b = get_weights_aligned(w, DEMO_LAB_HEADS);
     net->dec_lin = get_weights_aligned(w, DEMO_DEC_PAD * net->hidden_size);
     net->dec_q = get_weights_aligned(w, DEMO_QDIM * net->hidden_size);
     net->dec_k = get_weights_aligned(w, DEMO_INV_HID * DEMO_INV_HID);
@@ -303,47 +390,104 @@ static int demo_glyph_at(const int16_t* glyphs, int r, int c) {
     return g;
 }
 
+// glyph -> 9-class local id and glyph -> 17-class terrain id (mirrors nh_v5_luts_init)
+static unsigned char demo_locc_lut[DEMO_VOCAB];
+static unsigned char demo_terrc_lut[DEMO_VOCAB];
+static void demo_v5_luts_init(void) {
+    static int done = 0;
+    if (done) return;
+    done = 1;
+    for (int g = 0; g < DEMO_VOCAB; g++) {
+        int ci = (g >= 2359 && g < 2359 + 96) ? g - 2359 : -1;
+        unsigned char lc = 7; // other
+        if ((ci >= 1 && ci <= 11) || ci == 17 || ci == 18) lc = 0;      // wall/bars/tree
+        else if (ci >= 19 && ci <= 22) lc = 1;                          // floor/corridor
+        else if (ci >= 12 && ci <= 16) lc = 2;                          // door
+        else if (ci == 32 || ci == 34 || ci == 41
+                 || (ci >= 42 && ci <= 64)) lc = 3;                     // hazard terrain
+        else if (g >= 0 && g < 1144) lc = 4;                            // monster
+        else if ((g >= 1906 && g < 2359) || (g >= 1144 && g < 1525)) lc = 5; // item
+        else if (ci == 0) lc = 6;                                       // unexplored
+        if (g == NETHACK_PAD_GLYPH) lc = 8;                             // off-map
+        demo_locc_lut[g] = lc;
+        unsigned char tc = 255; // not counted
+        if (ci == 23 || ci == 25) tc = 0;                               // upstairs
+        else if (ci == 24 || ci == 26) tc = 1;                          // downstairs
+        else if (ci == 27) tc = 2;                                      // altar
+        else if (ci == 31) tc = 3;                                      // fountain
+        else if (ci == 30) tc = 4;                                      // sink
+        else if (ci == 29) tc = 5;                                      // throne
+        else if (ci >= 12 && ci <= 14) tc = 6;                          // open door
+        else if (ci == 15 || ci == 16) tc = 7;                          // closed door
+        else if (ci >= 42 && ci <= 64) tc = 8;                          // trap
+        else if (ci == 28) tc = 9;                                      // grave
+        else if (ci >= 1 && ci <= 11) tc = 10;                          // wall
+        else if (ci == 17 || ci == 18) tc = 11;                         // bars/tree
+        else if (ci == 0) tc = 12;                                      // stone
+        else if (ci >= 19 && ci <= 22) tc = 13;                         // floor
+        else if ((g >= 1906 && g < 2359) || (g >= 1144 && g < 1525)) tc = 14; // item
+        else if (g >= 0 && g < 1144) tc = (g % 381 == 267) ? 16 : 15;   // shk / monster
+        demo_terrc_lut[g] = tc;
+    }
+}
+
 static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // fills decoder->output
+    demo_v5_luts_init();
     const int16_t* glyphs = (const int16_t*)(obs + NETHACK_OFF_GLYPHS);
     const unsigned char* bl = obs + NETHACK_OFF_BLSTATS;
 
-    // local view: per-cell embeds of the egocentric crop, flattened
+    // local view: 9x9 semantic-class crop (LUT), center forced to class 7
     int hx = demo_i32(bl), hy = demo_i32(bl + 4);
     int half = NETHACK_CROP / 2;
     for (int p = 0; p < NETHACK_CROP_GRID; p++) {
         int g = demo_glyph_at(glyphs, hy - half + p / NETHACK_CROP,
                               hx - half + p % NETHACK_CROP);
-        memcpy(net->x + p * DEMO_EMBED, net->e_eff + g * DEMO_EMBED,
-               DEMO_EMBED * sizeof(float));
+        int cls = p == NETHACK_CROP_GRID / 2 ? 7 : demo_locc_lut[g];
+        memcpy(net->x + p * DEMO_LOCC_DIM, net->locc_w + cls * DEMO_LOCC_DIM,
+               DEMO_LOCC_DIM * sizeof(float));
     }
-    _linear(net->x, net->loc_w, net->loc_b, net->concat, 1, DEMO_LOC_IN, DEMO_LOC_HID);
+    _linear(net->x, net->loc_w, net->loc_b, net->loc_h1, 1, DEMO_LOC_IN, DEMO_LOC_H1);
+    _relu(net->loc_h1, net->loc_h1, DEMO_LOC_H1);
+    _linear(net->loc_h1, net->loc2_w, net->loc2_b, net->concat, 1, DEMO_LOC_H1, DEMO_LOC_HID);
     _relu(net->concat, net->concat, DEMO_LOC_HID);
 
-    // global view: per patch embed+flatten + normalized hero (dx,dy) -> 16 ->
-    // 128, elementwise max over the 80 tokens (off-map cells of ragged edge
-    // patches read the pad glyph)
-    float* glb = net->concat + DEMO_LOC_HID;
-    for (int o = 0; o < DEMO_GLB_HID; o++) glb[o] = -1e30f;
-    for (int tk = 0; tk < DEMO_TOK; tk++) {
-        int r0 = (tk / DEMO_PX) * DEMO_PH, c0 = (tk % DEMO_PX) * DEMO_PW;
-        for (int pos = 0; pos < DEMO_PCELLS; pos++) {
-            int g = demo_glyph_at(glyphs, r0 + pos / DEMO_PW, c0 + pos % DEMO_PW);
-            memcpy(net->px + pos * DEMO_EMBED, net->e_eff + g * DEMO_EMBED,
-                   DEMO_EMBED * sizeof(float));
+    // terrain branch: landmark table + sector radar (mirrors nh_terr_feat_kernel)
+    {
+        float* lm = net->terr_tf;           // 12 landmarks x [seen, dx, dy, dist]
+        float* sec = net->terr_tf + 48;     // 8 sectors x 4 bands x 17 classes
+        for (int i = 0; i < DEMO_TERRF; i++) net->terr_tf[i] = 0.0f;
+        int lmd[12];
+        for (int i = 0; i < 12; i++) lmd[i] = 1 << 30;
+        int hcell = hy * NH_COLS + hx;
+        for (int cell = 0; cell < NH_GRID; cell++) {
+            int g = glyphs[cell];
+            if (g < 0) g = 0;
+            if (g >= DEMO_VOCAB) g = DEMO_VOCAB - 1;
+            int tc = cell == hcell ? 13 : demo_terrc_lut[g];
+            if (tc == 255) continue;
+            int dy = cell / NH_COLS - hy, dx = cell % NH_COLS - hx;
+            int ady = dy < 0 ? -dy : dy, adx = dx < 0 ? -dx : dx;
+            int cheb = adx > ady ? adx : ady;
+            if (tc < 12 && cheb < lmd[tc]) {
+                lmd[tc] = cheb;
+                lm[tc * 4 + 0] = 1.0f;
+                lm[tc * 4 + 1] = (float)dx * (1.0f / 78.0f);
+                lm[tc * 4 + 2] = (float)dy * (1.0f / 20.0f);
+                lm[tc * 4 + 3] = (float)(cheb < 30 ? cheb : 30) * (1.0f / 30.0f);
+            }
+            float ang = atan2f((float)dy, (float)dx) + 3.14159265358979f;
+            int sct = ((int)(ang / 0.78539816339745f)) & 7;
+            int band = cheb < 3 ? 0 : cheb < 7 ? 1 : cheb < 15 ? 2 : 3;
+            sec[(sct * 4 + band) * 17 + tc] += 1.0f;
         }
-        float dx = (c0 + 0.5f * (DEMO_PW - 1) - hx) / (float)NH_COLS;
-        float dy = (r0 + 0.5f * (DEMO_PH - 1) - hy) / (float)NH_ROWS;
-        _linear(net->px, net->g1_w, net->g1_b, net->t16, 1, DEMO_GLB_IN, DEMO_P1);
-        for (int k = 0; k < DEMO_P1; k++) {
-            net->t16[k] += dx * net->g1_xy[k * 2] + dy * net->g1_xy[k * 2 + 1];
-            if (net->t16[k] < 0.f) net->t16[k] = 0.f;
-        }
-        _linear(net->t16, net->g2_w, net->g2_b, net->t128, 1, DEMO_P1, DEMO_GLB_HID);
-        for (int o = 0; o < DEMO_GLB_HID; o++)
-            if (net->t128[o] > glb[o]) glb[o] = net->t128[o];
+        float inv_log = 1.0f / logf(1660.0f);
+        for (int i = 0; i < 8 * 4 * 17; i++) sec[i] = log1pf(sec[i]) * inv_log;
+        _linear(net->terr_tf, net->terr1_w, net->terr1_b, net->terr_h, 1, DEMO_TERRF, DEMO_TERR_H1);
+        _relu(net->terr_h, net->terr_h, DEMO_TERR_H1);
+        float* glb = net->concat + DEMO_LOC_HID;
+        _linear(net->terr_h, net->terr2_w, net->terr2_b, glb, 1, DEMO_TERR_H1, DEMO_GLB_HID);
+        _relu(glb, glb, DEMO_GLB_HID);
     }
-    _relu(glb, glb, DEMO_GLB_HID);
-
     // inventory entities: per-slot embed -> shared 32->32 linear+relu (kept
     // as the pointer decoder's keys), then 32 -> 128 with max over slots for
     // the trunk (matches the CUDA fused pool)
@@ -359,8 +503,10 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
         for (int c = 0; c < 4; c++) sf[c] = st[0] == c ? 1.0f : 0.0f;
         int spe_known = st[1] != -128;
         sf[4] = (float)spe_known;
-        sf[5] = spe_known ? (float)st[1] * 0.1f : 0.0f;
-        sf[6] = log1pf(fmaxf((float)st[2], 0.0f)) * 0.5f;
+        int spe = st[1] < -7 ? -7 : (st[1] > 7 ? 7 : st[1]);
+        sf[5] = spe_known ? (float)spe * (1.0f / 7.0f) : 0.0f;
+        int quan = st[2] < 0 ? 0 : (st[2] > 30 ? 30 : st[2]);
+        sf[6] = (float)quan * (1.0f / 30.0f);
         sf[7] = (float)st[3] * (1.0f / 3.0f);
         sf[8] = (float)st[4] * (1.0f / 3.0f);
         for (int c = 0; c < 7; c++) sf[9 + c] = (float)((st[5] >> c) & 1);
@@ -368,6 +514,8 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
         int ot = inv[slot] - NH_GLYPH_OBJ_OFF; // armor slot category one-hot
         int cat = (ot >= 0 && ot < NH_NUM_OBJECTS) ? nh_obj_armcat[ot] : -1;
         for (int c = 0; c < 7; c++) sf[17 + c] = cat == c ? 1.0f : 0.0f;
+        net->wld[slot] = sf[10];
+        net->occ[slot] = inv[slot] != NETHACK_PAD_GLYPH;
         float* h32 = net->slots + slot * DEMO_INV_HID;
         _linear(net->e_eff + g * DEMO_EMBED, net->inv1_w, net->inv1_b,
                 h32, 1, DEMO_EMBED, DEMO_INV_HID);
@@ -382,21 +530,127 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
                             * net->e_eff[gt * DEMO_EMBED + d];
         _relu(h32, h32, DEMO_INV_HID);
     }
-    float* invp = net->concat + DEMO_LOC_HID + DEMO_GLB_HID;
-    for (int o = 0; o < DEMO_INV_POOL; o++) {
-        float best = -1e30f;
+    { // wield readout + masked-sum channel (mirrors nh_wld_kernel + nh_isum_*)
+        float* wdst = net->concat + DEMO_WLD_CONCAT_OFF;
+        float* idst = net->concat + DEMO_ISUM_CONCAT_OFF;
+        for (int k = 0; k < DEMO_INV_HID; k++) wdst[k] = 0.0f;
+        for (int d = 0; d < DEMO_ISUM_DIM; d++) idst[d] = 0.0f;
         for (int slot = 0; slot < NETHACK_INV_SLOTS; slot++) {
-            float v = 0.0f;
-            for (int k = 0; k < DEMO_INV_HID; k++)
-                v += net->inv2_w[o * DEMO_INV_HID + k] * net->slots[slot * DEMO_INV_HID + k];
-            if (v > best) best = v;
+            const float* h32 = net->slots + slot * DEMO_INV_HID;
+            if (net->wld[slot] > 0.0f)
+                for (int k = 0; k < DEMO_INV_HID; k++) wdst[k] += h32[k];
+            if (!net->occ[slot]) continue;
+            for (int d = 0; d < DEMO_ISUM_DIM; d++) {
+                float acc = net->isum_b[d];
+                for (int k = 0; k < DEMO_INV_HID; k++)
+                    acc += net->isum_w[d * DEMO_INV_HID + k] * h32[k];
+                if (acc > 0.0f) idst[d] += acc;
+            }
         }
-        invp[o] = fmaxf(best + net->inv2_b[o], 0.0f);
+        for (int d = 0; d < DEMO_ISUM_DIM; d++) idst[d] *= 0.2f;
+    }
+    { // attention tail over the 55 post-relu slot reps (mirrors nh_iva_kernel)
+        float* dst = net->concat + DEMO_IVA_CONCAT_OFF;
+        for (int m = 0; m < DEMO_IVA_M; m++) {
+            float sc[NETHACK_INV_SLOTS], mx = -1e30f;
+            for (int s = 0; s < NETHACK_INV_SLOTS; s++) { float d = 0.f;
+                for (int k = 0; k < DEMO_INV_HID; k++)
+                    d += net->iaq_w[m * DEMO_INV_HID + k] * net->slots[s * DEMO_INV_HID + k];
+                sc[s] = d; if (d > mx) mx = d; }
+            float z = 0.f;
+            for (int s = 0; s < NETHACK_INV_SLOTS; s++) { sc[s] = expf(sc[s] - mx); z += sc[s]; }
+            for (int k = 0; k < DEMO_INV_HID; k++) { float acc = 0.f;
+                for (int s = 0; s < NETHACK_INV_SLOTS; s++)
+                    acc += (sc[s] / z) * net->slots[s * DEMO_INV_HID + k];
+                dst[m * DEMO_INV_HID + k] = acc; }
+        }
+    }
+    { // typed token streams (mirrors nh_lab_tok_kernel + nh_lab_pool_kernel)
+        for (int is_mon = 1; is_mon >= 0; is_mon--) {
+            int list_off = is_mon ? NETHACK_OFF_TOKM : NETHACK_OFF_TOKI;
+            const float *w1 = is_mon ? net->lm1_w : net->li1_w;
+            const float *b1 = is_mon ? net->lm1_b : net->li1_b;
+            const float *w2 = is_mon ? net->lm2_w : net->li2_w;
+            const float *b2 = is_mon ? net->lm2_b : net->li2_b;
+            const float *aw = is_mon ? net->lma_w : net->lia_w;
+            const float *ab = is_mon ? net->lma_b : net->lia_b;
+            float* dst = net->concat + (is_mon ? DEMO_LABM_CONCAT_OFF : DEMO_LABI_CONCAT_OFF);
+            float tok[DEMO_LABK][DEMO_LAB_IN], h2[DEMO_LABK][DEMO_LAB_HID];
+            int valid[DEMO_LABK];
+            for (int k = 0; k < DEMO_LABK; k++) {
+                const unsigned char* e = obs + list_off + k * NETHACK_V3_MONF;
+                int row = e[0] | (e[1] << 8);
+                int dx = (signed char)e[2], dy = (signed char)e[3];
+                int f4 = e[4], f5 = e[5], f6 = e[6];
+                int g = row <= 0 ? -1 : is_mon ? row - 1
+                      : (row < 454 ? 1906 + row - 1 : 1144 + row - 454);
+                valid[k] = g >= 0;
+                float* o = tok[k];
+                for (int d = 0; d < DEMO_LAB_IN; d++) o[d] = 0.f;
+                if (g >= 0) {
+                    memcpy(o, net->e_eff + (size_t)g * DEMO_EMBED, DEMO_EMBED * sizeof(float));
+                    int adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+                    int cheb = adx > ady ? adx : ady;
+                    float fdx = dx * (1.0f/40.0f), fdy = dy * (1.0f/11.0f);
+                    o[32] = fdx < -1.f ? -1.f : (fdx > 1.f ? 1.f : fdx);
+                    o[33] = fdy < -1.f ? -1.f : (fdy > 1.f ? 1.f : fdy);
+                    o[34] = (cheb < 15 ? cheb : 15) * (1.0f/15.0f);
+                    o[35] = k * (1.0f/15.0f);
+                    if (is_mon) {
+                        o[36] = (f4 & 1) ? 1.f : 0.f;
+                        o[37] = (f4 & 8) ? 1.f : 0.f;
+                        o[38] = (f4 & 4) ? 1.f : 0.f;
+                        o[39] = cheb <= 1 ? 1.f : 0.f;
+                        float df = f5 * 0.04f; o[40] = df > 1.f ? 1.f : df;
+                        float sp = f6 * (1.0f/24.0f); o[41] = sp > 1.f ? 1.f : sp;
+                        int hb = NH_MON_HAZ[(row - 1) % NH_MONS_STATIC_N];
+                        for (int hz = 0; hz < 4; hz++) o[42 + hz] = (float)((hb >> hz) & 1);
+                    } else {
+                        o[36] = (f5 & 1) ? 1.f : 0.f;
+                        o[37] = (f5 & 2) ? 1.f : 0.f;
+                    }
+                }
+                float h1[DEMO_LAB_HID];
+                for (int j = 0; j < DEMO_LAB_HID; j++) {
+                    float acc = b1[j];
+                    for (int c = 0; c < DEMO_LAB_IN; c++) acc += w1[j * DEMO_LAB_IN + c] * o[c];
+                    h1[j] = acc > 0.f ? acc : 0.f;
+                }
+                for (int j = 0; j < DEMO_LAB_HID; j++) {
+                    float acc = b2[j];
+                    for (int c = 0; c < DEMO_LAB_HID; c++) acc += w2[j * DEMO_LAB_HID + c] * h1[c];
+                    h2[k][j] = acc > 0.f ? acc : 0.f;
+                }
+            }
+            const int D = DEMO_LAB_HID / DEMO_LAB_HEADS;
+            for (int hh = 0; hh < DEMO_LAB_HEADS; hh++) {
+                float sc[DEMO_LABK], mx = -1e30f;
+                int any = 0;
+                for (int k = 0; k < DEMO_LABK; k++) {
+                    if (!valid[k]) { sc[k] = -1e30f; continue; }
+                    any = 1;
+                    float s = ab[hh];
+                    for (int c = 0; c < DEMO_LAB_IN; c++) s += aw[hh * DEMO_LAB_IN + c] * tok[k][c];
+                    sc[k] = s; if (s > mx) mx = s;
+                }
+                float z = 0.f;
+                for (int k = 0; k < DEMO_LABK; k++) {
+                    sc[k] = any && sc[k] > -1e29f ? expf(sc[k] - mx) : 0.f;
+                    z += sc[k];
+                }
+                for (int d = 0; d < D; d++) {
+                    float acc = 0.f;
+                    for (int k = 0; k < DEMO_LABK; k++)
+                        if (sc[k] > 0.f) acc += (sc[k] / z) * h2[k][hh * D + d];
+                    dst[hh * D + d] = acc;
+                }
+            }
+        }
     }
 
     // blstats+extra features (25 scalars, hunger 7, cond bits 13, prev verb
     // one-hot, inv class counts, hp/ene frac, dnum one-hot, engraving bits)
-    float* f = net->concat + DEMO_LOC_HID + DEMO_GLB_HID + DEMO_INV_POOL + 64;
+    float* f = net->concat + DEMO_LOC_HID + DEMO_GLB_HID + DEMO_BLH;
     int j = 0;
     for (int i = 0; i < 27; i++) {
         if (i == 21 || i == 25) continue; // hunger, condition: expanded below
@@ -429,13 +683,14 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
       float d = (float)demo_i32(ex + 4*(NETHACK_EXTRA_WEIGHT+0)) * 0.01f - 1.0f;
       f[j++] = d / (1.0f + fabsf(d));
       f[j++] = (float)demo_i32(ex + 4*(NETHACK_EXTRA_WEIGHT+1)) * 0.001f; }
-    for (int k = 0; k < 20; k++) // role/race/gender one-hots; zeroed in the ide era
-        f[j++] = net->ide ? 0.f : (float)demo_i32(ex + 4*(NETHACK_EXTRA_ROLEOH + k));
+    for (int k = 0; k < 20; k++) // role/race/gender one-hots; dead under the embed channel
+        f[j++] = 0.f;
+    for (int k = 0; k < 8; k++) f[j++] = (float)((demo_i32(ex + 4*NETHACK_EXTRA_INTRINS) >> k) & 1);
     for (int k = 0; k < DEMO_BL_FEAT; k++) f[k] = fminf(fmaxf(f[k], -1.f), 1.f);
 
-    float* blout = net->concat + DEMO_LOC_HID + DEMO_GLB_HID + DEMO_INV_POOL;
-    _linear(f, net->bl_w, net->bl_b, blout, 1, DEMO_BL_FEAT, 64);
-    _relu(blout, blout, 64);
+    float* blout = net->concat + DEMO_LOC_HID + DEMO_GLB_HID;
+    _linear(f, net->bl_w, net->bl_b, blout, 1, DEMO_BL_FEAT, DEMO_BLH);
+    _relu(blout, blout, DEMO_BLH);
 
     demo_msg_pool(net, obs, net->concat + DEMO_MSG_CONCAT_OFF);
 
@@ -464,19 +719,42 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
           }
       }
       float* sp = net->concat + DEMO_SPELL_CONCAT_OFF;
-      for (int d = 0; d < DEMO_SPKEY; d++) {
-          float best = -1e30f;
-          for (int s = 0; s < NETHACK_SPELL_SLOTS; s++) {
-              float acc = 0.f;
-              for (int k = 0; k < DEMO_SPKEY; k++)
-                  acc += net->spk2_w[d * DEMO_SPKEY + k] * net->spkeys[s * DEMO_SPKEY + k];
-              if (acc > best) best = acc;
+      for (int d = 0; d < DEMO_SP2_DIM; d++) sp[d] = 0.0f;
+      int mf = 999, ml = 0, nn = 0; long mr = 99999;
+      for (int s = 0; s < NETHACK_SPELL_SLOTS; s++) {
+          const unsigned char* q = obs + NETHACK_OFF_EXTRA
+                                 + 4*(NETHACK_EXTRA_SPELL + 1 + 4*s);
+          int sid = demo_i32(q);
+          if (sid <= 0) continue;
+          nn++;
+          int lv = demo_i32(q + 4), fl = demo_i32(q + 8), kn = demo_i32(q + 12);
+          if (fl < mf) mf = fl;
+          if (lv > ml) ml = lv;
+          if (kn < mr) mr = kn;
+          float in[DEMO_SPIN];
+          int g = sid + 1906; if (g > 5975) g = 5975;
+          for (int d = 0; d < DEMO_EMBED; d++) in[d] = net->e_eff[g * DEMO_EMBED + d];
+          in[DEMO_EMBED + 0] = 1.f;
+          float lvf = (float)lv * 0.142857f, flf = (float)fl * 0.01f, knf = (float)kn * 0.00005f;
+          in[DEMO_EMBED + 1] = lvf > 1.f ? 1.f : lvf;
+          in[DEMO_EMBED + 2] = flf > 1.f ? 1.f : flf;
+          in[DEMO_EMBED + 3] = knf > 1.f ? 1.f : knf;
+          for (int d = 0; d < DEMO_SP2_DIM; d++) {
+              float acc = net->ss_b[d];
+              for (int c = 0; c < DEMO_SPIN; c++) acc += net->ss_w[d * DEMO_SPIN + c] * in[c];
+              if (acc > 0.f) sp[d] += acc;
           }
-          float v = best + net->spk2_b[d];
-          sp[d] = v > 0.f ? v : 0.f;
       }
+      for (int d = 0; d < DEMO_SP2_DIM; d++) sp[d] *= 0.2f;
+      if (nn == 0) { mf = 100; ml = 0; mr = 20000; } // empty book -> [1,0,0,1]
+      float e0 = (float)mf * 0.01f, e1 = (float)ml * (1.0f/7.0f);
+      float e2 = (float)(nn < 8 ? nn : 8) * 0.125f, e3 = (float)mr * 0.00005f;
+      sp[DEMO_SP2_DIM + 0] = e0 < 0.f ? 0.f : (e0 > 1.f ? 1.f : e0);
+      sp[DEMO_SP2_DIM + 1] = e1 < 0.f ? 0.f : (e1 > 1.f ? 1.f : e1);
+      sp[DEMO_SP2_DIM + 2] = e2 < 0.f ? 0.f : (e2 > 1.f ? 1.f : e2);
+      sp[DEMO_SP2_DIM + 3] = e3 < 0.f ? 0.f : (e3 > 1.f ? 1.f : e3);
     }
-    if (net->ide) { // identity table tail; mirrors nh_idemb_kernel (last set bit wins)
+    { // identity table tail; mirrors nh_idemb_kernel (last set bit wins)
       float* ide = net->concat + DEMO_IDE_CONCAT_OFF;
       int r = 0, rc = 0, g = 0;
       for (int k = 0; k < 13; k++) if (demo_i32(ex + 4*(NETHACK_EXTRA_ROLEOH + k))) r = k;
@@ -489,7 +767,7 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
       for (int d = 0; d < DEMO_IDE_GEND; d++) *ide++ = net->ide_gend_w[g * DEMO_IDE_GEND + d];
       for (int d = 0; d < DEMO_IDE_ALGN; d++) *ide++ = net->ide_algn_w[al * DEMO_IDE_ALGN + d];
     }
-    _linear(net->concat, net->proj_w, net->proj_b, net->hidden, 1, net->concat_dim, net->hidden_size);
+    _linear(net->concat, net->proj_w, net->proj_b, net->hidden, 1, DEMO_CONCAT, net->hidden_size);
     _relu(net->hidden, net->hidden, net->hidden_size);
 
     mingru(net->mingru, net->hidden);
@@ -511,6 +789,9 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
         for (int k = 0; k < H; k++) acc += net->dec_q[r * H + k] * hs[k];
         q[r] = acc;
     }
+    // NH_DEC_COS=1: legacy full-cosine slot logits (pre-2026-08-25 checkpoints)
+    static int dec_cos = -1;
+    if (dec_cos < 0) { const char* e = getenv("NH_DEC_COS"); dec_cos = e && e[0] && e[0] != '0'; }
     float kmat[DEMO_INV_FLAT], kn[NETHACK_INV_SLOTS];
     for (int i = 0; i < NETHACK_INV_SLOTS; i++) {
         float nk = 0.0f;
@@ -521,7 +802,7 @@ static int nethack_net_forward(NethackNet* net, const unsigned char* obs) { // f
             kmat[i * DEMO_INV_HID + r] = acc;
             nk += acc * acc;
         }
-        kn[i] = sqrtf(nk) + 1e-6f;
+        kn[i] = dec_cos ? sqrtf(nk) + 1e-6f : 1.0f;
     }
     for (int a = 0; a < NETHACK_NUM_ACTIONS; a++) net->logits[a] = tmp[a];
     for (int h = 0; h < DEMO_PTR_HEADS; h++) {
@@ -571,6 +852,7 @@ static void demo_restore_term(void) {
 }
 
 static void demo_on_signal(int sig) {
+    (void)sig;
     demo_restore_term();
     _exit(128 + sig);
 }
@@ -685,7 +967,7 @@ static void demo_step_once(NethackNet* net, Nethack* env, float* acts_f,
     nethack_net_forward(net, env->agents[0].observations);
     for (int i = 0; i < DEMO_OD; i++)
         if (!env->action_mask[i]) net->logits[i] = -1e9f;
-    multidiscrete(net->md, net->logits, acts_f, 0, NULL);
+    multidiscrete(net->md, net->logits, acts_f, 0);
     for (int h = 0; h < DEMO_NUM_HEADS; h++) env->agents[0].actions[h] = acts_f[h];
     puf_step(env);
     if (env->agents[0].terminals[0] > 0.5f) {

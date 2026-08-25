@@ -78,8 +78,22 @@ static const signed char nh_obj_armcat[NH_NUM_OBJECTS] = {
 // encumbrance percent (unclipped past 100) + raw carry capacity
 #define NETHACK_SPELL_SLOTS 8
 #define NETHACK_OFF_EXTRA (NETHACK_OFF_BLSTATS + NLE_BLSTATS_SIZE * 4)
-#define NETHACK_EXTRA_INTS (2 + NETHACK_NUM_OCLASSES + 2 + 1 + 4 * NETHACK_SPELL_SLOTS + 2 + 13 + 5 + 2)
+// intrinsics: 8 player-knowable intrinsic bits (poison/fire/cold/sleep/shock
+// res, telepathy, see-invis, fast) -- 7% of deaths are poison instadeath at
+// full HP and the policy has no persistent representation of resistance
+// typed token streams (encoder side nethack.cu); implies
+// the lean token lists.
+// flag, default off since the aux-heads score verdict).
+// aux target count: 10 = original probe set, 26 = mega-spec (NH_LAB)
+#define NETHACK_EXTRA_INTS (2 + NETHACK_NUM_OCLASSES + 2 + 1 + 4 * NETHACK_SPELL_SLOTS + 2 + 13 + 5 + 2 \
+                            + 1)
 #define NETHACK_EXTRA_ROLEOH (2 + NETHACK_NUM_OCLASSES + 2 + 1 + 4 * NETHACK_SPELL_SLOTS + 2)
+#define NETHACK_EXTRA_INTRINS (NETHACK_EXTRA_ROLEOH + 20)
+// threat block: [dist, bearing, adj_cnt, near3_cnt, vis_cnt, diff, speed]
+#define NETHACK_EXTRA_THREAT (NETHACK_EXTRA_INTRINS + 1)
+// aux supervised targets (labels for aux heads; NEVER featurized):
+// [ds_seen, ds_dx, ds_dy, nh_dist, nh_dx, nh_dy, nh_count, n_items,
+//  has_food, wield_class]
 #define NETHACK_EXTRA_SHOP (2 + NETHACK_NUM_OCLASSES)
 #define NETHACK_EXTRA_SPELL (NETHACK_EXTRA_SHOP + 2)
 #define NETHACK_EXTRA_WEIGHT (NETHACK_EXTRA_SPELL + 1 + 4 * NETHACK_SPELL_SLOTS)
@@ -95,7 +109,38 @@ static const signed char nh_obj_armcat[NH_NUM_OBJECTS] = {
 // raw topline chars, null-padded; must match NH_MSG_LEN in ocean/nethack/nethack.cu
 #define NETHACK_OFF_MSG (NETHACK_OFF_INVTRUE + NETHACK_INV_SLOTS * 2)
 #define NETHACK_MSG_LEN 128
-#define NETHACK_OBS_SIZE (NETHACK_OFF_MSG + NETHACK_MSG_LEN)
+// v2 split planes: remembered-terrain byte map (0 = never seen, else
+// cmap_index+1) and a K-nearest visible entity list. Player-fair: terrain
+// memory only records cmap glyphs the display has shown; the entity list is a
+// re-indexing of the visible glyph map plus the farlook-public attitude bit.
+#define NETHACK_GLYPH_CMAP_OFF 2359
+#define NETHACK_ENT_K 32
+#define NETHACK_ENT_FIELDS 6 // glyph u16 | dx i8 | dy i8 | flags u8 | pad
+#define NETHACK_OFF_TERR (NETHACK_OFF_MSG + NETHACK_MSG_LEN)
+#define NETHACK_OFF_ENTS (NETHACK_OFF_TERR + NH_GRID)
+// v3 typed-level planes: remembered terrain (as split), remembered floor
+// objects (u16 item-row+1 per cell, 0 = none seen; kept while occluded by a
+// monster, cleared when the bare floor is shown), and two typed K-nearest
+// token lists. Requires NH_THREAT_OBS=1 (set by the build).
+#define NETHACK_GLYPH_PET_OFF 381
+#define NETHACK_GLYPH_DET_OFF 762
+#define NETHACK_GLYPH_BODY_HI (NETHACK_GLYPH_BODY_OFF + NETHACK_NUMMONS)
+// item rows: objects (1906..2358) -> 1..453, bodies (1144..1524) -> 454..834
+#define NETHACK_ITEM_ROWS 840
+#define NETHACK_MON_ROWS 384
+#define NETHACK_V3_K 16
+#define NETHACK_V3_MONF 8  // species u16 | dx i8 | dy i8 | flags u8 | diff u8 | speed u8 | pad
+#define NETHACK_V3_ITEMF 8 // itemrow u16 | dx i8 | dy i8 | oclass u8 | flags u8 | pad | pad
+#define NETHACK_OFF_OBJM (NETHACK_OFF_TERR + NH_GRID)
+#define NETHACK_OFF_VMON (NETHACK_OFF_OBJM + NH_GRID * 2)
+#define NETHACK_OFF_VITEM (NETHACK_OFF_VMON + NETHACK_V3_K * NETHACK_V3_MONF)
+// lean token block (NH_TOK_OBS): the two typed K-nearest lists WITHOUT the
+// dense memory planes (obs H2D dominates rollout; the planes are 5KB/step).
+// terr_mem/obj_mem stay env-internal so item tokens keep occlusion memory.
+#define NETHACK_OFF_TOKM (NETHACK_OFF_MSG + NETHACK_MSG_LEN)
+#define NETHACK_OFF_TOKI (NETHACK_OFF_TOKM + NETHACK_V3_K * NETHACK_V3_MONF)
+#define NETHACK_OBS_SIZE (NETHACK_OFF_MSG + NETHACK_MSG_LEN \
+                          + NETHACK_V3_K * (NETHACK_V3_MONF + NETHACK_V3_ITEMF))
 
 // engine state
 
@@ -300,6 +345,10 @@ typedef struct Log {
 // per-episode stats; cleared with one memset per reset
 typedef struct Stats {
     long verb_uses[NETHACK_NUM_ACTIONS];
+    long fires;          // THROW of ammo matching the wielded launcher
+    long ammo_hand;      // ammo thrown without matching wielded launcher
+    long nonammo_throws; // daggers etc.
+    long wield_steps[5]; // per-step census: none|launcher|melee|ammo|other
     long valid_moves;
     long illegal_actions;
     long new_tiles;
@@ -308,6 +357,9 @@ typedef struct Stats {
     long burdened_steps;
     int min_ac;
     int last_ac; // AC on the last living obs (death-step blstats are torn down)
+    long last_gold; // gold on the last living obs (same teardown)
+    int last_xlvl; // xp level on the last living obs
+    int last_hp, last_hpmax, last_depth; // vitals on the last living obs
     long floor_eats;
     long reads_scroll;
     long reads_book;
@@ -327,3 +379,69 @@ typedef struct Stats {
     unsigned short visited_key[NETHACK_MAX_DEPTH]; // dnum << 8 | dlevel per slot
     int n_visited_floors;
 } Stats;
+
+// per-species engine-static tables, generated from libnethack mons[]
+// (tools/interp): difficulty, speed, hazard bits by monster number (= glyph).
+#define NH_MONS_STATIC_N 381
+static const unsigned char NH_MON_DIFF[NH_MONS_STATIC_N] = {
+    4, 5, 6, 6, 6, 12, 2, 6, 8, 7, 8, 8, 1, 1, 2, 4, 3, 5, 5, 7,
+    6, 7, 7, 8, 9, 9, 14, 2, 3, 8, 8, 8, 3, 5, 6, 7, 7, 7, 8, 8,
+    8, 11, 2, 4, 5, 6, 8, 13, 19, 3, 3, 4, 5, 7, 7, 5, 6, 8, 1, 2,
+    3, 4, 4, 8, 9, 11, 5, 5, 5, 1, 3, 3, 4, 5, 5, 5, 7, 4, 6, 9,
+    4, 7, 8, 9, 13, 15, 22, 1, 2, 4, 4, 4, 4, 3, 4, 7, 8, 12, 14, 4,
+    6, 6, 6, 7, 9, 4, 6, 7, 9, 9, 10, 6, 9, 10, 17, 1, 9, 5, 7, 11,
+    11, 12, 19, 21, 26, 2, 3, 6, 7, 6, 8, 9, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 20, 20, 20, 20, 20, 20, 20, 20, 20, 9, 10, 10, 10, 10, 1, 2, 2, 2, 2,
+    2, 5, 3, 4, 5, 6, 8, 8, 10, 11, 13, 13, 19, 20, 17, 18, 3, 4, 5, 6,
+    14, 18, 21, 29, 4, 5, 6, 6, 7, 7, 8, 10, 4, 4, 4, 4, 8, 10, 13, 16,
+    7, 9, 11, 4, 6, 8, 12, 9, 8, 14, 3, 6, 7, 8, 9, 10, 9, 12, 12, 13,
+    16, 12, 12, 14, 32, 7, 8, 17, 11, 4, 6, 7, 7, 8, 9, 1, 2, 3, 3, 4,
+    5, 7, 5, 9, 14, 4, 4, 6, 6, 7, 8, 10, 12, 15, 18, 22, 2, 3, 3, 6,
+    12, 6, 7, 8, 11, 11, 11, 15, 14, 14, 13, 15, 30, 8, 10, 13, 12, 14, 8, 12,
+    25, 34, 22, 12, 14, 11, 8, 9, 8, 10, 10, 11, 11, 12, 13, 14, 15, 16, 15, 20,
+    26, 31, 36, 36, 40, 45, 53, 57, 34, 34, 34, 8, 5, 6, 9, 7, 10, 22, 1, 2,
+    3, 4, 6, 7, 7, 12, 1, 12, 12, 12, 12, 12, 12, 11, 12, 12, 12, 12, 12, 12,
+    12, 12, 22, 22, 22, 22, 23, 30, 30, 22, 24, 23, 22, 23, 23, 23, 22, 23, 23, 22,
+    31, 23, 17, 20, 19, 19, 20, 7, 7, 7, 7, 7, 8, 8, 7, 7, 7, 7, 8, 7,
+    8};
+static const unsigned char NH_MON_SPEED[NH_MONS_STATIC_N] = {
+    18, 18, 18, 18, 6, 24, 3, 1, 6, 4, 6, 6, 12, 15, 12, 12, 18, 16, 16, 15,
+    12, 12, 12, 12, 12, 12, 14, 3, 1, 13, 13, 13, 18, 16, 15, 15, 15, 15, 12, 12,
+    10, 15, 9, 6, 9, 6, 6, 12, 12, 3, 12, 12, 3, 15, 13, 0, 0, 3, 6, 6,
+    6, 6, 15, 3, 3, 3, 12, 12, 12, 6, 9, 9, 9, 5, 7, 9, 5, 1, 1, 1,
+    9, 9, 18, 3, 12, 12, 12, 12, 10, 12, 12, 3, 3, 12, 4, 15, 15, 3, 3, 16,
+    24, 24, 24, 20, 24, 1, 20, 20, 20, 22, 22, 3, 3, 3, 9, 12, 18, 15, 15, 8,
+    10, 8, 10, 18, 16, 22, 22, 20, 20, 18, 18, 20, 9, 9, 9, 9, 9, 9, 9, 9,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 12, 36, 12, 6, 6, 1, 0, 0, 0, 0,
+    1, 1, 6, 8, 10, 10, 6, 6, 10, 12, 12, 12, 12, 18, 15, 12, 6, 8, 10, 12,
+    6, 9, 9, 9, 8, 10, 10, 10, 12, 12, 12, 14, 10, 10, 10, 10, 12, 14, 14, 16,
+    10, 12, 14, 1, 3, 6, 6, 12, 18, 12, 8, 15, 15, 3, 15, 18, 12, 10, 12, 14,
+    12, 6, 12, 14, 26, 12, 12, 12, 9, 12, 12, 12, 15, 12, 15, 6, 6, 6, 6, 6,
+    6, 8, 6, 8, 8, 12, 12, 9, 9, 6, 3, 8, 7, 6, 6, 6, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 18, 12, 12, 0, 12, 15, 10, 10, 6, 10, 10, 10, 10,
+    12, 12, 15, 3, 10, 12, 12, 9, 12, 12, 12, 12, 12, 6, 15, 6, 9, 6, 12, 5,
+    3, 18, 9, 3, 15, 9, 12, 15, 12, 12, 12, 12, 3, 12, 12, 9, 10, 3, 6, 6,
+    6, 6, 6, 5, 9, 12, 0, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12};
+// hazard bits per species (generated via nle_mon_haz from mons[]):
+// bit0 passive-counterattack, bit1 engulf, bit2 explosive, bit3 poisonous
+static const unsigned char NH_MON_HAZ[NH_MONS_STATIC_N] = {
+0,8,8,0,0,8,1,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,4,1,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,8,0,1,1,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,8,0,0,0,0,8,8,
+8,2,2,0,0,0,0,0,0,2,2,2,3,2,3,0,0,0,2,0,0,4,4,0,
+8,0,0,0,0,0,0,0,8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,8,0,0,2,1,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,8,0,0,0,0,0,0,0,0,0,0,0,8,8,0,8,8,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,8,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,8,0,0,0,0,0,0,0,
+0,8,0,0,0,0,8,0,0,0,0,0,2,0,8,8,0,8,0,0,0,0,0,0,
+8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
