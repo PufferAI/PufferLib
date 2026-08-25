@@ -42,7 +42,6 @@ extern int nle_lnc_bits(nle_ctx_t*);
 extern int nle_wield_class(nle_ctx_t*);
 extern int nle_throw_fire_kind(nle_ctx_t*, int);
 extern void nle_killer_name(nle_ctx_t*, char*, int);
-extern int nle_spellprot(nle_ctx_t*);
 extern void nle_weight(nle_ctx_t*, int*, int*);
 extern int nle_spells(nle_ctx_t*, short*, signed char*, signed char*, int*, int);
 extern int nle_cast_blocked(nle_ctx_t*);
@@ -109,8 +108,6 @@ struct Env {
     long prev_exp;
     long prev_gold;
     long start_gold;
-    float prev_ac_led; // ac-delta ledger: last ledgered AC (durable-weighted)
-    float ac_account; // accrued unpaid ac-delta reward (carries)
     long prev_time;
     int prev_depth;
     unsigned prev_floor; // dnum << 8 | dlevel at last reward; guards path attribution
@@ -127,9 +124,6 @@ struct Env {
     float floor_coef;
     float xp_coef;
     float scout_coef;
-    float ac_coef;
-    float scout_ready; // 0 = off; else a tile pays pro-rata to xp level vs depth
-    float ac_nospell; // unpaid fraction of protection-spell AC (1 = durable AC only)
     float death_penalty;
     float mask_search20; // 1 removes SEARCH20 from the action space
     float mask_run; // 1 removes RUN from the action space
@@ -656,7 +650,6 @@ static void nethack_add_log(Nethack* env, int how) { // how: nle how_done, -1 = 
     env->log.depth_15 += env->stats.max_depth >= 15 ? 1.0f : 0.0f;
     env->log.mines_depth += (float)__builtin_popcountll(env->stats.floors_bits[2]);
     env->log.sokoban_depth += (float)__builtin_popcountll(env->stats.floors_bits[4]);
-    env->log.scout_held += (float)env->stats.scout_held;
     env->log.enhances += (float)env->stats.enhances;
     env->log.floor_eats += (float)env->stats.floor_eats;
     env->log.reads_scroll += (float)env->stats.reads_scroll;
@@ -788,8 +781,6 @@ static void nethack_do_reset(Nethack* env) {
     env->stats.max_xp = (int)env->blstats[NLE_BL_XP];
     env->stats.min_ac = (int)env->blstats[NLE_BL_AC];
     env->stats.last_ac = (int)env->blstats[NLE_BL_AC];
-    env->prev_ac_led = (float)env->blstats[NLE_BL_AC];
-    env->ac_account = 0.0f;
     nethack_pack_obs(env);
 }
 
@@ -807,11 +798,8 @@ static void nethack_update_stats(Nethack* env) {
     env->prev_depth = (int)env->blstats[NLE_BL_DEPTH];
 }
 
-// Fractional scout claim, keyed by (dnum, dlevel). A tile pays its full
-// scout_coef only once the hero's xp level covers depth * scout_ready; below
-// that it pays pro-rata and the remainder stays claimable by a stronger
-// visit. Total over all visits is capped at 1.0, so revisiting cannot farm
-// it. scout_ready <= 0 restores plain first-visit semantics.
+// First-visit scout claim, keyed by (dnum, dlevel): a tile pays once per
+// episode, so revisiting cannot farm it.
 static float nethack_tile_claim(Nethack* env, long dn, long dl, long px, long py) {
     if (px < 0 || px >= NH_COLS || py < 0 || py >= NH_ROWS) return 0.0f;
     if (dn < 0 || dn > 15 || dl < 1 || dl > 64) return 0.0f;
@@ -828,21 +816,9 @@ static float nethack_tile_claim(Nethack* env, long dn, long dl, long px, long py
         env->stats.visited_key[d] = key;
     }
     int idx = (int)py * NH_COLS + (int)px;
-    unsigned char prev = env->stats.visited[d][idx];
-    if (env->scout_ready <= 0.0f) { // plain first-visit
-        if (prev) return 0.0f;
-        env->stats.visited[d][idx] = 1;
-        return 1.0f;
-    }
-    int depth = (int)env->blstats[NLE_BL_DEPTH];
-    if (depth < 1) depth = 1;
-    int req = (int)((float)depth * env->scout_ready + 0.5f);
-    if (req < 1) req = 1;
-    if (req > 255) req = 255;
-    int cap = env->stats.max_xp < req ? env->stats.max_xp : req; // max_xp is monotonic
-    if (cap <= (int)prev) return 0.0f;
-    env->stats.visited[d][idx] = (unsigned char)cap;
-    return (float)(cap - (int)prev) / (float)req;
+    if (env->stats.visited[d][idx]) return 0.0f;
+    env->stats.visited[d][idx] = 1;
+    return 1.0f;
 }
 
 static float nethack_reward(Nethack* env) {
@@ -917,16 +893,11 @@ static float nethack_reward(Nethack* env) {
         touched += (c > 0.0f);
     }
 
-    if (n && fresh < (float)n - 1e-6f) env->stats.scout_held++;
     if (fresh > 0.0f) {
         r += env->scout_coef * fresh;
         env->stats.new_tiles += touched;
     }
 
-    // ac: delta reward through a conservation ledger -- at most +-ac_coef
-    // pays per step and the remainder carries, so telescoping stays exact
-    // under the clamp and churn nets zero. ac_nospell is the unpaid fraction
-    // of protection-spell AC (1 = durable AC only; kills cast-cycle arbitrage).
     long ac = env->blstats[NLE_BL_AC];
     env->stats.last_ac = (int)ac;
     if ((int)ac < env->stats.min_ac) env->stats.min_ac = (int)ac;
@@ -937,17 +908,6 @@ static float nethack_reward(Nethack* env) {
         env->stats.last_hpmax = (int)env->blstats[NLE_BL_HPMAX];
         env->stats.last_depth = (int)env->blstats[NLE_BL_DEPTH];
     }
-
-    float ac_led = env->ac_nospell != 0.0f
-        ? (float)ac + env->ac_nospell * (float)nle_spellprot(env->ctx) : (float)ac;
-    env->ac_account += env->ac_coef * (env->prev_ac_led - ac_led);
-    env->prev_ac_led = ac_led;
-
-    float cap = env->ac_coef;
-    float pay = env->ac_account > cap ? cap
-              : (env->ac_account < -cap ? -cap : env->ac_account);
-    env->ac_account -= pay;
-    r += pay;
 
     return r;
 }
@@ -1196,9 +1156,6 @@ void puf_init(Env* env, Dict* kwargs) {
     env->descent_coef = dict_get(kwargs, "descent_coef");
     env->floor_coef = dict_get(kwargs, "floor_coef");
     env->scout_coef = dict_get(kwargs, "scout_coef");
-    env->ac_coef = dict_get(kwargs, "ac_coef");
-    env->scout_ready = dict_get(kwargs, "scout_ready");
-    env->ac_nospell = dict_get(kwargs, "ac_nospell");
     env->xp_coef = dict_get(kwargs, "xp_coef");
     env->death_penalty = dict_get(kwargs, "death_penalty");
     env->mask_search20 = dict_get(kwargs, "mask_search20");
@@ -1246,7 +1203,6 @@ void puf_log(Log* log, Dict* out) {
     dict_set(out, "game_time", log->game_time);
     dict_set(out, "max_xp_level", log->max_xp_level);
     dict_set(out, "floors", log->floors);
-    dict_set(out, "scout_held", log->scout_held);
     dict_set(out, "truncated", log->truncated);
 }
 

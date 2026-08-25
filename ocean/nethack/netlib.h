@@ -318,7 +318,6 @@ typedef struct Log {
     float depth_5, depth_10, depth_15; // fraction of episodes with max_depth >= N
     float mines_depth; // unique Gnomish Mines floors visited (0 = never entered)
     float sokoban_depth; // unique Sokoban floors visited (4 = reached the top)
-    float scout_held; // steps where scout_ready withheld a tile claim
     float enhances; // #enhance presses (skill advancement claims)
     float floor_eats; // eats that accepted a floor "eat it?" offer
     float reads_scroll;
@@ -352,7 +351,6 @@ typedef struct Stats {
     long valid_moves;
     long illegal_actions;
     long new_tiles;
-    long scout_held;
     long enhances;
     long burdened_steps;
     int min_ac;
