@@ -114,7 +114,7 @@ if MIN:
     WEIGHT_NAMES += ["mv1_w", "mv1_b", "mv2_w", "mv2_b"]
 if SPELL2:
     WEIGHT_NAMES.remove("spk2_w"); WEIGHT_NAMES.remove("spk2_b")
-    WEIGHT_NAMES += ["ss_w", "ss_b"]
+    WEIGHT_NAMES += ["spm1_w", "spm1_b", "spm2_w", "spm2_b"]
 if SPLIT:
     WEIGHT_NAMES += ["eterr_w", "tglb1_w", "tglb1_xy", "tglb1_b", "tglb2_w", "tglb2_b"]
     if not V3:  # mixed-ent branch is disabled under v3 (typed lists replace it)
@@ -522,8 +522,10 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
         spk2_w = w["spk2_w"]  = getw(lib, "spk2_w", (SK, SK))
         spk2_b = w["spk2_b"]  = getw(lib, "spk2_b", (SK,))
     else:
-        ss_w = w["ss_w"] = getw(lib, "ss_w", (32, SI))
-        ss_b = w["ss_b"] = getw(lib, "ss_b", (32,))
+        spm1_w = w["spm1_w"] = getw(lib, "spm1_w", (64, 16))
+        spm1_b = w["spm1_b"] = getw(lib, "spm1_b", (64,))
+        spm2_w = w["spm2_w"] = getw(lib, "spm2_w", (64, 64))
+        spm2_b = w["spm2_b"] = getw(lib, "spm2_b", (64,))
 
     # local: crop glyph ids with pad off-map
     hx, hy = bl_vals[:, 0], bl_vals[:, 1]
@@ -801,10 +803,10 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
         spkeys.append(torch.relu(xs @ spk_w.T))  # (B,16)
     sk = torch.stack(spkeys, dim=1)                            # (B,8,16)
     if SPELL2:
-        xst = torch.stack(spxs, dim=1)                         # (B,8,36)
         occ = torch.stack(spocc, dim=1)                        # (B,8)
-        h = torch.relu(xst @ ss_w.T + ss_b)                    # (B,8,32)
-        ssum = 0.2 * (h * occ[:, :, None]).sum(dim=1)          # (B,32)
+        spv = torch.relu(torch.relu(sk @ spm1_w.T + spm1_b) @ spm2_w.T + spm2_b)  # (B,8,64)
+        ssum = 0.25 * (spv * occ[:, :, None]).sum(dim=1)       # (B,64)
+        smax = torch.relu(spv.masked_fill(occ[:, :, None] < .5, -1e9).max(dim=1).values)
         # doorstep scalars (exact; empty book -> [1,0,0,1])
         sidm = ex_vals[:, 23:23+32:4].astype(np.int64)
         levm = ex_vals[:, 24:24+32:4].astype(np.int64)
@@ -818,7 +820,7 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
         eng = np.stack([np.clip(mf * 0.01, 0, 1), np.clip(ml / 7.0, 0, 1),
                         np.clip(np.minimum(nn, 8) * 0.125, 0, 1),
                         np.clip(mr * 0.00005, 0, 1)], 1)
-        spool = torch.cat([ssum, torch.tensor(eng, dtype=torch.float64)], dim=1)  # (B,36)
+        spool = torch.cat([ssum, smax, torch.tensor(eng, dtype=torch.float64)], dim=1)  # (B,132)
     else:
         spool = torch.relu((sk @ spk2_w.T).max(dim=1).values + spk2_b)
     parts = [loc, glb] + ([] if V5 else [invp]) + [blh, fb, msg_sum, spool]
@@ -1285,7 +1287,7 @@ def run(lib):
         enc_names += LAB_NAMES
     enc_names += ["spk_w"] if "spk_w" not in enc_names else []
     if SPELL2:
-        enc_names += ["ss_w", "ss_b"]
+        enc_names += ["spm1_w", "spm1_b", "spm2_w", "spm2_b"]
     else:
         enc_names += ["spk2_w", "spk2_b"]
 

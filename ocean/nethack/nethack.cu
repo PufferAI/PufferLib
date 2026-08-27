@@ -141,12 +141,13 @@ static constexpr int NH_MSG_CONCAT_OFF = NH_LOC_HID + NH_GLB_HID + NH_INVP_DIM +
 // sum-pooled 16-dim trunk summary. Empty slots are exact zeros end to end.
 static constexpr int NH_SPKEY = NH_INV_HID; // 16, shared key width
 static constexpr int NH_SPIN = NH_EMBED_DIM + 4; // 36 key inputs/slot
-// NH_SPELL2 (v5.1): trunk spell summary = isum32 over the keys (masked sum
-// x0.2) + 4 exact doorstep scalars [min_fail, max_lev, n/8, min_retention];
-// replaces the spk2 max-pool (proven to destroy spell info: identity AUC
-// .18-.24 pooled vs .97-1.0 in the keys). Keys + CAST pointer untouched.
-static constexpr int NH_SP2_DIM = 32;
-static constexpr int NH_SPELL_SLICE = NH_SP2_DIM + 4;
+// spell entity block (v6): keys r = relu(spk_w x) -> per-slot MLP 16->64->64
+// -> masked sum x0.25 | masked max + 4 exact doorstep scalars [min_fail,
+// max_lev, n/8, min_retention]. Same block as inventory/streams; trunk channel
+// backprops through the keys (dense gradient; the old spk2 raw-key max-pool
+// destroyed identity, AUC .18 vs .97 — this max is over post-depth values).
+static constexpr int NH_SPM = 64;
+static constexpr int NH_SPELL_SLICE = 2 * NH_SPM + 4;
 static constexpr int NH_SPELL_CONCAT_OFF = NH_MSG_CONCAT_OFF + NH_MSG_HID;
 // identity embeddings: explicit role/race/gend/align tables in a direct concat channel
 static constexpr int NH_IDE_ROLE = 16, NH_IDE_RACE = 8;
@@ -1135,20 +1136,13 @@ __global__ void nh_sppool_kernel(precision_t* __restrict__ concat,
 // spell sum-channel forward: masked sum x0.2 of relu'd key projections + 4
 // exact doorstep scalars (all in [0,1]; no spells -> minfail 1, maxlev 0,
 // n 0, minret 1).
-__global__ void nh_sp2_pool_kernel(precision_t* __restrict__ concat,
-    const precision_t* __restrict__ h, const float* __restrict__ spell_idx,
+__global__ void nh_sp_doorstep_kernel(precision_t* __restrict__ concat,
     const precision_t* __restrict__ obs, int B) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= B * NH_SPELL_SLICE) return;
-    int b = t / NH_SPELL_SLICE, d = t % NH_SPELL_SLICE;
+    if (t >= B * 4) return;
+    int b = t / 4, d = 2 * NH_SPM + t % 4;
     float v;
-    if (d < NH_SP2_DIM) {
-        float acc = 0.0f;
-        for (int s = 0; s < NH_SPELL_SLOTS; s++)
-            if (spell_idx[(int64_t)b * NH_SPELL_SLOTS + s] >= 0.0f)
-                acc += to_float(h[((int64_t)b * NH_SPELL_SLOTS + s) * NH_SP2_DIM + d]);
-        v = acc * 0.2f;
-    } else {
+    {
         const precision_t* ex = obs + (int64_t)b * NH_OBS_SIZE + NH_BL_OFF + NH_BL_RAW * 4;
         int mf = 100, ml = 0, n = 0, mr = 20000;
         for (int s = 0; s < NH_SPELL_SLOTS; s++) {
@@ -1161,7 +1155,7 @@ __global__ void nh_sp2_pool_kernel(precision_t* __restrict__ concat,
             if (lv > ml) ml = lv;
             if (kn < mr) mr = kn;
         }
-        int j = d - NH_SP2_DIM;
+        int j = d - 2 * NH_SPM;
         v = j == 0 ? (float)mf * 0.01f
           : j == 1 ? (float)ml * (1.0f / 7.0f)
           : j == 2 ? (float)(n > 8 ? 8 : n) * 0.125f
@@ -1170,43 +1164,15 @@ __global__ void nh_sp2_pool_kernel(precision_t* __restrict__ concat,
     }
     concat[(int64_t)b * NH_CONCAT + NH_SPELL_CONCAT_OFF + d] = from_float(v);
 }
-// backward: dih = 0.2 * occ * g (doorstep scalars carry no params)
-__global__ void nh_sp2_dh_kernel(precision_t* __restrict__ dih,
-    const precision_t* __restrict__ grad_concat, const float* __restrict__ spell_idx, int B) {
-    int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= B * NH_SPELL_SLOTS * NH_SP2_DIM) return;
-    int b = t / (NH_SPELL_SLOTS * NH_SP2_DIM);
-    int s = (t / NH_SP2_DIM) % NH_SPELL_SLOTS, d = t % NH_SP2_DIM;
-    float g = 0.0f;
-    if (spell_idx[(int64_t)b * NH_SPELL_SLOTS + s] >= 0.0f)
-        g = 0.2f * to_float(grad_concat[(int64_t)b * NH_CONCAT + NH_SPELL_CONCAT_OFF + d]);
-    dih[t] = from_float(g);
-}
-// dkeys under SPELL2 = pointer grads only (the sum channel reads the RAW
-// slot inputs, not the keys), gated by the key relu
+// dkeys = trunk-MLP grads (pre-staged in dkeys by the spm1 backward GEMM)
+// + pointer grads, gated by the key relu
 __global__ void nh_sp2_dk_kernel(precision_t* __restrict__ dkeys,
     const precision_t* __restrict__ ptr_dkeys, const precision_t* __restrict__ keys, int B) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= B * NH_SPELL_SLOTS * NH_SPKEY) return;
-    float v = ptr_dkeys ? to_float(ptr_dkeys[t]) : 0.0f;
+    float v = to_float(dkeys[t]) + (ptr_dkeys ? to_float(ptr_dkeys[t]) : 0.0f);
     if (to_float(keys[t]) <= 0.0f) v = 0.0f;
     dkeys[t] = from_float(v);
-}
-// sum-channel embed grads: d_emb = ss_w[:, :32]^T @ dih per occupied slot,
-// scattered into dE by the slot's book glyph (mirror of nh_spkey_dE)
-__global__ void nh_sp2_dE_kernel(long long* __restrict__ dE_i,
-    const precision_t* __restrict__ dih, const precision_t* __restrict__ ss_w,
-    const float* __restrict__ sp_idx, int B) {
-    int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= B * NH_SPELL_SLOTS * NH_EMBED_DIM) return;
-    int bs = t / NH_EMBED_DIM;
-    int d = t % NH_EMBED_DIM;
-    int g = (int)sp_idx[bs];
-    if (g < 0) return;
-    float acc = 0.0f;
-    for (int r = 0; r < NH_SP2_DIM; r++)
-        acc += to_float(ss_w[r * NH_SPIN + d]) * to_float(dih[(int64_t)bs * NH_SP2_DIM + r]);
-    if (acc != 0.0f) nh_fxp_atomic_add(&dE_i[(int64_t)g * NH_EMBED_DIM + d], acc);
 }
 // backward: scatter the concat-grad spell slice into the fxp dE staging
 // spell-key backward, stage 1: total per-slot rep grad = pool grad routed
@@ -1770,7 +1736,7 @@ struct NethackEncoderWeights {
     Prec bl_w, bl_b, proj_w, proj_b;
     Prec msg_w; // trigram embedding table (NH_MSG_VOCAB, NH_MSG_HID)
     Prec spk_w; // spell slot-rep projection (NH_SPKEY, NH_SPIN)
-    Prec ss_w, ss_b; // sum-channel projection over RAW slot inputs (NH_SP2_DIM, NH_SPIN)
+    Prec spm1_w, spm1_b, spm2_w, spm2_b; // spell per-slot MLP 16->64->64
     Prec ide_role_w, ide_race_w, ide_gend_w, ide_algn_w; // identity tables
     Prec mv1_w, mv1_b, mv2_w, mv2_b;     // inventory MLP 16->64->64
     Prec mr_w, mr_b;                     // monster rep 48->16
@@ -1794,8 +1760,10 @@ struct NethackEncoderActivations {
     Float spell_idx; // per-slot book glyphs (-1 = empty slot)
     Prec spk_in, spk_keys; // spell-key inputs (B, 8*36) + relu'd reps (B, 8*16)
     Prec spk_dkeys; // per-slot key grads (pointer; +pool under !SPELL2)
-    Prec sp2_h, sp2_dh; // (B, 8*NH_SP2_DIM) sum-channel hidden + grad
-    Long ssb_acc; Prec ss_wgrad, ss_bgrad;
+    Prec sph1, spdh1, spv, spdv; // (B, 8*NH_SPM) spell MLP hidden/values + grads
+    Float spvmax; // (B, NH_SPM) argmax winners
+    Long spm1b_acc, spm2b_acc;
+    Prec spm1_wgrad, spm1_bgrad, spm2_wgrad, spm2_bgrad;
     Float invt_idx; // discovered-type glyph ids (pad = unknown)
     Prec inv_sfeat; // per-slot state features (B, 55*NH_SFEAT)
     Prec inv_T, inv_out; // fused inv table + relu'd flat slots
@@ -1993,13 +1961,21 @@ static Prec nethack_encoder_forward(void* w, void* activations, Prec input, cuda
     nh_spkey_kernel<<<grid_size(B * NH_SPELL_SLOTS), BLOCK_SIZE, 0, stream>>>(
         a->spk_keys.data, a->spk_in.data, a->spell_idx.data,
         ew->spk_w.data, a->e_eff.data, input.data, B);
-    { Prec inf = {.data = a->spk_in.data, .shape = {B * NH_SPELL_SLOTS, NH_SPIN}};
-      Prec hf = {.data = a->sp2_h.data, .shape = {B * NH_SPELL_SLOTS, NH_SP2_DIM}};
-      puf_mm(&inf, &ew->ss_w, &hf, stream); }
-    nh_bias_relu_kernel<<<grid_size(B * NH_SPELL_SLOTS * NH_SP2_DIM), BLOCK_SIZE, 0, stream>>>(
-        a->sp2_h.data, ew->ss_b.data, B * NH_SPELL_SLOTS * NH_SP2_DIM, NH_SP2_DIM);
-    nh_sp2_pool_kernel<<<grid_size(B * NH_SPELL_SLICE), BLOCK_SIZE, 0, stream>>>(
-        a->concat.data, a->sp2_h.data, a->spell_idx.data, input.data, B);
+    { Prec kf = {.data = a->spk_keys.data, .shape = {B * NH_SPELL_SLOTS, NH_SPKEY}};
+      Prec hf = {.data = a->sph1.data, .shape = {B * NH_SPELL_SLOTS, NH_SPM}};
+      puf_mm(&kf, &ew->spm1_w, &hf, stream); }
+    nh_bias_relu_kernel<<<grid_size(B * NH_SPELL_SLOTS * NH_SPM), BLOCK_SIZE, 0, stream>>>(
+        a->sph1.data, ew->spm1_b.data, B * NH_SPELL_SLOTS * NH_SPM, NH_SPM);
+    { Prec hf = {.data = a->sph1.data, .shape = {B * NH_SPELL_SLOTS, NH_SPM}};
+      Prec vf = {.data = a->spv.data, .shape = {B * NH_SPELL_SLOTS, NH_SPM}};
+      puf_mm(&hf, &ew->spm2_w, &vf, stream); }
+    nh_bias_relu_kernel<<<grid_size(B * NH_SPELL_SLOTS * NH_SPM), BLOCK_SIZE, 0, stream>>>(
+        a->spv.data, ew->spm2_b.data, B * NH_SPELL_SLOTS * NH_SPM, NH_SPM);
+    nh_min_summax_kernel<<<grid_size(B * NH_SPM), BLOCK_SIZE, 0, stream>>>(
+        a->concat.data, a->spvmax.data, a->spv.data, a->spell_idx.data,
+        0.25f, NH_SPELL_SLOTS, -1, NH_SPELL_CONCAT_OFF, B);
+    nh_sp_doorstep_kernel<<<grid_size(B * 4), BLOCK_SIZE, 0, stream>>>(
+        a->concat.data, input.data, B);
     nh_idemb_kernel<<<grid_size(B), BLOCK_SIZE, 0, stream>>>(
         a->concat.data, a->ide_idx.data, input.data,
         ew->ide_role_w.data, ew->ide_race_w.data,
@@ -2178,21 +2154,33 @@ static void nethack_encoder_backward(void* w, void* activations, Prec grad, cuda
 
     // spell-embed channel: scatter its concat-grad slice into dE (reuse dE_i)
     cudaMemsetAsync(a->dE_i.data, 0, (size_t)NH_GLYPH_VOCAB * NH_EMBED_DIM * sizeof(long long), stream);
-    // sum channel: dih = 0.2*occ*g -> relu gate (+ss_b acc) -> ss grads;
-    // its embed grads scatter directly (nh_sp2_dE); dkeys = pointer only.
-    nh_sp2_dh_kernel<<<grid_size((int64_t)B * NH_SPELL_SLOTS * NH_SP2_DIM), BLOCK_SIZE, 0, stream>>>(
-        a->sp2_dh.data, grad_concat.data, a->spell_idx.data, B);
-    cudaMemsetAsync(a->ssb_acc.data, 0, NH_SP2_DIM * sizeof(long long), stream);
-    nh_relu_bias_bwd_kernel<<<nh_colsum_grid((int64_t)B * NH_SPELL_SLOTS * NH_SP2_DIM, NH_SP2_DIM), BLOCK_SIZE, NH_SP2_DIM * sizeof(long long), stream>>>(
-        a->sp2_dh.data, a->sp2_h.data, (long long*)a->ssb_acc.data,
-        (int64_t)B * NH_SPELL_SLOTS * NH_SP2_DIM, NH_SP2_DIM);
-    nh_fxp_to_precision_kernel<<<grid_size(NH_SP2_DIM), BLOCK_SIZE, 0, stream>>>(
-        a->ss_bgrad.data, (long long*)a->ssb_acc.data, NH_SP2_DIM);
-    { Prec dhf = {.data = a->sp2_dh.data, .shape = {B * NH_SPELL_SLOTS, NH_SP2_DIM}};
-      Prec inf = {.data = a->spk_in.data, .shape = {B * NH_SPELL_SLOTS, NH_SPIN}};
-      puf_mm_tn(&dhf, &inf, &a->ss_wgrad, stream); }
-    nh_sp2_dE_kernel<<<grid_size(B * NH_SPELL_SLOTS * NH_EMBED_DIM), BLOCK_SIZE, 0, stream>>>(
-        (long long*)a->dE_i.data, a->sp2_dh.data, ew->ss_w.data, a->spell_idx.data, B);
+    // spell block backward: dv (sum+max routing) -> MLP chain -> trunk dkeys
+    // staged into spk_dkeys, then pointer grads added + key relu gate.
+    nh_min_dv_kernel<<<grid_size((int64_t)B * NH_SPELL_SLOTS * NH_SPM), BLOCK_SIZE, 0, stream>>>(
+        a->spdv.data, grad_concat.data, a->spvmax.data, a->spell_idx.data,
+        0.25f, NH_SPELL_SLOTS, -1, NH_SPELL_CONCAT_OFF, B);
+    cudaMemsetAsync(a->spm1b_acc.data, 0, NH_SPM * sizeof(long long), stream);
+    cudaMemsetAsync(a->spm2b_acc.data, 0, NH_SPM * sizeof(long long), stream);
+    nh_relu_bias_bwd_kernel<<<nh_colsum_grid((int64_t)B * NH_SPELL_SLOTS * NH_SPM, NH_SPM), BLOCK_SIZE, NH_SPM * sizeof(long long), stream>>>(
+        a->spdv.data, a->spv.data, (long long*)a->spm2b_acc.data,
+        (int64_t)B * NH_SPELL_SLOTS * NH_SPM, NH_SPM);
+    nh_fxp_to_precision_kernel<<<grid_size(NH_SPM), BLOCK_SIZE, 0, stream>>>(
+        a->spm2_bgrad.data, (long long*)a->spm2b_acc.data, NH_SPM);
+    { Prec dvf = {.data = a->spdv.data, .shape = {B * NH_SPELL_SLOTS, NH_SPM}};
+      Prec hf = {.data = a->sph1.data, .shape = {B * NH_SPELL_SLOTS, NH_SPM}};
+      puf_mm_tn(&dvf, &hf, &a->spm2_wgrad, stream);
+      Prec dhf = {.data = a->spdh1.data, .shape = {B * NH_SPELL_SLOTS, NH_SPM}};
+      puf_mm_nn(&dvf, &ew->spm2_w, &dhf, stream); }
+    nh_relu_bias_bwd_kernel<<<nh_colsum_grid((int64_t)B * NH_SPELL_SLOTS * NH_SPM, NH_SPM), BLOCK_SIZE, NH_SPM * sizeof(long long), stream>>>(
+        a->spdh1.data, a->sph1.data, (long long*)a->spm1b_acc.data,
+        (int64_t)B * NH_SPELL_SLOTS * NH_SPM, NH_SPM);
+    nh_fxp_to_precision_kernel<<<grid_size(NH_SPM), BLOCK_SIZE, 0, stream>>>(
+        a->spm1_bgrad.data, (long long*)a->spm1b_acc.data, NH_SPM);
+    { Prec dhf = {.data = a->spdh1.data, .shape = {B * NH_SPELL_SLOTS, NH_SPM}};
+      Prec kf = {.data = a->spk_keys.data, .shape = {B * NH_SPELL_SLOTS, NH_SPKEY}};
+      puf_mm_tn(&dhf, &kf, &a->spm1_wgrad, stream);
+      Prec dkf = {.data = a->spk_dkeys.data, .shape = {B * NH_SPELL_SLOTS, NH_SPKEY}};
+      puf_mm_nn(&dhf, &ew->spm1_w, &dkf, stream); } // trunk dkeys, FIRST writer
     nh_sp2_dk_kernel<<<grid_size(B * NH_SPELL_SLOTS * NH_SPKEY), BLOCK_SIZE, 0, stream>>>(
         a->spk_dkeys.data, nh_ptr_spkeygrad != NULL ? nh_ptr_spkeygrad->data : NULL,
         a->spk_keys.data, B);
@@ -2345,8 +2333,10 @@ static void nethack_encoder_init_weights(void* w, uint64_t* seed, cudaStream_t s
     cudaMemsetAsync(ew->proj_b.data, 0, numel(ew->proj_b.shape) * sizeof(precision_t), stream);
     puf_normal_init(&ew->msg_w, 1.0f, (*seed)++, stream); // trigram embedding
     puf_kaiming_init(&ew->spk_w, 1.0f, (*seed)++, stream); // spell slot-rep projection
-    puf_kaiming_init(&ew->ss_w, 1.0f, (*seed)++, stream);
-    cudaMemsetAsync(ew->ss_b.data, 0, numel(ew->ss_b.shape) * sizeof(precision_t), stream);
+    puf_kaiming_init(&ew->spm1_w, 1.0f, (*seed)++, stream);
+    cudaMemsetAsync(ew->spm1_b.data, 0, numel(ew->spm1_b.shape) * sizeof(precision_t), stream);
+    puf_kaiming_init(&ew->spm2_w, 1.0f, (*seed)++, stream);
+    cudaMemsetAsync(ew->spm2_b.data, 0, numel(ew->spm2_b.shape) * sizeof(precision_t), stream);
     // zero: the identity channel starts as an exact no-op (ekind_w idiom)
     cudaMemsetAsync(ew->ide_role_w.data, 0, numel(ew->ide_role_w.shape) * sizeof(precision_t), stream);
     cudaMemsetAsync(ew->ide_race_w.data, 0, numel(ew->ide_race_w.shape) * sizeof(precision_t), stream);
@@ -2396,8 +2386,10 @@ static void nethack_encoder_reg_params(void* w, Allocator* alloc) {
     ew->proj_b = {.shape = {ew->hidden}};
     ew->msg_w = {.shape = {NH_MSG_VOCAB, NH_MSG_HID}}; // 4096x32=131072, mult of 8
     ew->spk_w = {.shape = {NH_SPKEY, NH_SPIN}}; // 16x36=576, mult of 8
-    ew->ss_w = {.shape = {NH_SP2_DIM, NH_SPIN}}; // 32x36=1152, mult of 8
-    ew->ss_b = {.shape = {NH_SP2_DIM}}; // 32, mult of 8
+    ew->spm1_w = {.shape = {NH_SPM, NH_SPKEY}}; // 64x16, mult of 8
+    ew->spm1_b = {.shape = {NH_SPM}};
+    ew->spm2_w = {.shape = {NH_SPM, NH_SPM}};
+    ew->spm2_b = {.shape = {NH_SPM}};
     ew->ide_role_w = {.shape = {13, NH_IDE_ROLE}}; // 208, mult of 8
     ew->ide_race_w = {.shape = {5, NH_IDE_RACE}}; // 40
     ew->ide_gend_w = {.shape = {2, NH_IDE_GEND}}; // 16
@@ -2417,7 +2409,8 @@ static void nethack_encoder_reg_params(void* w, Allocator* alloc) {
     alloc_register(alloc,&ew->proj_w);  alloc_register(alloc,&ew->proj_b);
     alloc_register(alloc,&ew->msg_w);
     alloc_register(alloc,&ew->spk_w);
-    alloc_register(alloc,&ew->ss_w);    alloc_register(alloc,&ew->ss_b);
+    alloc_register(alloc,&ew->spm1_w);  alloc_register(alloc,&ew->spm1_b);
+    alloc_register(alloc,&ew->spm2_w);  alloc_register(alloc,&ew->spm2_b);
     alloc_register(alloc,&ew->ide_role_w); alloc_register(alloc,&ew->ide_race_w);
     alloc_register(alloc,&ew->ide_gend_w); alloc_register(alloc,&ew->ide_algn_w);
     ew->mv1_w = {.shape = {NH_MV, NH_INV_HID}}; ew->mv1_b = {.shape = {NH_MV}};
@@ -2469,9 +2462,12 @@ static void nethack_encoder_reg_train(void* w, void* activations, Allocator* act
     a->spk_in = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SPIN}};
     a->spk_keys = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SPKEY}};
     a->spk_dkeys = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SPKEY}};
-    a->sp2_h = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SP2_DIM}};
-    a->sp2_dh = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SP2_DIM}};
-    a->ssb_acc = {.shape = {NH_SP2_DIM}};
+    a->sph1 = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SPM}};
+    a->spdh1 = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SPM}};
+    a->spv = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SPM}};
+    a->spdv = {.shape = {B_TT, NH_SPELL_SLOTS * NH_SPM}};
+    a->spvmax = {.shape = {B_TT, NH_SPM}};
+    a->spm1b_acc = {.shape = {NH_SPM}}; a->spm2b_acc = {.shape = {NH_SPM}};
     a->ide_idx = {.shape = {B_TT, 4}};
     a->lm_tok = {.shape = {B_TT, NH_LABK * NH_LAB_IN}};
     a->lm_gid = {.shape = {B_TT, NH_LABK}};
@@ -2489,8 +2485,10 @@ static void nethack_encoder_reg_train(void* w, void* activations, Allocator* act
     alloc_register(acts,&a->spell_idx);
     alloc_register(acts,&a->spk_in);    alloc_register(acts,&a->spk_keys);
     alloc_register(acts,&a->spk_dkeys);
-    alloc_register(acts,&a->sp2_h);     alloc_register(acts,&a->sp2_dh);
-    alloc_register(acts,&a->ssb_acc);
+    alloc_register(acts,&a->sph1);   alloc_register(acts,&a->spdh1);
+    alloc_register(acts,&a->spv);    alloc_register(acts,&a->spdv);
+    alloc_register(acts,&a->spvmax);
+    alloc_register(acts,&a->spm1b_acc); alloc_register(acts,&a->spm2b_acc);
     alloc_register(acts,&a->ide_idx);
     alloc_register(acts,&a->inv_sfeat);
     alloc_register(acts,&a->inv_T);     alloc_register(acts,&a->invt_T);
@@ -2580,8 +2578,10 @@ static void nethack_encoder_reg_train(void* w, void* activations, Allocator* act
     a->proj_bgrad = {.shape = {ew->hidden}};
     a->msg_wgrad = {.shape = {NH_MSG_VOCAB, NH_MSG_HID}};
     a->spk_wgrad = {.shape = {NH_SPKEY, NH_SPIN}};
-    a->ss_wgrad = {.shape = {NH_SP2_DIM, NH_SPIN}};
-    a->ss_bgrad = {.shape = {NH_SP2_DIM}};
+    a->spm1_wgrad = {.shape = {NH_SPM, NH_SPKEY}};
+    a->spm1_bgrad = {.shape = {NH_SPM}};
+    a->spm2_wgrad = {.shape = {NH_SPM, NH_SPM}};
+    a->spm2_bgrad = {.shape = {NH_SPM}};
     a->ide_role_wgrad = {.shape = {13, NH_IDE_ROLE}};
     a->ide_race_wgrad = {.shape = {5, NH_IDE_RACE}};
     a->ide_gend_wgrad = {.shape = {2, NH_IDE_GEND}};
@@ -2599,7 +2599,8 @@ static void nethack_encoder_reg_train(void* w, void* activations, Allocator* act
     alloc_register(grads,&a->proj_wgrad);  alloc_register(grads,&a->proj_bgrad);
     alloc_register(grads,&a->msg_wgrad);
     alloc_register(grads,&a->spk_wgrad);
-    alloc_register(grads,&a->ss_wgrad);   alloc_register(grads,&a->ss_bgrad);
+    alloc_register(grads,&a->spm1_wgrad); alloc_register(grads,&a->spm1_bgrad);
+    alloc_register(grads,&a->spm2_wgrad); alloc_register(grads,&a->spm2_bgrad);
     alloc_register(grads,&a->ide_role_wgrad); alloc_register(grads,&a->ide_race_wgrad);
     alloc_register(grads,&a->ide_gend_wgrad); alloc_register(grads,&a->ide_algn_wgrad);
     alloc_register(grads,&a->mv1_wgrad); alloc_register(grads,&a->mv1_bgrad);
@@ -2646,7 +2647,9 @@ static void nethack_encoder_reg_rollout(void* w, void* activations, Allocator* a
     a->msg_out = {.shape = {B, NH_MSG_HID}};
     a->spk_in = {.shape = {B, NH_SPELL_SLOTS * NH_SPIN}};
     a->spk_keys = {.shape = {B, NH_SPELL_SLOTS * NH_SPKEY}};
-    a->sp2_h = {.shape = {B, NH_SPELL_SLOTS * NH_SP2_DIM}};
+    a->sph1 = {.shape = {B, NH_SPELL_SLOTS * NH_SPM}};
+    a->spv = {.shape = {B, NH_SPELL_SLOTS * NH_SPM}};
+    a->spvmax = {.shape = {B, NH_SPM}};
     a->ide_idx = {.shape = {B, 4}};
     a->lm_tok = {.shape = {B, NH_LABK * NH_LAB_IN}};
     a->lm_gid = {.shape = {B, NH_LABK}};
@@ -2674,7 +2677,9 @@ static void nethack_encoder_reg_rollout(void* w, void* activations, Allocator* a
     alloc_register(alloc,&a->bl_feats);  alloc_register(alloc,&a->bl_out);
     alloc_register(alloc,&a->msg_ids);   alloc_register(alloc,&a->msg_out);
     alloc_register(alloc,&a->spk_in);    alloc_register(alloc,&a->spk_keys);
-    alloc_register(alloc,&a->sp2_h);
+    alloc_register(alloc,&a->sph1);
+    alloc_register(alloc,&a->spv);
+    alloc_register(alloc,&a->spvmax);
     alloc_register(alloc,&a->lm_tok);
     alloc_register(alloc,&a->lm_gid);
     alloc_register(alloc,&a->li_tok);
