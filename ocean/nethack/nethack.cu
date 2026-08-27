@@ -502,48 +502,49 @@ __global__ void nh_isum_pool_kernel(precision_t* __restrict__ concat,
 __global__ void nh_lab_tok_kernel(precision_t* __restrict__ tok, float* __restrict__ gid,
     const precision_t* __restrict__ obs, const precision_t* __restrict__ e_eff,
     const unsigned char* __restrict__ haz, int list_off, int is_mon, int B) {
+    // thread per (b, token, out dim): pure independent writes -> bit-identical
+    // to the serial per-token version by construction.
     int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= B * NH_LABK) return;
-    int b = t / NH_LABK, k = t % NH_LABK;
-    const precision_t* e = obs + (int64_t)b * NH_OBS_SIZE + list_off + k * NH_V3_MONF;
+    if (t >= B * NH_LABK * NH_LAB_IN) return;
+    int d = t % NH_LAB_IN;
+    int bk = t / NH_LAB_IN;
+    int k = bk % NH_LABK;
+    const precision_t* e = obs + (int64_t)(bk / NH_LABK) * NH_OBS_SIZE + list_off + k * NH_V3_MONF;
     int row = (int)to_float(e[0]) | ((int)to_float(e[1]) << 8);
-    int dx = (int)to_float(e[2]); if (dx >= 128) dx -= 256;
-    int dy = (int)to_float(e[3]); if (dy >= 128) dy -= 256;
-    int f4 = (int)to_float(e[4]), f5 = (int)to_float(e[5]), f6 = (int)to_float(e[6]);
     int g = row <= 0 ? -1
           : is_mon ? row - 1
           : (row < 454 ? NH_OBJ_LO + row - 1 : NH_BODY_OFF + row - 454);
-    gid[t] = (float)g;
-    precision_t* o = tok + (int64_t)t * NH_LAB_IN;
-    for (int d = 0; d < NH_EMBED_DIM; d++)
+    if (d == 0) gid[bk] = (float)g;
+    precision_t* o = tok + (int64_t)bk * NH_LAB_IN;
+    if (d < NH_EMBED_DIM) {
         o[d] = g >= 0 ? e_eff[(int64_t)g * NH_EMBED_DIM + d] : from_float(0.0f);
+        return;
+    }
+    if (d >= 46) { o[d] = from_float(0.0f); return; }
+    int dx = (int)to_float(e[2]); if (dx >= 128) dx -= 256;
+    int dy = (int)to_float(e[3]); if (dy >= 128) dy -= 256;
+    int f4 = (int)to_float(e[4]), f5 = (int)to_float(e[5]), f6 = (int)to_float(e[6]);
     int cheb = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
-    // strict [-1,1]: record-validated scaling with rare tails clamped
-    o[32] = from_float(g >= 0 ? fmaxf(fminf((float)dx * (1.0f / 40.0f), 1.0f), -1.0f) : 0.0f);
-    o[33] = from_float(g >= 0 ? fmaxf(fminf((float)dy * (1.0f / 11.0f), 1.0f), -1.0f) : 0.0f);
-    o[34] = from_float(g >= 0 ? fminf((float)cheb, 15.0f) * (1.0f / 15.0f) : 0.0f);
-    o[35] = from_float(g >= 0 ? (float)k * (1.0f / 15.0f) : 0.0f); // rank
-    if (is_mon) { // e4 flags: bit0 hostile, bit2 detected, bit3 pet
-        o[36] = from_float(g >= 0 && (f4 & 1) ? 1.0f : 0.0f);
-        o[37] = from_float(g >= 0 && (f4 & 8) ? 1.0f : 0.0f);
-        o[38] = from_float(g >= 0 && (f4 & 4) ? 1.0f : 0.0f);
-        o[39] = from_float(g >= 0 && cheb <= 1 ? 1.0f : 0.0f);
-        o[40] = from_float(g >= 0 ? fminf((float)f5 * 0.04f, 1.0f) : 0.0f);
-        o[41] = from_float(g >= 0 ? fminf((float)f6 * (1.0f / 24.0f), 1.0f) : 0.0f);
-    } else { // e5 flags: bit0 underfoot, bit1 body
-        o[36] = from_float(g >= 0 && (f5 & 1) ? 1.0f : 0.0f);
-        o[37] = from_float(g >= 0 && (f5 & 2) ? 1.0f : 0.0f);
-        o[38] = o[39] = o[40] = o[41] = from_float(0.0f);
-        (void)f4; (void)f6;
-    }
-    { // hazard bits (species LUT): passive, engulf, explosive, poisonous
+    float v = 0.0f;
+    switch (d) {
+    case 32: v = g >= 0 ? fmaxf(fminf((float)dx * (1.0f / 40.0f), 1.0f), -1.0f) : 0.0f; break;
+    case 33: v = g >= 0 ? fmaxf(fminf((float)dy * (1.0f / 11.0f), 1.0f), -1.0f) : 0.0f; break;
+    case 34: v = g >= 0 ? fminf((float)cheb, 15.0f) * (1.0f / 15.0f) : 0.0f; break;
+    case 35: v = g >= 0 ? (float)k * (1.0f / 15.0f) : 0.0f; break;
+    case 36: v = is_mon ? (g >= 0 && (f4 & 1) ? 1.0f : 0.0f)
+                        : (g >= 0 && (f5 & 1) ? 1.0f : 0.0f); break;
+    case 37: v = is_mon ? (g >= 0 && (f4 & 8) ? 1.0f : 0.0f)
+                        : (g >= 0 && (f5 & 2) ? 1.0f : 0.0f); break;
+    case 38: v = is_mon && g >= 0 && (f4 & 4) ? 1.0f : 0.0f; break;
+    case 39: v = is_mon && g >= 0 && cheb <= 1 ? 1.0f : 0.0f; break;
+    case 40: v = is_mon && g >= 0 ? fminf((float)f5 * 0.04f, 1.0f) : 0.0f; break;
+    case 41: v = is_mon && g >= 0 ? fminf((float)f6 * (1.0f / 24.0f), 1.0f) : 0.0f; break;
+    case 42: case 43: case 44: case 45: {
         int hb = is_mon && row > 0 && haz != NULL ? (int)haz[(row - 1) % 381] : 0;
-        o[42] = from_float((hb & 1) ? 1.0f : 0.0f);
-        o[43] = from_float((hb & 2) ? 1.0f : 0.0f);
-        o[44] = from_float((hb & 4) ? 1.0f : 0.0f);
-        o[45] = from_float((hb & 8) ? 1.0f : 0.0f);
+        v = (hb & (1 << (d - 42))) ? 1.0f : 0.0f; break;
     }
-    for (int d = 46; d < NH_LAB_IN; d++) o[d] = from_float(0.0f);
+    }
+    o[d] = from_float(v);
 }
 // embed-table scatter for a stream's dtok buffer (first 32 dims only)
 __global__ void nh_lab_dE_scatter_kernel(long long* __restrict__ dE_i,
@@ -815,67 +816,66 @@ __global__ void nh_min_sgate_bwd_kernel(precision_t* __restrict__ drp,
 }
 // ---- inventory pass-through kernels (shared by GEN and MIN arms) ----
 // pass-throughs: wielded [r|sfeat], quivered [r|sfeat], worn-profile mean r.
+// thread per (b, dim): each output dim replays the serial version's exact
+// per-dim op sequence (bf16 round-trip accumulation in slot order), so the
+// rewrite is bit-identical to the old one-thread-per-sample kernel.
 __global__ void nh_pass_kernel(precision_t* __restrict__ concat,
     const precision_t* __restrict__ inv_out, const precision_t* __restrict__ sfeat,
     const float* __restrict__ vid, int nopass, int passoff, int B) {
-    int b = blockIdx.x * blockDim.x + threadIdx.x;
-    if (b >= B) return;
-    precision_t* dst = concat + (int64_t)b * NH_CONCAT + passoff;
-    for (int d = 0; d < NH_PASS_DIM; d++) dst[d] = from_float(0.0f);
-    if (nopass == 7) return; // bit0 wield, bit1 quiver, bit2 worn: set bit = DISABLED
-    float wsum[NH_INV_HID]; int nworn = 0;
-    for (int d = 0; d < NH_INV_HID; d++) wsum[d] = 0.0f;
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= B * NH_PASS_DIM) return;
+    int b = t / NH_PASS_DIM, d = t % NH_PASS_DIM;
+    precision_t* dst = concat + (int64_t)b * NH_CONCAT + passoff + d;
+    *dst = from_float(0.0f);
+    if (nopass == 7) return;
+    int region = d < 40 ? 0 : d < 80 ? 1 : 2;   // wield | quiver | worn
+    int j = region == 0 ? d : region == 1 ? d - 40 : d - 80;
+    if (region == 0 && (nopass & 1)) return;
+    if (region == 1 && (nopass & 2)) return;
+    if (region == 2 && (nopass & 4)) return;
+    int fbit = region == 0 ? 10 : region == 1 ? 12 : 9;
+    float wsum = 0.0f; int nworn = 0;
     for (int k = 0; k < NH_INV; k++) {
         if ((int)vid[(int64_t)b * NH_INV + k] == NH_PAD_GLYPH) continue;
         const precision_t* f = sfeat + ((int64_t)b * NH_INV + k) * NH_SFEAT;
+        if (to_float(f[fbit]) <= 0.5f) continue;
         const precision_t* r = inv_out + ((int64_t)b * NH_INV + k) * NH_INV_HID;
-        if (!(nopass & 1) && to_float(f[10]) > 0.5f) { // wielded (sum: <=1 slot in play)
-            for (int d = 0; d < NH_INV_HID; d++)
-                dst[d] = from_float(to_float(dst[d]) + to_float(r[d]));
-            for (int d = 0; d < NH_SFEAT; d++)
-                dst[NH_INV_HID + d] = from_float(to_float(dst[NH_INV_HID + d]) + to_float(f[d]));
-        }
-        if (!(nopass & 2) && to_float(f[12]) > 0.5f) { // quivered (sum)
-            for (int d = 0; d < NH_INV_HID; d++)
-                dst[40 + d] = from_float(to_float(dst[40 + d]) + to_float(r[d]));
-            for (int d = 0; d < NH_SFEAT; d++)
-                dst[40 + NH_INV_HID + d] = from_float(to_float(dst[40 + NH_INV_HID + d]) + to_float(f[d]));
-        }
-        if (!(nopass & 4) && to_float(f[9]) > 0.5f) { // worn
-            nworn++;
-            for (int d = 0; d < NH_INV_HID; d++) wsum[d] += to_float(r[d]);
+        if (region == 2) { nworn++; wsum += to_float(r[j]); }
+        else {
+            float v = j < NH_INV_HID ? to_float(r[j]) : to_float(f[j - NH_INV_HID]);
+            *dst = from_float(to_float(*dst) + v);
         }
     }
-    if (nworn > 0)
-        for (int d = 0; d < NH_INV_HID; d++)
-            dst[80 + d] = from_float(wsum[d] / (float)nworn);
+    if (region == 2 && nworn > 0) *dst = from_float(wsum / (float)nworn);
 }
 // pass-through backward (runs AFTER the v-path GEMM's first write of inv_grad):
 // adds r-grads at flagged slots. One thread per sample; races impossible.
+// thread per (b, slot, dim): per-slot add order (wield, quiver, worn) matches
+// the serial version exactly per dim -> bit-identical.
 __global__ void nh_passbwd_kernel(precision_t* __restrict__ inv_grad,
     const precision_t* __restrict__ grad_concat, const precision_t* __restrict__ sfeat,
     const float* __restrict__ vid, int nopass, int passoff, int B) {
-    int b = blockIdx.x * blockDim.x + threadIdx.x;
-    if (b >= B) return;
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= B * NH_INV * NH_INV_HID) return;
+    int d = t % NH_INV_HID;
+    int k = (t / NH_INV_HID) % NH_INV;
+    int b = t / (NH_INV * NH_INV_HID);
+    if ((int)vid[(int64_t)b * NH_INV + k] == NH_PAD_GLYPH) return;
     const precision_t* gp = grad_concat + (int64_t)b * NH_CONCAT + passoff;
-    int nworn = 0;
-    for (int k = 0; k < NH_INV; k++) {
-        if ((int)vid[(int64_t)b * NH_INV + k] == NH_PAD_GLYPH) continue;
-        if (to_float(sfeat[((int64_t)b * NH_INV + k) * NH_SFEAT + 9]) > 0.5f) nworn++;
-    }
-    for (int k = 0; k < NH_INV; k++) {
-        if ((int)vid[(int64_t)b * NH_INV + k] == NH_PAD_GLYPH) continue;
-        const precision_t* f = sfeat + ((int64_t)b * NH_INV + k) * NH_SFEAT;
-        precision_t* dr = inv_grad + ((int64_t)b * NH_INV + k) * NH_INV_HID;
-        if (!(nopass & 1) && to_float(f[10]) > 0.5f)
-            for (int d = 0; d < NH_INV_HID; d++)
-                dr[d] = from_float(to_float(dr[d]) + to_float(gp[d]));
-        if (!(nopass & 2) && to_float(f[12]) > 0.5f)
-            for (int d = 0; d < NH_INV_HID; d++)
-                dr[d] = from_float(to_float(dr[d]) + to_float(gp[40 + d]));
-        if (!(nopass & 4) && to_float(f[9]) > 0.5f && nworn > 0)
-            for (int d = 0; d < NH_INV_HID; d++)
-                dr[d] = from_float(to_float(dr[d]) + to_float(gp[80 + d]) / (float)nworn);
+    const precision_t* f = sfeat + ((int64_t)b * NH_INV + k) * NH_SFEAT;
+    precision_t* dr = inv_grad + ((int64_t)b * NH_INV + k) * NH_INV_HID + d;
+    if (!(nopass & 1) && to_float(f[10]) > 0.5f)
+        *dr = from_float(to_float(*dr) + to_float(gp[d]));
+    if (!(nopass & 2) && to_float(f[12]) > 0.5f)
+        *dr = from_float(to_float(*dr) + to_float(gp[40 + d]));
+    if (!(nopass & 4) && to_float(f[9]) > 0.5f) {
+        int nworn = 0;
+        for (int j = 0; j < NH_INV; j++) {
+            if ((int)vid[(int64_t)b * NH_INV + j] == NH_PAD_GLYPH) continue;
+            if (to_float(sfeat[((int64_t)b * NH_INV + j) * NH_SFEAT + 9]) > 0.5f) nworn++;
+        }
+        if (nworn > 0)
+            *dr = from_float(to_float(*dr) + to_float(gp[80 + d]) / (float)nworn);
     }
 }
 __global__ void nh_patch_max_bwd_kernel(
@@ -1076,14 +1076,17 @@ __global__ void nh_spkey_kernel(precision_t* __restrict__ keys,
     precision_t* __restrict__ sp_in, float* __restrict__ sp_idx,
     const precision_t* __restrict__ spk_w, const precision_t* __restrict__ e_eff,
     const precision_t* __restrict__ obs, int B) {
+    // thread per (b, slot, key row): rebuilds the float input (cached loads),
+    // computes one matvec row in the original MAC order -> bit-identical.
     int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= B * NH_SPELL_SLOTS) return;
-    int b = t / NH_SPELL_SLOTS, s = t % NH_SPELL_SLOTS;
+    if (t >= B * NH_SPELL_SLOTS * NH_SPKEY) return;
+    int r = t % NH_SPKEY;
+    int bs = t / NH_SPKEY;
+    int b = bs / NH_SPELL_SLOTS, s = bs % NH_SPELL_SLOTS;
     const precision_t* src = obs + (int64_t)b * NH_OBS_SIZE + NH_BL_OFF
                            + 4 * (NH_BL_RAW + NH_EXTRA_SHOP + 2 + 1 + 4 * s);
     int id = (int)to_float(src[0]) | ((int)to_float(src[1]) << 8);
     int g = id > 0 ? min(id + 1906, NH_GLYPH_VOCAB - 1) : -1;
-    sp_idx[(int64_t)t] = (float)g;
     float in[NH_SPIN];
     for (int d = 0; d < NH_EMBED_DIM; d++)
         in[d] = g >= 0 ? to_float(e_eff[(int64_t)g * NH_EMBED_DIM + d]) : 0.0f;
@@ -1095,15 +1098,15 @@ __global__ void nh_spkey_kernel(precision_t* __restrict__ keys,
     in[NH_EMBED_DIM + 1] = fminf((float)lev * 0.142857f, 1.0f);
     in[NH_EMBED_DIM + 2] = fminf((float)fail * 0.01f, 1.0f);
     in[NH_EMBED_DIM + 3] = fminf((float)know * 0.00005f, 1.0f);
-    precision_t* inb = sp_in + (int64_t)t * NH_SPIN;
-    for (int c = 0; c < NH_SPIN; c++) inb[c] = from_float(in[c]);
-    precision_t* kb = keys + (int64_t)t * NH_SPKEY;
-    for (int r = 0; r < NH_SPKEY; r++) {
-        float acc = 0.0f;
-        for (int c = 0; c < NH_SPIN; c++)
-            acc += to_float(spk_w[r * NH_SPIN + c]) * in[c];
-        kb[r] = from_float(fmaxf(acc, 0.0f)); // relu'd slot rep (inv1 idiom)
+    if (r == 0) {
+        sp_idx[(int64_t)bs] = (float)g;
+        precision_t* inb = sp_in + (int64_t)bs * NH_SPIN;
+        for (int c = 0; c < NH_SPIN; c++) inb[c] = from_float(in[c]);
     }
+    float acc = 0.0f;
+    for (int c = 0; c < NH_SPIN; c++)
+        acc += to_float(spk_w[r * NH_SPIN + c]) * in[c];
+    keys[(int64_t)bs * NH_SPKEY + r] = from_float(fmaxf(acc, 0.0f));
 }
 
 // inventory-style pool: project each relu'd slot rep, max over slots, bias,
@@ -1889,7 +1892,7 @@ static Prec nethack_encoder_forward(void* w, void* activations, Prec input, cuda
     nh_min_summax_kernel<<<grid_size(B * NH_MV), BLOCK_SIZE, 0, stream>>>(
         a->concat.data, a->mvmax.data, a->mvv.data, a->inv_idx.data,
         0.2f, NH_INV, NH_PAD_GLYPH, NH_MINV_OFF, B);
-    nh_pass_kernel<<<grid_size(B), BLOCK_SIZE, 0, stream>>>(
+    nh_pass_kernel<<<grid_size(B * NH_PASS_DIM), BLOCK_SIZE, 0, stream>>>(
         a->concat.data, a->inv_out.data, a->inv_sfeat.data, a->inv_idx.data,
         0, NH_MINV_OFF + 2 * NH_MV, B);
 
@@ -1909,7 +1912,7 @@ static Prec nethack_encoder_forward(void* w, void* activations, Prec input, cuda
         (const precision_t*)NULL, // invpool slice is width-0
         a->bl_out.data, a->bl_feats.data, a->msg_out.data, B);
     { // typed streams: tok -> deep values (48->64->64) -> 8-head pool
-    nh_lab_tok_kernel<<<grid_size(B * NH_LABK), BLOCK_SIZE, 0, stream>>>(
+    nh_lab_tok_kernel<<<grid_size(B * NH_LABK * NH_LAB_IN), BLOCK_SIZE, 0, stream>>>(
         a->lm_tok.data, a->lm_gid.data, input.data, a->e_eff.data,
         nh_haz_lut_dev,
         NH_TOKM_OFF, 1, B);
@@ -1934,7 +1937,7 @@ static Prec nethack_encoder_forward(void* w, void* activations, Prec input, cuda
     nh_min_sgate_kernel<<<grid_size(B * NH_INV_HID), BLOCK_SIZE, 0, stream>>>(
         a->concat.data, a->mrp.data, a->lm_tok.data, a->lm_gid.data,
         0, NH_MLM_OFF + 2 * NH_MV, B);
-    nh_lab_tok_kernel<<<grid_size(B * NH_LABK), BLOCK_SIZE, 0, stream>>>(
+    nh_lab_tok_kernel<<<grid_size(B * NH_LABK * NH_LAB_IN), BLOCK_SIZE, 0, stream>>>(
         a->li_tok.data, a->li_gid.data, input.data, a->e_eff.data, NULL, NH_TOKI_OFF, 0, B);
     { Prec tokf = {.data = a->li_tok.data, .shape = {B * NH_LABK, NH_LAB_IN}};
       Prec rpf = {.data = a->irp.data, .shape = {B * NH_LABK, NH_INV_HID}};
@@ -1958,7 +1961,7 @@ static Prec nethack_encoder_forward(void* w, void* activations, Prec input, cuda
         a->concat.data, a->irp.data, a->li_tok.data, a->li_gid.data,
         1, NH_MLI_OFF + 2 * NH_MV, B);
     }
-    nh_spkey_kernel<<<grid_size(B * NH_SPELL_SLOTS), BLOCK_SIZE, 0, stream>>>(
+    nh_spkey_kernel<<<grid_size(B * NH_SPELL_SLOTS * NH_SPKEY), BLOCK_SIZE, 0, stream>>>(
         a->spk_keys.data, a->spk_in.data, a->spell_idx.data,
         ew->spk_w.data, a->e_eff.data, input.data, B);
     { Prec kf = {.data = a->spk_keys.data, .shape = {B * NH_SPELL_SLOTS, NH_SPKEY}};
@@ -2082,7 +2085,7 @@ static void nethack_encoder_backward(void* w, void* activations, Prec grad, cuda
       puf_mm_tn(&dh1f, &invf, &a->mv1_wgrad, stream);
       Prec dinvf = {.data = a->inv_grad.data, .shape = {B * NH_INV, NH_INV_HID}};
       puf_mm_nn(&dh1f, &ew->mv1_w, &dinvf, stream); } // FIRST writer of inv_grad
-    nh_passbwd_kernel<<<grid_size(B), BLOCK_SIZE, 0, stream>>>(
+    nh_passbwd_kernel<<<grid_size((int64_t)B * NH_INV * NH_INV_HID), BLOCK_SIZE, 0, stream>>>(
         a->inv_grad.data, grad_concat.data, a->inv_sfeat.data, a->inv_idx.data,
         0, NH_MINV_OFF + 2 * NH_MV, B);
     // pointer-decoder key grads: second consumer of inv_out, summed before
