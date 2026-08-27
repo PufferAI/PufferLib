@@ -1177,7 +1177,6 @@ static void* vec_thread_main(void* arg) {
             memset(&vec->rewards[agent_start], 0, apb * sizeof(float));
             memset(&vec->terminals[agent_start], 0, apb * sizeof(float));
             clock_gettime(CLOCK_MONOTONIC, &t0);
-            #pragma omp parallel for schedule(static) num_threads(vec->num_workers)
             for (int i = env_start; i < env_start + env_count; i++) {
                 puf_step(&envs[i]);
             }
@@ -1210,7 +1209,6 @@ static void env_start(PuffeRL* p) {
     VecThreadArg* args = (VecThreadArg*)calloc(1,
         vec->buffers * sizeof(VecThreadArg));
     vec->accum = (float*)calloc(1, vec->buffers * NUM_PROF * sizeof(float));
-    #pragma omp parallel for schedule(static) num_threads(vec->num_workers)
     for (int i = 0; i < vec->size; i++) {
         puf_reset(&vec->envs[i]);
     }
@@ -2239,11 +2237,11 @@ void puf_dashboard_print(Ini* ini, PuffeRL* p, Dict* log, int epoch) {
     }
 
     char gpu[16], vram[32], ram[16];
-    snprintf(gpu, sizeof(gpu), "%3.0f%%", dict_get(log, "util/gpu_percent"));
+    snprintf(gpu, sizeof(gpu), "%3.0f%%", dict_get_default(log, "util/gpu_percent", 0.0));
     snprintf(vram, sizeof(vram), "%.1f/%.0fG",
-        dict_get(log, "util/vram_used_gb"),
-        dict_get(log, "util/vram_total_gb"));
-    snprintf(ram, sizeof(ram), "%.1fG", dict_get(log, "util/cpu_mem_gb"));
+        dict_get_default(log, "util/vram_used_gb", 0.0),
+        dict_get_default(log, "util/vram_total_gb", 0.0));
+    snprintf(ram, sizeof(ram), "%.1fG", dict_get_default(log, "util/cpu_mem_gb", 0.0));
 
     int fish_span = 18;
     int fish_pos = (fish_span - 3) - (puf_dashboard_frame++ % (fish_span - 2));
@@ -2407,20 +2405,21 @@ static void log_history_bin_mean(PufLogHistory* h, const char* key,
         int points, double* out) {
     assert(h->size > 0 && points >= 1);
     if (points == 1) {
-        out[0] = dict_get(&h->items[h->size - 1], key);
+        out[0] = dict_get_default(&h->items[h->size - 1], key, 0.0);
         return;
     }
-    double final_steps = dict_get(&h->items[h->size - 1], "agent_steps");
+    double final_steps = dict_get_default(
+        &h->items[h->size - 1], "agent_steps", 0.0);
     int out_idx = 0;
     int bin_n = 0;
     double bin_sum = 0;
-    double fallback = dict_get(&h->items[0], key);
+    double fallback = dict_get_default(&h->items[0], key, 0.0);
     double next_bin = final_steps / (points - 1);
     for (int i = 0; i < h->size; i++) {
         Dict* log = &h->items[i];
         bin_sum += dict_get(log, key);
         bin_n++;
-        double steps = dict_get(log, "agent_steps");
+        double steps = dict_get_default(log, "agent_steps", 0.0);
         if (steps < next_bin || out_idx >= points - 1) {
             continue;
         }
@@ -2430,7 +2429,7 @@ static void log_history_bin_mean(PufLogHistory* h, const char* key,
         bin_sum = 0;
         next_bin += final_steps / (points - 1);
     }
-    out[points - 1] = dict_get(&h->items[h->size - 1], key);
+    out[points - 1] = dict_get_default(&h->items[h->size - 1], key, 0.0);
     while (out_idx < points - 1) {
         out[out_idx++] = fallback;
     }
@@ -3155,8 +3154,10 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
     }
 
     // TrainResult curve: bin-mean over log_history (same as artifact metrics).
-    result.cost = dict_get(&last_log, "uptime");
-    result.steps = dict_get(&last_log, "agent_steps");
+    DictItem* cost_item = dict_find(&last_log, "uptime");
+    result.cost = cost_item ? cost_item->value : 0.0;
+    DictItem* steps_item = dict_find(&last_log, "agent_steps");
+    result.steps = steps_item ? steps_item->value : 0.0;
     DictItem* target = dict_find(&last_log, target_key);
     result.score = target ? (float)target->value : 0;
 

@@ -104,6 +104,11 @@ static inline DictItem* dict_set(Dict* dict, const char* key, double value) {
     return item;
 }
 
+static inline double dict_get_default(Dict* dict, const char* key, double def) {
+    DictItem* item = dict_find(dict, key);
+    return item ? item->value : def;
+}
+
 static inline const char* dict_get_str(Dict* dict, const char* key) {
     DictItem* item = dict_find(dict, key);
     if (!item || !item->str) {
