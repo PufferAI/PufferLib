@@ -86,6 +86,9 @@ V5 = True
 # doorstep scalars replaces the spk2 max-pool. Implies V5.
 SPELL2 = True
 
+GMP = os.environ.get("NH_TEST_GMP") == "1"
+GEN = os.environ.get("NH_TEST_GEN") == "1"
+MIN = os.environ.get("NH_TEST_MIN", "1") == "1"  # min is the encoder now
 if SPELL2:
     V5 = True
 if V5:
@@ -96,7 +99,19 @@ if LAB and LAB_IVA:
 if V5:
     for _nm in ["glb1_w", "glb1_xy", "glb1_b", "glb2_w", "glb2_b", "inv2_w", "inv2_b"]:
         WEIGHT_NAMES.remove(_nm)
-    WEIGHT_NAMES += ["terr1_w", "terr1_b", "terr2_w", "terr2_b", "locc_w", "isum_w", "isum_b"]
+    WEIGHT_NAMES += ["terr1_w", "terr1_b", "terr2_w", "terr2_b", "locc_w"]
+if GMP:
+    for _nm in ["isum_w", "isum_b", "iaq_w"]:
+        if _nm in WEIGHT_NAMES: WEIGHT_NAMES.remove(_nm)
+    WEIGHT_NAMES += ["gws_w", "gv_w", "gv_b", "gtau"]
+if GEN:
+    for _nm in ["isum_w", "isum_b", "iaq_w"]:
+        if _nm in WEIGHT_NAMES: WEIGHT_NAMES.remove(_nm)
+    WEIGHT_NAMES += ["gln_g", "gln_b", "gnv_w", "gnv_b", "gns_w"]
+if MIN:
+    for _nm in ["isum_w", "isum_b", "iaq_w"]:
+        if _nm in WEIGHT_NAMES: WEIGHT_NAMES.remove(_nm)
+    WEIGHT_NAMES += ["mv1_w", "mv1_b", "mv2_w", "mv2_b"]
 if SPELL2:
     WEIGHT_NAMES.remove("spk2_w"); WEIGHT_NAMES.remove("spk2_b")
     WEIGHT_NAMES += ["ss_w", "ss_b"]
@@ -106,12 +121,14 @@ if SPLIT:
         WEIGHT_NAMES += ["ent1_w", "ent1_b", "entq_w", "entb"]
 if ATTNPOOL:
     WEIGHT_NAMES += ["apq_w", "apb"]
-if INVATTN:
+if INVATTN and not (MIN or GMP or GEN):
     WEIGHT_NAMES += ["iaq_w"]
 if V3:
     WEIGHT_NAMES += ["emon_w", "eitem_w", "eterrc_w", "mon1_w", "mon1_b", "monq_w", "monb"]
-LAB_NAMES = (["lm1_w", "lm1_b", "lm2_w", "lm2_b", "lma_w", "lma_b",
-              "li1_w", "li1_b", "li2_w", "li2_b", "lia_w", "lia_b"] if LAB_TOK else []) \
+LAB_NAMES = ((["mr_w", "mr_b", "mm1_w", "mm1_b", "mm2_w", "mm2_b",
+               "ir_w", "ir_b", "im1_w", "im1_b", "im2_w", "im2_b"] if MIN
+              else ["lm1_w", "lm1_b", "lm2_w", "lm2_b", "lma_w", "lma_b",
+                    "li1_w", "li1_b", "li2_w", "li2_b", "lia_w", "lia_b"]) if LAB_TOK else []) \
           + (["aux_w"] if LAB_AUX else [])
 if LAB:
     WEIGHT_NAMES += LAB_NAMES
@@ -492,7 +509,7 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
     if not V5:
         inv2_w = w["inv2_w"]  = getw(lib, "inv2_w", (IP, IH))
         inv2_b = w["inv2_b"]  = getw(lib, "inv2_b", (IP,))
-    else:
+    elif not MIN:
         isum_w = w["isum_w"] = getw(lib, "isum_w", (64, IH))
         isum_b = w["isum_b"] = getw(lib, "isum_b", (64,))
     bl_w   = w["bl_w"]    = getw(lib, "bl_w", (BH, lib.nh_bl_feat()))
@@ -962,7 +979,79 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
         idxs = (t16 @ g2_w.T).argmax(dim=1)                       # (B,128)
         dxyt = torch.tensor(dxy)                                  # (B,80,2)
         parts.append(dxyt[torch.arange(idxs.shape[0])[:, None], idxs].reshape(idxs.shape[0], -1))
-    if INVATTN:  # M-query softmax attention over the 55 post-relu slot reps
+    if MIN:  # V6-min: per-slot deep MLP -> masked sum|max + pass-throughs; no attention
+        mv1 = w["mv1_w"] = getw(lib, "mv1_w", (64, IH))
+        mv1b = w["mv1_b"] = getw(lib, "mv1_b", (64,))
+        mv2 = w["mv2_w"] = getw(lib, "mv2_w", (64, 64))
+        mv2b = w["mv2_b"] = getw(lib, "mv2_b", (64,))
+        occb = torch.tensor((inv_vals.astype(np.int64) != 5976).astype(np.float64))
+        v = torch.relu(torch.relu(invh @ mv1.T + mv1b) @ mv2.T + mv2b)   # (B,55,64)
+        sm = 0.2 * (v * occb[:, :, None]).sum(dim=1)
+        mx = torch.relu(v.masked_fill(occb[:, :, None] < .5, -1e9).max(dim=1).values)
+        wldb = torch.tensor(sf[:, :, 10]) * occb
+        qvb = torch.tensor(sf[:, :, 12]) * occb
+        wrnb = torch.tensor(sf[:, :, 9]) * occb
+        sft = torch.tensor(sf)
+        pw = torch.cat([(invh * wldb[:, :, None]).sum(1), (sft * wldb[:, :, None]).sum(1)], 1)
+        pq = torch.cat([(invh * qvb[:, :, None]).sum(1), (sft * qvb[:, :, None]).sum(1)], 1)
+        nw = wrnb.sum(1).clamp(min=1.0)
+        pworn = (invh * wrnb[:, :, None]).sum(1) / nw[:, None]
+        parts.append(torch.cat([sm, mx, pw, pq, pworn], 1))
+    elif GEN:  # final arch: LN + 1/sqrt(d) unit (attn slices|cnt|sum|max) + pass-throughs
+        gln_g = w["gln_g"] = getw(lib, "gln_g", (IH,))
+        gln_b = w["gln_b"] = getw(lib, "gln_b", (IH,))
+        gnv_w = w["gnv_w"] = getw(lib, "gnv_w", (64, IH))
+        gnv_b = w["gnv_b"] = getw(lib, "gnv_b", (64,))
+        gns_w = w["gns_w"] = getw(lib, "gns_w", (8, IH))
+        occb = torch.tensor((inv_vals.astype(np.int64) != 5976).astype(np.float64))
+        mu = invh.mean(dim=2, keepdim=True)
+        var = invh.var(dim=2, unbiased=False, keepdim=True)
+        lnr = (invh - mu) / torch.sqrt(var + 1e-5) * gln_g + gln_b
+        S = (lnr @ gns_w.T)                                       # (B,55,8)
+        maskb = torch.where(occb > 0, 0.0, float("-inf"))[:, :, None]
+        A = torch.softmax(0.25 * S + maskb, dim=1)
+        A = torch.where(torch.isnan(A), torch.zeros_like(A), A)
+        v = torch.relu(invh @ gnv_w.T + gnv_b)                    # (B,55,64)
+        Bn = invh.shape[0]
+        att = torch.zeros(Bn, 64, dtype=torch.float64)
+        cnt = torch.zeros(Bn, 64, dtype=torch.float64)
+        for hh in range(8):
+            sl = v[:, :, hh*8:(hh+1)*8]
+            att[:, hh*8:(hh+1)*8] = torch.einsum('bs,bsd->bd', A[:, :, hh], sl)
+            cnt[:, hh*8:(hh+1)*8] = 0.2 * torch.einsum('bs,bsd->bd',
+                torch.sigmoid(S[:, :, hh]) * occb, sl)
+        vm = v * occb[:, :, None]
+        sm = 0.2 * vm.sum(dim=1)
+        mx = torch.relu(v.masked_fill(occb[:, :, None] < .5, -1e9).max(dim=1).values)
+        wldb = torch.tensor(sf[:, :, 10]) * occb
+        qvb = torch.tensor(sf[:, :, 12]) * occb
+        wrnb = torch.tensor(sf[:, :, 9]) * occb
+        sft = torch.tensor(sf)
+        NOPASS = int(os.environ.get("NH_GEN_NOPASS", "0"))
+        pw = torch.cat([(invh * wldb[:, :, None]).sum(1), (sft * wldb[:, :, None]).sum(1)], 1)
+        if NOPASS & 1: pw = pw * 0
+        pq = torch.cat([(invh * qvb[:, :, None]).sum(1), (sft * qvb[:, :, None]).sum(1)], 1)
+        if NOPASS & 2: pq = pq * 0
+        nw = wrnb.sum(1).clamp(min=1.0)
+        pworn = (invh * wrnb[:, :, None]).sum(1) / nw[:, None]
+        if NOPASS & 4: pworn = pworn * 0
+        parts.append(torch.cat([att, cnt, sm, mx, pw, pq, pworn], 1))
+    elif GMP:  # generalized pooling: K heads x (softmax(tau S) att | 0.2 sigmoid(S) count)
+        gws = w["gws_w"] = getw(lib, "gws_w", (8, IH + 24))
+        gv_w = w["gv_w"] = getw(lib, "gv_w", (16, IH))
+        gv_b = w["gv_b"] = getw(lib, "gv_b", (16,))
+        gtau = w["gtau"] = getw(lib, "gtau", (8,))
+        occb = torch.tensor((inv_vals.astype(np.int64) != 5976).astype(np.float64))
+        xs = torch.cat([invh, torch.tensor(sf)], dim=2)           # (B,55,40)
+        S = xs @ gws.T                                            # (B,55,8)
+        maskb = torch.where(occb > 0, 0.0, float("-inf"))[:, :, None]
+        A = torch.softmax(torch.exp(gtau)[None, None, :] * S + maskb, dim=1)
+        A = torch.where(torch.isnan(A), torch.zeros_like(A), A)   # empty inv rows
+        v = torch.relu(invh @ gv_w.T + gv_b)                      # (B,55,16)
+        att = torch.einsum('bsk,bsd->bkd', A, v)                  # (B,8,16)
+        sig = torch.einsum('bsk,bsd->bkd', torch.sigmoid(S) * occb[:, :, None], v) * 0.2
+        parts.append(torch.cat([att, sig], dim=2).reshape(invh.shape[0], -1))
+    elif INVATTN:  # M-query softmax attention over the 55 post-relu slot reps
         M = lib.nh_numel_iaq_w() // IH
         iaq = w["iaq_w"] = getw(lib, "iaq_w", (M, IH))
         att = torch.softmax(invh @ iaq.T, dim=1)                  # (B,55,M)
@@ -973,12 +1062,21 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
             hazlut = np.empty(381, dtype=np.uint8)
             lib.nh_get_haz_lut(hazlut.ctypes.data_as(VP))
         for nm, lst, ismon in [("lm", make_obs.labm, True), ("li", make_obs.labi, False)]:
-            w1 = w[nm + "1_w"] = getw(lib, nm + "1_w", (64, 48))
-            b1v = w[nm + "1_b"] = getw(lib, nm + "1_b", (64,))
-            w2 = w[nm + "2_w"] = getw(lib, nm + "2_w", (64, 64))
-            b2v = w[nm + "2_b"] = getw(lib, nm + "2_b", (64,))
-            aw = w[nm + "a_w"] = getw(lib, nm + "a_w", (8, 48))
-            abv = w[nm + "a_b"] = getw(lib, nm + "a_b", (8,))
+            if MIN:
+                rn = "mr" if ismon else "ir"; mn = "mm" if ismon else "im"
+                mrw = w[rn + "_w"] = getw(lib, rn + "_w", (16, 48))
+                mrb = w[rn + "_b"] = getw(lib, rn + "_b", (16,))
+                m1w = w[mn + "1_w"] = getw(lib, mn + "1_w", (64, 16))
+                m1b = w[mn + "1_b"] = getw(lib, mn + "1_b", (64,))
+                m2w = w[mn + "2_w"] = getw(lib, mn + "2_w", (64, 64))
+                m2b = w[mn + "2_b"] = getw(lib, mn + "2_b", (64,))
+            else:
+                w1 = w[nm + "1_w"] = getw(lib, nm + "1_w", (64, 48))
+                b1v = w[nm + "1_b"] = getw(lib, nm + "1_b", (64,))
+                w2 = w[nm + "2_w"] = getw(lib, nm + "2_w", (64, 64))
+                b2v = w[nm + "2_b"] = getw(lib, nm + "2_b", (64,))
+                aw = w[nm + "a_w"] = getw(lib, nm + "a_w", (8, 48))
+                abv = w[nm + "a_b"] = getw(lib, nm + "a_b", (8,))
             rows = []
             for b in range(B):
                 toks, valid = [], []
@@ -1018,6 +1116,20 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
                         tk = torch.zeros(48, dtype=torch.float64); valid.append(False)
                     toks.append(tk)
                 tokm = torch.stack(toks)                       # (16, 48)
+                if MIN:
+                    vb = torch.tensor([1.0 if v else 0.0 for v in valid],
+                                      dtype=torch.float64)
+                    rp = torch.relu(tokm @ mrw.T + mrb)        # (16, 16)
+                    hv = torch.relu(torch.relu(rp @ m1w.T + m1b) @ m2w.T + m2b)
+                    sm = 0.25 * (hv * vb[:, None]).sum(0)
+                    mx = torch.relu(hv.masked_fill(vb[:, None] < .5, -1e9).max(0).values)
+                    g0 = rp[0] * vb[0]
+                    if ismon:
+                        rows.append(torch.cat([sm, mx, g0]))
+                    else:
+                        uf = (rp * (vb * (tokm[:, 36] > 0.5).double())[:, None]).sum(0)
+                        rows.append(torch.cat([sm, mx, g0, uf]))
+                    continue
                 h2 = torch.relu(torch.relu(tokm @ w1.T + b1v) @ w2.T + b2v)  # (16, 64)
                 sc = tokm @ aw.T + abv                         # (16, 8)
                 mask = torch.tensor([0.0 if v else -1e30 for v in valid],
@@ -1030,7 +1142,7 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
                     pooled = torch.zeros(64, dtype=torch.float64)
                 rows.append(pooled)
             parts.append(torch.stack(rows))
-    if V5:  # inv2 tail: parameterless wield readout + masked-sum channel
+    if V5 and not GMP and not GEN and not MIN:  # inv2 tail: parameterless wield readout + masked-sum channel
         wldg = torch.tensor(sf[:, :, 10])                # wielded state bit
         parts.append((invh * wldg[:, :, None]).sum(dim=1))       # (B,16)
         ih = torch.relu(invh @ isum_w.T + isum_b)                # (B,55,64)
@@ -1147,7 +1259,7 @@ def run(lib):
         + (["terr1_w", "terr1_b", "terr2_w", "terr2_b", "locc_w"] if V5
            else ["glb1_w", "glb1_xy", "glb1_b", "glb2_w", "glb2_b"]) \
         + ["inv1_w", "inv1_b", "inv1s_w", "invt_w"] \
-        + (["isum_w", "isum_b"] if V5 else ["inv2_w", "inv2_b"]) \
+        + ([] if (GMP or GEN or MIN) else (["isum_w", "isum_b"] if V5 else ["inv2_w", "inv2_b"])) \
         + ["embed_w", "msg_w"]
     if IDEMB:
         enc_names += IDE_NAMES
@@ -1166,7 +1278,9 @@ def run(lib):
     if V3:
         enc_names += ["emon_w", "eitem_w", "eterrc_w", "mon1_w", "mon1_b", "monq_w", "monb"]
     if INVATTN:
-        enc_names += ["iaq_w"]
+        enc_names += (["mv1_w", "mv1_b", "mv2_w", "mv2_b"] if MIN
+                      else ["gws_w", "gv_w", "gv_b", "gtau"] if GMP
+                      else (["gln_g", "gln_b", "gnv_w", "gnv_b", "gns_w"] if GEN else ["iaq_w"]))
     if LAB:
         enc_names += LAB_NAMES
     enc_names += ["spk_w"] if "spk_w" not in enc_names else []
