@@ -292,6 +292,10 @@ if [ "$MODE" = "cpu" ]; then
     echo "Built: ./$OUTPUT_NAME"
     exit 0
 elif [ "$MODE" = "web" ]; then
+    if [ -f "$SRC_DIR/web.sh" ]; then
+        source "$SRC_DIR/web.sh"
+        exit 0
+    fi
     ENV_HEADER="$SRC_DIR/$ENV.h"
     if ! grep -q 'typedef[[:space:]].*obs_t' "$ENV_HEADER" 2>/dev/null; then
         echo "Error: $ENV_HEADER must typedef obs_t for web eval"

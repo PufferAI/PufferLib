@@ -2321,15 +2321,10 @@ int main(int argc, char** argv) {
         }
     }
 
-#ifdef __EMSCRIPTEN__
-    if (!encounter_name) encounter_name = "inferno";
-    if (encounter_name && strcmp(encounter_name, "pvp") == 0) encounter_name = "nh_pvp";
-#else
 #ifdef OSRS_VISUAL_DEFAULT_ENCOUNTER
     if (!encounter_name) encounter_name = OSRS_VISUAL_DEFAULT_ENCOUNTER;
 #endif
     if (encounter_name && strcmp(encounter_name, "pvp") == 0) encounter_name = "nh_pvp";
-#endif
     VisualPolicyMode policy_mode __attribute__((unused)) =
         visual_policy_parse_mode(policy_mode_name);
 
