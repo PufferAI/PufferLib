@@ -114,6 +114,7 @@ struct Env {
 
     // reward coefs
     float gold_coef;
+    float score_coef; // in-game score delta per step (0 = off)
     float exp_coef;
     float descent_coef;
     float floor_coef;
@@ -784,6 +785,7 @@ static float nethack_tile_claim(Nethack* env, long dn, long dl, long px, long py
 static float nethack_reward(Nethack* env) {
     // death payout
     if (env->obs.done) return env->death_penalty;
+    long score_before = env->prev_score; // update_stats overwrites prev_score below
     nethack_update_stats(env);
 
     int depth = (int)env->blstats[NLE_BL_DEPTH];
@@ -827,6 +829,9 @@ static float nethack_reward(Nethack* env) {
         r += env->xp_coef * (float)(xp - env->stats.max_xp);
         env->stats.max_xp = xp;
     }
+
+    // in-game score delta (the eval metric itself); coef 0 adds exactly 0.0f
+    r += env->score_coef * (float)(env->blstats[NLE_BL_SCORE] - score_before);
 
     // scout: pay every tile walked this step; a rush resolves many moves in
     // one nle_step, so drain the engine's path rather than crediting only
@@ -1100,6 +1105,7 @@ void puf_init(Env* env, Dict* kwargs) {
     env->agents[0].policy = 0;
     init(env);
     env->gold_coef = dict_get(kwargs, "gold_coef");
+    env->score_coef = dict_get(kwargs, "score_coef");
     env->exp_coef = dict_get(kwargs, "exp_coef");
     env->descent_coef = dict_get(kwargs, "descent_coef");
     env->floor_coef = dict_get(kwargs, "floor_coef");
