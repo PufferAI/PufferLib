@@ -638,7 +638,7 @@ void free_puffernet(PufferNet* net) {
 
 #include ENV_HEADER
 
-#if !defined(PUF_NMMO3_NET) && !defined(PUF_ASTEROIDS_NET) && !defined(PUF_MINIMAL_NET)
+#if !defined(PUF_NMMO3_NET) && !defined(PUF_ASTEROIDS_NET) && !defined(PUF_MINIMAL_NET) && !defined(PUF_CRAFTAX_NET)
 static int puf_align8(int n) {
     return (n + 7) & ~7;
 }
@@ -724,7 +724,10 @@ int main(int argc, char** argv) {
     if (argc >= 2 && argv[1][0] && argv[1][0] != '-' &&
             strchr(argv[1], '=') == NULL && strchr(argv[1], '/') == NULL &&
             strstr(argv[1], ".bin") == NULL && strcmp(argv[1], "latest") != 0) {
-        env_name = argv[1];
+        if (strcmp(argv[1], "eval") != 0 && strcmp(argv[1], "train") != 0
+                && strcmp(argv[1], "match") != 0 && strcmp(argv[1], "sweep") != 0) {
+            env_name = argv[1];
+        }
         argi = 2;
     }
     Ini ini = {0};
@@ -768,6 +771,8 @@ int main(int argc, char** argv) {
     int need = asteroids_weight_count(hidden_size, num_layers);
 #elif defined(PUF_MINIMAL_NET)
     int need = minimal_weight_count(hidden_size, num_layers);
+#elif defined(PUF_CRAFTAX_NET)
+    int need = craftax_weight_count(hidden_size, num_layers);
 #else
     int need = puffernet_weight_count(OBS_SIZE, hidden_size, num_layers,
         act_sizes, num_actions);
@@ -802,7 +807,7 @@ int main(int argc, char** argv) {
     size_t n_atn = (size_t)env.num_agents * (size_t)NUM_ATNS;
     size_t n_agt = (size_t)env.num_agents;
     obs_t* observations = (obs_t*)calloc(n_obs, sizeof(obs_t));
-#if !defined(PUF_NMMO3_NET) && !defined(PUF_ASTEROIDS_NET) && !defined(PUF_MINIMAL_NET)
+#if !defined(PUF_NMMO3_NET) && !defined(PUF_ASTEROIDS_NET) && !defined(PUF_MINIMAL_NET) && !defined(PUF_CRAFTAX_NET)
     float* obs_f = (float*)calloc(n_obs, sizeof(float));
 #endif
     float* actions = (float*)calloc(n_atn, sizeof(float));
@@ -843,6 +848,12 @@ int main(int argc, char** argv) {
         net = init_minimal_net(weights, env.num_agents,
             hidden_size, num_layers);
     }
+#elif defined(PUF_CRAFTAX_NET)
+    CraftaxNet* net = NULL;
+    if (have_net) {
+        net = init_craftax_net(weights, env.num_agents,
+            hidden_size, num_layers);
+    }
 #else
     PufferNet* net = NULL;
     if (have_net) {
@@ -851,18 +862,20 @@ int main(int argc, char** argv) {
     }
 #endif
 
+#ifndef PLATFORM_WEB
     SetConfigFlags(FLAG_MSAA_4X_HINT);
+#endif
 
 #ifndef PUF_STEPS_PER_SEC
 #define PUF_STEPS_PER_SEC 60
 #endif
-    int step_period = 1;
-    int step_credit = 0;
-    if ((int)PUF_STEPS_PER_SEC < 60) {
-        step_period = 60 / (int)PUF_STEPS_PER_SEC;
-        assert(step_period >= 1);
-    }
-    int step_hold = 0;
+    // Interactive: keep sim at PUF_STEPS_PER_SEC using wall clock.
+    // Each tick is still one training step (one forward + one puf_step / ACTION_DT).
+    // Slow renders catch up with extra ticks; they do not stretch dt.
+    const double sim_dt = 1.0 / (double)PUF_STEPS_PER_SEC;
+    double sim_accum = 0.0;
+    double sim_prev = -1.0;
+    int sim_tick_cap = 5;
     int hold = 0;
     int steps = 0;
 #ifndef PLATFORM_WEB
@@ -873,18 +886,36 @@ int main(int argc, char** argv) {
     if (!headless) {
         puf_render(&env);
     }
+    // Raylib 5.5 WindowShouldClose() on web always emscripten_sleep(16).
+    // With ASYNCIFY that wait is ~40ms; plus puf_web_vsync rAF => ~18fps.
+    // Pace frames only with puf_web_vsync. Native still uses WindowShouldClose.
     while (headless
             ? (env.log.n < (float)eval_episodes)
-            : !IsWindowReady() || !WindowShouldClose()) {
-        int do_step = headless || (step_hold == 0);
+#ifdef PLATFORM_WEB
+            : IsWindowReady()) {
+#else
+            : (!IsWindowReady() || !WindowShouldClose())) {
+#endif
         int ticks = 1;
-        if (!headless && (int)PUF_STEPS_PER_SEC > 60) {
-            step_credit += (int)PUF_STEPS_PER_SEC;
+        if (!headless) {
+            double now = GetTime();
             ticks = 0;
-            while (step_credit >= 60) {
-                step_credit -= 60;
-                ticks++;
+            if (sim_prev >= 0.0) {
+                double dt = now - sim_prev;
+                if (dt < 0.0) dt = 0.0;
+                if (dt > 0.25) dt = 0.25;
+                sim_accum += dt;
+                if (sim_accum > sim_dt * (double)sim_tick_cap) {
+                    sim_accum = sim_dt * (double)sim_tick_cap;
+                }
+                while (sim_accum >= sim_dt && ticks < sim_tick_cap) {
+                    sim_accum -= sim_dt;
+                    ticks++;
+                }
+            } else {
+                ticks = 1;
             }
+            sim_prev = now;
         }
         for (int t = 0; t < ticks; t++) {
 #ifdef PUF_EVAL_SHOULD_FORWARD
@@ -894,13 +925,16 @@ int main(int argc, char** argv) {
 #endif
             int eval_human = !headless && IsWindowReady() &&
                 IsKeyDown(KEY_LEFT_SHIFT);
-            if (have_net && do_step && eval_fwd && hold == 0 && !eval_human) {
+            if (have_net && eval_fwd && hold == 0 && !eval_human) {
 #ifdef PUF_NMMO3_NET
                 forward(net, observations, terminals, actions);
 #elif defined(PUF_ASTEROIDS_NET)
                 forward_asteroids(net, (float*)observations, terminals, actions);
 #elif defined(PUF_MINIMAL_NET)
                 forward_minimal(net, (float*)observations, terminals, actions);
+#elif defined(PUF_CRAFTAX_NET)
+                forward_craftax(net, (float*)observations, terminals, actions, masks);
+                env.predicted_value = craftax_value(net, 0);
 #else
                 float* fwd = (float*)observations;
                 if (sizeof(obs_t) != sizeof(float)) {
@@ -912,13 +946,11 @@ int main(int argc, char** argv) {
                 forward_puffernet(net, fwd, actions, masks, terminals);
 #endif
             }
-            if (do_step) {
-                puf_step(&env);
-                if (headless) {
-                    steps++;
-                }
+            puf_step(&env);
+            if (headless) {
+                steps++;
             }
-            if (do_step && eval_fwd) {
+            if (eval_fwd) {
                 int reset_hold = 0;
                 for (int a = 0; a < env.num_agents; a++) {
                     if (rewards[a] != 0.0f || terminals[a] > 0.5f) {
@@ -930,7 +962,6 @@ int main(int argc, char** argv) {
         }
         if (!headless) {
             puf_render(&env);
-            step_hold = (step_hold + 1) % step_period;
         }
     }
 

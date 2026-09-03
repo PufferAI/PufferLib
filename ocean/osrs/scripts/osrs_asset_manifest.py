@@ -294,17 +294,29 @@ def print_group_files(manifest: AssetManifest, group_names: list[str]) -> None:
             print(f"{group.name}\t{asset_path}")
 
 
-def print_emcc_preload_args(manifest: AssetManifest, group_names: list[str]) -> None:
+def emcc_preload_args(manifest: AssetManifest, group_names: list[str]) -> list[str]:
     requested = set(group_names)
     manifest_names = {group.name for group in manifest.required_groups}
     unknown = requested - manifest_names
     if unknown:
         raise SystemExit(f"osrs-assets: unknown groups: {', '.join(sorted(unknown))}")
+    seen: set[str] = set()
+    lines: list[str] = []
     for group in manifest.required_groups:
         if requested and group.name not in requested:
             continue
         for asset_path in group.files:
-            print(f"--preload-file ocean/osrs/data/{asset_path}@{asset_path}")
+            if asset_path in seen:
+                continue
+            seen.add(asset_path)
+            runtime_path = f"ocean/osrs/data/{asset_path}"
+            lines.append(f"--preload-file {runtime_path}@{runtime_path}")
+    return lines
+
+
+def print_emcc_preload_args(manifest: AssetManifest, group_names: list[str]) -> None:
+    for line in emcc_preload_args(manifest, group_names):
+        print(line)
 
 
 def main(argv: list[str]) -> int:

@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSRS</title>
+  <style>
+    :root {
+      --highlight: #00bbbb;
+      --foreground: #061818;
+      --background: #000000;
+      --text: #f1f1f1;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--background);
+      color: var(--text);
+      font-family: Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #stage {
+      position: relative;
+      width: 1240px;
+      height: 840px;
+      max-width: 100%;
+      max-height: 100%;
+      aspect-ratio: 1240 / 840;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: var(--background);
+    }
+
+    #wave-bar,
+    #status {
+      position: absolute;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      background: var(--foreground);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    #wave-bar {
+      top: 8px;
+      left: 8px;
+    }
+
+    #status {
+      top: 8px;
+      right: 8px;
+    }
+
+    #wave-bar[hidden],
+    #status[hidden] {
+      display: none;
+    }
+
+    label {
+      color: var(--highlight);
+    }
+
+    input,
+    button {
+      height: 26px;
+      border: 1px solid var(--highlight);
+      background: var(--background);
+      color: var(--text);
+      font: inherit;
+    }
+
+    input {
+      width: 56px;
+      padding: 0 6px;
+    }
+
+    button {
+      padding: 0 8px;
+      cursor: pointer;
+    }
+
+    button:hover,
+    button:focus-visible,
+    canvas:focus-visible {
+      outline: 2px solid var(--highlight);
+      outline-offset: 1px;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <form id="wave-bar" hidden>
+      <label for="wave">Wave</label>
+      <input id="wave" name="wave" type="number" min="1" step="1" required>
+      <button type="submit">Go</button>
+      <button id="wave-boss" type="button"></button>
+    </form>
+    <div id="status" role="status" aria-live="assertive">Loading simulator</div>
+    <canvas id="canvas" aria-label="OSRS simulator" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+  </div>
+  <script>
+    var canvasElement = document.getElementById("canvas");
+    var statusElement = document.getElementById("status");
+    var waveBar = document.getElementById("wave-bar");
+    var waveInput = document.getElementById("wave");
+    var waveBoss = document.getElementById("wave-boss");
+    var runtimeError = false;
+    var query = new URLSearchParams(window.location.search);
+    var encounterFromPath = function () {
+      if (window.location.pathname.indexOf("colosseum") !== -1) return "colosseum";
+      if (window.location.pathname.indexOf("inferno") !== -1) return "inferno";
+      return "";
+    };
+    var encounter = query.get("encounter") || encounterFromPath();
+    var waveLimits = {
+      inferno: { max: 69, bossLabel: "Zuk", bossWave: 69 },
+      colosseum: { max: 12, bossLabel: "Sol", bossWave: 12 }
+    };
+    var encounterLabels = {
+      inferno: "Inferno",
+      colosseum: "Colosseum",
+      zulrah: "Zulrah",
+      nh_pvp: "NH PvP"
+    };
+    var encounterLabel = encounterLabels[encounter] || "OSRS";
+    var modelUrl = query.get("model") || "models/policy.bin";
+    var modelUrlPath = new URL(modelUrl, window.location.href).pathname;
+    var modelBasename = modelUrlPath.split("/").filter(Boolean).pop();
+    document.title = "OSRS " + encounterLabel;
+    canvasElement.setAttribute("aria-label", "OSRS " + encounterLabel + " simulator");
+
+    function unwindMessage(reason) {
+      if (reason == null) return "";
+      if (typeof reason === "string") return reason;
+      if (reason instanceof Error) return reason.message || "";
+      return String(reason.message || reason);
+    }
+
+    function isEmscriptenUnwind(reason) {
+      var message = unwindMessage(reason);
+      return message === "unwind";
+    }
+
+    function reportError(reason) {
+      // emscripten_set_main_loop(..., simulate_infinite_loop=1) throws "unwind"
+      // to freeze main(). That is the game loop starting, not a crash.
+      if (isEmscriptenUnwind(reason)) {
+        if (!runtimeError) {
+          statusElement.hidden = true;
+          canvasElement.focus();
+        }
+        return;
+      }
+      var message = unwindMessage(reason) || "unknown error";
+      runtimeError = true;
+      statusElement.hidden = false;
+      statusElement.textContent = "Error: " + message;
+      console.error(reason);
+      window.parent.postMessage({
+        type: "osrs-simulator-error",
+        message: message
+      }, window.location.origin);
+    }
+
+    if (!modelBasename) {
+      reportError(new Error("Model URL has no filename"));
+      throw new Error("Model URL has no filename");
+    }
+
+    function versionedAssetUrl(url) {
+      var separator = url.includes("?") ? "&" : "?";
+      return url + separator + "v=__OSRS_BUNDLE_VERSION__";
+    }
+
+    function appendArgument(argumentsList, parameterName, flagName) {
+      var value = query.get(parameterName);
+      if (value !== null) {
+        argumentsList.push(flagName, value);
+      }
+    }
+
+    function applyWave(wave) {
+      var next = new URL(window.location.href);
+      next.searchParams.set("wave", String(wave));
+      if (encounter) next.searchParams.set("encounter", encounter);
+      window.location.replace(next.toString());
+    }
+
+    var waveSpec = waveLimits[encounter];
+    if (waveSpec) {
+      var currentWave = parseInt(query.get("wave") || "1", 10);
+      if (!Number.isInteger(currentWave) || currentWave < 1) currentWave = 1;
+      if (currentWave > waveSpec.max) currentWave = waveSpec.max;
+      waveInput.min = "1";
+      waveInput.max = String(waveSpec.max);
+      waveInput.value = String(currentWave);
+      waveBoss.textContent = waveSpec.bossLabel;
+      waveBar.hidden = false;
+      waveBar.addEventListener("submit", function (event) {
+        event.preventDefault();
+        var wave = parseInt(waveInput.value, 10);
+        if (!Number.isInteger(wave) || wave < 1 || wave > waveSpec.max) return;
+        applyWave(wave);
+      });
+      waveBoss.addEventListener("click", function () {
+        applyWave(waveSpec.bossWave);
+      });
+    }
+
+    var installedModelPath = "/models/" + modelBasename;
+    var runtimeArguments = [
+      "--model", installedModelPath,
+      "--policy-mode", query.get("policyMode") || "sample",
+      "--policy-seed", query.get("policySeed") || "1"
+    ];
+    appendArgument(runtimeArguments, "encounter", "--encounter");
+    appendArgument(runtimeArguments, "wave", "--wave");
+    appendArgument(runtimeArguments, "gearTier", "--tier");
+    appendArgument(runtimeArguments, "loadoutMode", "--loadout-mode");
+    appendArgument(runtimeArguments, "tps", "--tps");
+    appendArgument(runtimeArguments, "tab", "--tab");
+    appendArgument(runtimeArguments, "hiddenSize", "--hidden-size");
+    appendArgument(runtimeArguments, "numLayers", "--num-layers");
+    appendArgument(runtimeArguments, "entityEncoder", "--entity-encoder");
+    window.addEventListener("error", function (event) {
+      var reason = event.error || event.message;
+      if (isEmscriptenUnwind(reason)) {
+        event.preventDefault();
+        reportError(reason);
+        return;
+      }
+      reportError(reason);
+    });
+    window.addEventListener("unhandledrejection", function (event) {
+      if (isEmscriptenUnwind(event.reason)) {
+        event.preventDefault();
+        reportError(event.reason);
+        return;
+      }
+      reportError(event.reason);
+    });
+    window.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && window.parent !== window) {
+        window.parent.postMessage({ type: "osrs-simulator-exit" }, window.location.origin);
+      }
+    });
+
+    var verbose = query.get("debug") === "1";
+    function runtimePrint(text) {
+      if (verbose) console.log(text);
+    }
+    function runtimePrintErr(text) {
+      var line = String(text);
+      if (verbose) {
+        console.warn(line);
+        return;
+      }
+      if (/error|abort|fail|mismatch/i.test(line)) console.warn(line);
+    }
+
+    var Module = {
+      arguments: runtimeArguments,
+      canvas: canvasElement,
+      print: runtimePrint,
+      printErr: runtimePrintErr,
+      locateFile: function (path) {
+        return versionedAssetUrl(path);
+      },
+      setStatus: function (text) {
+        if (runtimeError) {
+          return;
+        }
+        statusElement.hidden = false;
+        statusElement.textContent = text;
+      },
+      onAbort: function (reason) {
+        reportError(reason);
+      },
+      onRuntimeInitialized: function () {
+        if (!runtimeError) {
+          statusElement.hidden = false;
+          statusElement.textContent = "Loading assets";
+        }
+        window.parent.postMessage({ type: "osrs-simulator-ready" }, window.location.origin);
+      },
+      preRun: [function () {
+        var dependencyName = "osrs-policy";
+        addRunDependency(dependencyName);
+        Module.setStatus("Loading policy");
+        fetch(versionedAssetUrl(modelUrl)).then(function (response) {
+          if (!response.ok) {
+            throw new Error("Policy request failed: HTTP " + response.status + " " + response.statusText);
+          }
+          return response.arrayBuffer();
+        }).then(function (policyData) {
+          FS.mkdirTree("/models");
+          FS.writeFile(installedModelPath, new Uint8Array(policyData));
+          removeRunDependency(dependencyName);
+        }).catch(function (error) {
+          reportError(error);
+          abort(error);
+        });
+      }]
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

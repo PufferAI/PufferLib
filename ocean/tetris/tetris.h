@@ -31,7 +31,7 @@ static inline int tetris_max(int a, int b) { return a > b ? a : b; }
 #define ACTION_HOLD 6
 
 #define MAX_TICKS 10000
-#define PERSONAL_BEST 67890
+#define PERSONAL_BEST 150000
 #define INITIAL_TICKS_PER_FALL 6 // how many ticks before the tetromino naturally falls down of one square
 #define GARBAGE_KICKOFF_TICK 500
 #define INITIAL_TICKS_PER_GARBAGE 100

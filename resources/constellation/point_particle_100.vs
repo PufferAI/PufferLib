@@ -18,6 +18,6 @@ void main() {
     vec2 pos = vertexPosition.xy;
     float idx = vertexPosition.z;
     gl_Position = mvp * vec4(pos, 0.0, 1.0);
-    gl_PointSize = twinkle(idx, currentTime);
+    gl_PointSize = twinkle(idx, currentTime) * vertexColor.a;
     fragColor = vertexColor;
 }

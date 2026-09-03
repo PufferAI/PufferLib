@@ -1,9 +1,30 @@
+#!/usr/bin/env python3
+"""Compare ocean/craftax against original JAX Craftax-Symbolic-v1.
+
+https://github.com/MichaelTMatthews/Craftax
+
+The reference is the symbolic env (8268-d one-hot obs from
+render_craftax_symbolic), not the pixels env. Those observations are packed
+into the 9x11x8+51 layout used by ocean/craftax.
+
+Checks:
+1. Reset worldgen (maps, items, lights, ladders, starter stats)
+2. Packed symbolic observations after reset and after a shared action sequence
+
+JAX sleep/rest is collapsed into one agent step to match puf_step. Rewards are
+not compared: clean dropped health shaping, adds armour delta, and uses -1 on
+death.
+"""
+
+from __future__ import annotations
+
 import argparse
 import ctypes
 import os
+import random
 import subprocess
+import sys
 import tempfile
-from collections import deque
 from pathlib import Path
 
 os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
@@ -12,1336 +33,641 @@ os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import jax
 import jax.numpy as jnp
 import numpy as np
-
+from craftax.craftax.envs.craftax_symbolic_env import CraftaxSymbolicEnvNoAutoReset
 from craftax.craftax_env import make_craftax_env_from_name
-try:
-    from craftax_state_fixtures import (
-        CraftaxState,
-        craftax_state_to_jax,
-        flatten_env_state,
-    )
-except ModuleNotFoundError:
-    from tests.craftax_state_fixtures import (
-        CraftaxState,
-        craftax_state_to_jax,
-        flatten_env_state,
-    )
 
 
-OBS_SIZE = 8268
-NUM_ACTIONS = 43
-
-OBS_ROWS = 9
-OBS_COLS = 11
-NUM_BLOCK_TYPES = 37
-NUM_ITEM_TYPES = 5
-NUM_MOB_CLASSES = 5
-NUM_MOB_TYPES = 8
-NUM_TILE_CHANNELS = NUM_BLOCK_TYPES + NUM_ITEM_TYPES + NUM_MOB_CLASSES * NUM_MOB_TYPES + 1
-MAP_OBS_SIZE = OBS_ROWS * OBS_COLS * NUM_TILE_CHANNELS
 MAP_SIZE = 48
 NUM_LEVELS = 9
-MONSTERS_KILLED_TO_CLEAR_LEVEL = 8
+NUM_POTIONS = 6
+MAP_CELLS = NUM_LEVELS * MAP_SIZE * MAP_SIZE
+OBS_ROWS = 9
+OBS_COLS = 11
+NUM_MOB_CLASSES = 5
+NUM_MOB_TYPES = 8
+NUM_BLOCK_TYPES = 37
+NUM_ITEM_TYPES = 5
+INVENTORY_OBS_SIZE = 51
+OBS_TILE_CHANNELS = 3 + NUM_MOB_CLASSES
+OBS_SIZE = OBS_ROWS * OBS_COLS * OBS_TILE_CHANNELS + INVENTORY_OBS_SIZE
+JAX_TILE_CHANNELS = (
+    NUM_BLOCK_TYPES + NUM_ITEM_TYPES + NUM_MOB_CLASSES * NUM_MOB_TYPES + 1
+)
+JAX_MAP_OBS = OBS_ROWS * OBS_COLS * JAX_TILE_CHANNELS
+JAX_OBS_SIZE = JAX_MAP_OBS + INVENTORY_OBS_SIZE
+NUM_ACTIONS = 43
 
-NOOP = 0
-LEFT = 1
-RIGHT = 2
-UP = 3
-DOWN = 4
-DO = 5
-PLACE_STONE = 7
-PLACE_TABLE = 8
-PLACE_FURNACE = 9
-MAKE_WOOD_PICKAXE = 11
-MAKE_STONE_PICKAXE = 12
-MAKE_IRON_PICKAXE = 13
-MAKE_WOOD_SWORD = 14
-MAKE_STONE_SWORD = 15
-MAKE_IRON_SWORD = 16
-DESCEND = 18
-MAKE_DIAMOND_PICKAXE = 20
-MAKE_DIAMOND_SWORD = 21
-MAKE_IRON_ARMOUR = 22
-MAKE_DIAMOND_ARMOUR = 23
-SHOOT_ARROW = 24
-MAKE_ARROW = 25
-CAST_FIREBALL = 26
-CAST_ICEBALL = 27
-PLACE_TORCH = 28
-MAKE_TORCH = 38
+DUNGEON_FLOORS = (1, 3, 4)
+SMOOTH_FLOORS = (0, 2, 5, 6, 7, 8)
+BOSS_FLOOR = 8
+FIRE_FLOOR = 6
 
 BLOCK_WATER = 3
+BLOCK_STONE = 4
+BLOCK_TREE = 5
+BLOCK_PATH = 7
 BLOCK_LAVA = 14
-ITEM_LADDER_DOWN = 2
+BLOCK_DARKNESS = 18
+BLOCK_CHEST = 23
+BLOCK_FOUNTAIN = 24
+BLOCK_FIRE_GRASS = 25
+BLOCK_FIRE_TREE = 28
+BLOCK_ENCHANTMENT_TABLE_FIRE = 30
+BLOCK_ENCHANTMENT_TABLE_ICE = 31
+BLOCK_NECROMANCER = 32
+BLOCK_GRAVE = 33
 
-MOVE_ACTIONS = np.asarray([LEFT, RIGHT, UP, DOWN], dtype=np.int32)
-DIRS = {
-    LEFT: (0, -1),
-    RIGHT: (0, 1),
-    UP: (-1, 0),
-    DOWN: (1, 0),
+ITEM_TORCH = 1
+ITEM_LADDER_DOWN = 2
+ITEM_LADDER_UP = 3
+
+
+class WorldDump(ctypes.Structure):
+    _fields_ = [
+        ("map", ctypes.c_int32 * MAP_CELLS),
+        ("item_map", ctypes.c_int32 * MAP_CELLS),
+        ("light_map", ctypes.c_uint8 * MAP_CELLS),
+        ("down_ladders", ctypes.c_int32 * (NUM_LEVELS * 2)),
+        ("up_ladders", ctypes.c_int32 * (NUM_LEVELS * 2)),
+        ("monsters_killed", ctypes.c_int32 * NUM_LEVELS),
+        ("potion_mapping", ctypes.c_int32 * NUM_POTIONS),
+        ("player_position", ctypes.c_int32 * 2),
+        ("player_level", ctypes.c_int32),
+        ("player_direction", ctypes.c_int32),
+        ("player_health", ctypes.c_float),
+        ("player_food", ctypes.c_int32),
+        ("player_drink", ctypes.c_int32),
+        ("player_energy", ctypes.c_int32),
+        ("player_mana", ctypes.c_int32),
+        ("player_dexterity", ctypes.c_int32),
+        ("player_strength", ctypes.c_int32),
+        ("player_intelligence", ctypes.c_int32),
+        ("light_level", ctypes.c_float),
+        ("boss_timesteps", ctypes.c_int32),
+    ]
+
+
+SOURCE = r"""
+#include <stdint.h>
+#include <string.h>
+#include "ocean/craftax/craftax.h"
+
+static void flatten_clean(const State* state, WorldDump* out) {
+    int cell = 0;
+    for (int level = 0; level < NUM_LEVELS; level++) {
+        for (int row = 0; row < MAP_SIZE; row++) {
+            for (int col = 0; col < MAP_SIZE; col++) {
+                out->map[cell] = state->map[level][row][col];
+                out->item_map[cell] = state->item_map[level][row][col];
+                out->light_map[cell] = state->light_map[level][row][col];
+                cell++;
+            }
+        }
+        out->down_ladders[level * 2 + 0] = state->down_ladders[level][0];
+        out->down_ladders[level * 2 + 1] = state->down_ladders[level][1];
+        out->up_ladders[level * 2 + 0] = state->up_ladders[level][0];
+        out->up_ladders[level * 2 + 1] = state->up_ladders[level][1];
+        out->monsters_killed[level] = state->monsters_killed[level];
+    }
+    memcpy(out->potion_mapping, state->potion_mapping, sizeof(out->potion_mapping));
+    out->player_position[0] = state->player_position[0];
+    out->player_position[1] = state->player_position[1];
+    out->player_level = state->player_level;
+    out->player_direction = state->player_direction;
+    out->player_health = state->player_health;
+    out->player_food = state->player_food;
+    out->player_drink = state->player_drink;
+    out->player_energy = state->player_energy;
+    out->player_mana = state->player_mana;
+    out->player_dexterity = state->player_dexterity;
+    out->player_strength = state->player_strength;
+    out->player_intelligence = state->player_intelligence;
+    out->light_level = state->light_level;
+    out->boss_timesteps = state->boss_timestep_to_spawn_this_round;
 }
 
-SOLID_BLOCKS = frozenset(
-    [
-        4,
-        5,
-        8,
-        9,
-        10,
-        11,
-        12,
-        15,
-        16,
-        17,
-        19,
-        20,
-        21,
-        22,
-        23,
-        24,
-        28,
-        30,
-        31,
-        32,
-        33,
-        34,
-        35,
-    ]
-)
+void generate_clean_world(int32_t seed, WorldDump* out) {
+    State state;
+    Rng initial = rng_seed((uint32_t)seed);
+    Rng env_rng;
+    Rng reset_key;
+    rng_split(initial, &env_rng, &reset_key);
+    Rng unused;
+    Rng world_key;
+    rng_split(reset_key, &unused, &world_key);
+    generate_world_from_key(&state, world_key);
+    flatten_clean(&state, out);
+}
+"""
 
-INVENTORY_OBS_NAMES = [
-    "inventory.wood",
-    "inventory.stone",
-    "inventory.coal",
-    "inventory.iron",
-    "inventory.diamond",
-    "inventory.sapphire",
-    "inventory.ruby",
-    "inventory.sapling",
-    "inventory.torches",
-    "inventory.arrows",
-    "inventory.books",
-    "inventory.pickaxe",
-    "inventory.sword",
-    "sword_enchantment",
-    "bow_enchantment",
-    "inventory.bow",
-    "inventory.potions.red",
-    "inventory.potions.green",
-    "inventory.potions.blue",
-    "inventory.potions.pink",
-    "inventory.potions.cyan",
-    "inventory.potions.yellow",
-    "player_health",
-    "player_food",
-    "player_drink",
-    "player_energy",
-    "player_mana",
-    "player_xp",
-    "player_dexterity",
-    "player_strength",
-    "player_intelligence",
-    "direction.left",
-    "direction.right",
-    "direction.up",
-    "direction.down",
-    "inventory.armour.0",
-    "inventory.armour.1",
-    "inventory.armour.2",
-    "inventory.armour.3",
-    "armour_enchantments.0",
-    "armour_enchantments.1",
-    "armour_enchantments.2",
-    "armour_enchantments.3",
-    "light_level",
-    "is_sleeping",
-    "is_resting",
-    "learned_spells.fireball",
-    "learned_spells.iceball",
-    "player_level",
-    "ladder_down_open",
-    "boss_vulnerable",
-]
+CLEAN_REPLAY = r"""
+#include <stdint.h>
+#include <string.h>
+#include "ocean/craftax/craftax.h"
 
-MOB_CLASS_NAMES = [
-    "melee_mobs",
-    "passive_mobs",
-    "ranged_mobs",
-    "mob_projectiles",
-    "player_projectiles",
-]
+void replay_clean(
+    int32_t seed,
+    const int32_t* actions,
+    int32_t num_actions,
+    float* obs_out,
+    float* rewards_out,
+    int32_t* terminal_step
+) {
+    Craftax env;
+    float action_value = 0.0f;
+    float reward_value = 0.0f;
+    float terminal_value = 0.0f;
+    float live_obs[OBS_SIZE];
+    memset(&env, 0, sizeof(env));
+    env.num_agents = 1;
+    env.rng = (unsigned int)seed;
+    env.seed = (uint64_t)(uint32_t)seed;
+    env.agents[0].actions = &action_value;
+    env.agents[0].rewards = &reward_value;
+    env.agents[0].terminals = &terminal_value;
+    env.agents[0].observations = live_obs;
 
-POLICIES = ("uniform", "combat", "descend", "suicide", "boss", "mixed")
-MIXED_ORDER = ("uniform", "combat", "descend", "suicide", "boss")
-
-
-def _preload_nccl():
-    root = Path(__file__).resolve().parents[1]
-    nccl = root / ".venv/lib/python3.12/site-packages/nvidia/nccl/lib/libnccl.so.2"
-    if nccl.exists():
-        ctypes.CDLL(str(nccl), mode=ctypes.RTLD_GLOBAL)
-
-
-def import_c_env():
-    _preload_nccl()
-    import pufferlib._C as cmod
-
-    env_name = getattr(cmod, "env_name", None)
-    if env_name != "craftax":
-        raise RuntimeError(
-            f"pufferlib._C is compiled for {env_name!r}, expected 'craftax'. "
-            "Run: uv run --with pybind11 --with rich_argparse ./build.sh craftax"
-        )
-    return cmod
-
-
-def float_view(ptr, count):
-    array_t = ctypes.c_float * count
-    return np.ctypeslib.as_array(array_t.from_address(ptr))
-
-
-def _stack_states(states):
-    return jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *states)
-
-
-class JaxCraftaxBatch:
-    def __init__(self, seeds, resetter=None):
-        self.env = make_craftax_env_from_name("Craftax-Symbolic-v1", auto_reset=False)
-        self.params = self.env.default_params
-        self.num_envs = len(seeds)
-        self.resetter = resetter
-        self.reset_keys = []
-        rngs = []
-        states = []
-        obs = []
-        for seed in seeds:
-            rng = jax.random.PRNGKey(int(seed))
-            rng, reset_key = jax.random.split(rng)
-            env_obs, state = self.env.reset(reset_key, self.params)
-            rngs.append(rng)
-            self.reset_keys.append(np.asarray(reset_key, dtype=np.uint32))
-            states.append(state)
-            obs.append(np.asarray(env_obs, dtype=np.float32).reshape(-1))
-
-        self.rngs = jnp.stack(rngs)
-        self.states = _stack_states(states)
-        self.obs = np.stack(obs, axis=0)
-        self._step_batch = self._make_step_batch()
-
-    def _make_step_batch(self):
-        env = self.env
-        params = self.params
-
-        def step_one(key, state, action):
-            step_rng, reset_key = jax.random.split(key, 2)
-            obs, next_state, reward, done, _info = env.step(
-                step_rng,
-                state,
-                action,
-                params,
-            )
-            return obs, next_state, reward, done, reset_key
-
-        def step_batch(rngs, states, actions):
-            split_keys = jax.vmap(lambda key: jax.random.split(key, 2))(rngs)
-            next_rngs = split_keys[:, 0]
-            step_keys = split_keys[:, 1]
-            obs, next_states, rewards, dones, reset_keys = jax.vmap(step_one)(
-                step_keys, states, actions
-            )
-            return next_rngs, next_states, obs, rewards, dones, reset_keys
-
-        return jax.jit(step_batch)
-
-    def step(self, actions):
-        actions = jnp.asarray(actions, dtype=jnp.int32)
-        (
-            self.rngs,
-            self.states,
-            obs,
-            rewards,
-            dones,
-            reset_keys,
-        ) = self._step_batch(self.rngs, self.states, actions)
-        self.obs = np.asarray(obs, dtype=np.float32).reshape(self.num_envs, -1).copy()
-        dones_np = np.asarray(dones, dtype=np.bool_)
-        reset_keys_np = np.asarray(reset_keys, dtype=np.uint32)
-        if self.resetter is not None and np.any(dones_np):
-            for env_i, done in enumerate(dones_np):
-                if not bool(done):
-                    continue
-                reset_state, reset_obs = self.resetter.reset(
-                    reset_keys_np[env_i],
-                    self.state_at(env_i),
-                )
-                self.states = jax.tree_util.tree_map(
-                    lambda batched, value: batched.at[env_i].set(value),
-                    self.states,
-                    reset_state,
-                )
-                self.obs[env_i] = reset_obs
-        return (
-            self.obs,
-            np.asarray(rewards, dtype=np.float32),
-            dones_np,
-            reset_keys_np,
-        )
-
-    def state_at(self, env_i):
-        return jax.tree_util.tree_map(lambda leaf: leaf[env_i], self.states)
-
-
-class PolicySnapshot:
-    def __init__(self, states):
-        self.level = np.asarray(states.player_level, dtype=np.int32)
-        self.position = np.asarray(states.player_position, dtype=np.int32)
-        self.direction = np.asarray(states.player_direction, dtype=np.int32)
-        self.health = np.asarray(states.player_health, dtype=np.float32)
-        self.mana = np.asarray(states.player_mana, dtype=np.int32)
-        self.learned_spells = np.asarray(states.learned_spells, dtype=np.bool_)
-
-        self.inventory = states.inventory
-        self.wood = np.asarray(self.inventory.wood, dtype=np.int32)
-        self.stone = np.asarray(self.inventory.stone, dtype=np.int32)
-        self.coal = np.asarray(self.inventory.coal, dtype=np.int32)
-        self.iron = np.asarray(self.inventory.iron, dtype=np.int32)
-        self.diamond = np.asarray(self.inventory.diamond, dtype=np.int32)
-        self.bow = np.asarray(self.inventory.bow, dtype=np.int32)
-        self.arrows = np.asarray(self.inventory.arrows, dtype=np.int32)
-        self.torches = np.asarray(self.inventory.torches, dtype=np.int32)
-
-        num_envs = int(self.level.shape[0])
-        env_idx = np.arange(num_envs)
-
-        full_map = np.asarray(states.map, dtype=np.int32)
-        full_item_map = np.asarray(states.item_map, dtype=np.int32)
-        full_mob_map = np.asarray(states.mob_map, dtype=np.bool_)
-        full_monsters_killed = np.asarray(states.monsters_killed, dtype=np.int32)
-        full_down_ladders = np.asarray(states.down_ladders, dtype=np.int32)
-
-        self.map = full_map[env_idx, self.level]
-        self.item_map = full_item_map[env_idx, self.level]
-        self.mob_map = full_mob_map[env_idx, self.level]
-        self.monsters_killed = full_monsters_killed[env_idx, self.level]
-        self.down_ladders = full_down_ladders[env_idx, self.level]
-
-        self.melee_pos, self.melee_mask, self.melee_type = self._take_mobs(
-            states.melee_mobs, env_idx
-        )
-        self.passive_pos, self.passive_mask, self.passive_type = self._take_mobs(
-            states.passive_mobs, env_idx
-        )
-        self.ranged_pos, self.ranged_mask, self.ranged_type = self._take_mobs(
-            states.ranged_mobs, env_idx
-        )
-        (
-            self.mob_projectile_pos,
-            self.mob_projectile_mask,
-            self.mob_projectile_type,
-        ) = self._take_mobs(states.mob_projectiles, env_idx)
-        (
-            self.player_projectile_pos,
-            self.player_projectile_mask,
-            self.player_projectile_type,
-        ) = self._take_mobs(states.player_projectiles, env_idx)
-
-    def _take_mobs(self, mobs, env_idx):
-        pos = np.asarray(mobs.position, dtype=np.int32)[env_idx, self.level]
-        mask = np.asarray(mobs.mask, dtype=np.bool_)[env_idx, self.level]
-        type_id = np.asarray(mobs.type_id, dtype=np.int32)[env_idx, self.level]
-        return pos, mask, type_id
-
-
-class ResetVerifier:
-    def __init__(self):
-        root = Path(__file__).resolve().parents[1]
-        source = r"""
-        #include <stdbool.h>
-        #include <stdint.h>
-        #define CRAFTAX_ENABLE_ENV_IMPL
-        #include "ocean/craftax/craftax.h"
-        #include "ocean/craftax/step_crafting.h"
-        #include "ocean/craftax/step_update_mobs.h"
-        #include "ocean/craftax/step_spawn_mobs.h"
-
-        void reset_from_key(
-            uint32_t key0,
-            uint32_t key1,
-            CraftaxState* out,
-            float* obs
-        ) {
-            CraftaxThreefryKey reset_key = {{key0, key1}};
-            craftax_reset_state_from_reset_key(out, reset_key);
-            craftax_encode_native_observation(out, obs);
+    puf_reset(&env);
+    memcpy(obs_out, live_obs, OBS_SIZE * sizeof(float));
+    *terminal_step = -1;
+    for (int32_t i = 0; i < num_actions; i++) {
+        action_value = (float)actions[i];
+        puf_step(&env);
+        memcpy(obs_out + (size_t)(i + 1) * OBS_SIZE, live_obs, OBS_SIZE * sizeof(float));
+        rewards_out[i] = env.agents[0].rewards[0];
+        if (env.agents[0].terminals[0] > 0.5f) {
+            *terminal_step = i;
+            break;
         }
-        """
-        self._tmp = tempfile.TemporaryDirectory()
-        tmp_path = Path(self._tmp.name)
-        src = tmp_path / "craftax_reset_verify.c"
-        so = tmp_path / "craftax_reset_verify.so"
-        src.write_text(source)
-        subprocess.run(
-            [
-                "cc",
-                "-std=c99",
-                "-O2",
-                "-shared",
-                "-fPIC",
-                "-I",
-                str(root),
-                "-I",
-                str(root / "raylib-5.5_linux_amd64/include"),
-                str(src),
-                "-lm",
-                "-o",
-                str(so),
-            ],
-            check=True,
-            cwd=root,
-        )
-        self.lib = ctypes.CDLL(str(so))
-        self.lib.reset_from_key.argtypes = [
-            ctypes.c_uint32,
-            ctypes.c_uint32,
-            ctypes.POINTER(CraftaxState),
-            ctypes.POINTER(ctypes.c_float),
-        ]
-        self.lib.reset_from_key.restype = None
-
-    def reset(self, reset_key, template):
-        c_state = CraftaxState()
-        c_obs = np.empty(OBS_SIZE, dtype=np.float32)
-        key = np.asarray(reset_key, dtype=np.uint32)
-        self.lib.reset_from_key(
-            ctypes.c_uint32(int(key[0])),
-            ctypes.c_uint32(int(key[1])),
-            ctypes.byref(c_state),
-            c_obs.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        )
-        return craftax_state_to_jax(c_state, template=template), c_obs
-
-    def compare(self, jax_state, jax_obs, reset_key, seed, step, policy, atol):
-        c_jax_state, c_obs = self.reset(reset_key, jax_state)
-
-        obs_diff = first_obs_diff(jax_obs, c_obs, atol)
-        state_diff = first_state_diff(jax_state, c_jax_state, atol)
-        if obs_diff is not None:
-            idx, max_diff, jax_value, c_value = obs_diff
-            key = np.asarray(reset_key, dtype=np.uint32)
-            print(
-                "RESET DIVERGENCE "
-                f"seed={seed} step={step} policy={policy} "
-                f"reset_key=[{int(key[0])},{int(key[1])}] "
-                f"obs_index={idx} section={section_for_index(idx)} "
-                f"subsystem={subsystem_for_section(section_for_index(idx))} "
-                f"abs_diff={max_diff:.8g} jax={jax_value:.8g} c={c_value:.8g}"
-            )
-            if state_diff is not None:
-                name, index, state_max_diff, state_jax_value, state_c_value = state_diff
-                print(
-                    "reset_state_first_diff: "
-                    f"field={name} index={index} "
-                    f"abs_diff={state_max_diff:.8g} "
-                    f"jax={state_jax_value} c={state_c_value}"
-                )
-            return False
-
-        if state_diff is not None:
-            name, index, max_diff, jax_value, c_value = state_diff
-            key = np.asarray(reset_key, dtype=np.uint32)
-            print(
-                "RESET STATE DIVERGENCE "
-                f"seed={seed} step={step} policy={policy} "
-                f"reset_key=[{int(key[0])},{int(key[1])}] "
-                f"field={name} index={index} abs_diff={max_diff:.8g} "
-                f"jax={jax_value} c={c_value}"
-            )
-            return False
-        return True
-
-
-_RESET_VERIFIER = None
-
-
-def get_reset_verifier(enabled):
-    global _RESET_VERIFIER
-    if not enabled:
-        return None
-    if _RESET_VERIFIER is None:
-        _RESET_VERIFIER = ResetVerifier()
-    return _RESET_VERIFIER
-
-
-def make_c_vec(cmod, num_envs, seed_offset, num_threads=1):
-    args = {
-        "vec": {
-            "total_agents": num_envs,
-            "num_buffers": 1,
-            "num_threads": num_threads,
-        },
-        "env": {
-            "seed_offset": seed_offset,
-        },
     }
-    vec = cmod.create_vec(args, 0)
-    if vec.obs_size != OBS_SIZE:
-        raise RuntimeError(f"C obs_size={vec.obs_size}, expected {OBS_SIZE}")
-    if vec.num_atns != 1:
-        raise RuntimeError(f"C num_atns={vec.num_atns}, expected 1")
-    if list(vec.act_sizes) != [NUM_ACTIONS]:
-        raise RuntimeError(f"C act_sizes={vec.act_sizes}, expected [{NUM_ACTIONS}]")
-    vec.reset()
-    obs = float_view(vec.obs_ptr, num_envs * OBS_SIZE).reshape(num_envs, OBS_SIZE)
-    rewards = float_view(vec.rewards_ptr, num_envs)
-    terminals = float_view(vec.terminals_ptr, num_envs)
-    return vec, obs, rewards, terminals
+}
+"""
 
 
-def action_plan(seeds, steps, action_seed):
-    rng = np.random.default_rng(action_seed)
-    return rng.integers(0, NUM_ACTIONS, size=(steps, len(seeds)), dtype=np.int32)
+def _fill_c_array(c_arr, values, dtype):
+    flat = np.ascontiguousarray(values, dtype=dtype).reshape(-1)
+    if flat.size != len(c_arr):
+        raise ValueError(f"size mismatch: {flat.size} vs {len(c_arr)}")
+    ctypes.memmove(ctypes.addressof(c_arr), flat.ctypes.data, flat.nbytes)
 
 
-def first_obs_diff(ref, got, atol):
-    diff = np.abs(ref - got)
-    idx = int(np.argmax(diff))
-    max_diff = float(diff[idx])
+def jax_state_to_dump(state) -> WorldDump:
+    dump = WorldDump()
+    _fill_c_array(dump.map, state.map, np.int32)
+    _fill_c_array(dump.item_map, state.item_map, np.int32)
+    lights = np.clip(np.asarray(state.light_map) * 255.0, 0, 255).astype(np.uint8)
+    _fill_c_array(dump.light_map, lights, np.uint8)
+    _fill_c_array(dump.down_ladders, state.down_ladders, np.int32)
+    _fill_c_array(dump.up_ladders, state.up_ladders, np.int32)
+    _fill_c_array(dump.monsters_killed, state.monsters_killed, np.int32)
+    _fill_c_array(dump.potion_mapping, state.potion_mapping, np.int32)
+    pos = np.asarray(state.player_position, dtype=np.int32).reshape(-1)
+    dump.player_position[0] = int(pos[0])
+    dump.player_position[1] = int(pos[1])
+    dump.player_level = int(np.asarray(state.player_level))
+    dump.player_direction = int(np.asarray(state.player_direction))
+    dump.player_health = float(np.asarray(state.player_health))
+    dump.player_food = int(np.asarray(state.player_food))
+    dump.player_drink = int(np.asarray(state.player_drink))
+    dump.player_energy = int(np.asarray(state.player_energy))
+    dump.player_mana = int(np.asarray(state.player_mana))
+    dump.player_dexterity = int(np.asarray(state.player_dexterity))
+    dump.player_strength = int(np.asarray(state.player_strength))
+    dump.player_intelligence = int(np.asarray(state.player_intelligence))
+    dump.light_level = float(np.asarray(state.light_level))
+    dump.boss_timesteps = int(np.asarray(state.boss_timesteps_to_spawn_this_round))
+    return dump
+
+
+def pack_symbolic_obs(obs) -> np.ndarray:
+    """Convert JAX 8268-d one-hot symbolic obs to packed 9x11x8+51 obs."""
+    obs = np.asarray(obs, dtype=np.float32).reshape(-1)
+    if obs.size != JAX_OBS_SIZE:
+        raise ValueError(f"JAX obs size {obs.size}, expected {JAX_OBS_SIZE}")
+    tiled = obs[:JAX_MAP_OBS].reshape(OBS_ROWS, OBS_COLS, JAX_TILE_CHANNELS)
+    blocks = tiled[..., :NUM_BLOCK_TYPES]
+    items = tiled[..., NUM_BLOCK_TYPES : NUM_BLOCK_TYPES + NUM_ITEM_TYPES]
+    mobs = tiled[
+        ...,
+        NUM_BLOCK_TYPES + NUM_ITEM_TYPES : NUM_BLOCK_TYPES
+        + NUM_ITEM_TYPES
+        + NUM_MOB_CLASSES * NUM_MOB_TYPES,
+    ].reshape(OBS_ROWS, OBS_COLS, NUM_MOB_CLASSES, NUM_MOB_TYPES)
+    visible = tiled[..., -1]
+    packed = np.zeros((OBS_ROWS, OBS_COLS, OBS_TILE_CHANNELS), dtype=np.float32)
+    packed[..., 0] = np.argmax(blocks, axis=-1).astype(np.float32) * visible
+    packed[..., 1] = (np.argmax(items, axis=-1).astype(np.float32) + 1.0) * visible
+    packed[..., 2] = visible
+    present = mobs.max(axis=-1)
+    packed[..., 3:] = (np.argmax(mobs, axis=-1).astype(np.float32) + 1.0) * present
+    return np.concatenate([packed.reshape(-1), obs[JAX_MAP_OBS:]], axis=0)
+
+
+class JaxCraftax:
+    def __init__(self):
+        self.env = make_craftax_env_from_name("Craftax-Symbolic-v1", auto_reset=False)
+        if not isinstance(self.env, CraftaxSymbolicEnvNoAutoReset):
+            raise TypeError(
+                f"expected Craftax-Symbolic-v1, got {type(self.env).__name__}"
+            )
+        self.params = self.env.default_params
+        self._step = self.env.step
+
+    def reset(self, seed: int):
+        rng = jax.random.PRNGKey(int(seed))
+        rng, reset_key = jax.random.split(rng)
+        obs, state = self.env.reset(reset_key, self.params)
+        return rng, obs, state
+
+    def replay(self, seed: int, actions):
+        rng, obs, state = self.reset(seed)
+        packed = [pack_symbolic_obs(obs)]
+        terminal_step = -1
+        for i, action in enumerate(actions):
+            current = int(action)
+            while True:
+                rng, step_key = jax.random.split(rng)
+                step_rng, reset_key = jax.random.split(step_key)
+                obs, state, _reward, done, _info = self._step(
+                    step_rng, state, jnp.int32(current), self.params
+                )
+                done = bool(np.asarray(done))
+                sleeping = bool(np.asarray(state.is_sleeping)) or bool(
+                    np.asarray(state.is_resting)
+                )
+                if done or not sleeping:
+                    break
+                current = 0
+            if done:
+                # puf_step generates a new world from this tick's reset_key.
+                obs, state = self.env.reset(reset_key, self.params)
+                packed.append(pack_symbolic_obs(obs))
+                terminal_step = i
+                break
+            packed.append(pack_symbolic_obs(obs))
+        return packed, terminal_step
+
+
+def compile_lib(root: Path) -> ctypes.CDLL:
+    tmp = tempfile.TemporaryDirectory(prefix="craftax_parity_")
+    src = Path(tmp.name) / "parity.c"
+    so = Path(tmp.name) / "parity.so"
+    compile_lib._tmp = tmp  # type: ignore[attr-defined]
+    c_struct = f"""
+#include <stdint.h>
+typedef struct WorldDump {{
+    int32_t map[{MAP_CELLS}];
+    int32_t item_map[{MAP_CELLS}];
+    uint8_t light_map[{MAP_CELLS}];
+    int32_t down_ladders[{NUM_LEVELS * 2}];
+    int32_t up_ladders[{NUM_LEVELS * 2}];
+    int32_t monsters_killed[{NUM_LEVELS}];
+    int32_t potion_mapping[{NUM_POTIONS}];
+    int32_t player_position[2];
+    int32_t player_level;
+    int32_t player_direction;
+    float player_health;
+    int32_t player_food;
+    int32_t player_drink;
+    int32_t player_energy;
+    int32_t player_mana;
+    int32_t player_dexterity;
+    int32_t player_strength;
+    int32_t player_intelligence;
+    float light_level;
+    int32_t boss_timesteps;
+}} WorldDump;
+"""
+    src.write_text(c_struct + SOURCE)
+    subprocess.run(
+        [
+            "cc",
+            "-std=c99",
+            "-O2",
+            "-shared",
+            "-fPIC",
+            "-I",
+            str(root),
+            "-I",
+            str(root / "src"),
+            "-I",
+            str(root / "ocean" / "craftax"),
+            "-I",
+            str(root / "raylib-5.5_linux_amd64/include"),
+            str(src),
+            str(root / "raylib-5.5_linux_amd64/lib/libraylib.a"),
+            "-lm",
+            "-lpthread",
+            "-lGL",
+            "-ldl",
+            "-o",
+            str(so),
+        ],
+        check=True,
+        cwd=root,
+    )
+    lib = ctypes.CDLL(str(so))
+    lib.generate_clean_world.argtypes = [ctypes.c_int32, ctypes.POINTER(WorldDump)]
+    lib.generate_clean_world.restype = None
+    return lib
+
+
+def compile_replay_lib(root: Path) -> ctypes.CDLL:
+    tmp = tempfile.TemporaryDirectory(prefix="craftax_replay_")
+    compile_replay_lib._tmp = tmp  # type: ignore[attr-defined]
+    src = Path(tmp.name) / "replay_clean.c"
+    so = Path(tmp.name) / "replay_clean.so"
+    src.write_text(CLEAN_REPLAY)
+    subprocess.run(
+        [
+            "cc",
+            "-std=c99",
+            "-O2",
+            "-shared",
+            "-fPIC",
+            "-I",
+            str(root),
+            "-I",
+            str(root / "src"),
+            "-I",
+            str(root / "ocean" / "craftax"),
+            "-I",
+            str(root / "raylib-5.5_linux_amd64/include"),
+            str(src),
+            str(root / "raylib-5.5_linux_amd64/lib/libraylib.a"),
+            "-lm",
+            "-lpthread",
+            "-lGL",
+            "-ldl",
+            "-o",
+            str(so),
+        ],
+        check=True,
+        cwd=root,
+    )
+    clean = ctypes.CDLL(str(so))
+    clean.replay_clean.argtypes = [
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_int32),
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_float),
+        ctypes.POINTER(ctypes.c_float),
+        ctypes.POINTER(ctypes.c_int32),
+    ]
+    clean.replay_clean.restype = None
+    return clean
+
+
+def obs_section(index: int) -> str:
+    map_size = OBS_ROWS * OBS_COLS * OBS_TILE_CHANNELS
+    if index < map_size:
+        cell = index // OBS_TILE_CHANNELS
+        channel = index % OBS_TILE_CHANNELS
+        names = [
+            "block",
+            "item",
+            "visible",
+            "melee",
+            "passive",
+            "ranged",
+            "mob_proj",
+            "player_proj",
+        ]
+        name = names[channel] if channel < len(names) else str(channel)
+        return f"map cell={cell} channel={name}"
+    return f"scalar[{index - map_size}]"
+
+
+def first_obs_mismatch(clean, jax_obs, atol: float):
+    clean = np.asarray(clean, dtype=np.float32).reshape(-1)
+    jax_obs = np.asarray(jax_obs, dtype=np.float32).reshape(-1)
+    diff = np.abs(clean - jax_obs)
+    index = int(np.argmax(diff))
+    max_diff = float(diff[index])
     if max_diff <= atol:
         return None
-    return idx, max_diff, float(ref[idx]), float(got[idx])
+    return index, max_diff, float(clean[index]), float(jax_obs[index])
 
 
-def _format_index(index):
-    index = np.asarray(index)
-    if index.ndim == 0:
-        return "scalar"
-    return ",".join(str(int(i)) for i in index)
-
-
-def first_state_diff(jax_state, c_state, atol):
-    jax_flat = flatten_env_state(jax_state)
-    c_flat = flatten_env_state(c_state)
-    if jax_flat.keys() != c_flat.keys():
-        missing = sorted(jax_flat.keys() - c_flat.keys())
-        extra = sorted(c_flat.keys() - jax_flat.keys())
-        return "state_keys", "scalar", 1.0, f"missing_c={missing}", f"extra_c={extra}"
-
-    for name, jax_value in jax_flat.items():
-        c_value = c_flat[name]
-        if np.asarray(jax_value).dtype.kind == "f":
-            diff = np.abs(np.asarray(jax_value) - np.asarray(c_value))
-            if diff.size == 0:
-                continue
-            idx = np.unravel_index(int(np.argmax(diff)), diff.shape)
-            max_diff = float(diff[idx])
-            if max_diff > atol:
-                return (
-                    name,
-                    _format_index(np.asarray(idx)),
-                    max_diff,
-                    float(np.asarray(jax_value)[idx]),
-                    float(np.asarray(c_value)[idx]),
-                )
-        else:
-            neq = np.asarray(jax_value) != np.asarray(c_value)
-            if np.any(neq):
-                idx = np.argwhere(neq)[0] if np.asarray(neq).ndim else np.asarray(())
-                idx_tuple = tuple(int(i) for i in np.asarray(idx).reshape(-1))
-                return (
-                    name,
-                    _format_index(idx),
-                    1.0,
-                    np.asarray(jax_value)[idx_tuple].item()
-                    if idx_tuple
-                    else np.asarray(jax_value).item(),
-                    np.asarray(c_value)[idx_tuple].item()
-                    if idx_tuple
-                    else np.asarray(c_value).item(),
-                )
+def first_mismatch(left, right, name: str):
+    for index, (a, b) in enumerate(zip(left, right)):
+        if a != b:
+            return f"{name}[{index}] clean={a} jax={b}"
     return None
 
 
-def section_for_index(idx):
-    if idx < MAP_OBS_SIZE:
-        tile = idx // NUM_TILE_CHANNELS
-        channel = idx % NUM_TILE_CHANNELS
-        row = tile // OBS_COLS
-        col = tile % OBS_COLS
-        if channel < NUM_BLOCK_TYPES:
-            return f"map_one_hot[row={row},col={col},block={channel}]"
-        channel -= NUM_BLOCK_TYPES
-        if channel < NUM_ITEM_TYPES:
-            return f"item_one_hot[row={row},col={col},item={channel}]"
-        channel -= NUM_ITEM_TYPES
-        if channel < NUM_MOB_CLASSES * NUM_MOB_TYPES:
-            mob_class = channel // NUM_MOB_TYPES
-            mob_type = channel % NUM_MOB_TYPES
-            return (
-                f"{MOB_CLASS_NAMES[mob_class]}_type_{mob_type}"
-                f"[row={row},col={col}]"
+def compare_dumps(clean: WorldDump, jax_dump: WorldDump) -> list[str]:
+    diffs = []
+    for name, _ctype in WorldDump._fields_:
+        left = getattr(clean, name)
+        right = getattr(jax_dump, name)
+        if hasattr(left, "__len__"):
+            mismatch = first_mismatch(left, right, name)
+            if mismatch:
+                diffs.append(mismatch)
+        elif left != right:
+            diffs.append(f"{name} clean={left} jax={right}")
+    return diffs
+
+
+def count_block(dump: WorldDump, level: int, block: int) -> int:
+    start = level * MAP_SIZE * MAP_SIZE
+    end = start + MAP_SIZE * MAP_SIZE
+    return sum(1 for value in dump.map[start:end] if value == block)
+
+
+def count_item(dump: WorldDump, level: int, item: int) -> int:
+    start = level * MAP_SIZE * MAP_SIZE
+    end = start + MAP_SIZE * MAP_SIZE
+    return sum(1 for value in dump.item_map[start:end] if value == item)
+
+
+def min_light(dump: WorldDump, level: int) -> int:
+    start = level * MAP_SIZE * MAP_SIZE
+    end = start + MAP_SIZE * MAP_SIZE
+    return min(dump.light_map[start:end])
+
+
+def mean_light(dump: WorldDump, level: int) -> float:
+    start = level * MAP_SIZE * MAP_SIZE
+    end = start + MAP_SIZE * MAP_SIZE
+    values = dump.light_map[start:end]
+    return sum(values) / float(len(values))
+
+
+def check_structure(dump: WorldDump) -> list[str]:
+    errors = []
+    if dump.player_position[0] != MAP_SIZE // 2 or dump.player_position[1] != MAP_SIZE // 2:
+        errors.append("player does not spawn at map center")
+    if dump.monsters_killed[0] != 10:
+        errors.append("overworld is not pre-cleared")
+    if dump.player_health != 9.0 or dump.player_food != 9:
+        errors.append("starter vitals are not 9")
+
+    for level in DUNGEON_FLOORS:
+        if count_block(dump, level, BLOCK_DARKNESS) == 0:
+            errors.append(f"floor {level} is missing BLOCK_DARKNESS")
+        if count_block(dump, level, BLOCK_CHEST) < 6:
+            errors.append(
+                f"floor {level} has {count_block(dump, level, BLOCK_CHEST)} chests, expected at least 6"
             )
-        return f"light[row={row},col={col}]"
+        if count_item(dump, level, ITEM_TORCH) < 16:
+            errors.append(f"floor {level} is missing room-corner torches")
+        if min_light(dump, level) != 255:
+            errors.append(f"floor {level} is not fully lit")
+        if count_item(dump, level, ITEM_LADDER_UP) != 1:
+            errors.append(f"floor {level} is missing an up ladder")
+        if count_item(dump, level, ITEM_LADDER_DOWN) != 1:
+            errors.append(f"floor {level} is missing a down ladder")
 
-    inv_idx = idx - MAP_OBS_SIZE
-    if 0 <= inv_idx < len(INVENTORY_OBS_NAMES):
-        return INVENTORY_OBS_NAMES[inv_idx]
-    return f"inventory_or_special[{inv_idx}]"
+    if count_block(dump, 1, BLOCK_FOUNTAIN) == 0:
+        errors.append("dungeon is missing a fountain")
+    if count_block(dump, 3, BLOCK_ENCHANTMENT_TABLE_ICE) == 0:
+        errors.append("sewers are missing the ice enchantment table")
+    if count_block(dump, 4, BLOCK_ENCHANTMENT_TABLE_FIRE) == 0:
+        errors.append("vault is missing the fire enchantment table")
+
+    if mean_light(dump, 0) < 250:
+        errors.append("overworld is not fully lit")
+    if mean_light(dump, FIRE_FLOOR) < 250:
+        errors.append("fire realm is not bright")
+    if mean_light(dump, BOSS_FLOOR) > 80:
+        errors.append("boss floor is not dark")
+    if count_block(dump, BOSS_FLOOR, BLOCK_NECROMANCER) == 0:
+        errors.append("boss floor is missing the necromancer")
+    if count_item(dump, BOSS_FLOOR, ITEM_LADDER_UP) != 0:
+        errors.append("boss floor should not have an up ladder")
+    if count_item(dump, BOSS_FLOOR, ITEM_LADDER_DOWN) != 0:
+        errors.append("boss floor should not have a down ladder")
+    if count_block(dump, FIRE_FLOOR, BLOCK_FIRE_GRASS) == 0:
+        errors.append("fire realm is missing fire grass")
+    return errors
 
 
-def subsystem_for_section(section):
-    if section.startswith("map_one_hot"):
-        return "symbolic_observation.map"
-    if section.startswith("item_one_hot"):
-        return "symbolic_observation.item_or_ladder"
-    if section.startswith("melee_mobs") or section.startswith("passive_mobs"):
-        return "mobs.update_or_observation"
-    if section.startswith("ranged_mobs") or section.startswith("mob_projectiles"):
-        return "projectiles_or_ranged_mobs"
-    if section.startswith("player_projectiles"):
-        return "player_projectiles"
-    if section.startswith("light[") or section == "light_level":
-        return "light"
-    if section.startswith("inventory."):
-        return "inventory"
-    if section.startswith("player_"):
-        return "player_intrinsics"
-    if section.startswith("direction."):
-        return "movement"
-    if section in {"ladder_down_open", "player_level"}:
-        return "floor_change"
-    if section == "boss_vulnerable":
-        return "boss_logic"
-    return "state_or_observation"
+def replay_seed(clean_lib, jax_env: JaxCraftax, seed: int, actions, atol: float):
+    num_actions = len(actions)
+    action_array = (ctypes.c_int32 * num_actions)(*actions)
+    obs_count = (num_actions + 1) * OBS_SIZE
+    clean_obs = (ctypes.c_float * obs_count)()
+    clean_rewards = (ctypes.c_float * num_actions)()
+    clean_done = ctypes.c_int32(-1)
+
+    clean_lib.replay_clean(
+        seed,
+        action_array,
+        num_actions,
+        clean_obs,
+        clean_rewards,
+        ctypes.byref(clean_done),
+    )
+    jax_obs, jax_done = jax_env.replay(seed, actions)
+
+    compare_steps = min(len(jax_obs), num_actions + 1)
+    if clean_done.value >= 0 or jax_done >= 0:
+        compare_steps = min(
+            clean_done.value if clean_done.value >= 0 else num_actions,
+            jax_done if jax_done >= 0 else num_actions,
+        ) + 2
+        compare_steps = min(compare_steps, len(jax_obs), num_actions + 1)
+
+    for step in range(compare_steps):
+        start = step * OBS_SIZE
+        end = start + OBS_SIZE
+        mismatch = first_obs_mismatch(clean_obs[start:end], jax_obs[step], atol)
+        if mismatch is not None:
+            index, abs_diff, clean_value, jax_value = mismatch
+            return (
+                f"obs mismatch seed={seed} step={step} "
+                f"index={index} section={obs_section(index)} "
+                f"abs_diff={abs_diff:.8g} clean={clean_value:.8g} jax={jax_value:.8g}"
+            )
+    if clean_done.value != jax_done:
+        return (
+            f"terminal mismatch seed={seed} "
+            f"clean_done={clean_done.value} jax_done={jax_done}"
+        )
+    return None
 
 
-def compare_reset(ref_obs, c_obs, seeds, atol):
-    for env_i, seed in enumerate(seeds):
-        diff = first_obs_diff(ref_obs[env_i], c_obs[env_i], atol)
-        if diff is not None:
-            idx, max_diff, ref_value, c_value = diff
-            section = section_for_index(idx)
+def run(args: argparse.Namespace) -> int:
+    root = Path(__file__).resolve().parents[1]
+    print(f"Compiling craftax worldgen harness in {root}")
+    lib = compile_lib(root)
+    print("Compiling craftax replay harness")
+    clean_lib = compile_replay_lib(root)
+    print("Loading JAX Craftax-Symbolic-v1")
+    jax_env = JaxCraftax()
+    print(f"Reference env: {type(jax_env.env).__name__}")
+
+    failures = 0
+    for seed in range(args.seeds):
+        clean = WorldDump()
+        lib.generate_clean_world(seed, ctypes.byref(clean))
+        _rng, _obs, jax_state = jax_env.reset(seed)
+        jax_dump = jax_state_to_dump(jax_state)
+
+        diffs = compare_dumps(clean, jax_dump)
+        struct_errors = check_structure(clean)
+        jax_struct_errors = [f"jax {error}" for error in check_structure(jax_dump)]
+        rng = random.Random(args.action_seed + seed)
+        actions = [rng.randrange(NUM_ACTIONS) for _ in range(args.steps)]
+        obs_error = replay_seed(clean_lib, jax_env, seed, actions, args.atol)
+
+        if diffs or struct_errors or jax_struct_errors or obs_error:
+            failures += 1
+            print(f"FAIL seed={seed}")
+            for diff in diffs[:8]:
+                print(f"  {diff}")
+            for error in struct_errors:
+                print(f"  {error}")
+            for error in jax_struct_errors:
+                print(f"  {error}")
+            if obs_error:
+                print(f"  {obs_error}")
+            if not args.keep_going:
+                return 1
+        else:
             print(
-                "RESET DIVERGENCE "
-                f"seed={seed} obs_index={idx} section={section} "
-                f"subsystem={subsystem_for_section(section)} "
-                f"abs_diff={max_diff:.8g} jax={ref_value:.8g} c={c_value:.8g}"
-            )
-            return False
-    return True
-
-
-def _in_bounds(pos):
-    return 0 <= int(pos[0]) < MAP_SIZE and 0 <= int(pos[1]) < MAP_SIZE
-
-
-def _action_toward_delta(delta):
-    dr, dc = int(delta[0]), int(delta[1])
-    if abs(dr) > abs(dc):
-        return DOWN if dr > 0 else UP
-    if dc != 0:
-        return RIGHT if dc > 0 else LEFT
-    if dr != 0:
-        return DOWN if dr > 0 else UP
-    return NOOP
-
-
-def _action_to_neighbor(start, target):
-    delta = np.asarray(target, dtype=np.int32) - np.asarray(start, dtype=np.int32)
-    if abs(int(delta[0])) + abs(int(delta[1])) != 1:
-        return None
-    return _action_toward_delta(delta)
-
-
-def _passable_map(snapshot, env_i, allow_danger=False, allow_mobs=False):
-    level_map = snapshot.map[env_i]
-    passable = np.ones((MAP_SIZE, MAP_SIZE), dtype=np.bool_)
-    for block in SOLID_BLOCKS:
-        passable &= level_map != block
-    if not allow_danger:
-        passable &= level_map != BLOCK_WATER
-        passable &= level_map != BLOCK_LAVA
-    if not allow_mobs:
-        passable &= ~snapshot.mob_map[env_i]
-    return passable
-
-
-def _valid_move_actions(snapshot, env_i, allow_danger=False):
-    pos = snapshot.position[env_i]
-    passable = _passable_map(snapshot, env_i, allow_danger=allow_danger)
-    actions = []
-    for action, delta in DIRS.items():
-        target = pos + np.asarray(delta, dtype=np.int32)
-        if _in_bounds(target) and passable[int(target[0]), int(target[1])]:
-            actions.append(action)
-    return actions
-
-
-def _random_move(snapshot, env_i, rng, allow_danger=False):
-    actions = _valid_move_actions(snapshot, env_i, allow_danger=allow_danger)
-    if actions:
-        return int(rng.choice(actions))
-    return int(rng.choice(MOVE_ACTIONS))
-
-
-def _bfs_first_action(snapshot, env_i, target, rng, allow_danger=False):
-    start = tuple(int(x) for x in snapshot.position[env_i])
-    target = tuple(int(x) for x in np.asarray(target, dtype=np.int32))
-    if start == target:
-        return NOOP
-
-    passable = _passable_map(snapshot, env_i, allow_danger=allow_danger)
-    passable[start] = True
-    if not _in_bounds(target) or not passable[target]:
-        return _greedy_action(snapshot, env_i, np.asarray(target), rng, allow_danger)
-
-    visited = np.zeros((MAP_SIZE, MAP_SIZE), dtype=np.bool_)
-    visited[start] = True
-    queue = deque()
-    for action in rng.permutation(MOVE_ACTIONS):
-        delta = DIRS[int(action)]
-        row = start[0] + delta[0]
-        col = start[1] + delta[1]
-        if not (0 <= row < MAP_SIZE and 0 <= col < MAP_SIZE):
-            continue
-        if visited[row, col] or not passable[row, col]:
-            continue
-        if (row, col) == target:
-            return int(action)
-        visited[row, col] = True
-        queue.append((row, col, int(action)))
-
-    while queue:
-        row, col, first_action = queue.popleft()
-        for action in MOVE_ACTIONS:
-            delta = DIRS[int(action)]
-            next_row = row + delta[0]
-            next_col = col + delta[1]
-            if not (0 <= next_row < MAP_SIZE and 0 <= next_col < MAP_SIZE):
-                continue
-            if visited[next_row, next_col] or not passable[next_row, next_col]:
-                continue
-            if (next_row, next_col) == target:
-                return int(first_action)
-            visited[next_row, next_col] = True
-            queue.append((next_row, next_col, first_action))
-
-    return _greedy_action(snapshot, env_i, np.asarray(target), rng, allow_danger)
-
-
-def _greedy_action(snapshot, env_i, target, rng, allow_danger=False):
-    pos = snapshot.position[env_i]
-    actions = _valid_move_actions(snapshot, env_i, allow_danger=allow_danger)
-    if not actions:
-        return int(rng.choice(MOVE_ACTIONS))
-    scored = []
-    for action in actions:
-        delta = np.asarray(DIRS[action], dtype=np.int32)
-        next_pos = pos + delta
-        dist = int(np.abs(next_pos - target).sum())
-        scored.append((dist, action))
-    best_dist = min(dist for dist, _action in scored)
-    best = [action for dist, action in scored if dist == best_dist]
-    return int(rng.choice(best))
-
-
-def _nearest_target(snapshot, env_i, positions):
-    if len(positions) == 0:
-        return None
-    pos = snapshot.position[env_i]
-    positions = np.asarray(positions, dtype=np.int32)
-    distances = np.abs(positions - pos).sum(axis=1)
-    return positions[int(np.argmin(distances))]
-
-
-def _live_mobs(snapshot, env_i, include_passive=True, include_projectiles=False):
-    groups = [
-        (0, snapshot.melee_pos[env_i], snapshot.melee_mask[env_i], snapshot.melee_type[env_i]),
-        (2, snapshot.ranged_pos[env_i], snapshot.ranged_mask[env_i], snapshot.ranged_type[env_i]),
-    ]
-    if include_passive:
-        groups.append(
-            (
-                1,
-                snapshot.passive_pos[env_i],
-                snapshot.passive_mask[env_i],
-                snapshot.passive_type[env_i],
-            )
-        )
-    if include_projectiles:
-        groups.append(
-            (
-                3,
-                snapshot.mob_projectile_pos[env_i],
-                snapshot.mob_projectile_mask[env_i],
-                snapshot.mob_projectile_type[env_i],
-            )
-        )
-
-    mobs = []
-    for mob_class, positions, masks, type_ids in groups:
-        for index, mask in enumerate(masks):
-            if bool(mask):
-                mobs.append((mob_class, index, positions[index], int(type_ids[index])))
-    return mobs
-
-
-def _mob_positions(snapshot, env_i, include_passive=True, include_projectiles=False):
-    return [
-        np.asarray(position, dtype=np.int32)
-        for _cls, _idx, position, _type_id in _live_mobs(
-            snapshot,
-            env_i,
-            include_passive=include_passive,
-            include_projectiles=include_projectiles,
-        )
-    ]
-
-
-def _projectile_slot_available(snapshot, env_i):
-    return int(np.count_nonzero(snapshot.player_projectile_mask[env_i])) < 3
-
-
-def _target_in_current_line(snapshot, env_i, target):
-    pos = snapshot.position[env_i]
-    direction = int(snapshot.direction[env_i])
-    delta = np.asarray(target, dtype=np.int32) - pos
-    if direction == LEFT:
-        return int(delta[0]) == 0 and int(delta[1]) < 0
-    if direction == RIGHT:
-        return int(delta[0]) == 0 and int(delta[1]) > 0
-    if direction == UP:
-        return int(delta[1]) == 0 and int(delta[0]) < 0
-    if direction == DOWN:
-        return int(delta[1]) == 0 and int(delta[0]) > 0
-    return False
-
-
-def _combat_action(snapshot, env_i, rng):
-    pos = snapshot.position[env_i]
-    mobs = _live_mobs(snapshot, env_i, include_passive=True)
-    mob_positions = [mob[2] for mob in mobs]
-    adjacent = [
-        np.asarray(position, dtype=np.int32)
-        for position in mob_positions
-        if int(np.abs(np.asarray(position) - pos).sum()) == 1
-    ]
-
-    for target in adjacent:
-        action = _action_to_neighbor(pos, target)
-        if action == int(snapshot.direction[env_i]) and rng.random() < 0.75:
-            return DO
-    if adjacent:
-        target = adjacent[int(rng.integers(0, len(adjacent)))]
-        return int(_action_to_neighbor(pos, target))
-
-    has_projectile_slot = _projectile_slot_available(snapshot, env_i)
-    projectile_actions = []
-    if has_projectile_slot and int(snapshot.bow[env_i]) >= 1 and int(snapshot.arrows[env_i]) >= 1:
-        projectile_actions.append(SHOOT_ARROW)
-    if has_projectile_slot and int(snapshot.mana[env_i]) >= 2:
-        if bool(snapshot.learned_spells[env_i, 0]):
-            projectile_actions.append(CAST_FIREBALL)
-        if bool(snapshot.learned_spells[env_i, 1]):
-            projectile_actions.append(CAST_ICEBALL)
-
-    if projectile_actions and mob_positions:
-        line_targets = [
-            target
-            for target in mob_positions
-            if _target_in_current_line(snapshot, env_i, target)
-        ]
-        if line_targets and rng.random() < 0.8:
-            return int(rng.choice(projectile_actions))
-
-        axis_targets = [
-            target
-            for target in mob_positions
-            if int(target[0]) == int(pos[0]) or int(target[1]) == int(pos[1])
-        ]
-        if axis_targets:
-            target = _nearest_target(snapshot, env_i, axis_targets)
-            return _action_toward_delta(target - pos)
-
-    if mob_positions:
-        target = _nearest_target(snapshot, env_i, mob_positions)
-        return _bfs_first_action(snapshot, env_i, target, rng)
-
-    return _random_move(snapshot, env_i, rng)
-
-
-def _craft_or_place_action(snapshot, env_i, rng):
-    options = []
-    if int(snapshot.wood[env_i]) > 0:
-        options.extend([PLACE_TABLE, MAKE_WOOD_PICKAXE, MAKE_WOOD_SWORD])
-    if int(snapshot.stone[env_i]) > 0:
-        options.append(PLACE_STONE)
-    if int(snapshot.stone[env_i]) >= 4:
-        options.append(PLACE_FURNACE)
-    if int(snapshot.stone[env_i]) > 0 and int(snapshot.wood[env_i]) > 0:
-        options.extend([MAKE_STONE_PICKAXE, MAKE_STONE_SWORD])
-    if int(snapshot.iron[env_i]) > 0 and int(snapshot.wood[env_i]) > 0:
-        options.extend([MAKE_IRON_PICKAXE, MAKE_IRON_SWORD, MAKE_IRON_ARMOUR])
-    if int(snapshot.diamond[env_i]) > 0 and int(snapshot.wood[env_i]) > 0:
-        options.extend([MAKE_DIAMOND_PICKAXE, MAKE_DIAMOND_SWORD, MAKE_DIAMOND_ARMOUR])
-    if int(snapshot.wood[env_i]) > 0 and int(snapshot.stone[env_i]) > 0:
-        options.append(MAKE_ARROW)
-    if int(snapshot.coal[env_i]) > 0 and int(snapshot.wood[env_i]) > 0:
-        options.append(MAKE_TORCH)
-    if int(snapshot.torches[env_i]) > 0:
-        options.append(PLACE_TORCH)
-    if not options:
-        return None
-    return int(rng.choice(options))
-
-
-def _descend_action(snapshot, env_i, rng):
-    level = int(snapshot.level[env_i])
-    pos = snapshot.position[env_i]
-    if level >= NUM_LEVELS - 1:
-        return _combat_action(snapshot, env_i, rng)
-
-    row, col = int(pos[0]), int(pos[1])
-    on_down_ladder = int(snapshot.item_map[env_i, row, col]) == ITEM_LADDER_DOWN
-    ladder_open = int(snapshot.monsters_killed[env_i]) >= MONSTERS_KILLED_TO_CLEAR_LEVEL
-    if on_down_ladder and ladder_open:
-        return DESCEND
-
-    mobs = _mob_positions(snapshot, env_i, include_passive=False)
-    if not ladder_open and mobs:
-        return _combat_action(snapshot, env_i, rng)
-
-    if rng.random() < 0.12:
-        craft_action = _craft_or_place_action(snapshot, env_i, rng)
-        if craft_action is not None:
-            return craft_action
-
-    ladder = snapshot.down_ladders[env_i]
-    if ladder_open:
-        return _bfs_first_action(snapshot, env_i, ladder, rng)
-
-    if mobs:
-        return _combat_action(snapshot, env_i, rng)
-    return _random_move(snapshot, env_i, rng)
-
-
-def _danger_adjacent_action(snapshot, env_i, rng):
-    pos = snapshot.position[env_i]
-    level_map = snapshot.map[env_i]
-    dangerous_actions = []
-    for action, delta in DIRS.items():
-        target = pos + np.asarray(delta, dtype=np.int32)
-        if not _in_bounds(target):
-            continue
-        block = int(level_map[int(target[0]), int(target[1])])
-        if block in (BLOCK_WATER, BLOCK_LAVA) or bool(
-            snapshot.mob_map[env_i, int(target[0]), int(target[1])]
-        ):
-            dangerous_actions.append(action)
-    if dangerous_actions:
-        return int(rng.choice(dangerous_actions))
-    return None
-
-
-def _suicide_action(snapshot, env_i, rng):
-    adjacent = _danger_adjacent_action(snapshot, env_i, rng)
-    if adjacent is not None:
-        return adjacent
-
-    hostile_positions = _mob_positions(
-        snapshot, env_i, include_passive=False, include_projectiles=True
-    )
-    danger_blocks = np.argwhere(
-        (snapshot.map[env_i] == BLOCK_LAVA) | (snapshot.map[env_i] == BLOCK_WATER)
-    )
-
-    targets = []
-    targets.extend(hostile_positions)
-    if danger_blocks.size:
-        targets.extend([danger_blocks[i] for i in range(danger_blocks.shape[0])])
-
-    target = _nearest_target(snapshot, env_i, targets)
-    if target is None:
-        return _random_move(snapshot, env_i, rng, allow_danger=True)
-
-    if int(np.abs(target - snapshot.position[env_i]).sum()) == 1:
-        return _action_toward_delta(target - snapshot.position[env_i])
-
-    passable = _passable_map(snapshot, env_i, allow_danger=False)
-    adjacent_cells = []
-    for delta in DIRS.values():
-        cell = target + np.asarray(delta, dtype=np.int32)
-        if _in_bounds(cell) and passable[int(cell[0]), int(cell[1])]:
-            adjacent_cells.append(cell)
-    adjacent_target = _nearest_target(snapshot, env_i, adjacent_cells)
-    if adjacent_target is not None:
-        return _bfs_first_action(snapshot, env_i, adjacent_target, rng)
-    return _greedy_action(snapshot, env_i, target, rng, allow_danger=True)
-
-
-def _boss_action(snapshot, env_i, rng, step):
-    if step < 1000:
-        return _descend_action(snapshot, env_i, rng)
-    level = int(snapshot.level[env_i])
-    if level >= NUM_LEVELS - 1:
-        return _combat_action(snapshot, env_i, rng)
-    pos = snapshot.position[env_i]
-    on_down_ladder = int(snapshot.item_map[env_i, int(pos[0]), int(pos[1])]) == ITEM_LADDER_DOWN
-    ladder_open = int(snapshot.monsters_killed[env_i]) >= MONSTERS_KILLED_TO_CLEAR_LEVEL
-    if on_down_ladder and ladder_open:
-        return DESCEND
-    if rng.random() < 0.25:
-        return DESCEND
-    return _descend_action(snapshot, env_i, rng)
-
-
-class ActionPolicy:
-    def __init__(self, policy, action_seed, num_envs):
-        if policy not in POLICIES:
-            raise ValueError(f"unknown policy {policy!r}")
-        self.policy = policy
-        self.rng = np.random.default_rng(action_seed)
-        self.num_envs = num_envs
-
-    def effective_policy(self, step):
-        if self.policy != "mixed":
-            return self.policy
-        return MIXED_ORDER[(step // 500) % len(MIXED_ORDER)]
-
-    def actions(self, step, ref):
-        policy = self.effective_policy(step)
-        if policy == "uniform":
-            return (
-                self.rng.integers(0, NUM_ACTIONS, size=self.num_envs, dtype=np.int32),
-                policy,
+                f"PASS seed={seed} "
+                f"dungeon_dark={count_block(clean, 1, BLOCK_DARKNESS)} "
+                f"dungeon_chests={count_block(clean, 1, BLOCK_CHEST)} "
+                f"boss_light={mean_light(clean, BOSS_FLOOR):.1f} "
+                f"steps={args.steps}"
             )
 
-        snapshot = PolicySnapshot(ref.states)
-        out = np.empty(self.num_envs, dtype=np.int32)
-        for env_i in range(self.num_envs):
-            if policy == "combat":
-                out[env_i] = _combat_action(snapshot, env_i, self.rng)
-            elif policy == "descend":
-                out[env_i] = _descend_action(snapshot, env_i, self.rng)
-            elif policy == "suicide":
-                out[env_i] = _suicide_action(snapshot, env_i, self.rng)
-            elif policy == "boss":
-                out[env_i] = _boss_action(snapshot, env_i, self.rng, step)
-            else:
-                raise AssertionError(policy)
-        return out, policy
-
-
-def _print_step_divergence(
-    seed,
-    step,
-    action,
-    policy_name,
-    reward_diff,
-    ref_reward,
-    c_reward,
-    ref_done,
-    c_done,
-    obs_diff,
-    history,
-):
-    terminal_delta = int(bool(c_done)) - int(bool(ref_done))
-    print(
-        "STEP DIVERGENCE "
-        f"seed={seed} step={step} action={int(action)} policy={policy_name}"
-    )
-    print(
-        f"reward_delta={reward_diff:.8g} "
-        f"reward: jax={float(ref_reward):.8g} c={float(c_reward):.8g}"
-    )
-    print(
-        f"terminal_delta={terminal_delta} "
-        f"done: jax={bool(ref_done)} c={bool(c_done)}"
-    )
-    if obs_diff is None:
-        print("obs: ok")
-    else:
-        idx, max_diff, ref_value, c_value = obs_diff
-        section = section_for_index(idx)
+    passed = args.seeds - failures
+    if failures:
         print(
-            "obs: "
-            f"index={idx} section={section} "
-            f"subsystem={subsystem_for_section(section)} "
-            f"abs_diff={max_diff:.8g} "
-            f"jax={ref_value:.8g} c={c_value:.8g}"
+            f"FAIL craftax vs JAX parity: "
+            f"{passed}/{args.seeds} passed, {failures}/{args.seeds} diverged"
         )
-    print(f"last_10_actions={list(history)}")
+        return 1
 
-
-def _print_terminal_reset_check(
-    reset_verifier,
-    ref,
-    ref_obs,
-    reset_key,
-    env_i,
-    seed,
-    step,
-    policy_name,
-    atol,
-):
-    if reset_verifier is None:
-        return True
-    key = np.asarray(reset_key, dtype=np.uint32)
-    ok = reset_verifier.compare(
-        ref.state_at(env_i),
-        ref_obs[env_i],
-        reset_key,
-        int(seed),
-        step,
-        policy_name,
-        atol,
-    )
-    if ok:
-        print(
-            "terminal_reset_reference: ok "
-            f"reset_key=[{int(key[0])},{int(key[1])}]"
-        )
-    return ok
-
-
-def _terminal_summary(seeds, terminal_counts, episode_length_sums):
-    total_terminals = int(np.sum(terminal_counts))
-    per_seed = []
-    for seed, count, length_sum in zip(seeds, terminal_counts, episode_length_sums):
-        if int(count) > 0:
-            mean_len = float(length_sum) / float(count)
-            per_seed.append(f"{int(seed)}:{int(count)}@{mean_len:.1f}")
-        else:
-            per_seed.append(f"{int(seed)}:0")
-    return total_terminals, " ".join(per_seed)
-
-
-def _diagnose_isolated_replay(cmod, seed, actions, atol, num_threads, reset_verifier):
+    sample = WorldDump()
+    lib.generate_clean_world(0, ctypes.byref(sample))
     print(
-        "isolated_replay: start "
-        f"seed={int(seed)} steps={len(actions)}"
+        "PASS craftax vs JAX Craftax: "
+        f"seeds={args.seeds} steps={args.steps} atol={args.atol} "
+        f"dungeon_chests={count_block(sample, 1, BLOCK_CHEST)} "
+        f"dungeon_darkness={count_block(sample, 1, BLOCK_DARKNESS)} "
+        f"sewer_ice_table={count_block(sample, 3, BLOCK_ENCHANTMENT_TABLE_ICE)} "
+        f"vault_fire_table={count_block(sample, 4, BLOCK_ENCHANTMENT_TABLE_FIRE)} "
+        f"fire_light={mean_light(sample, FIRE_FLOOR):.1f} "
+        f"boss_light={mean_light(sample, BOSS_FLOOR):.1f}"
     )
-    trace_path = Path("build") / f"craftax_repro_seed_{int(seed)}_steps_{len(actions)}.txt"
-    trace_path.parent.mkdir(exist_ok=True)
-    trace_path.write_text("\n".join(str(int(action)) for action in actions) + "\n")
-    print(f"isolated_replay_actions={trace_path}")
-    ref = JaxCraftaxBatch(np.asarray([seed], dtype=np.int64), resetter=reset_verifier)
-    vec, c_obs, c_rewards, c_terminals = make_c_vec(
-        cmod,
-        1,
-        int(seed),
-        num_threads=num_threads,
-    )
-    try:
-        if not compare_reset(ref.obs, c_obs.copy(), np.asarray([seed]), atol):
-            print("isolated_replay: initial reset diverged")
-            return
-        action_buf = np.zeros((1, 1), dtype=np.float32)
-        for step, action in enumerate(actions):
-            action_buf[0, 0] = float(action)
-            ref_obs, ref_rewards, ref_dones, reset_keys = ref.step(
-                np.asarray([action], dtype=np.int32)
-            )
-            vec.cpu_step(action_buf.ctypes.data)
-            c_obs_snapshot = c_obs.copy()
-            c_rewards_snapshot = c_rewards.copy()
-            c_dones_snapshot = c_terminals.copy().astype(bool)
-            reward_diff = abs(float(ref_rewards[0]) - float(c_rewards_snapshot[0]))
-            done_match = bool(ref_dones[0]) == bool(c_dones_snapshot[0])
-            obs_diff = first_obs_diff(ref_obs[0], c_obs_snapshot[0], atol)
-            if reward_diff > atol or not done_match or obs_diff is not None:
-                print(
-                    "isolated_replay: divergence "
-                    f"step={step} action={int(action)} "
-                    f"reward_delta={reward_diff:.8g} "
-                    f"done_jax={bool(ref_dones[0])} "
-                    f"done_c={bool(c_dones_snapshot[0])}"
-                )
-                if obs_diff is not None:
-                    idx, max_diff, ref_value, c_value = obs_diff
-                    section = section_for_index(idx)
-                    print(
-                        "isolated_replay_obs: "
-                        f"index={idx} section={section} "
-                        f"subsystem={subsystem_for_section(section)} "
-                        f"abs_diff={max_diff:.8g} "
-                        f"jax={ref_value:.8g} c={c_value:.8g}"
-                    )
-                if bool(ref_dones[0]) and bool(c_dones_snapshot[0]):
-                    _print_terminal_reset_check(
-                        reset_verifier,
-                        ref,
-                        ref_obs,
-                        reset_keys[0],
-                        0,
-                        seed,
-                        step,
-                        "isolated_replay",
-                        atol,
-                    )
-                return
-        print("isolated_replay: no divergence")
-    finally:
-        vec.close()
+    return 0
 
 
-def run(args):
-    if args.seeds <= 0:
-        raise ValueError("--seeds must be positive")
-    if args.steps < 0:
-        raise ValueError("--steps must be non-negative")
-
-    policy_name = getattr(args, "policy", "uniform")
-    if policy_name not in POLICIES:
-        raise ValueError(f"--policy must be one of {POLICIES}")
-
-    num_threads = int(getattr(args, "num_threads", 1))
-    if num_threads <= 0:
-        raise ValueError("--num-threads must be positive")
-    os.environ.setdefault("OMP_NUM_THREADS", str(num_threads))
-
-    reset_on_done = bool(getattr(args, "reset_on_done", True))
-    seeds = np.arange(args.seed_start, args.seed_start + args.seeds, dtype=np.int64)
-
-    cmod = import_c_env()
-    reset_verifier = get_reset_verifier(True)
-    ref = JaxCraftaxBatch(seeds, resetter=reset_verifier)
-    ref_obs = ref.obs
-
-    vec, c_obs, c_rewards, c_terminals = make_c_vec(
-        cmod, len(seeds), int(seeds[0]), num_threads=num_threads
-    )
-    try:
-        if not compare_reset(ref_obs, c_obs.copy(), seeds, args.atol):
-            return 1
-
-        if reset_verifier is not None:
-            for env_i, seed in enumerate(seeds):
-                if not reset_verifier.compare(
-                    ref.state_at(env_i),
-                    ref_obs[env_i],
-                    ref.reset_keys[env_i],
-                    int(seed),
-                    "initial",
-                    policy_name,
-                    args.atol,
-                ):
-                    return 1
-
-        policy = ActionPolicy(policy_name, args.action_seed, len(seeds))
-        action_buf = np.zeros((len(seeds), 1), dtype=np.float32)
-        histories = [deque(maxlen=10) for _seed in seeds]
-        full_histories = [[] for _seed in seeds]
-        terminal_counts = np.zeros(len(seeds), dtype=np.int64)
-        episode_lengths = np.zeros(len(seeds), dtype=np.int64)
-        episode_length_sums = np.zeros(len(seeds), dtype=np.int64)
-
-        for step in range(args.steps):
-            step_actions, effective_policy = policy.actions(step, ref)
-            action_buf[:, 0] = step_actions.astype(np.float32)
-            for env_i, action in enumerate(step_actions):
-                histories[env_i].append(int(action))
-                full_histories[env_i].append(int(action))
-
-            ref_obs, ref_rewards, ref_dones, reset_keys = ref.step(step_actions)
-            vec.cpu_step(action_buf.ctypes.data)
-
-            c_obs_snapshot = c_obs.copy()
-            c_rewards_snapshot = c_rewards.copy()
-            c_dones_snapshot = c_terminals.copy().astype(bool)
-
-            for env_i, seed in enumerate(seeds):
-                reward_diff = abs(float(ref_rewards[env_i]) - float(c_rewards_snapshot[env_i]))
-                done_match = bool(ref_dones[env_i]) == bool(c_dones_snapshot[env_i])
-                obs_diff = first_obs_diff(ref_obs[env_i], c_obs_snapshot[env_i], args.atol)
-                if reward_diff > args.atol or not done_match or obs_diff is not None:
-                    _print_step_divergence(
-                        seed=seed,
-                        step=step,
-                        action=step_actions[env_i],
-                        policy_name=effective_policy,
-                        reward_diff=reward_diff,
-                        ref_reward=ref_rewards[env_i],
-                        c_reward=c_rewards_snapshot[env_i],
-                        ref_done=ref_dones[env_i],
-                        c_done=c_dones_snapshot[env_i],
-                        obs_diff=obs_diff,
-                        history=histories[env_i],
-                    )
-                    if bool(ref_dones[env_i]) and bool(c_dones_snapshot[env_i]):
-                        _print_terminal_reset_check(
-                            reset_verifier,
-                            ref,
-                            ref_obs,
-                            reset_keys[env_i],
-                            env_i,
-                            seed,
-                            step,
-                            effective_policy,
-                            args.atol,
-                        )
-                    _diagnose_isolated_replay(
-                        cmod,
-                        int(seed),
-                        full_histories[env_i],
-                        args.atol,
-                        num_threads,
-                        reset_verifier,
-                    )
-                    return 1
-
-            episode_lengths += 1
-            done_any = np.logical_or(ref_dones, c_dones_snapshot)
-            if reset_on_done and np.any(done_any):
-                for env_i, is_done in enumerate(done_any):
-                    if not bool(is_done):
-                        continue
-                    terminal_counts[env_i] += 1
-                    episode_length_sums[env_i] += episode_lengths[env_i]
-                    if reset_verifier is not None:
-                        if not reset_verifier.compare(
-                            ref.state_at(env_i),
-                            ref_obs[env_i],
-                            reset_keys[env_i],
-                            int(seeds[env_i]),
-                            step,
-                            effective_policy,
-                            args.atol,
-                        ):
-                            return 1
-                    episode_lengths[env_i] = 0
-
-        total_terminals, per_seed_summary = _terminal_summary(
-            seeds, terminal_counts, episode_length_sums
-        )
-        print(
-            f"PASS craftax parity: seeds={args.seeds} steps={args.steps} "
-            f"atol={args.atol:g} action_seed={args.action_seed}"
-        )
-        print(
-            f"policy={policy_name} reset_on_done={reset_on_done} "
-            f"terminal_count={total_terminals} "
-            f"mean_episode_length_by_seed={per_seed_summary}"
-        )
-        return 0
-    finally:
-        vec.close()
-
-
-def main():
-    parser = argparse.ArgumentParser()
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seeds", type=int, default=16)
-    parser.add_argument("--seed-start", type=int, default=0)
-    parser.add_argument("--steps", type=int, default=1000)
+    parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--action-seed", type=int, default=0)
     parser.add_argument("--atol", type=float, default=1e-5)
-    parser.add_argument("--policy", choices=POLICIES, default="uniform")
-    parser.add_argument("--num-threads", type=int, default=1)
-    parser.set_defaults(reset_on_done=True)
-    parser.add_argument("--reset-on-done", dest="reset_on_done", action="store_true")
-    parser.add_argument("--no-reset-on-done", dest="reset_on_done", action="store_false")
-    raise SystemExit(run(parser.parse_args()))
+    parser.add_argument("--keep-going", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
+    return run(parser.parse_args())
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

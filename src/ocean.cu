@@ -49,6 +49,9 @@ __device__ static const float OSRS_ITEM_OBS_TABLE_DEV
 #ifdef PUFFER_NETHACK
 #include "../ocean/nethack/nethack.cu"
 #endif
+#ifdef PUFFER_CRAFTAX
+#include "../ocean/craftax/craftax.cu"
+#endif
 
 // Override encoder vtable for known ocean environments. No-op for unknown envs.
 static void create_custom_encoder(const char* env_name, Encoder* enc) {
@@ -57,6 +60,12 @@ static void create_custom_encoder(const char* env_name, Encoder* enc) {
 #ifdef PUFFER_NETHACK
     if (strcmp(env_name, "nethack") == 0) {
         create_nethack_encoder(enc);
+        return;
+    }
+#endif
+#ifdef PUFFER_CRAFTAX
+    if (strcmp(env_name, "craftax") == 0) {
+        create_craftax_encoder(enc);
         return;
     }
 #endif

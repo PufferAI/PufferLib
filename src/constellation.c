@@ -5,7 +5,7 @@
 
 #include "ini.h"
 
-#define PUF_TABLE_MAX_COLS 256
+#define PUF_TABLE_MAX_COLS 512
 
 typedef struct {
     char name[64];
@@ -338,12 +338,15 @@ static void load_env(const char* env, int full_dataset, Table* out) {
         }
     }
 
-    if (full_dataset || steps_col < 0) {
+    if (full_dataset) {
         return;
     }
 
     int cost_col = table_col(out, "uptime");
     int score_col = table_col(out, "env/score");
+    if (score_col < 0) {
+        score_col = table_col(out, "env/perf");
+    }
     if (cost_col < 0 || score_col < 0) {
         return;
     }
@@ -354,8 +357,7 @@ static void load_env(const char* env, int full_dataset, Table* out) {
         keep[i] = 1;
         for (int j = 0; j < n; j++) {
             if (table_get(out, j, score_col) >= table_get(out, i, score_col) &&
-                    table_get(out, j, cost_col) < table_get(out, i, cost_col) &&
-                    table_get(out, j, steps_col) < table_get(out, i, steps_col)) {
+                    table_get(out, j, cost_col) < table_get(out, i, cost_col)) {
                 keep[i] = 0;
                 break;
             }
@@ -475,6 +477,7 @@ int main(int argc, char** argv) {
 
 #define CAMERA_ORBITAL_SPEED 0.05f
 #define MOUSE_ROTATE_SPEED 0.005f
+#define CAMERA_ZOOM_SPEED 0.08f
 void CustomUpdateCamera(Camera *camera, Rectangle bounds) {
     Vector2 mouse = GetMousePosition();
     if (CheckCollisionPointRec(mouse, bounds) && IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
@@ -489,7 +492,8 @@ void CustomUpdateCamera(Camera *camera, Rectangle bounds) {
         camera->position = Vector3Add(camera->target, view);
     }
     if (CheckCollisionPointRec(mouse, bounds)) {
-        CameraMoveToTarget(camera, -GetMouseWheelMove());
+        float dist = Vector3Distance(camera->position, camera->target);
+        CameraMoveToTarget(camera, -GetMouseWheelMove() * dist * CAMERA_ZOOM_SPEED);
     }
     if (IsKeyPressed(KEY_KP_SUBTRACT)) CameraMoveToTarget(camera, 2.0f);
     if (IsKeyPressed(KEY_KP_ADD)) CameraMoveToTarget(camera, -2.0f);
@@ -509,10 +513,12 @@ void CustomUpdateCamera(Camera *camera, Rectangle bounds) {
 #define PUFF_WHITE ((Color){241, 241, 241, 255})
 #define PUFF_BACKGROUND ((Color){6, 24, 24, 255})
 
-int hyper_count = 19;
-char *hyper_key[19] = {
-    "agent_steps",
+int hyper_count = 21;
+char *hyper_key[21] = {
     "uptime",
+    "agent_steps",
+    "parameters",
+    "tflops",
     "env/perf",
     "env/score",
     "train/learning_rate",
@@ -530,6 +536,29 @@ char *hyper_key[19] = {
     "policy/hidden_size",
     "policy/num_layers",
     "vec/total_agents",
+};
+char *hyper_label[21] = {
+    "uptime",
+    "agent_steps_M",
+    "params_M",
+    "flops_T",
+    "perf",
+    "score",
+    "learning_rate",
+    "ent_coef",
+    "gamma",
+    "gae_lambda",
+    "clip_coef",
+    "vf_clip_coef",
+    "vf_coef",
+    "max_grad_norm",
+    "momentum",
+    "horizon",
+    "replay_ratio",
+    "minibatch_size",
+    "hidden_size",
+    "num_layers",
+    "total_agents",
 };
 
 typedef struct Glyph {
@@ -759,15 +788,25 @@ void draw_all_ticks(PlotArgs args) {
     draw_ticks(x_ticks, tick_n.x, y_ticks, tick_n.y, args);
 }
 
-void draw_box_ticks(char* hypers[], int hyper_count, PlotArgs args) {
+void draw_box_ticks(char* hypers[], int n, PlotArgs args) {
     Vector2 tick_n = compute_ticks(args);
     char x_ticks[(int)tick_n.x][32];
     label_ticks(x_ticks, args, 0, tick_n.x);
-    char fixed_hypers[hyper_count][32];
-    for (int i=0; i<hyper_count; i++) {
-        strncpy(fixed_hypers[hyper_count - i - 1], hypers[i], 32);
+    draw_ticks(x_ticks, tick_n.x, x_ticks, 0, args);
+    float dy = (args.height - args.top_margin - args.bottom_margin) / (float)n;
+    for (int i=0; i<n; i++) {
+        float y_pos = args.top_margin + (i + 0.5f)*dy;
+        DrawLine(args.left_margin - args.tick_length, y_pos,
+            args.left_margin + args.tick_length, y_pos, args.axis_color);
+        Vector2 ts = MeasureTextEx(args.font, hypers[i], args.axis_tick_font_size, 0);
+        DrawTextEx(args.font_small, hypers[i],
+            (Vector2){
+                args.left_margin - ts.x - args.tick_length - args.tick_margin,
+                y_pos - ts.y/2,
+            },
+            args.axis_tick_font_size, 0, PUFF_WHITE
+        );
     }
-    draw_ticks(x_ticks, tick_n.x, fixed_hypers, hyper_count, args);
 }
 
 void draw_axes3() {
@@ -786,49 +825,6 @@ void draw_axes3() {
         (Vector3){0, 0, 1},
         BLUE
     );
-}
-
-void boxplot(Table* table, int col, int x_scale, int i, int hyper_count, PlotArgs args,
-        Color color, bool* filter, bool has_highlight, float highlight_val) {
-    int width = args.width;
-    int height = args.height;
-
-    float plot_width = width - args.left_margin - args.right_margin;
-    float plot_height = height - args.top_margin - args.bottom_margin;
-
-    float x_min = scale_val(x_scale, args.mmin[0]);
-    float x_max = scale_val(x_scale, args.mmax[0]);
-
-    float dy = plot_height/((float)hyper_count);
-
-    float mmin = table_get(table, 0, col);
-    float mmax = mmin;
-    for (int j=0; j<table->rows; j++) {
-        if (filter != NULL && !filter[j]) {
-            continue;
-        }
-        float val = table_get(table, j, col);
-        mmin = fmin(mmin, val);
-        mmax = fmax(mmax, val);
-    }
-
-    mmin = scale_val(x_scale, mmin);
-    mmax = scale_val(x_scale, mmax);
-
-    float left = args.left_margin + (mmin - x_min)/(x_max - x_min)*plot_width;
-    float right = args.left_margin + (mmax - x_min)/(x_max - x_min)*plot_width;
-
-    // TODO - rough patch
-    left = fminf(fmax(left, args.left_margin), width - args.right_margin);
-    right = fmaxf(fmin(right, width - args.right_margin), 0);
-    DrawRectangle(left, args.top_margin + i*dy, right - left, dy, color);
-
-    if (has_highlight) {
-        float hval = scale_val(x_scale, highlight_val);
-        float hx = args.left_margin + (hval - x_min)/(x_max - x_min)*plot_width;
-        hx = fminf(fmaxf(hx, args.left_margin), width - args.right_margin);
-        DrawRectangle(hx - 1, args.top_margin + i*dy, 3, dy, BLUE);
-    }
 }
 
 void plot_gl(Glyph* glyphs, int size, Shader* shader) {
@@ -991,15 +987,15 @@ void brighten_hit(Tooltip* tooltip, Vector2* indices, Glyph* glyphs, int size,
         if (indices[i].y != tooltip->ary_idx || indices[i].x != tooltip->env_idx) {
             continue;
         }
-        glyphs[i].r *= 8;
-        glyphs[i].g *= 8;
-        glyphs[i].b *= 8;
-        glyphs[i].i = 0;
+        glyphs[i].r = fmaxf(glyphs[i].r * 1.25f, glyphs[i].r + 0.25f);
+        glyphs[i].g = fmaxf(glyphs[i].g * 1.25f, glyphs[i].g + 0.25f);
+        glyphs[i].b = fmaxf(glyphs[i].b * 1.25f, glyphs[i].b + 0.25f);
+        glyphs[i].a = 1.5625f;
         if (follow) {
             tooltip->x = x_offset + glyphs[i].x;
             tooltip->y = y_offset + glyphs[i].y;
+            follow = false;
         }
-        return;
     }
 }
 
@@ -1133,6 +1129,29 @@ Dataset load_dataset(const char* path) {
 
 int main(void) {
     Dataset data = load_dataset("resources/constellation/experiments.ini");
+    for (int i = 0; i < data.n; i++) {
+        Table* table = &data.tables[i];
+        int hid = table_col(table, "policy/hidden_size");
+        int layers = table_col(table, "policy/num_layers");
+        int replay = table_col(table, "train/replay_ratio");
+        int steps = table_col(table, "agent_steps");
+        int pcol = table_ensure_col(table, "parameters");
+        int fcol = table_ensure_col(table, "tflops");
+        if (hid < 0 || layers < 0) {
+            continue;
+        }
+        for (int r = 0; r < table->rows; r++) {
+            float h = table_get(table, r, hid);
+            float L = table_get(table, r, layers);
+            float params = 3.0f * h * h * L;
+            table_set(table, r, pcol, params * 1e-6f);
+            if (replay < 0 || steps < 0 || params <= 0) {
+                continue;
+            }
+            table_set(table, r, fcol, 6.0f * params
+                * table_get(table, r, replay) * table_get(table, r, steps) * 1e-6f);
+        }
+    }
     int max_data_points = 0;
     for (int i=0; i<data.n; i++) {
         max_data_points = data.tables[i].rows > max_data_points ?
@@ -1146,13 +1165,13 @@ int main(void) {
     // Create options as a semicolon-separated string
     size_t options_len = 0;
     for (int i = 0; i < hyper_count; i++) {
-        options_len += strlen(hyper_key[i]) + 1;
+        options_len += strlen(hyper_label[i]) + 1;
     }
     char *options = malloc(options_len);
     options[0] = '\0';
     for (int i = 0; i < hyper_count; i++) {
         if (i > 0) strcat(options, ";");
-        strcat(options, hyper_key[i]);
+        strcat(options, hyper_label[i]);
     }
 
     // Options with extra "env_name;"
@@ -1160,6 +1179,11 @@ int main(void) {
     char *env_hyper_options = malloc(options_len + strlen(extra));
     strcpy(env_hyper_options, extra);
     strcat(env_hyper_options, options);
+
+    char* z_extra = "none;";
+    char *z_options = malloc(options_len + strlen(z_extra));
+    strcpy(z_options, z_extra);
+    strcat(z_options, options);
 
     // Env names as semi-colon-separated string
     size_t env_options_len = 4;
@@ -1179,12 +1203,13 @@ int main(void) {
     // Points
     printf("total points: %d", total_points);
     Point* points = calloc(total_points, sizeof(Point));
-    Glyph* glyphs = calloc(total_points, sizeof(Glyph));
-    Vector2* env_indices = calloc(total_points, sizeof(Vector2));
+    int glyph_cap = total_points * hyper_count;
+    Glyph* glyphs = calloc(glyph_cap, sizeof(Glyph));
+    Vector2* env_indices = calloc(glyph_cap, sizeof(Vector2));
 
     // Initialize Raylib
     SetConfigFlags(FLAG_MSAA_4X_HINT);
-    InitWindow(2*DEFAULT_PLOT_ARGS.width, 2*DEFAULT_PLOT_ARGS.height + 2*SETTINGS_HEIGHT, "Puffer Constellation");
+    InitWindow(2*DEFAULT_PLOT_ARGS.width, DEFAULT_PLOT_ARGS.height + 2*SETTINGS_HEIGHT, "Puffer Constellation");
     Texture2D puffer = LoadTexture("resources/shared/puffers.png");
 
     DEFAULT_PLOT_ARGS.font = LoadFontEx("resources/shared/JetBrainsMono-SemiBold.ttf", 32, NULL, 255);
@@ -1219,16 +1244,20 @@ int main(void) {
     args1.camera.projection = CAMERA_PERSPECTIVE;
     args1.scale[0] = 1;
     args1.scale[2] = 1;
+    args1.top_margin = 20;
+    args1.left_margin = 100;
+    args1.right_margin = 50;
+    args1.bottom_margin = 50;
     RenderTexture2D fig1 = LoadRenderTexture(args1.width, args1.height);
     RenderTexture2D fig1_overlay = LoadRenderTexture(args1.width, args1.height);
     Rectangle fig1_bounds = {0, 2*SETTINGS_HEIGHT, args1.width, args1.height};
     int fig_env_idx = 0;
     bool fig_env_active = false;
     bool fig_x_active = false;
-    int fig_x_idx = 1;
+    int fig_x_idx = 0;
     bool fig_xscale_active = false;
     bool fig_y_active = false;
-    int fig_y_idx = 2;
+    int fig_y_idx = 4;
     bool fig_yscale_active = false;
     bool fig_z_active = false;
     int fig_z_idx = 0;
@@ -1237,13 +1266,13 @@ int main(void) {
     bool fig_color_active = false;
     bool fig_colorscale_active = false;
     bool fig_range1_active = false;
-    int fig_range1_idx = 2;
+    int fig_range1_idx = 4;
     char fig_range1_min[32] = {0};
     char fig_range1_max[32] = {0};
     float fig_range1_min_val = 0;
     float fig_range1_max_val = FLT_MAX;
     bool fig_range2_active = false;
-    int fig_range2_idx = 1;
+    int fig_range2_idx = 0;
     char fig_range2_min[32] = {0};
     char fig_range2_max[32] = {0};
     float fig_range2_min_val = FLT_MIN;
@@ -1255,37 +1284,15 @@ int main(void) {
 
     PlotArgs args2 = DEFAULT_PLOT_ARGS;
     RenderTexture2D fig2 = LoadRenderTexture(args2.width, args2.height);
+    args2.x_label = "Value";
+    args2.y_label = "Hyperparameter";
+    args2.left_margin = 170;
     args2.right_margin = 50;
-    args2.scale[0] = 1;
+    args2.top_margin = 10;
+    args2.bottom_margin = 50;
+    Rectangle fig2_bounds = {args1.width, 2*SETTINGS_HEIGHT, args2.width, args2.height};
 
-    PlotArgs args3 = DEFAULT_PLOT_ARGS;
-    RenderTexture2D fig3 = LoadRenderTexture(args3.width, args3.height);
-    RenderTexture2D fig3_overlay = LoadRenderTexture(args1.width, args1.height);
-    args3.left_margin = 100;
-    args3.right_margin = 50;
-    args3.top_margin = 20;
-    args3.bottom_margin = 50;
-    args3.scale[0] = LOG;
-    args3.scale[1] = LOG;
-    args3.x_label = "params";
-    args3.y_label = "train FLOPs";
-
-    PlotArgs args4 = DEFAULT_PLOT_ARGS;
-    RenderTexture2D fig4 = LoadRenderTexture(args4.width, args4.height);
-    args4.x_label = "Value";
-    args4.y_label = "Hyperparameter";
-    args4.left_margin = 170;
-    args4.right_margin = 50;
-    args4.top_margin = 10;
-    args4.bottom_margin = 50;
-
-    int x;
-    int y;
-    int z;
-    int c;
-    char* x_label;
-    char* y_label;
-    char* z_label;
+    int x, y, z, c;
 
     bool *filter = calloc(max_data_points, sizeof(bool));
 
@@ -1301,9 +1308,7 @@ int main(void) {
 
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             focus = GetMousePosition();
-            if (!CheckCollisionPointRec(focus, fig1_bounds)) {
-                tooltip.active = false;
-            }
+            tooltip.active = false;
         }
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
             Vector2 mouse_pos = GetMousePosition();
@@ -1313,13 +1318,10 @@ int main(void) {
             tooltip.click_y = mouse_pos.y;
         }
 
-        // Figure 1
-        x_label = hyper_key[fig_x_idx];
-        y_label = hyper_key[fig_y_idx];
-        z_label = hyper_key[fig_z_idx];
-        args1.x_label = x_label;
-        args1.y_label = y_label;
-        args1.z_label = z_label;
+        int use_3d = fig_z_idx != 0;
+        args1.x_label = hyper_label[fig_x_idx];
+        args1.y_label = hyper_label[fig_y_idx];
+        args1.z_label = use_3d ? hyper_label[fig_z_idx - 1] : "";
         int start = 0;
         int end = data.n;
         if (fig_env_idx != 0) {
@@ -1334,7 +1336,7 @@ int main(void) {
             Table* table = &data.tables[i];
             x = table_col(table, hyper_key[fig_x_idx]);
             y = table_col(table, hyper_key[fig_y_idx]);
-            z = table_col(table, hyper_key[fig_z_idx]);
+            z = use_3d ? table_col(table, hyper_key[fig_z_idx - 1]) : -1;
             if (fig_color_idx != 0) {
                 c = table_col(table, hyper_key[fig_color_idx - 1]);
             }
@@ -1353,187 +1355,158 @@ int main(void) {
                 points[size] = (Point){
                     table_get(table, j, x),
                     table_get(table, j, y),
-                    table_get(table, j, z),
+                    (z < 0) ? 0.0f : table_get(table, j, z),
                     (fig_color_idx == 0) ? i/(float)data.n : table_get(table, j, c),
                 };
                 env_indices[size] = (Vector2){i, j};
                 size++;
             }
         }
-        CustomUpdateCamera(&args1.camera, fig1_bounds);
         autoscale(points, size, &args1);
+        if (use_3d) {
+            CustomUpdateCamera(&args1.camera, fig1_bounds);
+        } else {
+            args1.mmin[2] = 0.0f;
+            args1.mmax[2] = 0.0f;
+        }
         toPx(points, glyphs, size, args1);
-        if (right_clicked) {
+        Vector2 click = {tooltip.click_x, tooltip.click_y};
+        if (right_clicked && CheckCollisionPointRec(click, fig1_bounds)) {
             update_closest(&tooltip, env_indices, glyphs, size, 0, 2*SETTINGS_HEIGHT);
         }
-        Vector2 click = {tooltip.click_x, tooltip.click_y};
         brighten_hit(&tooltip, env_indices, glyphs, size, 0, 2*SETTINGS_HEIGHT,
             CheckCollisionPointRec(click, fig1_bounds));
         plot_gl(glyphs, size, &shader);
-
-        BeginMode3D(args1.camera);
-        draw_axes3();
-        EndMode3D();
+        if (use_3d) {
+            BeginMode3D(args1.camera);
+            draw_axes3();
+            EndMode3D();
+        } else {
+            draw_axes(args1);
+            draw_all_ticks(args1);
+        }
         EndTextureMode();
 
-        // Figure 2
-        x_label = hyper_key[fig_x_idx];
-        y_label = hyper_key[fig_y_idx];
-        args2.scale[0] = args1.scale[0];
-        args2.scale[1] = args1.scale[1];
-        args2.x_label = x_label;
-        args2.y_label = y_label;
-        args2.top_margin = 20;
-        args2.left_margin = 100;
+        // Figure 2: hyper boxplot
+        args2.scale[0] = fig_box_idx;
         BeginTextureMode(fig2);
         ClearBackground(PUFF_BACKGROUND);
-
-        autoscale(points, size, &args2);
-        args2.mmin[2] = 0.0f;
-        args2.mmax[2] = 0.0f;
-        toPx(points, glyphs, size, args2);
-        if (right_clicked) {
-            update_closest(&tooltip, env_indices, glyphs, size,
-                fig1.texture.width, 2*SETTINGS_HEIGHT);
+        float bmin[hyper_count];
+        float bmax[hyper_count];
+        for (int j=0; j<hyper_count; j++) {
+            bmin[j] = FLT_MAX;
+            bmax[j] = -FLT_MAX;
         }
-        brighten_hit(&tooltip, env_indices, glyphs, size,
-            fig1.texture.width, 2*SETTINGS_HEIGHT, false);
-        plot_gl(glyphs, size, &shader);
-        draw_axes(args2);
-        draw_all_ticks(args2);
-        EndTextureMode();
-
-        // Figure 3
-        BeginTextureMode(fig3);
-        ClearBackground(PUFF_BACKGROUND);
-        size = 0;
-        for (int i=0; i<data.n; i++) {
-            Table* table = &data.tables[i];
-            int hid = table_col(table, "policy/hidden_size");
-            int layers = table_col(table, "policy/num_layers");
-            int replay = table_col(table, "train/replay_ratio");
-            int steps = table_col(table, "agent_steps");
-            int perf = table_col(table, "env/perf");
-            if (hid < 0 || layers < 0 || replay < 0 || steps < 0 || perf < 0) {
-                continue;
-            }
-            for (int j=0; j<table->rows; j++) {
-                filter[j] = true;
-            }
-            int filter_param_1 = table_col(table, hyper_key[fig_range1_idx]);
-            apply_filter(filter, table, filter_param_1, fig_range1_min_val, fig_range1_max_val);
-            int filter_param_2 = table_col(table, hyper_key[fig_range2_idx]);
-            apply_filter(filter, table, filter_param_2, fig_range2_min_val, fig_range2_max_val);
-
-            int best = -1;
-            float best_flops = FLT_MAX;
-            float best_params = 0;
-            for (int j=0; j<table->rows; j++) {
-                if (!filter[j] || table_get(table, j, perf) <= 0.95f) {
-                    continue;
-                }
-                float h = table_get(table, j, hid);
-                float L = table_get(table, j, layers);
-                float params = 3.0f * h * h * L;
-                float flops = 6.0f * params * table_get(table, j, replay)
-                    * table_get(table, j, steps) * 1e6f;
-                if (params <= 0 || flops <= 0 || flops >= best_flops) {
-                    continue;
-                }
-                best_flops = flops;
-                best_params = params;
-                best = j;
-            }
-            if (best < 0) {
-                continue;
-            }
-            points[size] = (Point){
-                best_params,
-                best_flops,
-                0.0f,
-                i/(float)data.n
-            };
-            env_indices[size] = (Vector2){i, best};
-            size++;
-        }
-        if (size > 0) {
-            autoscale(points, size, &args3);
-            args3.mmin[2] = 0.0f;
-            args3.mmax[2] = 0.0f;
-            if (args3.mmin[0] >= args3.mmax[0]) {
-                args3.mmax[0] = args3.mmin[0] * 10.0f;
-            }
-            if (args3.mmin[1] >= args3.mmax[1]) {
-                args3.mmax[1] = args3.mmin[1] * 10.0f;
-            }
-            toPx(points, glyphs, size, args3);
-            if (right_clicked) {
-                update_closest(&tooltip, env_indices, glyphs, size,
-                    0, fig1.texture.height + 2*SETTINGS_HEIGHT);
-            }
-            brighten_hit(&tooltip, env_indices, glyphs, size,
-                0, fig1.texture.height + 2*SETTINGS_HEIGHT, false);
-            plot_gl(glyphs, size, &shader);
-        }
-        draw_axes(args3);
-        draw_all_ticks(args3);
-        for (int k=0; k<size; k++) {
-            int ei = env_indices[k].x;
-            char* name = data.tables[ei].name;
-            Vector2 ts = MeasureTextEx(
-                args3.font_small, name, args3.axis_tick_font_size, 0);
-            float lx = glyphs[k].x + 6;
-            float ly = glyphs[k].y - ts.y - 6;
-            if (lx + ts.x + 4 > args3.width) {
-                lx = glyphs[k].x - ts.x - 6;
-            }
-            DrawTextEx(
-                args3.font_small, name, (Vector2){lx, ly},
-                args3.axis_tick_font_size, 0, PUFF_WHITE
-            );
-        }
-        EndTextureMode();
-
-        // Figure 4
-        args4.scale[0] = fig_box_idx;
-        if (args4.scale[0] == LINEAR) {
-            args4.mmin[0] = 0.0f;
-            args4.mmax[0] = 5.0f;
-        } else if (args4.scale[0] == LOG) {
-            args4.mmin[0] = 1.0e-5f;
-            args4.mmax[0] = 1.0e5f;
-        } else if (args4.scale[0] == LOGIT) {
-            args4.mmin[0] = 0.5f;
-            args4.mmax[0] = 0.999f;
-        }
-        BeginTextureMode(fig4);
-        ClearBackground(PUFF_BACKGROUND);
-        rlSetBlendFactorsSeparate(0x0302, 0x0303, 1, 0x0303, 0x8006, 0x8006);
-        BeginBlendMode(BLEND_CUSTOM_SEPARATE);
-        Color color = Fade(PUFF_CYAN, 1.0f / (float)(end - start));
         for (int i=start; i<end; i++) {
             Table* table = &data.tables[i];
-            int filter_param_1 = table_col(table, hyper_key[fig_range1_idx]);
-            int filter_param_2 = table_col(table, hyper_key[fig_range2_idx]);
+            int f1 = table_col(table, hyper_key[fig_range1_idx]);
+            int f2 = table_col(table, hyper_key[fig_range2_idx]);
+            for (int k=0; k<table->rows; k++) {
+                filter[k] = true;
+            }
+            apply_filter(filter, table, f1, fig_range1_min_val, fig_range1_max_val);
+            apply_filter(filter, table, f2, fig_range2_min_val, fig_range2_max_val);
             for (int j=0; j<hyper_count; j++) {
                 int col = table_col(table, hyper_key[j]);
-                for (int k=0; k<table->rows; k++) {
-                    filter[k] = true;
+                if (col < 0) {
+                    continue;
                 }
-                apply_filter(filter, table, filter_param_1, fig_range1_min_val, fig_range1_max_val);
-                apply_filter(filter, table, filter_param_2, fig_range2_min_val, fig_range2_max_val);
-                bool hit = tooltip.active && i == tooltip.env_idx;
-                float hval = hit ? table_get(table, tooltip.ary_idx, col) : 0;
-                boxplot(table, col, args4.scale[0], j, hyper_count, args4,
-                    color, filter, hit, hval);
+                for (int k=0; k<table->rows; k++) {
+                    if (!filter[k]) {
+                        continue;
+                    }
+                    float val = table_get(table, k, col);
+                    bmin[j] = fminf(bmin[j], val);
+                    bmax[j] = fmaxf(bmax[j], val);
+                }
             }
         }
-        EndBlendMode();
-        draw_axes(args4);
-        draw_box_ticks(hyper_key, hyper_count, args4);
+        float gmin = FLT_MAX, gmax = -FLT_MAX;
+        for (int j=0; j<hyper_count; j++) {
+            if (bmin[j] > bmax[j] || (args2.scale[0] == LOG && bmax[j] <= 0)) {
+                continue;
+            }
+            float lo = bmin[j] > 0 ? bmin[j] : bmax[j];
+            gmin = fminf(gmin, lo);
+            gmax = fmaxf(gmax, bmax[j]);
+        }
+        if (gmin > gmax) {
+            gmin = 1e-5f;
+            gmax = 1e5f;
+        } else if (gmin == gmax) {
+            gmin = args2.scale[0] == LOG ? gmin/10 : gmin - 1;
+            gmax = args2.scale[0] == LOG ? gmax*10 : gmax + 1;
+        }
+        args2.mmin[0] = args2.scale[0] == LOGIT ? 0.5f : gmin;
+        args2.mmax[0] = args2.scale[0] == LOGIT ? 0.999f : gmax;
+        int bsize = 0;
+        float plot_width = args2.width - args2.left_margin - args2.right_margin;
+        float plot_height = args2.height - args2.top_margin - args2.bottom_margin;
+        float dy = plot_height / (float)hyper_count;
+        float x_min = scale_val(args2.scale[0], args2.mmin[0]);
+        float x_max = scale_val(args2.scale[0], args2.mmax[0]);
+        Color bar = Fade(PUFF_WHITE, 0.08f);
+        for (int j=0; j<hyper_count; j++) {
+            if (bmin[j] > bmax[j]) {
+                continue;
+            }
+            float lo = scale_val(args2.scale[0], bmin[j]);
+            float hi = scale_val(args2.scale[0], bmax[j]);
+            float left = args2.left_margin + (lo - x_min)/(x_max - x_min)*plot_width;
+            float right = args2.left_margin + (hi - x_min)/(x_max - x_min)*plot_width;
+            left = fminf(fmaxf(left, args2.left_margin), args2.width - args2.right_margin);
+            right = fmaxf(fminf(right, args2.width - args2.right_margin), args2.left_margin);
+            if (right - left < 2) {
+                right = left + 2;
+            }
+            DrawRectangle(left, args2.top_margin + j*dy, right - left, dy, bar);
+        }
+        for (int i=start; i<end; i++) {
+            Table* table = &data.tables[i];
+            int f1 = table_col(table, hyper_key[fig_range1_idx]);
+            int f2 = table_col(table, hyper_key[fig_range2_idx]);
+            for (int k=0; k<table->rows; k++) {
+                filter[k] = true;
+            }
+            apply_filter(filter, table, f1, fig_range1_min_val, fig_range1_max_val);
+            apply_filter(filter, table, f2, fig_range2_min_val, fig_range2_max_val);
+            Color dc = rgb(i / (float)data.n);
+            for (int j=0; j<hyper_count; j++) {
+                int col = table_col(table, hyper_key[j]);
+                if (col < 0) {
+                    continue;
+                }
+                float y0 = args2.top_margin + j*dy;
+                for (int k=0; k<table->rows; k++) {
+                    if (!filter[k]) {
+                        continue;
+                    }
+                    float sval = scale_val(args2.scale[0], table_get(table, k, col));
+                    float hx = args2.left_margin + (sval - x_min)/(x_max - x_min)*plot_width;
+                    hx = fminf(fmaxf(hx, args2.left_margin), args2.width - args2.right_margin);
+                    float hy = y0 + 2 + fmodf((k + 1)*0.618034f, 1.0f)*fmaxf(dy - 4, 1);
+                    glyphs[bsize] = (Glyph){
+                        hx, hy, (float)bsize,
+                        dc.r/255.0f, dc.g/255.0f, dc.b/255.0f, dc.a/255.0f
+                    };
+                    env_indices[bsize] = (Vector2){i, k};
+                    bsize++;
+                }
+            }
+        }
+        if (right_clicked && CheckCollisionPointRec(click, fig2_bounds)) {
+            update_closest(&tooltip, env_indices, glyphs, bsize,
+                fig1.texture.width, 2*SETTINGS_HEIGHT);
+        }
+        brighten_hit(&tooltip, env_indices, glyphs, bsize,
+            fig1.texture.width, 2*SETTINGS_HEIGHT, false);
+        if (bsize > 0) {
+            plot_gl(glyphs, bsize, &shader);
+        }
+        draw_axes(args2);
+        draw_box_ticks(hyper_label, hyper_count, args2);
         EndTextureMode();
 
-        // Figure 1-4
         DrawTextureRec(
             fig1.texture,
             (Rectangle){0, 0, fig1.texture.width, -fig1.texture.height },
@@ -1552,25 +1525,6 @@ int main(void) {
             fig2.texture,
             (Rectangle){ 0, 0, fig2.texture.width, -fig2.texture.height },
             (Vector2){ fig1.texture.width, 2*SETTINGS_HEIGHT }, WHITE
-        );
-        DrawTextureRec(
-            fig3.texture,
-            (Rectangle){ 0, 0, fig3.texture.width, -fig3.texture.height },
-            (Vector2){ 0, 2*SETTINGS_HEIGHT + fig1.texture.height }, WHITE
-        );
-        BeginShaderMode(blur_shader);
-        rlSetBlendMode(RL_BLEND_ADDITIVE);
-        DrawTextureRec(
-            fig3_overlay.texture,
-            (Rectangle){0, 0, fig3_overlay.texture.width, -fig3_overlay.texture.height },
-            (Vector2){ 0, 2*SETTINGS_HEIGHT + fig1.texture.height }, WHITE
-        );
-        rlSetBlendMode(RL_BLEND_ALPHA);
-        EndShaderMode();
-        DrawTextureRec(
-            fig4.texture,
-            (Rectangle){ 0, 0, fig4.texture.width, -fig4.texture.height },
-            (Vector2){ fig1.texture.width, fig1.texture.height + 2*SETTINGS_HEIGHT }, WHITE
         );
 
         // UI
@@ -1621,7 +1575,7 @@ int main(void) {
 
         Rectangle fig_z_rect = {x, SEP, DROPDOWN_WIDTH, SETTINGS_HEIGHT};
         x += DROPDOWN_WIDTH;
-        if (GuiDropdownBox(fig_z_rect, options, &fig_z_idx, fig_z_active)){
+        if (GuiDropdownBox(fig_z_rect, z_options, &fig_z_idx, fig_z_active)){
             fig_z_active = !fig_z_active;
         }
         Rectangle fig_zscale_rect = {x, SEP, TOGGLE_WIDTH, SETTINGS_HEIGHT};
@@ -1644,11 +1598,6 @@ int main(void) {
         if (GuiDropdownBox(fig_colorscale_rect, scale_options, &args1.scale[3], fig_colorscale_active)){
             fig_colorscale_active = !fig_colorscale_active;
         }
-
-        // Temp hack
-        args2.scale[3] = args1.scale[3];
-        args3.scale[3] = args1.scale[3];
-        args4.scale[3] = args1.scale[3];
 
         // Filters
         DrawTextEx(args1.font_small, "F1", (Vector2){x, y}, args1.axis_tick_font_size, 0, WHITE);
@@ -1725,6 +1674,7 @@ int main(void) {
     free(data.tables);
     free(options);
     free(env_hyper_options);
+    free(z_options);
     free(env_options);
     free(clipboard);
     free(points);
@@ -1738,9 +1688,6 @@ int main(void) {
     UnloadRenderTexture(fig1);
     UnloadRenderTexture(fig1_overlay);
     UnloadRenderTexture(fig2);
-    UnloadRenderTexture(fig3);
-    UnloadRenderTexture(fig3_overlay);
-    UnloadRenderTexture(fig4);
     CloseWindow();
     return 0;
 }

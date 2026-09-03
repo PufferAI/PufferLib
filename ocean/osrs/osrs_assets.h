@@ -4,6 +4,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+static inline double osrs_now_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec * 1000.0 + (double)t.tv_nsec / 1e6;
+}
+
+static inline void osrs_time_log(const char* label, double* t0) {
+    double now = osrs_now_ms();
+    if (t0 && *t0 > 0.0) {
+        fprintf(stderr, "TIME %-36s %7.1f ms\n", label, now - *t0);
+    }
+    if (t0) *t0 = now;
+}
 
 #include "osrs_assets_generated.h"
 #include "osrs_binary_io.h"

@@ -110,11 +110,15 @@ static RenderClient* visual_init_render_scene(
         render_client->collision_map = (const CollisionMap*)env->collision_map;
     }
 
+    double t0 = osrs_now_ms();
     render_client->model_cache = model_cache_load(OSRS_ASSET("equipment.models"));
     if (render_client->model_cache) render_client->show_models = 1;
     render_client->anim_cache = anim_cache_load(OSRS_ASSET("equipment.anims"));
+    osrs_time_log("equipment models+anims", &t0);
     render_load_projectile_assets(render_client);
+    osrs_time_log("projectile assets", &t0);
     render_init_overlay_models(render_client);
+    osrs_time_log("overlay models", &t0);
 
     if (!encounter_name || encounter_name_is_pvp(encounter_name)) {
         render_client->terrain = terrain_load(OSRS_ASSET("wilderness.terrain"));
@@ -158,6 +162,7 @@ static RenderClient* visual_init_render_scene(
             render_client->collision_map ? "loaded" : "MISSING",
             render_client->npc_model_cache ? render_client->npc_model_cache->count : 0,
             render_client->npc_anim_cache ? render_client->npc_anim_cache->seq_count : 0);
+        osrs_time_log("inferno scene meshes", &t0);
     } else if (strcmp(encounter_name, "colosseum") == 0) {
         render_client->terrain = terrain_load(OSRS_ASSET("colosseum.terrain"));
         render_client->objects = objects_load(OSRS_ASSET("colosseum.objects"));
@@ -176,6 +181,7 @@ static RenderClient* visual_init_render_scene(
             render_client->collision_map ? "loaded" : "MISSING",
             render_client->npc_model_cache ? render_client->npc_model_cache->count : 0,
             render_client->npc_anim_cache ? render_client->npc_anim_cache->seq_count : 0);
+        osrs_time_log("colosseum scene meshes", &t0);
     }
 
     render_populate_entities(render_client, env);

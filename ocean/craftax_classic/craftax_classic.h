@@ -1012,9 +1012,9 @@ void puf_close(CraftaxClassic* env) {
 }
 
 // ============================================================
-// Tile-based renderer sharing the full-Craftax textures.bin
+// Tile-based renderer sharing resources/craftax/textures.png
 // ============================================================
-// Shared layout (see ocean/craftax/pack_textures.py):
+// Sprite sheet: 16x16 RGBA tiles, 16 columns.
 //   [0..36]  block textures (first 17 used by classic, indexed by BLK_*)
 //   [37..41] player: down, up, left, right, sleep
 //   [42..46] items (unused by classic)
@@ -1023,6 +1023,7 @@ void puf_close(CraftaxClassic* env) {
 
 #include <stdio.h>
 #define CC_TEX_TILE_PX 16
+#define CC_TEX_SHEET_COLS 16
 #define CC_TEX_SCALE 4
 #define CC_TEX_DRAW_PX (CC_TEX_TILE_PX * CC_TEX_SCALE)
 #define CC_TEX_NUM (37 + 5 + 5 + 3 + 4)
@@ -1043,44 +1044,27 @@ void puf_close(CraftaxClassic* env) {
 #define CC_RENDER_ROWS 16
 #define CC_RENDER_COLS 16
 
-static Texture2D cc_textures[CC_TEX_NUM];
+static Texture2D cc_textures;
 static bool cc_textures_loaded = false;
 
 static void cc_load_textures(void) {
     if (cc_textures_loaded) return;
     const char* candidates[] = {
-        "resources/craftax/textures.bin",
-        "../resources/craftax/textures.bin",
-        "../../resources/craftax/textures.bin",
+        "resources/craftax/textures.png",
+        "../resources/craftax/textures.png",
+        "../../resources/craftax/textures.png",
     };
-    FILE* f = NULL;
     for (size_t i = 0; i < sizeof(candidates)/sizeof(candidates[0]); i++) {
-        f = fopen(candidates[i], "rb");
-        if (f) break;
+        if (FileExists(candidates[i])) {
+            cc_textures = LoadTexture(candidates[i]);
+            break;
+        }
     }
-    if (!f) {
-        fprintf(stderr, "craftax_classic: textures.bin not found in resources/craftax -- run ocean/craftax/pack_textures.py\n");
+    if (cc_textures.id == 0) {
+        fprintf(stderr, "craftax_classic: textures.png not found in resources/craftax\n");
         exit(1);
     }
-    const size_t tile_bytes = CC_TEX_TILE_PX * CC_TEX_TILE_PX * 4;
-    uint8_t* buf = (uint8_t*)malloc(tile_bytes);
-    for (int i = 0; i < CC_TEX_NUM; i++) {
-        if (fread(buf, 1, tile_bytes, f) != tile_bytes) {
-            fprintf(stderr, "craftax_classic: short read on textures.bin at tile %d\n", i);
-            exit(1);
-        }
-        Image img = {
-            .data = buf,
-            .width = CC_TEX_TILE_PX,
-            .height = CC_TEX_TILE_PX,
-            .mipmaps = 1,
-            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        };
-        cc_textures[i] = LoadTextureFromImage(img);
-        SetTextureFilter(cc_textures[i], TEXTURE_FILTER_POINT);
-    }
-    free(buf);
-    fclose(f);
+    SetTextureFilter(cc_textures, TEXTURE_FILTER_POINT);
     cc_textures_loaded = true;
 }
 
@@ -1104,9 +1088,14 @@ static int cc_arrow_tex_id(int8_t dr, int8_t dc) {
 
 static void cc_draw_tile(int tex_id, int dst_x, int dst_y) {
     if (tex_id < 0 || tex_id >= CC_TEX_NUM) return;
-    Rectangle src = {0, 0, CC_TEX_TILE_PX, CC_TEX_TILE_PX};
+    Rectangle src = {
+        (float)((tex_id % CC_TEX_SHEET_COLS) * CC_TEX_TILE_PX),
+        (float)((tex_id / CC_TEX_SHEET_COLS) * CC_TEX_TILE_PX),
+        (float)CC_TEX_TILE_PX,
+        (float)CC_TEX_TILE_PX,
+    };
     Rectangle dst = {(float)dst_x, (float)dst_y, CC_TEX_DRAW_PX, CC_TEX_DRAW_PX};
-    DrawTexturePro(cc_textures[tex_id], src, dst, (Vector2){0, 0}, 0.0f, WHITE);
+    DrawTexturePro(cc_textures, src, dst, (Vector2){0, 0}, 0.0f, WHITE);
 }
 
 void puf_render(CraftaxClassic* env) {

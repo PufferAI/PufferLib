@@ -36,7 +36,7 @@ void main()
     //gl_PointSize = 10 - 5*abs(sin(0.1*idx*currentTime));
     //gl_PointSize = 10.0;
 
-    gl_PointSize = twinkle(idx, currentTime);
+    gl_PointSize = twinkle(idx, currentTime) * vertexColor.a;
 
     fragColor = vertexColor;
 }
