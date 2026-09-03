@@ -85,6 +85,12 @@ void nh_get_invout(void* dst, int B) {
 void nh_get_sfeat(void* dst, int B) {
     cudaMemcpy(dst, g_a->inv_sfeat.data, (size_t)B * NH_INV * 24 * sizeof(float), cudaMemcpyDeviceToDevice);
 }
+// per-entity last-layer outputs (post-activation) for dead-unit analysis
+void nh_get_mvv(void* dst, int B) { cudaMemcpy(dst, g_a->mvv.data, (size_t)B * NH_INV * NH_MV * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+void nh_get_mvm(void* dst, int B) { cudaMemcpy(dst, g_a->mvm.data, (size_t)B * NH_LABK * NH_MV * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+void nh_get_mvi(void* dst, int B) { cudaMemcpy(dst, g_a->mvi.data, (size_t)B * NH_LABK * NH_MV * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+void nh_get_spv(void* dst, int B) { cudaMemcpy(dst, g_a->spv.data, (size_t)B * NH_SPELL_SLOTS * NH_SPM * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+int nh_inv_n() { return NH_INV; } int nh_labk() { return NH_LABK; } int nh_mv() { return NH_MV; } int nh_spell_slots() { return NH_SPELL_SLOTS; } int nh_spm() { return NH_SPM; }
 void nh_forward(void* out, void* obs, int B) {
     Prec in = {.data = (precision_t*)obs, .shape = {B, NH_OBS_SIZE}};
     Prec r = g_enc.forward(g_w, g_a, in, 0);
@@ -238,6 +244,7 @@ GRAD_ACC(gv_b, gv_bgrad)
 GRAD_ACC(gtau, gtau_grad)
 #endif
 int nh_id_embed() { return 1; }
+void nh_get_eeff(void* dst) { cudaMemcpy(dst, g_a->e_eff.data, (size_t)NH_GLYPH_VOCAB * NH_EMBED_DIM * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
 void nh_get_concat(void* dst, int B) { cudaMemcpy(dst, g_a->concat.data, (size_t)B * NH_CONCAT * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
 
 // ---- pointer decoder (fed by the encoder's inv_out keys) ----

@@ -89,6 +89,24 @@ SPELL2 = True
 GMP = os.environ.get("NH_TEST_GMP") == "1"
 GEN = os.environ.get("NH_TEST_GEN") == "1"
 MIN = os.environ.get("NH_TEST_MIN", "1") == "1"  # min is the encoder now
+APANEL = "-DNH_NO_APANEL" not in os.environ.get("NH_TEST_DEFS", "")  # champion default on
+LINPOOL = "-DNH_ENT_LINPOOL" in os.environ.get("NH_TEST_DEFS", "")  # linear last entity layer before sum|max
+def act_last(x):
+    import torch as _t
+    return x if LINPOOL else _t.relu(x)
+def pool_max(v, keep, dim):
+    import torch as _t
+    m = v.masked_fill(keep < .5, -1e9).max(dim=dim).values
+    return _t.where((keep > .5).any(dim=dim), m, _t.zeros_like(m)) if LINPOOL else _t.relu(m)
+ACCOBS = os.environ.get("NH_TEST_ACC", "1") == "1"  # worn rings/amulets/eyewear + armor in inventory (exercises the panels)
+import re as _re0
+_ARMOR_OTYPS = np.flatnonzero(np.array([int(x) for x in _re0.findall(r"-?\d+", _re0.search(
+    r"nh_obj_armcat\[NH_NUM_OBJECTS\] = \{(.*?)\};", open("ocean/nethack/netlib.h").read(), _re0.S).group(1))]) >= 0)
+MSGH = int(os.environ.get("NH_TEST_MSGH", "256"))  # champion msg width
+KT = int(os.environ.get("NH_TEST_K", "16"))  # nearest-token cap (NETHACK_V3_K)
+def entact(x):
+    import torch as _t
+    return _t.relu(x)
 if SPELL2:
     V5 = True
 if V5:
@@ -162,6 +180,7 @@ def build():
         "-I" + os.path.join(raylib, "include"),
         '-DENV_HEADER="ocean/nethack/nethack.h"',
         "-DPUFFER_NETHACK", "-DENV_NAME=nethack", '-DPUFFER_ENV_NAME="nethack"',
+    ] + [d for d in os.environ.get("NH_TEST_DEFS", "").split() if d] + [
         "-Xcompiler=-DPLATFORM_DESKTOP", "-Xcompiler=-fPIC",
         "-Xcompiler=-fopenmp", "-O2",
         "-L" + os.path.join(root, "vendor", "fast-nle", "build"), "-lnethack",
@@ -169,7 +188,7 @@ def build():
         os.path.join(root, "vendor", "fast-nle", "build"),
         "-L" + os.path.join(raylib, "lib"), "-lraylib",
         "-Xlinker", "-rpath", "-Xlinker", os.path.join(raylib, "lib"),
-        "-lcublas", "-lcusolver", "-lcurand", "-lnvidia-ml", "-lcudart",
+        "-lcublas", "-lcublasLt", "-lcusolver", "-lcurand", "-lnvidia-ml", "-lcudart",
     ]
     try:
         import nvidia.nccl
@@ -309,6 +328,12 @@ def make_obs(B, obs_size, grid, max_glyph_used):
     n_items = rng.integers(3, 12, size=B)
     for b in range(B):
         inv[b, n_items[b]:] = 5976
+        if ACCOBS:  # accessory otyps (rings 150-177, amulets 178-188, eyewear 207-209) in some slots
+            for k in range(n_items[b]):
+                if rng.random() < 0.25:
+                    inv[b, k] = 1906 + int(rng.choice(np.r_[150:189, 207:210]))
+                elif rng.random() < 0.25:  # armor otyps (any subclass in the baked armcat table)
+                    inv[b, k] = 1906 + int(rng.choice(_ARMOR_OTYPS))
     obs[:, inv_off + 0::2][:, :55] = (inv & 0xFF).astype(np.float32)
     obs[:, inv_off + 1::2][:, :55] = ((inv >> 8) & 0xFF).astype(np.float32)
     # per-slot item state @ +55*2: 8 int8 fields, incl. the -128 spe sentinel
@@ -339,7 +364,7 @@ def make_obs(B, obs_size, grid, max_glyph_used):
     msg_len = 128  # fixed NETHACK_MSG_LEN; the split planes sit after it
     if V3:
         # planes: terr (GRID) | objm (GRID u16) | vmon 16x8 | vitem 16x8
-        terr_off = obs_size - (21 * 79 * 3 + 16 * 16)
+        terr_off = obs_size - (21 * 79 * 3 + 2 * KT * 8)
         tb = rng.integers(0, 97, size=(B, 21 * 79))
         obs[:, terr_off:terr_off + 21 * 79] = tb.astype(np.float32)
         om_off = terr_off + 21 * 79
@@ -348,22 +373,22 @@ def make_obs(B, obs_size, grid, max_glyph_used):
         obs[:, om_off + 0:om_off + 2 * 21 * 79:2] = (objm & 0xFF).astype(np.float32)
         obs[:, om_off + 1:om_off + 2 * 21 * 79:2] = ((objm >> 8) & 0xFF).astype(np.float32)
         vm_off = om_off + 2 * 21 * 79
-        vmon = np.zeros((B, 16, 8), dtype=np.int64)
-        vitem = np.zeros((B, 16, 8), dtype=np.int64)
+        vmon = np.zeros((B, KT, 8), dtype=np.int64)
+        vitem = np.zeros((B, KT, 8), dtype=np.int64)
         for b in range(B):
-            for k in range(int(rng.integers(0, 17))):
+            for k in range(int(rng.integers(0, KT + 1))):
                 sp = int(rng.integers(1, 382))
                 dx = int(rng.integers(-39, 40)); dy = int(rng.integers(-10, 11))
                 fl = int(rng.integers(0, 16))
                 vmon[b, k] = [sp & 0xFF, (sp >> 8) & 0xFF, dx & 0xFF, dy & 0xFF, fl,
                               int(rng.integers(0, 58)), int(rng.integers(0, 37)), 0]
-            for k in range(int(rng.integers(0, 17))):
+            for k in range(int(rng.integers(0, KT + 1))):
                 row = int(rng.integers(1, 835))
                 dx = int(rng.integers(-39, 40)); dy = int(rng.integers(-10, 11))
                 vitem[b, k] = [row & 0xFF, (row >> 8) & 0xFF, dx & 0xFF, dy & 0xFF, 0,
                                int(rng.integers(0, 4)), 0, 0]
-        obs[:, vm_off:vm_off + 16 * 8] = vmon.reshape(B, -1).astype(np.float32)
-        obs[:, vm_off + 16 * 8:vm_off + 32 * 8] = vitem.reshape(B, -1).astype(np.float32)
+        obs[:, vm_off:vm_off + KT * 8] = vmon.reshape(B, -1).astype(np.float32)
+        obs[:, vm_off + KT * 8:vm_off + 2 * KT * 8] = vitem.reshape(B, -1).astype(np.float32)
         make_obs.terr = tb; make_obs.objm = objm
         make_obs.vmon = vmon; make_obs.vitem = vitem
     elif SPLIT:
@@ -383,24 +408,24 @@ def make_obs(B, obs_size, grid, max_glyph_used):
         make_obs.terr = tb; make_obs.ents = ents
     if LAB:
         # lean token lists at the obs tail: vmon 16x8 | vitem 16x8
-        tm_off = obs_size - 16 * 16
-        labm = np.zeros((B, 16, 8), dtype=np.int64)
-        labi = np.zeros((B, 16, 8), dtype=np.int64)
+        tm_off = obs_size - 2 * KT * 8
+        labm = np.zeros((B, KT, 8), dtype=np.int64)
+        labi = np.zeros((B, KT, 8), dtype=np.int64)
         DXR, DYR = (61, 16) if V5 else (40, 11)  # V5 widened: exercise the clamps
         for b in range(B):
-            for k in range(int(rng.integers(0, 17))):
+            for k in range(int(rng.integers(0, KT + 1))):
                 sp = int(rng.integers(1, 382))
                 dx = int(rng.integers(-DXR + 1, DXR)); dy = int(rng.integers(-DYR + 1, DYR))
                 fl = int(rng.integers(0, 16))
                 labm[b, k] = [sp & 0xFF, (sp >> 8) & 0xFF, dx & 0xFF, dy & 0xFF, fl,
                               int(rng.integers(0, 58)), int(rng.integers(0, 37)), 0]
-            for k in range(int(rng.integers(0, 17))):
+            for k in range(int(rng.integers(0, KT + 1))):
                 row = int(rng.integers(1, 835))
                 dx = int(rng.integers(-DXR + 1, DXR)); dy = int(rng.integers(-DYR + 1, DYR))
                 labi[b, k] = [row & 0xFF, (row >> 8) & 0xFF, dx & 0xFF, dy & 0xFF, 0,
                               int(rng.integers(0, 4)), 0, 0]
-        obs[:, tm_off:tm_off + 16 * 8] = labm.reshape(B, -1).astype(np.float32)
-        obs[:, tm_off + 16 * 8:tm_off + 32 * 8] = labi.reshape(B, -1).astype(np.float32)
+        obs[:, tm_off:tm_off + KT * 8] = labm.reshape(B, -1).astype(np.float32)
+        obs[:, tm_off + KT * 8:tm_off + 2 * KT * 8] = labi.reshape(B, -1).astype(np.float32)
         make_obs.labm = labm; make_obs.labi = labi
     msg = np.zeros((B, msg_len), dtype=np.int64)
     alpha = np.frombuffer(b"abcdefghijklmnopqrstuvwxyz ", dtype=np.uint8).astype(np.int64)
@@ -501,7 +526,7 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
         t1_b = w["terr1_b"] = getw(lib, "terr1_b", (TH1,))
         t2_w = w["terr2_w"] = getw(lib, "terr2_w", (GH, TH1))
         t2_b = w["terr2_b"] = getw(lib, "terr2_b", (GH,))
-        locc = w["locc_w"] = getw(lib, "locc_w", (9, 8))
+        locc = w["locc_w"] = getw(lib, "locc_w", (lib.nh_numel_locc_w() // 8, 8))
     inv1_w = w["inv1_w"]  = getw(lib, "inv1_w", (IH, D))
     inv1_b = w["inv1_b"]  = getw(lib, "inv1_b", (IH,))
     inv1s_w = w["inv1s_w"] = getw(lib, "inv1s_w", (IH, 24))
@@ -516,7 +541,7 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
     bl_b   = w["bl_b"]    = getw(lib, "bl_b", (BH,))
     proj_w = w["proj_w"]  = getw(lib, "proj_w", (H, lib.nh_concat()))
     proj_b = w["proj_b"]  = getw(lib, "proj_b", (H,))
-    msg_w  = w["msg_w"]   = getw(lib, "msg_w", (lib.nh_numel_msg_w() // 32, 32))
+    msg_w  = w["msg_w"]   = getw(lib, "msg_w", (lib.nh_numel_msg_w() // MSGH, MSGH))
     spk_w  = w["spk_w"]   = getw(lib, "spk_w", (SK, SI))
     if not SPELL2:
         spk2_w = w["spk2_w"]  = getw(lib, "spk2_w", (SK, SK))
@@ -774,9 +799,9 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
             if c0 == 0 or c1 == 0 or c2 == 0:
                 break
             key = (_lc(c0) << 16) | (_lc(c1) << 8) | _lc(c2)
-            ids.append(((key * 2654435761) & 0xFFFFFFFF) >> (32 - 12))
+            ids.append(((key * 2654435761) & 0xFFFFFFFF) >> (32 - (msg_w.shape[0].bit_length() - 1)))
         cnt = len(ids)
-        s = msg_w[torch.tensor(ids, dtype=torch.long)].sum(dim=0) if cnt else torch.zeros(32, dtype=torch.float64)
+        s = msg_w[torch.tensor(ids, dtype=torch.long)].sum(dim=0) if cnt else torch.zeros(MSGH, dtype=torch.float64)
         rows.append(s / np.sqrt(cnt + 1))
     msg_sum = torch.stack(rows, dim=0)   # (B, 32); grad flows to msg_w
     # spell-key path: per slot, key = spk_w . [e_eff(book glyph) | known,
@@ -804,9 +829,10 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
     sk = torch.stack(spkeys, dim=1)                            # (B,8,16)
     if SPELL2:
         occ = torch.stack(spocc, dim=1)                        # (B,8)
-        spv = torch.relu(torch.relu(sk @ spm1_w.T + spm1_b) @ spm2_w.T + spm2_b)  # (B,8,64)
+        sph1 = entact(sk @ spm1_w.T + spm1_b)
+        spv = act_last(sph1 @ spm2_w.T + spm2_b)  # (B,8,64)
         ssum = 0.25 * (spv * occ[:, :, None]).sum(dim=1)       # (B,64)
-        smax = torch.relu(spv.masked_fill(occ[:, :, None] < .5, -1e9).max(dim=1).values)
+        smax = pool_max(spv, occ[:, :, None], 1)
         # doorstep scalars (exact; empty book -> [1,0,0,1])
         sidm = ex_vals[:, 23:23+32:4].astype(np.int64)
         levm = ex_vals[:, 24:24+32:4].astype(np.int64)
@@ -987,9 +1013,10 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
         mv2 = w["mv2_w"] = getw(lib, "mv2_w", (64, 64))
         mv2b = w["mv2_b"] = getw(lib, "mv2_b", (64,))
         occb = torch.tensor((inv_vals.astype(np.int64) != 5976).astype(np.float64))
-        v = torch.relu(torch.relu(invh @ mv1.T + mv1b) @ mv2.T + mv2b)   # (B,55,64)
+        h1 = entact(invh @ mv1.T + mv1b)
+        v = act_last(h1 @ mv2.T + mv2b)   # (B,55,64)
         sm = 0.2 * (v * occb[:, :, None]).sum(dim=1)
-        mx = torch.relu(v.masked_fill(occb[:, :, None] < .5, -1e9).max(dim=1).values)
+        mx = pool_max(v, occb[:, :, None], 1)
         wldb = torch.tensor(sf[:, :, 10]) * occb
         qvb = torch.tensor(sf[:, :, 12]) * occb
         wrnb = torch.tensor(sf[:, :, 9]) * occb
@@ -998,7 +1025,18 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
         pq = torch.cat([(invh * qvb[:, :, None]).sum(1), (sft * qvb[:, :, None]).sum(1)], 1)
         nw = wrnb.sum(1).clamp(min=1.0)
         pworn = (invh * wrnb[:, :, None]).sum(1) / nw[:, None]
-        parts.append(torch.cat([sm, mx, pw, pq, pworn], 1))
+        if APANEL:  # 4 single-occupant accessory slots [amulet | ring A | ring B | eyewear], first owner wins
+            ot = inv_vals.astype(np.int64) - 1906
+            worn = (sf[:, :, 9] > 0.5) & (occb.numpy() > 0.5)
+            isam = worn & (ot >= 178) & (ot <= 188); isey = worn & (ot >= 207) & (ot <= 209)
+            isr = worn & (ot >= 150) & (ot <= 177); rr = np.cumsum(isr, 1) - 1
+            masks = [isam & (np.cumsum(isam, 1) == 1), isr & (rr == 0), isr & (rr == 1), isey & (np.cumsum(isey, 1) == 1)]
+            if os.environ.get("NH_TEST_ACC_CANARY") == "1": masks[1], masks[2] = masks[2], masks[1]  # must FAIL if exercised
+            pacc = torch.cat([torch.cat([(invh * m[:, :, None]).sum(1), (sft * m[:, :, None]).sum(1)], 1)
+                              for m in [torch.tensor(mm.astype(np.float64)) for mm in masks]], 1)
+            parts.append(torch.cat([sm, mx, pw, pq, pworn, pacc], 1))
+        else:
+            parts.append(torch.cat([sm, mx, pw, pq, pworn], 1))
     elif GEN:  # final arch: LN + 1/sqrt(d) unit (attn slices|cnt|sum|max) + pass-throughs
         gln_g = w["gln_g"] = getw(lib, "gln_g", (IH,))
         gln_b = w["gln_b"] = getw(lib, "gln_b", (IH,))
@@ -1082,7 +1120,7 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
             rows = []
             for b in range(B):
                 toks, valid = [], []
-                for k in range(16):
+                for k in range(KT):
                     row = int(lst[b, k, 0]) | (int(lst[b, k, 1]) << 8)
                     dx = int(lst[b, k, 2]); dx = dx - 256 if dx >= 128 else dx
                     dy = int(lst[b, k, 3]); dy = dy - 256 if dy >= 128 else dy
@@ -1122,9 +1160,10 @@ def torch_encoder(lib, glyphs, bl_vals, ex_vals, inv_vals, st_vals, itr_vals, ms
                     vb = torch.tensor([1.0 if v else 0.0 for v in valid],
                                       dtype=torch.float64)
                     rp = torch.relu(tokm @ mrw.T + mrb)        # (16, 16)
-                    hv = torch.relu(torch.relu(rp @ m1w.T + m1b) @ m2w.T + m2b)
+                    hv1 = entact(rp @ m1w.T + m1b)
+                    hv = act_last(hv1 @ m2w.T + m2b)
                     sm = 0.25 * (hv * vb[:, None]).sum(0)
-                    mx = torch.relu(hv.masked_fill(vb[:, None] < .5, -1e9).max(0).values)
+                    mx = pool_max(hv, vb[:, None], 0)
                     g0 = rp[0] * vb[0]
                     if ismon:
                         rows.append(torch.cat([sm, mx, g0]))

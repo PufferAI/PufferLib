@@ -131,6 +131,7 @@ struct Env {
 
 #include "macros.h"
 
+
 // init
 
 // demo-only obs planes; NULL in training (fills skipped)
@@ -195,6 +196,13 @@ void init(Nethack* env) {
 
 static int nethack_slot_usable(const Nethack* env, const Verb* verb, int i) {
     if (!(verb->item_classes & (1u << env->inv_oclasses[i]))) return 0;
+    // APPLY on a container (box/bag) is a silent zero-turn no-op: the macro
+    // drives no put-in/take-out menus, so it is an absorbing spam loop, not a
+    // choice. Bag of tricks (spawns monsters, costs a turn) stays legal.
+    if (verb == &NETHACK_VERBS[NETHACK_ACT_APPLY]) {
+        int a = env->inv_glyphs[i] - NH_GLYPH_OBJ_OFF;
+        if (a >= 189 /* LARGE_BOX */ && a <= 194 /* BAG_OF_HOLDING */) return 0;
+    }
     // READ hygiene: blind reads refuse for free, and re-reading a still-fresh
     // book is a multi-turn re-study furnace; low-retention refresh stays legal
     if (verb->item_classes == ((1u << 9) | (1u << 10))) {
@@ -649,6 +657,8 @@ static void nethack_add_log(Nethack* env, int how) { // how: nle how_done, -1 = 
         ? (float)env->stats.burdened_steps / (float)env->stats.length : 0.0f;
     env->log.game_time += (float)env->prev_time;
     env->log.max_xp_level += (float)env->stats.max_xp;
+    env->log.gold += (float)(env->stats.last_gold - env->start_gold);
+    env->log.exp_points += (float)env->stats.last_exp;
     env->log.episode_return += env->stats.ret;
     env->log.episode_length += env->stats.length;
     if (how == -1) env->log.truncated += 1.0f;
@@ -853,6 +863,7 @@ static float nethack_reward(Nethack* env) {
     if ((int)ac < env->stats.min_ac) env->stats.min_ac = (int)ac;
     if (!env->obs.done) { // death-step blstats are torn down
         env->stats.last_gold = env->blstats[NLE_BL_GOLD];
+        env->stats.last_exp = env->blstats[NLE_BL_EXP];
         env->stats.last_xlvl = (int)env->blstats[NLE_BL_XP];
         env->stats.last_hp = (int)env->blstats[NLE_BL_HP];
         env->stats.last_hpmax = (int)env->blstats[NLE_BL_HPMAX];
@@ -1139,6 +1150,8 @@ void puf_log(Log* log, Dict* out) {
     dict_set(out, "burdened_frac", log->burdened_frac);
     dict_set(out, "game_time", log->game_time);
     dict_set(out, "max_xp_level", log->max_xp_level);
+    dict_set(out, "gold", log->gold);
+    dict_set(out, "exp_points", log->exp_points);
     dict_set(out, "floors", log->floors);
     dict_set(out, "truncated", log->truncated);
 }

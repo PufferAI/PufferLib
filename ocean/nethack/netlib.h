@@ -125,7 +125,9 @@ static const signed char nh_obj_armcat[NH_NUM_OBJECTS] = {
 // item rows: objects (1906..2358) -> 1..453, bodies (1144..1524) -> 454..834
 #define NETHACK_ITEM_ROWS 840
 #define NETHACK_MON_ROWS 384
-#define NETHACK_V3_K 16
+#ifndef NETHACK_V3_K
+#define NETHACK_V3_K 16 // nearest-token cap per typed list (K=32 arm: -DNETHACK_V3_K=32)
+#endif
 #define NETHACK_V3_MONF 8  // species u16 | dx i8 | dy i8 | flags u8 | diff u8 | speed u8 | pad
 #define NETHACK_V3_ITEMF 8 // itemrow u16 | dx i8 | dy i8 | oclass u8 | flags u8 | pad | pad
 #define NETHACK_OFF_OBJM (NETHACK_OFF_TERR + NH_GRID)
@@ -327,6 +329,8 @@ typedef struct Log {
     float min_ac; // best (lowest) AC reached this episode
     float game_time; // NetHack turns survived
     float max_xp_level;
+    float gold; // net gold on the last living obs (score's netgold term)
+    float exp_points; // experience points on the last living obs (score's urexp term)
     // episode end reason (game_end_types in hack.h); other = traps/wrath/poison/...
     float death_combat;
     float death_starved;
@@ -349,6 +353,7 @@ typedef struct Stats {
     int min_ac;
     int last_ac; // AC on the last living obs (death-step blstats are torn down)
     long last_gold; // gold on the last living obs (same teardown)
+    long last_exp; // experience points on the last living obs
     int last_xlvl; // xp level on the last living obs
     int last_hp, last_hpmax, last_depth; // vitals on the last living obs
     long floor_eats;
