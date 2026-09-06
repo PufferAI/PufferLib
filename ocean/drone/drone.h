@@ -91,6 +91,17 @@ struct Env {
 
     // Physics integrator (0=RK4, 1=RK2)
     int integrator;
+
+    // Cached task configs so TAB can switch hover/race/sphere/cube/flag.
+    float hover_target_dist;
+    float alpha_hover;
+    float hover_alpha_dist;
+    float sphere_radius;
+    int hover_horizon;
+    int max_rings;
+    float ring_reward;
+    float race_alpha_dist;
+    int race_horizon;
 };
 
 // Task sampling fractions (set in puf_init for puf_log episode_frac keys)
@@ -229,23 +240,35 @@ void puf_close(DroneEnv* env) {
     }
 }
 
-static void hover_config(DroneEnv* env, Dict* kwargs) {
-    HoverConfig* cfg = (HoverConfig*)calloc(1, sizeof(HoverConfig));
-    cfg->target_dist = dict_get(kwargs, "hover_target_dist");
-    cfg->alpha_hover = dict_get(kwargs, "alpha_hover");
-    cfg->alpha_dist = dict_get(kwargs, "hover_alpha_dist");
-    cfg->sphere_radius = dict_get(kwargs, "sphere_radius");
-    cfg->horizon = dict_get(kwargs, "hover_horizon");
-    env->task_config = cfg;
+static void drone_fill_task_config(DroneEnv* env) {
+    if (env->task == TASK_RACE) {
+        RaceConfig* cfg = (RaceConfig*)calloc(1, sizeof(RaceConfig));
+        cfg->max_rings = env->max_rings;
+        cfg->ring_reward = env->ring_reward;
+        cfg->alpha_dist = env->race_alpha_dist;
+        cfg->horizon = env->race_horizon;
+        env->task_config = cfg;
+    } else {
+        HoverConfig* cfg = (HoverConfig*)calloc(1, sizeof(HoverConfig));
+        cfg->target_dist = env->hover_target_dist;
+        cfg->alpha_hover = env->alpha_hover;
+        cfg->alpha_dist = env->hover_alpha_dist;
+        cfg->sphere_radius = env->sphere_radius;
+        cfg->horizon = env->hover_horizon;
+        env->task_config = cfg;
+    }
 }
 
-static void race_config(DroneEnv* env, Dict* kwargs) {
-    RaceConfig* cfg = (RaceConfig*)calloc(1, sizeof(RaceConfig));
-    cfg->max_rings = dict_get(kwargs, "max_rings");
-    cfg->ring_reward = dict_get(kwargs, "ring_reward");
-    cfg->alpha_dist = dict_get(kwargs, "race_alpha_dist");
-    cfg->horizon = dict_get(kwargs, "race_horizon");
-    env->task_config = cfg;
+static void drone_set_task(DroneEnv* env, TaskType task) {
+    if (env->task_config) task_close(env);
+    env->task = task;
+    drone_fill_task_config(env);
+    task_init(env);
+    if (env->drones) puf_reset(env);
+}
+
+static TaskType drone_next_task(TaskType cur) {
+    return (TaskType)(((int)cur + 1) % NUM_TASKS);
 }
 
 void puf_init(Env* env, Dict* kwargs) {
@@ -284,11 +307,17 @@ void puf_init(Env* env, Dict* kwargs) {
         }
     }
 
-    if (env->task == TASK_RACE) {
-        race_config(env, kwargs);
-    } else {
-        hover_config(env, kwargs);
-    }
+    env->hover_target_dist = dict_get(kwargs, "hover_target_dist");
+    env->alpha_hover = dict_get(kwargs, "alpha_hover");
+    env->hover_alpha_dist = dict_get(kwargs, "hover_alpha_dist");
+    env->sphere_radius = dict_get(kwargs, "sphere_radius");
+    env->hover_horizon = (int)dict_get(kwargs, "hover_horizon");
+    env->max_rings = (int)dict_get(kwargs, "max_rings");
+    env->ring_reward = dict_get(kwargs, "ring_reward");
+    env->race_alpha_dist = dict_get(kwargs, "race_alpha_dist");
+    env->race_horizon = (int)dict_get(kwargs, "race_horizon");
+
+    drone_fill_task_config(env);
 
     for (int i = 0; i < env->num_agents; i++) {
         env->agents[i].policy = 0;

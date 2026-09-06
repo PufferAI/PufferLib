@@ -328,7 +328,7 @@ static void human_handle_combat_click(HumanInput* hi, GuiState* gs, Player* p,
 #define CLICK_CROSS_NUM_FRAMES 4
 #define CLICK_CROSS_ANIM_TICKS 20
 
-static void human_draw_click_cross(HumanInput* hi, Texture2D* cross_sprites, int sprites_loaded) {
+static void human_draw_click_cross(HumanInput* hi, Texture2D* cross_sprites) {
     if (!hi->click_cross_active) return;
     if (hi->click_cross_timer >= CLICK_CROSS_ANIM_TICKS) {
         hi->click_cross_active = 0;
@@ -341,19 +341,8 @@ static void human_draw_click_cross(HumanInput* hi, Texture2D* cross_sprites, int
 
     int cx = hi->click_screen_x;
     int cy = hi->click_screen_y;
-
-    if (sprites_loaded && cross_sprites[sprite_idx].id > 0) {
-        Texture2D tex = cross_sprites[sprite_idx];
-        DrawTexture(tex, cx - tex.width / 2, cy - tex.height / 2, WHITE);
-    } else {
-        float progress = 1.0f - (float)hi->click_cross_timer / CLICK_CROSS_ANIM_TICKS;
-        int alpha = (int)(progress * 255);
-        Color c = hi->click_is_attack
-            ? CLITERAL(Color){ 255, 50, 50, (unsigned char)alpha }
-            : CLITERAL(Color){ 255, 255, 0, (unsigned char)alpha };
-        DrawLine(cx - 6, cy - 6, cx + 6, cy + 6, c);
-        DrawLine(cx + 6, cy - 6, cx - 6, cy + 6, c);
-    }
+    Texture2D tex = cross_sprites[sprite_idx];
+    DrawTexture(tex, cx - tex.width / 2, cy - tex.height / 2, WHITE);
 }
 
 static void human_tick_visuals(HumanInput* hi) {

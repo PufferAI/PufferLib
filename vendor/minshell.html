@@ -67,6 +67,13 @@
         <canvas class=emscripten id=canvas oncontextmenu=event.preventDefault() tabindex=-1></canvas>
         <p id="output" />
         <script>
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    var canvas = document.getElementById('canvas');
+                    if (canvas) canvas.focus();
+                }
+            }, true);
             var Module = {
                 print: (function() {
                     var element = document.getElementById('output');

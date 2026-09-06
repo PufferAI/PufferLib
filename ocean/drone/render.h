@@ -489,17 +489,25 @@ void puf_render(DroneEnv* env) {
 
     // Capture modes must not hard-exit the process when the display is headless
     // or the window is closed programmatically mid-recording.
+    // Raylib 5.5 WindowShouldClose() on web is emscripten_sleep(16) every call
+    // (ASYNCIFY makes that ~40ms -> ~25fps). Never call it on web.
+#if defined(__EMSCRIPTEN__) || defined(PLATFORM_WEB)
+    if (IsKeyDown(KEY_ESCAPE)) {
+        puf_close(env);
+        exit(0);
+    }
+#else
     if (WindowShouldClose() || IsKeyDown(KEY_ESCAPE)) {
         if (!IsWindowReady()) {
             return;
         }
-        // Interactive demos: clean shutdown. GIF capture should not reach ESC.
         if (IsKeyDown(KEY_ESCAPE)) {
             puf_close(env);
             exit(0);
         }
         return;
     }
+#endif
 
     Client* client = env->client;
     float dt = ACTION_DT;
@@ -530,6 +538,14 @@ void puf_render(DroneEnv* env) {
 
     if (IsKeyPressed(KEY_F)) {
         client->follow_mode = !client->follow_mode;
+    }
+
+    if (IsKeyPressed(KEY_TAB)) {
+        drone_set_task(env, drone_next_task(env->task));
+        drone_pos = env->drones[client->selected_drone].state.pos;
+        if (client->follow_mode) {
+            update_camera_position(client, drone_pos);
+        }
     }
 
     // Update camera position every frame when in follow mode
@@ -622,16 +638,25 @@ void puf_render(DroneEnv* env) {
     // Task-specific rendering
     render_task(env, client);
 
-    // Targets (shown in inspect mode)
-    if (inspect_mode) {
+    // Hover-family: cheap cubes so sphere/cube/flag formations are visible
+    // without 64 DrawSphere tessellations (that path was a web FPS cliff).
+    if (env->task != TASK_RACE) {
+        float s = (env->task == TASK_HOVER) ? 0.12f : 0.18f;
+        for (int i = 0; i < env->num_agents; i++) {
+            Vec3 t = env->drones[i].target->pos;
+            bool is_selected = (i == client->selected_drone);
+            float size = is_selected ? s * 1.25f : s;
+            Color c = is_selected ? (Color){0, 255, 100, 200} : (Color){0, 220, 255, 160};
+            DrawCube((Vector3){t.x, t.y, t.z}, size, size, size, c);
+        }
+    } else if (inspect_mode) {
         float target_size = 0.1f;
-
         for (int i = 0; i < env->num_agents; i++) {
             Vec3 t = env->drones[i].target->pos;
             bool is_selected = (i == client->selected_drone);
             float size = is_selected ? target_size * 1.1f : target_size;
-            DrawSphere((Vector3){t.x, t.y, t.z}, size,
-                       is_selected ? (Color){0, 255, 100, 180} : (Color){0, 255, 255, 100});
+            DrawCube((Vector3){t.x, t.y, t.z}, size, size, size,
+                     is_selected ? (Color){0, 255, 100, 180} : (Color){0, 255, 255, 100});
         }
     }
 
@@ -716,7 +741,7 @@ void puf_render(DroneEnv* env) {
     y += 18;
     DrawText("Mouse wheel: Zoom in/out", 10, y, 16, LIGHTGRAY);
     y += 18;
-    DrawText("Tab: Change task", 10, y, 16, LIGHTGRAY);
+    DrawText("Tab: Next task (hover/race/sphere/cube/flag)", 10, y, 16, LIGHTGRAY);
     y += 18;
     DrawText(TextFormat("I: Inspect mode [%s]", inspect_mode ? "ON" : "OFF"), 10, y, 16,
              inspect_mode ? PUFF_GREEN : LIGHTGRAY);

@@ -16,6 +16,7 @@ set -e
 #   ./build.sh breakout --profile    # Kernel profiling binary
 #   ./build.sh constellation         # Sweep dashboard -> ./seethestars
 #   ./build.sh cache_data            # Sweep log cache -> ./cache_data
+#   ./build.sh trailer               # 5.0 trailer -> ./trailer/trailer (also exports diagrams)
 #   ./build.sh all                   # Build all envs native and native float32
 #
 # Env is compiled in. Run: ./puffer train|eval|match|sweep [--section.key=value ...]
@@ -157,11 +158,9 @@ elif [ "$ENV" = "cache_data" ]; then
 elif [ "$ENV" = "trailer" ]; then
     SRC_DIR="trailer"
     OUTPUT_NAME="trailer/trailer"
-    STANDALONE=1
-    CLANG_WARN+=(-Wno-unused-function)
-elif [ "$ENV" = "architecture" ]; then
-    SRC_DIR="trailer"
-    OUTPUT_NAME="trailer/architecture"
+    SRC_FILE="trailer/puffer5.c"
+    EXTRA_SRC="trailer/architecture.c trailer/stars.c trailer/plot_scale.c"
+    EXTRA_CFLAGS+=(-DARCHITECTURE_LIB)
     STANDALONE=1
     CLANG_WARN+=(-Wno-unused-function)
 elif [ "$ENV" = "impulse_wars" ]; then
@@ -254,6 +253,22 @@ if [ "$STANDALONE" = "1" ]; then
         -DPLATFORM_DESKTOP \
         "${EXTRA_CFLAGS[@]}"
     echo "Built: ./$OUTPUT_NAME"
+    if [ "$ENV" = "trailer" ]; then
+        echo "Compiling architecture..."
+        ${CC:-clang} "${CLANG_OPT[@]}" \
+            -I. "${INCLUDES[@]}" \
+            trailer/architecture.c -o trailer/architecture \
+            "${LINK_ARCHIVES[@]}" \
+            "${EXTRA_LDFLAGS[@]}" \
+            "${STANDALONE_LDFLAGS[@]}" \
+            -lm -lpthread \
+            -DPLATFORM_DESKTOP
+        echo "Built: ./trailer/architecture"
+        echo "Exporting diagrams..."
+        mkdir -p trailer/shots
+        ./trailer/architecture --shot trailer/shots/loop.png
+        ./"$OUTPUT_NAME" --plot trailer/shots/fig_scale.png
+    fi
     exit 0
 fi
 if [ "$MODE" = "cpu" ]; then
@@ -292,6 +307,10 @@ if [ "$MODE" = "cpu" ]; then
     echo "Built: ./$OUTPUT_NAME"
     exit 0
 elif [ "$MODE" = "web" ]; then
+    if [ -f "$SRC_DIR/web.sh" ]; then
+        source "$SRC_DIR/web.sh"
+        exit 0
+    fi
     ENV_HEADER="$SRC_DIR/$ENV.h"
     if ! grep -q 'typedef[[:space:]].*obs_t' "$ENV_HEADER" 2>/dev/null; then
         echo "Error: $ENV_HEADER must typedef obs_t for web eval"
@@ -324,7 +343,11 @@ elif [ "$MODE" = "web" ]; then
     if [ -f "config/$ENV.ini" ]; then
         PRELOAD+=(--preload-file "config/$ENV.ini@config/$ENV.ini")
     fi
-    if [ -f "config/${ENV}_web.ini" ]; then
+    # Web overlays live on the site, not in this repo.
+    SITE_WEB_INI="../docker/puffer.ai/config/${ENV}_web.ini"
+    if [ -f "$SITE_WEB_INI" ]; then
+        PRELOAD+=(--preload-file "$SITE_WEB_INI@config/${ENV}_web.ini")
+    elif [ -f "config/${ENV}_web.ini" ]; then
         PRELOAD+=(--preload-file "config/${ENV}_web.ini@config/${ENV}_web.ini")
     fi
     emcc \

@@ -34,27 +34,16 @@
 //   ./drone --gif [out.gif]   automated capture schedule
 
 static void setup_task(DroneEnv* env, TaskType task) {
-    task_close(env);
-    env->task = task;
-
-    if (task == TASK_RACE) {
-        RaceConfig* cfg = (RaceConfig*)calloc(1, sizeof(RaceConfig));
-        cfg->max_rings = 10;
-        cfg->ring_reward = 2.4450236350884f;
-        cfg->alpha_dist = 2.8630645575928786f;
-        cfg->horizon = 2048;
-        env->task_config = cfg;
-    } else {
-        HoverConfig* cfg = (HoverConfig*)calloc(1, sizeof(HoverConfig));
-        cfg->target_dist = 5.0f;
-        cfg->alpha_hover = 1.0f;
-        cfg->alpha_dist = 0.8120191629018807f;
-        cfg->sphere_radius = 4.0f;
-        cfg->horizon = 1024;
-        env->task_config = cfg;
-    }
-    task_init(env);
-    puf_reset(env);
+    env->hover_target_dist = 5.0f;
+    env->alpha_hover = 1.0f;
+    env->hover_alpha_dist = 0.8120191629018807f;
+    env->sphere_radius = 4.0f;
+    env->hover_horizon = 1024;
+    env->max_rings = 10;
+    env->ring_reward = 2.4450236350884f;
+    env->race_alpha_dist = 2.8630645575928786f;
+    env->race_horizon = 2048;
+    drone_set_task(env, task);
 }
 
 // Same as train: one forward + one ACTION_DT tick.
@@ -107,19 +96,6 @@ static void step_fixed(DroneEnv* env, PufferNet* net, float* observations, float
     }
 }
 
-static bool tab_swap_pressed(void) {
-    static bool prev_down = false;
-    bool down = IsKeyDown(KEY_TAB);
-    bool edge = down && !prev_down;
-    prev_down = down;
-    return edge;
-}
-
-static TaskType next_demo_task(TaskType cur) {
-    // Cycle race <-> hover only in interactive mode
-    return (cur == TASK_RACE) ? TASK_HOVER : TASK_RACE;
-}
-
 #ifdef __EMSCRIPTEN__
 typedef struct {
     DroneEnv* env;
@@ -130,9 +106,6 @@ typedef struct {
 
 void emscriptenStep(void* e) {
     WebRenderArgs* args = (WebRenderArgs*)e;
-    if (tab_swap_pressed()) {
-        setup_task(args->env, next_demo_task(args->env->task));
-    }
     step_display_frame(args->env, args->net, args->observations, args->actions);
     puf_render(args->env);
 }
@@ -328,9 +301,6 @@ void demo(int gif_mode, const char* gif_path) {
     emscripten_set_main_loop_arg(emscriptenStep, &args, 0, true);
 #else
     while (!WindowShouldClose()) {
-        if (tab_swap_pressed()) {
-            setup_task(&env, next_demo_task(env.task));
-        }
         step_display_frame(&env, net, (float*)observations, actions);
         puf_render(&env);
     }
