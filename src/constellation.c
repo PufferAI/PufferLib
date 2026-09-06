@@ -390,7 +390,7 @@ static void write_env(FILE* fp, const char* env, Table* table) {
             if (r > 0) {
                 fputc(',', fp);
             }
-            fprintf(fp, "%.6g", table_get(table, r, c));
+            fprintf(fp, "%.9g", table_get(table, r, c));
         }
         fputc('\n', fp);
     }
@@ -1034,7 +1034,7 @@ void copy_hypers_to_clipboard(Table *table, char* buffer, int row) {
         } else if (val == (long long)val) {
             buffer += sprintf(buffer, "%s = %lld\n", suffix, (long long)val);
         } else {
-            buffer += sprintf(buffer, "%s = %g\n", suffix, val);
+            buffer += sprintf(buffer, "%s = %.9g\n", suffix, val);
         }
     }
     buffer[0] = '\0';

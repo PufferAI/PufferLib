@@ -48,6 +48,13 @@ void puf_step(Env* env);
 void puf_render(Env* env);
 void puf_close(Env* env);
 void puf_log(Log* log, Dict* out);
+// Bot ladder writes this between rungs so one PuffeRL can eval a whole ladder.
+// Default no-op; envs with scripted opponents #define PUF_HAS_BOT_POLICY and
+// assign env->bot_policy.
+#ifndef PUF_HAS_BOT_POLICY
+static inline void puf_set_bot_policy(Env* env, int bot_policy) {
+}
+#endif
 
 typedef uint16_t bf16;
 

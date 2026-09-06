@@ -4,6 +4,7 @@
 #include <math.h>
 #include <assert.h>
 typedef float obs_t;
+#define PUF_HAS_BOT_POLICY
 #include "pufferenv.h"
 
 // CONFIG
@@ -12,6 +13,10 @@ typedef float obs_t;
 #define NUM_ATNS 3
 
 typedef Env SlimeVolley;
+
+// Scripted opponents, weakest first. These are the [env] bot_policy ids and the
+// rungs of [selfplay] eval_bots.
+enum { BOT_ABRANTI = 0 };
 
 #define REF_W 48
 #define REF_H REF_W
@@ -30,27 +35,13 @@ typedef Env SlimeVolley;
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 500
 #define FACTOR (WINDOW_WIDTH / REF_W)
-#define PIXEL_MODE false
-#define PIXEL_SCALE 4
-#define PIXEL_WIDTH (84*2)
-#define PIXEL_HEIGHT 84
-#define MAX_TICKS 3000
 
-// Day colors
-const Color BALL_COLOR = {255, 200, 20, 255};
-const Color AGENT_LEFT_COLOR = {240, 75, 0, 255};
-const Color AGENT_RIGHT_COLOR = {0, 150, 255, 255};
-const Color PIXEL_AGENT_LEFT_COLOR = {240, 75, 0, 255};
-const Color PIXEL_AGENT_RIGHT_COLOR = {0, 150, 255, 255};
-const Color BACKGROUND_COLOR = {255, 255, 255, 255};
-const Color FENCE_COLOR = {240, 210, 130, 255};
 const Color COIN_COLOR = {240, 210, 130, 255};
+const Color FENCE_COLOR = {240, 210, 130, 255};
 const Color GROUND_COLOR = {128, 227, 153, 255};
-
-const Color PUFF_RED = (Color){187, 0, 0, 255};
-const Color PUFF_CYAN = (Color){0, 187, 187, 255};
-const Color PUFF_WHITE = (Color){241, 241, 241, 241};
-const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
+const Color PUFF_RED = {187, 0, 0, 255};
+const Color PUFF_CYAN = {0, 187, 187, 255};
+const Color PUFF_BACKGROUND = {6, 24, 24, 255};
 
 // UTILS
 typedef struct {
@@ -82,13 +73,10 @@ typedef struct {
     float vx;
     float vy;
     float prev_x;
-    float prev_y;
-    Color c;
 } Ball;
 
 void ball_move(Ball* ball){
     ball->prev_x = ball->x;
-    ball->prev_y = ball->y;
     ball->x += ball->vx * TIMESTEP;
     ball->y += ball->vy * TIMESTEP;
 }
@@ -98,7 +86,28 @@ void ball_accelerate(Ball* ball, float ax, float ay){
     ball->vy += ay * TIMESTEP;
 }
 
+// Returns 0 while the ball is live, else the side that conceded: -1 left, 1 right.
 int ball_check_edges(Ball* ball){
+    // Solid fence. The old test only fired on the tick the ball crossed a face
+    // (x inside the band, prev_x outside), so a ball that got inside the band
+    // any other way - a player bounce shoving it off the wall, a stub bounce
+    // dropping it in - drifted out the far side and scored for free. Resolve
+    // against the face the ball came from instead. That also catches a full
+    // tunnel in one step, and runs after the player bounces so a hit into the
+    // wall cannot push the ball through it.
+    float fence = REF_WALL_WIDTH/2 + ball->r;
+    if (ball->y <= REF_WALL_HEIGHT){
+        float side = (ball->prev_x >= fence) - (ball->prev_x <= -fence);
+        if (side == 0){
+            side = (ball->x >= 0) ? 1.0f : -1.0f; // already inside: nearest face
+        }
+        if (side*ball->x < fence){
+            ball->x = side*(fence + NUDGE*TIMESTEP);
+            if (side*ball->vx < 0){
+                ball->vx *= -FRICTION;
+            }
+        }
+    }
     if (ball->x <= (ball->r-REF_W/2)){
         ball->vx *= -FRICTION;
         ball->x = ball->r-REF_W/2+NUDGE*TIMESTEP;
@@ -107,28 +116,14 @@ int ball_check_edges(Ball* ball){
         ball->vx *= -FRICTION;
         ball->x = REF_W/2-ball->r-NUDGE*TIMESTEP;
     }
-    if (ball->y <= (ball->r+REF_U)){
-        ball->vy *= -FRICTION;
-        ball->y = ball->r+REF_U+NUDGE*TIMESTEP;
-        if (ball->x <= 0){
-            return -1;
-        }
-        else{
-            return 1;
-        }
-    }
     if (ball->y >= (REF_H-ball->r)){
         ball->vy *= -FRICTION;
         ball->y = REF_H-ball->r-NUDGE*TIMESTEP;
     }
-    // fence:
-    if ((ball->x <= (REF_WALL_WIDTH/2+ball->r)) && (ball->prev_x > (REF_WALL_WIDTH/2+ball->r)) && (ball->y <= REF_WALL_HEIGHT)){
-        ball->vx *= -FRICTION;
-        ball->x = REF_WALL_WIDTH/2+ball->r+NUDGE*TIMESTEP;
-    }
-    if ((ball->x >= (-REF_WALL_WIDTH/2-ball->r)) && (ball->prev_x < (-REF_WALL_WIDTH/2-ball->r)) && (ball->y <= REF_WALL_HEIGHT)){
-        ball->vx *= -FRICTION;
-        ball->x = -REF_WALL_WIDTH/2-ball->r-NUDGE*TIMESTEP;
+    if (ball->y <= (ball->r+REF_U)){
+        ball->vy *= -FRICTION;
+        ball->y = ball->r+REF_U+NUDGE*TIMESTEP;
+        return (ball->x <= 0) ? -1 : 1;
     }
     return 0;
 }
@@ -170,49 +165,13 @@ void ball_bounce(Ball* ball, SphericalObject* p){
     ball->vy = uy + p->vy;
 }
 
-void ball_limit_speed(Ball* ball, float minSpeed, float maxSpeed){
+void ball_limit_speed(Ball* ball, float max_speed){
     float mag2 = ball->vx*ball->vx+ball->vy*ball->vy;
-    if (mag2 > (maxSpeed*maxSpeed)){
+    if (mag2 > (max_speed*max_speed)){
         float mag = sqrt(mag2);
-        ball->vx /= mag;
-        ball->vy /= mag;
-        ball->vx *= maxSpeed;
-        ball->vy *= maxSpeed;
+        ball->vx *= max_speed/mag;
+        ball->vy *= max_speed/mag;
     }
-}
-
-// Relative State
-typedef struct {
-    //agent
-    float x;
-    float y;
-    float vx;
-    float vy;
-    //ball
-    float bx;
-    float by;
-    float bvx;
-    float bvy;
-    //opponent
-    float ox;
-    float oy;
-    float ovx;
-    float ovy;
-} RelativeState;
-
-// WALL
-typedef struct {
-    float x;
-    float y;
-    float w;
-    float h;
-    Color c;
-} Wall;
-
-void wall_display(Wall* wall){
-    Rectangle rec = {to_x_pixel(wall->x - wall->w/2), to_y_pixel(wall->y + wall->h/2),
-         to_p(wall->w), to_p(wall->h)};
-    DrawRectangleRec(rec, wall->c);
 }
 
 // PLAYER (game entity; RL Agent is from pufferenv)
@@ -227,12 +186,10 @@ typedef struct {
     float desired_vx;
     float desired_vy;
     float* observations;
-    RelativeState *state;
     int lives;
 } Player;
 
 void agent_display(Player *agent, float bx, float by) {
-    // fprintf(stderr, "agent_display: x=%f, y=%f, r=%f, lives=%d, dir=%d\n", agent->x, agent->y, agent->r, agent->lives, agent->dir);
     float x = agent->x;
     float y = agent->y;
     float r = agent->r;
@@ -298,34 +255,19 @@ void agent_display(Player *agent, float bx, float by) {
 }
 
 void agent_set_action(Player* agent, float* action){
-    bool forward = false;
-    bool backward = false;
-    bool jump = false;
-    if (action[0] > 0){
-        forward = true;
-    }
-    if (action[1] > 0){
-        backward = true;
-    }
-    if (action[2] > 0){
-        jump = true;
-    }
     agent->desired_vx = 0;
     agent->desired_vy = 0;
+    bool forward = action[0] > 0;
+    bool backward = action[1] > 0;
     if (forward && !backward){
         agent->desired_vx = -PLAYER_SPEED_X;
     }
     if (backward && !forward){
         agent->desired_vx = PLAYER_SPEED_X;
     }
-    if (jump){
+    if (action[2] > 0){
         agent->desired_vy = PLAYER_SPEED_Y;
     }
-}
-
-void agent_move(Player* agent){
-    agent->x += agent->vx * TIMESTEP;
-    agent->y += agent->vy * TIMESTEP;
 }
 
 void agent_update(Player* agent){
@@ -334,7 +276,8 @@ void agent_update(Player* agent){
         agent->vy = agent->desired_vy;
     }
     agent->vx = agent->desired_vx*agent->dir;
-    agent_move(agent);
+    agent->x += agent->vx * TIMESTEP;
+    agent->y += agent->vy * TIMESTEP;
     if (agent->y <= REF_U){
         agent->y = REF_U;
         agent->vy = 0;
@@ -350,162 +293,175 @@ void agent_update(Player* agent){
     }
 }
 
+// Ego-centric and mirrored by dir, so both sides see the same game.
 void agent_update_state(Player* agent, Ball* ball, Player* opponent){
-    int obs_idx = 0;
     float* observations = agent->observations;
-    
-    // self
-    observations[obs_idx++] = agent->x*agent->dir / 10.0f;
-    observations[obs_idx++] = agent->y / 10.0f;  
-    observations[obs_idx++] = agent->vx*agent->dir / 10.0f;
-    observations[obs_idx++] = agent->vy / 10.0f;
-    // ball
-    observations[obs_idx++] = ball->x*agent->dir / 10.0f;
-    observations[obs_idx++] = ball->y / 10.0f;
-    observations[obs_idx++] = ball->vx*agent->dir / 10.0f;
-    observations[obs_idx++] = ball->vy / 10.0f;
-    // opponent
-    observations[obs_idx++] = opponent->x*(-agent->dir) / 10.0f; // negate direction for opponent
-    observations[obs_idx++] = opponent->y / 10.0f;
-    observations[obs_idx++] = opponent->vx*(-agent->dir) / 10.0f ; // negate direction for opponent
-    observations[obs_idx++] = opponent->vy / 10.0f;
+    observations[0] = agent->x*agent->dir / 10.0f;
+    observations[1] = agent->y / 10.0f;
+    observations[2] = agent->vx*agent->dir / 10.0f;
+    observations[3] = agent->vy / 10.0f;
+    observations[4] = ball->x*agent->dir / 10.0f;
+    observations[5] = ball->y / 10.0f;
+    observations[6] = ball->vx*agent->dir / 10.0f;
+    observations[7] = ball->vy / 10.0f;
+    observations[8] = opponent->x*(-agent->dir) / 10.0f;
+    observations[9] = opponent->y / 10.0f;
+    observations[10] = opponent->vx*(-agent->dir) / 10.0f;
+    observations[11] = opponent->vy / 10.0f;
 }
 
 // ENV
 
 // Required struct. Only use floats!
+typedef struct Log Log;
 struct Log {
+    // Lives margin from each slot's own view, mapped to [0, 1]. 0.5 is a draw,
+    // 1.0 a 5-0 sweep. Denser than win credit, so it is the sweep metric.
     float perf;
-    float score;
+    float score;            // lives margin from each slot's own view
     float episode_return;
     float episode_length;
+    // Per-slot win credit for match() scoring + a selfplay sanity check. In
+    // selfplay both average to ~0.5; in match A=policy 0, B=policy 1, so
+    // policy_0_score is A's win rate. Each game hands out 1.0 of credit total
+    // (win=1.0, draw=0.5 each). Scaled by num_agents on accumulation so the
+    // eval_log mean (sum / n, n incremented per slot per episode) is the rate.
+    float policy_0_score;
+    float policy_1_score;
+    float draw_rate;
     float n;
 };
 
 struct Env {
     Log log;
-    Agent agents[2]; // pufferenv RL agents (learning slots)
-    Player players[2]; // game entities (left/right)
-    Wall* ground;
-    Wall* fence;
-    Ball* fence_stub;
-    Ball* ball;
+    Agent agents[2];   // pufferenv RL agents (learning slots)
+    Player players[2]; // game entities: 0 = left, 1 = right
+    Ball ball;
+    float episode_return[2];
+    float bot_observations[OBS_SIZE]; // right side when it is a scripted bot
+    float bot_actions[NUM_ATNS];
+    int num_agents;    // 1 (right side is a bot) or 2 (selfplay)
+    int num_bots;
+    int bot_policy;    // BOT_* id the scripted side runs
+    int max_ticks;     // episode timeout; configured per-run via [env].max_ticks
     int delay_frames;
-    int num_agents; // 1 or 2 learning agents; if 1, right side is a bot
+    int tick;
+    // Selfplay-pool tagging. tag = 0 means pure selfplay (both slots = primary
+    // policy). tag > 0 means historical: slot 0 = primary, slot 1 = frozen
+    // historical opponent. boundary_reached is set on game-end so the trainer
+    // can swap frozen banks only between games.
     int tag;
     int boundary_reached;
-    float* bot_observations;
-    float* bot_actions;
-    int tick;
     Texture2D puffers;
     unsigned int rng;
 };
+
+static inline void puf_set_bot_policy(Env* env, int bot_policy) {
+    env->bot_policy = bot_policy;
+}
+
+void puf_init(Env* env, Dict* kwargs) {
+    env->num_agents = dict_get(kwargs, "num_agents");
+    env->num_bots = dict_get(kwargs, "num_bots");
+    env->bot_policy = dict_get(kwargs, "bot_policy");
+    env->max_ticks = dict_get(kwargs, "max_ticks");
+    assert(env->num_agents + env->num_bots == 2
+        && "slimevolley is 1v1: env.num_agents + env.num_bots must be 2");
+    assert(env->bot_policy == BOT_ABRANTI
+        && "slimevolley ships one bot: env.bot_policy must be 0");
+    for (int i = 0; i < env->num_agents; i++) {
+        env->agents[i].policy = i;
+        env->agents[i].action_mask = NULL;
+    }
+}
+
+void puf_log(Log* log, Dict* out) {
+    dict_set(out, "perf", log->perf);
+    dict_set(out, "score", log->score);
+    dict_set(out, "episode_return", log->episode_return);
+    dict_set(out, "episode_length", log->episode_length);
+    dict_set(out, "policy_0_score", log->policy_0_score);
+    dict_set(out, "policy_1_score", log->policy_1_score);
+    dict_set(out, "draw_rate", log->draw_rate);
+    dict_set(out, "n", log->n);
+}
 
 float randf(SlimeVolley* env) {
     return (float)rand_r(&env->rng) / (float)RAND_MAX;
 }
 
-/* Recommended to have an init function of some kind if you allocate 
-* extra memory. This should be freed by puf_close. Don't forget to call
-* this in binding.c!
-*/
-void init(SlimeVolley* env) {
-    env->ground = (Wall*)malloc(sizeof(Wall));
-    *env->ground = (Wall){0};
-    env->ground->x = 0;
-    env->ground->y = REF_U / 2.0f;
-    env->ground->w = REF_W;
-    env->ground->h = REF_U;
-    env->ground->c = GROUND_COLOR;
-    env->fence = (Wall*)malloc(sizeof(Wall));
-    *env->fence = (Wall){0};
-    env->fence->x = 0;
-    env->fence->y = (REF_U + REF_WALL_HEIGHT)/2.0f;
-    env->fence->w = REF_WALL_WIDTH;
-    env->fence->h = REF_WALL_HEIGHT - 1.5f;
-    env->fence->c = FENCE_COLOR;
-    env->fence_stub = (Ball*)malloc(sizeof(Ball));
-    *env->fence_stub = (Ball){0};
-    env->fence_stub->x = 0;
-    env->fence_stub->y = REF_WALL_HEIGHT;
-    env->fence_stub->r = REF_WALL_WIDTH/2.0f;
-    env->fence_stub->c = FENCE_COLOR;
-    env->ball = (Ball*)malloc(sizeof(Ball));
-    env->bot_observations = NULL;
-    env->bot_actions = NULL;
-    if (env->num_agents == 1) {
-        env->bot_observations = (float*)calloc(12, sizeof(float));
-        env->bot_actions = (float*)calloc(3, sizeof(float));
-    }
+void new_match(SlimeVolley* env) {
+    env->ball = (Ball){
+        .x = 0,
+        .y = REF_W/4,
+        .r = 0.5,
+        .vx = 40.0f*randf(env) - 20.0f,
+        .vy = 15.0f*randf(env) + 10.0f,
+    };
+    env->delay_frames = INIT_DELAY_FRAMES;
 }
 
 // Required function
 void puf_reset(SlimeVolley* env) {
     env->tick = 0;
-    env->delay_frames = INIT_DELAY_FRAMES;
-    float ball_vx = 40.0f*randf(env) - 20.0f;
-    float ball_vy = 15.0f*randf(env) + 10.0f;
-    *env->ball = (Ball){0};
-    env->ball->x = 0;
-    env->ball->y = REF_W/4;
-    env->ball->vx = ball_vx;
-    env->ball->vy = ball_vy;
-    env->ball->r = 0.5;
-    env->ball->c = BALL_COLOR;
-    for (int i=0; i < 2; i++) {
-        obs_t* observations;
-        if (i == 0) {
-            observations = env->agents[0].observations;
-        } else if (env->num_agents == 1) {
-            observations = env->bot_observations;
-        } else {
-            observations = env->agents[1].observations;
-        }
-        env->players[i] = (Player){0};
-        env->players[i].x = i == 0 ? -REF_W/4 : REF_W/4;
-        env->players[i].y = REF_U;
-        env->players[i].r = 1.5;
-        env->players[i].dir = i == 0 ? -1 : 1;
-        env->players[i].c = i == 0 ? PUFF_RED : PUFF_CYAN;
-        env->players[i].lives = MAXLIVES;
-        env->players[i].observations = observations;
+    for (int i = 0; i < 2; i++) {
+        env->players[i] = (Player){
+            .x = (i == 0) ? -REF_W/4 : REF_W/4,
+            .y = REF_U,
+            .r = 1.5,
+            .dir = (i == 0) ? -1 : 1,
+            .c = (i == 0) ? PUFF_RED : PUFF_CYAN,
+            .lives = MAXLIVES,
+        };
+        env->players[i].observations = (i < env->num_agents)
+            ? env->agents[i].observations : env->bot_observations;
+        env->episode_return[i] = 0.0f;
     }
-    agent_update_state(&env->players[0], env->ball, &env->players[1]);
-    agent_update_state(&env->players[1], env->ball, &env->players[0]);
+    new_match(env);
+    agent_update_state(&env->players[0], &env->ball, &env->players[1]);
+    agent_update_state(&env->players[1], &env->ball, &env->players[0]);
 }
 
-float clip(float val, float min, float max) {
-    if (val < min) {
-        return min;
-    } else if (val > max) {
-        return max;
+void add_reward(SlimeVolley* env, int slot, float reward) {
+    env->agents[slot].rewards[0] += reward;
+    env->episode_return[slot] += reward;
+}
+
+// Every episode-end path. outcome: 1 slot 0 won, -1 slot 0 lost, 0 draw.
+void end_episode(SlimeVolley* env, int outcome) {
+    float s0_score = (outcome > 0) ? 1.0f : (outcome < 0) ? 0.0f : 0.5f;
+    env->log.policy_0_score += s0_score * env->num_agents;
+    env->log.policy_1_score += (1.0f - s0_score) * env->num_agents;
+    if (outcome == 0) {
+        env->log.draw_rate += env->num_agents;
     }
-    return val;
+    if (env->tag > 0) {
+        env->boundary_reached = 1;
+    }
+    int margin = env->players[0].lives - env->players[1].lives;
+    for (int i = 0; i < env->num_agents; i++) {
+        int slot_margin = (i == 0) ? margin : -margin;
+        env->log.perf += (slot_margin + MAXLIVES) / (2.0f*MAXLIVES);
+        env->log.score += slot_margin;
+        env->log.episode_return += env->episode_return[i];
+        env->log.episode_length += env->tick;
+        env->log.n += 1.0f;
+        env->agents[i].terminals[0] = 1.0f;
+    }
+    puf_reset(env);
 }
 
-void new_match(SlimeVolley* env) {
-    float ball_vx = 40.0f*randf(env) - 20.0f;
-    float ball_vy = 15.0f*randf(env) + 10.0f;
-    *env->ball = (Ball){0};
-    env->ball->x = 0;
-    env->ball->y = REF_W/4;
-    env->ball->vx = ball_vx;
-    env->ball->vy = ball_vy;
-    env->ball->r = 0.5;
-    env->ball->c = BALL_COLOR;
-    env->delay_frames = INIT_DELAY_FRAMES;
-}
-
-void abranti_simple_bot(float* obs, float* action) {
-    // the bot policy. just 7 params but hard to beat.
+void puf_bot(SlimeVolley* env, int bot_idx) {
+    // BOT_ABRANTI. just 7 params but hard to beat.
+    float* obs = env->players[bot_idx].observations;
     float x_agent = obs[0];
     float x_ball = obs[4];
     float vx_ball = obs[6];
-    float backward = (-23.757145f * x_agent + 23.206863f * x_ball + 0.7943352f * vx_ball) + 1.4617119f;
-    float forward = -64.6463748f * backward + 22.4668393f;
-    action[0] = forward;
-    action[1] = backward;
-    action[2] = 1.0f; // always jump
+    float backward = -23.757145f*x_agent + 23.206863f*x_ball
+        + 0.7943352f*vx_ball + 1.4617119f;
+    env->bot_actions[0] = -64.6463748f * backward + 22.4668393f;
+    env->bot_actions[1] = backward;
+    env->bot_actions[2] = 1.0f; // always jump
 }
 
 // Hold Left Shift + A/D/W or arrows/space.
@@ -529,37 +485,31 @@ static void slimevolley_human_controls(SlimeVolley *env) {
 
 // Required function
 void puf_step(SlimeVolley* env) {
-    env->agents[0].rewards[0] = 0;
-    env->agents[0].terminals[0] = 0;
-    if (env->num_agents == 2){
-        env->agents[1].rewards[0] = 0;
-        env->agents[1].terminals[0] = 0;
+    env->tick++;
+    for (int i = 0; i < env->num_agents; i++) {
+        env->agents[i].rewards[0] = 0;
+        env->agents[i].terminals[0] = 0;
     }
-    
+
     Player* left = &env->players[0];
     Player* right = &env->players[1];
-    Ball* ball = env->ball;
+    Ball* ball = &env->ball;
 
-    env->tick++;
     agent_set_action(left, env->agents[0].actions);
-    if (env->num_agents == 1){
-        abranti_simple_bot(right->observations, env->bot_actions);
+    if (env->num_bots == 1){
+        puf_bot(env, 1);
         agent_set_action(right, env->bot_actions);
-    }
-    else {
+    } else {
         agent_set_action(right, env->agents[1].actions);
     }
-
-    // Update
     agent_update(left);
     agent_update(right);
 
     if (env->delay_frames == 0) {
         ball_accelerate(ball, 0, GRAVITY);
-        ball_limit_speed(ball, 0, MAX_BALL_SPEED);
+        ball_limit_speed(ball, MAX_BALL_SPEED);
         ball_move(ball);
-    }
-    else {
+    } else {
         env->delay_frames--;
     }
 
@@ -569,45 +519,28 @@ void puf_step(SlimeVolley* env) {
     if (ball_is_colliding(ball, (SphericalObject*)right)){
         ball_bounce(ball, (SphericalObject*)right);
     }
-    if (ball_is_colliding(ball, (SphericalObject*)env->fence_stub)){
-        ball_bounce(ball, (SphericalObject*)env->fence_stub);
+    SphericalObject fence_stub = {.y = REF_WALL_HEIGHT, .r = REF_WALL_WIDTH/2};
+    if (ball_is_colliding(ball, &fence_stub)){
+        ball_bounce(ball, &fence_stub);
     }
 
-    int right_reward = -ball_check_edges(ball);
-
-    if (right_reward != 0){
+    int conceded = ball_check_edges(ball);
+    if (conceded != 0){
+        env->players[(conceded < 0) ? 0 : 1].lives--;
+        float reward = (conceded < 0) ? -1.0f : 1.0f; // slot 0's view
+        add_reward(env, 0, reward);
+        if (env->num_agents == 2){
+            add_reward(env, 1, -reward);
+        }
         new_match(env);
-        if (right_reward == -1){
-            right->lives--;
-            env->agents[0].rewards[0] = 1.0f;
-            if (env->num_agents == 2){
-                env->agents[1].rewards[0] = -1.0f;
-            }
-        }
-        else{
-            left->lives--;
-            env->agents[0].rewards[0] = -1.0f;
-            if (env->num_agents == 2){
-                env->agents[1].rewards[0] = 1.0f;
-            }
-        }
     }
     agent_update_state(left, ball, right);
     agent_update_state(right, ball, left);
 
-    if (env->tick > MAX_TICKS || left->lives <= 0 || right->lives <= 0){
-        env->agents[0].terminals[0] = 1;
-        if (env->num_agents == 2){
-            env->agents[1].terminals[0] = 1;
-        }
-        env->log.perf += (left->lives - right->lives + 5.0f) / 10.0f;
-        env->log.score += (float)(left->lives - right->lives);
-        env->log.episode_return += (5.0f - right->lives);
-        env->log.episode_length += (float)env->tick;
-        env->log.n += 1;
-        puf_reset(env);
+    if (env->tick > env->max_ticks || left->lives <= 0 || right->lives <= 0){
+        int outcome = (left->lives > right->lives) - (left->lives < right->lives);
+        end_episode(env, outcome);
     }
-    
 }
 
 // Required function. Should handle creating the client on first call
@@ -626,17 +559,16 @@ void puf_render(SlimeVolley* env) {
     slimevolley_human_controls(env);
     BeginDrawing();
     ClearBackground(PUFF_BACKGROUND);
-    wall_display(env->ground);
-    wall_display(env->fence);
+    DrawRectangleRec((Rectangle){to_x_pixel(-REF_W/2.0f), to_y_pixel(REF_U),
+        to_p(REF_W), to_p(REF_U)}, GROUND_COLOR);
+    float fence_h = REF_WALL_HEIGHT - REF_U;
+    DrawRectangleRec((Rectangle){to_x_pixel(-REF_WALL_WIDTH/2.0f),
+        to_y_pixel(REF_U + fence_h), to_p(REF_WALL_WIDTH), to_p(fence_h)},
+        FENCE_COLOR);
+    DrawCircleV((Vector2){to_x_pixel(0), to_y_pixel(REF_WALL_HEIGHT)},
+        to_p(REF_WALL_WIDTH/2.0f), FENCE_COLOR);
 
-    // Fence
-    Ball* stub = env->fence_stub;
-    DrawCircleV(
-        (Vector2){to_x_pixel(stub->x), to_y_pixel(stub->y)},
-        to_p(stub->r), stub->c
-    );
-
-    Ball* puff = env->ball;
+    Ball* puff = &env->ball;
     DrawTexturePro(
         env->puffers,
         (Rectangle){
@@ -656,7 +588,7 @@ void puf_render(SlimeVolley* env) {
     );
 
     for (int i=0; i<2; i++) {
-        agent_display(&env->players[i], env->ball->x, env->ball->y);
+        agent_display(&env->players[i], env->ball.x, env->ball.y);
     }
 
     EndDrawing();
@@ -666,33 +598,7 @@ void puf_render(SlimeVolley* env) {
 // Required function. Should clean up anything you allocated
 // Do not free env->observations, actions, rewards, terminals
 void puf_close(SlimeVolley* env) {
-    free(env->ground);
-    free(env->fence);
-    free(env->fence_stub);
-    free(env->ball);
-    free(env->bot_observations);
-    free(env->bot_actions);
     if (IsWindowReady()) {
         CloseWindow();
     }
 }
-
-void puf_init(Env* env, Dict* kwargs) {
-    env->num_agents = dict_get(kwargs, "num_agents");
-    if (env->num_agents < 1) env->num_agents = 1;
-    if (env->num_agents > 2) env->num_agents = 2;
-    for (int i = 0; i < env->num_agents; i++) {
-        env->agents[i].policy = 0;
-        env->agents[i].action_mask = NULL;
-    }
-    init(env);
-}
-
-void puf_log(Log* log, Dict* out) {
-    dict_set(out, "perf", log->perf);
-    dict_set(out, "score", log->score);
-    dict_set(out, "episode_return", log->episode_return);
-    dict_set(out, "episode_length", log->episode_length);
-    dict_set(out, "n", log->n);
-}
-

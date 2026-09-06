@@ -1,4 +1,4 @@
-// Included from pufferl.cu when building nethack (-DPUFFER_NETHACK).
+// Included by src/ocean.cu when building nethack (-DPUFFER_NETHACK).
 // Verb-conditional heads + verb-eps. Not a separate translation unit.
 
 __device__ const signed char* d_hc_dev = NULL;

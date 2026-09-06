@@ -52,7 +52,6 @@ struct Env {
     int max_upright_steps;
     int upright_count;
     float best_height;
-    int got_upright;
     int physics_failed;
 
     float cart_mass;
@@ -178,7 +177,6 @@ void puf_reset(DoublePendulum* env) {
     env->max_upright_steps = 0;
     env->upright_count = 0;
     env->best_height = 0.0f;
-    env->got_upright = 0;
     env->physics_failed = 0;
     compute_observations(env);
 }
@@ -305,9 +303,8 @@ float height_record_reward(DoublePendulum* env) {
     if (height > env->best_height && height > 0.9f) {
         reward += 0.05f * (height - 0.9f) / 0.1f;
     }
-    if (stable && !env->got_upright) {
+    if (stable) {
         reward += 0.1f;
-        env->got_upright = 1;
     }
     env->best_height = fmaxf(env->best_height, height);
     return reward;

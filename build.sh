@@ -12,6 +12,7 @@ set -e
 #   ./build.sh breakout myplay --cpu # Play -> ./myplay
 #   ./build.sh breakout --debug      # Debug (-O0 -g; sanitizers on --cpu)
 #   ./build.sh breakout --web        # Emscripten web build
+#                                    # packs website 1M-cap policy + *_web.ini
 #                                    # copy build/web/ENV/* to ../docker/puffer.ai/docs/assets/ENV/
 #   ./build.sh breakout --profile    # Kernel profiling binary
 #   ./build.sh constellation         # Sweep dashboard -> ./seethestars
@@ -317,12 +318,12 @@ elif [ "$MODE" = "web" ]; then
         exit 1
     fi
     mkdir -p "build/web/$ENV"
+    WEBSITE_DIR="${PUFFER_WEBSITE_DIR:-../docker/puffer.ai}"
     PRELOAD_ENV=()
     if [ "$ENV" = "boxoban" ]; then
         # Do not pack generated boxoban_maps_*.bin or levels/ (hundreds of MB).
         PRELOAD_ENV=(
             --preload-file resources/boxoban/web_maps.bin@resources/boxoban/web_maps.bin
-            --preload-file resources/boxoban/boxoban_weights.bin@resources/boxoban/boxoban_weights.bin
             --preload-file resources/boxoban/Wall_Black.jpg@resources/boxoban/Wall_Black.jpg
             --preload-file resources/boxoban/Crate_Black.jpg@resources/boxoban/Crate_Black.jpg
             --preload-file resources/boxoban/EndPoint_Black.jpg@resources/boxoban/EndPoint_Black.jpg
@@ -330,7 +331,14 @@ elif [ "$MODE" = "web" ]; then
             --preload-file resources/boxoban/GroundGravel_Concrete.jpg@resources/boxoban/GroundGravel_Concrete.jpg
         )
     elif [ -d "resources/$ENV" ]; then
-        PRELOAD_ENV=(--preload-file "resources/$ENV@resources/$ENV")
+        # Env assets only. Policy weights live in the website repo.
+        while IFS= read -r -d '' f; do
+            rel="${f#resources/$ENV/}"
+            case "$rel" in
+                *weights*.bin|*_weights.bin) continue ;;
+            esac
+            PRELOAD_ENV+=(--preload-file "$f@resources/$ENV/$rel")
+        done < <(find "resources/$ENV" -type f -print0)
     fi
     echo "Compiling $ENV for web..."
     PRELOAD=(
@@ -343,12 +351,17 @@ elif [ "$MODE" = "web" ]; then
     if [ -f "config/$ENV.ini" ]; then
         PRELOAD+=(--preload-file "config/$ENV.ini@config/$ENV.ini")
     fi
-    # Web overlays live on the site, not in this repo.
-    SITE_WEB_INI="../docker/puffer.ai/config/${ENV}_web.ini"
+    # Web overlays + 1M-cap policies live in the website repo.
+    SITE_WEB_INI="$WEBSITE_DIR/config/${ENV}_web.ini"
     if [ -f "$SITE_WEB_INI" ]; then
         PRELOAD+=(--preload-file "$SITE_WEB_INI@config/${ENV}_web.ini")
-    elif [ -f "config/${ENV}_web.ini" ]; then
-        PRELOAD+=(--preload-file "config/${ENV}_web.ini@config/${ENV}_web.ini")
+    fi
+    SITE_MODELS="$WEBSITE_DIR/docs/assets/models"
+    if [ -f "$SITE_MODELS/${ENV}_web_weights.bin" ]; then
+        PRELOAD+=(--preload-file "$SITE_MODELS/${ENV}_web_weights.bin@resources/$ENV/${ENV}_web_weights.bin")
+        PRELOAD+=(--preload-file "$SITE_MODELS/${ENV}_web_weights.bin@resources/$ENV/${ENV}_weights.bin")
+    elif [ -f "$SITE_MODELS/${ENV}_weights.bin" ]; then
+        PRELOAD+=(--preload-file "$SITE_MODELS/${ENV}_weights.bin@resources/$ENV/${ENV}_weights.bin")
     fi
     emcc \
         -o "build/web/$ENV/game.html" \
@@ -371,7 +384,6 @@ elif [ "$MODE" = "web" ]; then
         "${PRELOAD[@]}" \
         "${EXTRA_CFLAGS[@]}"
     echo "Built: build/web/$ENV/game.html"
-    WEBSITE_DIR="${PUFFER_WEBSITE_DIR:-../docker/puffer.ai}"
     WEBSITE_ASSETS="$WEBSITE_DIR/docs/assets"
     if [ -d "$WEBSITE_ASSETS" ]; then
         mkdir -p "$WEBSITE_ASSETS/$ENV"
