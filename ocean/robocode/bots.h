@@ -29,6 +29,7 @@ typedef enum {
     BOT_WAVE_SURFER   = 3,
     BOT_HAWK_ON_FIRE  = 4,
     BOT_RAIKO         = 5,
+    BOT_DRUSSGT       = 6,
 } BotPolicy;
 
 #define WS_NUM_WAVES        8
@@ -74,6 +75,38 @@ typedef struct {
     int active;
 } RBRaikoWave;
 
+// DrussGT adaptation sizes (agent_drussgt.h). Moderate caps for train SPS.
+#ifndef DGT_WAVES
+#define DGT_WAVES          10
+#define DGT_GUN_WAVES      14
+#define DGT_KNN_CAP        96
+#define DGT_GUN_CAP       160
+#define DGT_FEATS           8
+#define DGT_HIST           16
+#endif
+typedef struct {
+    float ox, oy;
+    float head_on;
+    float speed;
+    float power;
+    int   fire_tick;
+    int   lat_sign;
+    float feats[DGT_FEATS];
+    int   active;
+    int   imaginary;
+} DGTWave;
+
+typedef struct {
+    float ox, oy;
+    float abs_bearing;
+    float lat_dir;
+    float speed;
+    float mea;
+    float dist_traveled;
+    float feats[DGT_FEATS];
+    int   active;
+} DGTGunWave;
+
 struct BotMem {
     int    tick;
     int    orbit_dir;            // -1, 0, +1
@@ -110,10 +143,49 @@ struct BotMem {
     int    raiko_wave_head;
     int    raiko_guess[RAIKO_DIST_BINS][RAIKO_GF_BINS];
     RBRaikoWave raiko_waves[RAIKO_WAVES];
+
+    // DrussGT (agent_drussgt.h). kNN persists across episodes; waves clear on reset.
+    int    dgt_initialized;
+    float  dgt_enemy_gunheat;
+    float  dgt_enemy_energy;
+    float  dgt_enemy_firepower;
+    float  dgt_lat_dir;
+    float  dgt_enemy_lat_dir;
+    float  dgt_last_v;
+    float  dgt_enemy_last_v;
+    int    dgt_enemy_dir_change_tick;
+    int    dgt_enemy_decel_tick;
+    float  dgt_goto_x, dgt_goto_y;
+    int    dgt_wave_head;
+    DGTWave dgt_waves[DGT_WAVES];
+    int    dgt_surf_n, dgt_surf_head;
+    float  dgt_surf_feats[DGT_KNN_CAP][DGT_FEATS];
+    float  dgt_surf_gf[DGT_KNN_CAP];
+    int    dgt_gun_n, dgt_gun_head;
+    float  dgt_gun_feats[DGT_GUN_CAP][DGT_FEATS];
+    float  dgt_gun_gf[DGT_GUN_CAP];
+    int    dgt_gun_wave_head;
+    DGTGunWave dgt_gun_waves[DGT_GUN_WAVES];
+    int    dgt_bullets_hit, dgt_bullets_fired;
+    int    dgt_hits_taken, dgt_waves_passed;
+    int    dgt_hist_n, dgt_hist_head;
+    float  dgt_hist_x[DGT_HIST];
+    float  dgt_hist_y[DGT_HIST];
+    float  dgt_lat_hist[10];
+    int    dgt_lat_hist_i;
+    float  dgt_current_gf;
 };
 
 #include "agent_hawk_on_fire.h"
 #include "agent_raiko.h"
+#include "agent_drussgt.h"
+
+// Per-bot policy: bot_policy_1 overrides for the second bot in bot-vs-bot.
+static inline int bot_policy_for(Robocode* env, int bot_idx) {
+    int bi = bot_idx - env->num_agents;
+    if (bi == 1 && env->bot_policy_1 >= 0) return env->bot_policy_1;
+    return env->bot_policy;
+}
 
 // ---- Lifetime ---------------------------------------------------------------
 static inline void bot_mems_alloc(Robocode* env) {
@@ -147,6 +219,15 @@ static inline void bot_mems_episode_reset(Robocode* env) {
         m->raiko_bearing_dir = m->raiko_bearing_dir == 0.0f ? 1.0f : m->raiko_bearing_dir;
         for (int wi = 0; wi < WS_NUM_WAVES; wi++) m->waves[wi].active = 0;
         for (int wi = 0; wi < RAIKO_WAVES; wi++) m->raiko_waves[wi].active = 0;
+        // DrussGT: clear per-round waves; keep kNN across episodes.
+        m->dgt_initialized = 0;
+        for (int wi = 0; wi < DGT_WAVES; wi++) m->dgt_waves[wi].active = 0;
+        for (int wi = 0; wi < DGT_GUN_WAVES; wi++) m->dgt_gun_waves[wi].active = 0;
+        m->dgt_hist_n = 0;
+        m->dgt_hist_head = 0;
+        m->dgt_lat_hist_i = 0;
+        for (int hi = 0; hi < 10; hi++) m->dgt_lat_hist[hi] = 0.0f;
+        m->dgt_current_gf = 0.0f;
     }
 }
 
@@ -225,9 +306,14 @@ static inline void ws_add_sample(BotMem* m, const float feats[WS_NUM_FEATS], flo
 // sample to the kNN.
 static void bot_on_hit_by_bullet(Robocode* env, int bot_idx,
                                  float bullet_heading, float bullet_power) {
-    if (env->bot_policy != BOT_WAVE_SURFER) return;
     if (env->bot_mems == NULL) return;
     BotMem* m = &env->bot_mems[bot_idx - env->num_agents];
+    int policy = bot_policy_for(env, bot_idx);
+    if (policy == BOT_DRUSSGT) {
+        dgt_on_hit_by_bullet(m, bullet_heading, bullet_power);
+        return;
+    }
+    if (policy != BOT_WAVE_SURFER) return;
     float speed = 20.0f - 3.0f * bullet_power;
     WSWave* best = NULL;
     int best_age = -1;
@@ -251,6 +337,41 @@ static void bot_on_hit_by_bullet(Robocode* env, int bot_idx,
     best->active = 0;
 }
 
+// Curriculum random bot: sample from the same discrete action tables agents use.
+// Called when rand_unit(env) < env->bot_cl_noise instead of the scripted policy.
+static void bot_random_step(Robocode* env, int bot_idx) {
+    Robot* bot = &env->robots[bot_idx];
+    float move_atn = ACCEL_VALUES[rand_r(&env->rng) % 4];
+    move(env, bot, move_atn);
+
+    float turn_atn = TURN_VALUES[rand_r(&env->rng) % 9];
+    float max_turn = 10.0f - 0.75f * fabsf(bot->v);
+    if (max_turn < 0.0f) max_turn = 0.0f;
+    float body = turn(&bot->heading, turn_atn, max_turn, 0.0f);
+
+    float gun_atn = GUN_TURN_VALUES[rand_r(&env->rng) % 11];
+    float gun = turn(&bot->gun_heading, gun_atn, 20.0f, body);
+
+    float radar_atn = RADAR_TURN_VALUES[rand_r(&env->rng) % 11];
+    bot->radar_heading_prev = bot->radar_heading;
+    turn(&bot->radar_heading, radar_atn, 45.0f, body + gun);
+
+    float firepower = FIREPOWER_VALUES[rand_r(&env->rng) % 6];
+    if (firepower > 0.0f) {
+        fire(env, bot, bot_idx, firepower);
+    }
+
+    float px = bot->x, py = bot->y;
+    bot->x = fmaxf(16.0f, fminf(bot->x, env->width - 16.0f));
+    bot->y = fmaxf(16.0f, fminf(bot->y, env->height - 16.0f));
+    if (bot->x != px || bot->y != py) {
+        float wall_dmg = fabsf(bot->v) * 0.5f - 1.0f;
+        if (wall_dmg < 0.0f) wall_dmg = 0.0f;
+        bot->energy -= wall_dmg;
+        bot->v = 0.0f;
+    }
+}
+
 // ---- Main entry -------------------------------------------------------------
 static void bot_step(Robocode* env, int bot_idx) {
     Robot* bot = &env->robots[bot_idx];
@@ -259,18 +380,29 @@ static void bot_step(Robocode* env, int bot_idx) {
     if (bot->energy < 0) return;
     if (bot->energy == 0) { bot->v = 0; return; }
     if (bot->gun_heat > 0) bot->gun_heat -= 0.1f;
-    if (env->bot_policy == BOT_STATIONARY) return;
+    int policy = bot_policy_for(env, bot_idx);
+    if (policy == BOT_STATIONARY) return;
 
     BotMem* m = &env->bot_mems[bot_idx - env->num_agents];
     m->tick++;
     if (m->orbit_dir == 0) m->orbit_dir = 1;
 
-    if (env->bot_policy == BOT_HAWK_ON_FIRE) {
+    // Curriculum: randomly replace scripted policy with discrete noise.
+    if (env->bot_cl_noise > 0.0f && rand_unit(env) < env->bot_cl_noise) {
+        bot_random_step(env, bot_idx);
+        return;
+    }
+
+    if (policy == BOT_HAWK_ON_FIRE) {
         bot_hawk_on_fire_step(env, bot_idx, m);
         return;
     }
-    if (env->bot_policy == BOT_RAIKO) {
+    if (policy == BOT_RAIKO) {
         bot_raiko_step(env, bot_idx, m);
+        return;
+    }
+    if (policy == BOT_DRUSSGT) {
+        bot_drussgt_step(env, bot_idx, m);
         return;
     }
 
@@ -342,10 +474,10 @@ static void bot_step(Robocode* env, int bot_idx) {
         // Detect target fire from energy drop BEFORE overwriting last_energy_seen.
         float drop = m->last_scan_tick > 0 ? (m->last_energy_seen - tgt->energy) : 0.0f;
         bool fired = (drop > 0.0f && drop <= 3.0f);
-        if (env->bot_policy == BOT_SURFER && fired) {
+        if (policy == BOT_SURFER && fired) {
             m->orbit_dir = -m->orbit_dir;
             m->last_dir_change_tick = m->tick;
-        } else if (env->bot_policy == BOT_WAVE_SURFER && fired) {
+        } else if (policy == BOT_WAVE_SURFER && fired) {
             // Wave origin = target's PREVIOUS scanned position (where they
             // were the tick before they fired). speed inferred from drop.
             WSWave* w = &m->waves[m->wave_head];
@@ -372,7 +504,7 @@ static void bot_step(Robocode* env, int bot_idx) {
     if (m->last_scan_tick == 0) return;  // still hunting for first contact
 
     // ---- Wave-surfer: expire missed waves, then choose orbit direction ---
-    if (env->bot_policy == BOT_WAVE_SURFER) {
+    if (policy == BOT_WAVE_SURFER) {
         for (int wi = 0; wi < WS_NUM_WAVES; wi++) {
             WSWave* w = &m->waves[wi];
             if (!w->active) continue;

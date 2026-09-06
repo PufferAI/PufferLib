@@ -370,6 +370,26 @@ static inline const char* puf_ini_get_str(Ini* ini, const char* section,
     return dict_get_str(puf_ini_section(ini, section, 0), key);
 }
 
+// Reads a key as a list of numbers. A scalar reads as one element and a missing
+// key as none, so an optional list needs no placeholder in default.ini.
+static inline int puf_ini_get_list(Ini* ini, const char* section,
+        const char* key, double* out, int max) {
+    DictItem* item = dict_find(puf_ini_section(ini, section, 0), key);
+    if (!item) {
+        return 0;
+    }
+    int n = item->len ? item->len : 1;
+    if (n > max) {
+        fprintf(stderr, "config error: [%s] %s has %d values, max %d\n",
+            section, key, n, max);
+        exit(1);
+    }
+    for (int i = 0; i < n; i++) {
+        out[i] = item->len ? item->values[i] : item->value;
+    }
+    return n;
+}
+
 static inline void puf_ini_put(Ini* ini, const char* full_key, const char* raw) {
     const char* split = strrchr(full_key, '.');
     if (!split) {
