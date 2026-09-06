@@ -978,10 +978,10 @@ Weights weights_create(Arch* p, Allocator* params) {
 // unsolved research problem.
 #include "ocean.cu"
 
-// Build an Arch (ops + dims) for a given env. Encoder/decoder algorithms are
-// fixed by the env; hidden_size/num_layers/horizon parameterize shape. Arch
-// has no heap state so this returns by value; callers store it wherever.
-Arch build_arch(const char* env_name, int input_size, int hidden_size,
+// Build an Arch (ops + dims) for this env. Encoder/decoder algorithms are
+// fixed at compile time; hidden_size/num_layers/horizon parameterize shape.
+// Arch has no heap state so this returns by value; callers store it wherever.
+Arch build_arch(int input_size, int hidden_size,
         int num_layers, int decoder_output_size, bool is_continuous, int horizon) {
     Encoder encoder = {
         .forward = encoder_forward,
@@ -994,7 +994,7 @@ Arch build_arch(const char* env_name, int input_size, int hidden_size,
         .in_dim = input_size, .out_dim = hidden_size,
         .activation_size = sizeof(EncoderActivations),
     };
-    create_custom_encoder(env_name, &encoder);
+    create_custom_encoder(&encoder);
     Decoder decoder = {
         .forward = decoder_forward,
         .backward = decoder_backward,
@@ -1008,7 +1008,7 @@ Arch build_arch(const char* env_name, int input_size, int hidden_size,
         .continuous = is_continuous,
         .activation_size = sizeof(DecoderActivations),
     };
-    create_custom_decoder(env_name, &decoder);
+    create_custom_decoder(&decoder);
     Network network = {
         .forward = mingru_forward,
         .forward_train = mingru_forward_train,

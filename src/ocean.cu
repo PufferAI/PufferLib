@@ -1,6 +1,5 @@
 // Custom ocean env CUDA. Included by algo.cu.
-// Per-env nets live under ocean/<env>/<env>.cu and are compiled in only when
-// that env is built (build.sh -DPUFFER_<ENV>).
+// Per-env nets live under ocean/<env>/<env>.cu
 
 // Normal(0, std). Used by custom ocean encoders for embeddings.
 void puf_normal_init(Prec* dst, float std, ulong seed, cudaStream_t stream) {
@@ -27,7 +26,6 @@ void puf_normal_init(Prec* dst, float std, ulong seed, cudaStream_t stream) {
 #ifdef PUFFER_ASTEROIDS
 #include "../ocean/asteroids/asteroids.cu"
 #endif
-
 #if defined(PUFFER_OSRS_COLOSSEUM) || defined(PUFFER_OSRS_INFERNO) \
     || defined(PUFFER_OSRS_ZULRAH) || defined(PUFFER_OSRS_PVP)
 #define PUFFER_OSRS_ENTITY_NET
@@ -54,81 +52,41 @@ __device__ static const float OSRS_ITEM_OBS_TABLE_DEV
 #include "../ocean/craftax/craftax.cu"
 #endif
 
-// Override encoder vtable for known ocean environments. No-op for unknown envs.
-static void create_custom_encoder(const char* env_name, Encoder* enc) {
-    (void)env_name;
-    (void)enc;
+// Override encoder vtable when this env has a custom net. No-op otherwise.
+static void create_custom_encoder(Encoder* enc) {
 #ifdef PUFFER_NETHACK
-    if (strcmp(env_name, "nethack") == 0) {
-        create_nethack_encoder(enc);
-        return;
-    }
-#endif
-#ifdef PUFFER_CRAFTAX
-    if (strcmp(env_name, "craftax") == 0) {
-        create_craftax_encoder(enc);
-        return;
-    }
-#endif
-#ifdef PUFFER_NMMO3
-    if (strcmp(env_name, "nmmo3") == 0) {
+    create_nethack_encoder(enc);
+#elif defined(PUFFER_CRAFTAX)
+    create_craftax_encoder(enc);
+#elif defined(PUFFER_NMMO3)
 #ifdef N3_ATTN
-        create_nmmo3_attn_encoder(enc);
+    create_nmmo3_attn_encoder(enc);
 #else
-        create_nmmo3_conv_encoder(enc);
+    create_nmmo3_conv_encoder(enc);
 #endif
-        return;
-    }
-#endif
-#ifdef PUFFER_MINIMAL
-    if (strcmp(env_name, "minimal") == 0) {
+#elif defined(PUFFER_MINIMAL)
 #ifdef MINIMAL_ATTN
-        create_entity_attn_encoder(enc);
+    create_entity_attn_encoder(enc);
 #else
-        create_minimal_encoder(enc);
+    create_minimal_encoder(enc);
 #endif
-        return;
-    }
-#endif
-#ifdef PUFFER_ASTEROIDS
-    if (strcmp(env_name, "asteroids") == 0) {
-        create_asteroids_encoder(enc);
-        return;
-    }
-#endif
-#ifdef PUFFER_OSRS_COLOSSEUM
-    if (strcmp(env_name, "osrs_colosseum") == 0) {
-        create_osrs_entity_encoder<&OSRS_COLOSSEUM_ENTITY_DESCRIPTOR>(enc);
-        return;
-    }
-#endif
-#ifdef PUFFER_OSRS_INFERNO
-    if (strcmp(env_name, "osrs_inferno") == 0) {
-        create_osrs_entity_encoder<&OSRS_INFERNO_ENTITY_DESCRIPTOR>(enc);
-        return;
-    }
-#endif
-#ifdef PUFFER_OSRS_ZULRAH
-    if (strcmp(env_name, "osrs_zulrah") == 0) {
-        create_osrs_entity_encoder<&OSRS_EQUIPMENT_ENTITY_DESCRIPTOR>(enc);
-        return;
-    }
-#endif
-#ifdef PUFFER_OSRS_PVP
-    if (strcmp(env_name, "osrs_pvp") == 0) {
-        create_osrs_entity_encoder<&OSRS_EQUIPMENT_ENTITY_DESCRIPTOR>(enc);
-        return;
-    }
+#elif defined(PUFFER_ASTEROIDS)
+    create_asteroids_encoder(enc);
+#elif defined(PUFFER_OSRS_COLOSSEUM)
+    create_osrs_entity_encoder<&OSRS_COLOSSEUM_ENTITY_DESCRIPTOR>(enc);
+#elif defined(PUFFER_OSRS_INFERNO)
+    create_osrs_entity_encoder<&OSRS_INFERNO_ENTITY_DESCRIPTOR>(enc);
+#elif defined(PUFFER_OSRS_ZULRAH) || defined(PUFFER_OSRS_PVP)
+    create_osrs_entity_encoder<&OSRS_EQUIPMENT_ENTITY_DESCRIPTOR>(enc);
+#else
+    (void)enc;
 #endif
 }
 
-static void create_custom_decoder(const char* env_name, Decoder* dec) {
-    (void)env_name;
-    (void)dec;
+static void create_custom_decoder(Decoder* dec) {
 #ifdef PUFFER_NETHACK
-    if (strcmp(env_name, "nethack") == 0) {
-        create_nethack_decoder(dec);
-        return;
-    }
+    create_nethack_decoder(dec);
+#else
+    (void)dec;
 #endif
 }
