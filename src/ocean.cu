@@ -1,4 +1,4 @@
-// Custom ocean env encoders. Included by algo.cu.
+// Custom ocean env CUDA. Included by algo.cu.
 // Per-env nets live under ocean/<env>/<env>.cu and are compiled in only when
 // that env is built (build.sh -DPUFFER_<ENV>).
 
@@ -48,6 +48,7 @@ __device__ static const float OSRS_ITEM_OBS_TABLE_DEV
 #endif
 #ifdef PUFFER_NETHACK
 #include "../ocean/nethack/nethack.cu"
+#include "../ocean/nethack/nethack_policy.cu"
 #endif
 #ifdef PUFFER_CRAFTAX
 #include "../ocean/craftax/craftax.cu"

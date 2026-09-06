@@ -114,7 +114,7 @@ static void cublasGemmExDense(cublasHandle_t handle,
         C, CUBLAS_PRECISION, N, CUBLAS_COMPUTE, CUBLAS_GEMM_DEFAULT);
 }
 
-// out(...,N) = alpha * a(...,K) @ b(N,K)^T + beta * out  — leading dims folded into M
+// out(...,N) = alpha * a(...,K) @ b(N,K)^T + beta * out: leading dims folded into M
 void puf_mm(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
         float alpha = 1.0f, float beta = 0.0f) {
     int M = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
@@ -124,7 +124,7 @@ void puf_mm(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
         a->data, b->data, out->data, stream, alpha, beta);
 }
 
-// out(M,N) = alpha * a(...,M)^T @ b(...,N) + beta * out  — leading dims folded into K
+// out(M,N) = alpha * a(...,M)^T @ b(...,N) + beta * out: leading dims folded into K
 void puf_mm_tn(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
         float alpha = 1.0f, float beta = 0.0f,
         cublasHandle_t handle = g_cublas_handle) {
@@ -135,7 +135,7 @@ void puf_mm_tn(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
         a->data, b->data, out->data, stream, alpha, beta);
 }
 
-// out(...,N) = alpha * a(...,K) @ b(K,N) + beta * out  — leading dims folded into M
+// out(...,N) = alpha * a(...,K) @ b(K,N) + beta * out: leading dims folded into M
 void puf_mm_nn(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
         float alpha = 1.0f, float beta = 0.0f) {
     int M = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
@@ -1263,10 +1263,6 @@ enum LossIdx {
     LOSS_IMP = 7,
     LOSS_N = 8, NUM_LOSSES = 9,
 };
-
-#ifdef PUFFER_NETHACK
-#include "../ocean/nethack/nethack_policy.cu"
-#endif
 
 constexpr int PPO_THREADS = 256;
 

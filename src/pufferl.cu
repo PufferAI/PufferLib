@@ -37,7 +37,6 @@
 // Project
 #include "ini.h"
 
-// To investigate: 32f compute? Need to check bf16
 #ifdef PRECISION_FLOAT
 typedef float precision_t;
 constexpr bool USE_BF16 = false;
@@ -62,7 +61,7 @@ int grid_size(int N) {
     return (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
 }
 
-// Exclusive env: -DENV_HEADER=ocean/<env>/<env>.h or .cu (--cu). Never both.
+// Compile vs a single env: -DENV_HEADER=ocean/<env>/<env>.h or .cu (--cu)
 #include ENV_HEADER
 
 typedef struct {
@@ -464,7 +463,7 @@ typedef struct {
     Allocator activ_alloc;
     Prec param;
     Float master_weights;
-    Prec* buffer_states;         // [num_buffers]
+    Prec* buffer_states;    // [num_buffers]
     Activations* buf_acts;  // [num_buffers]
 } Policy;
 
@@ -592,14 +591,14 @@ __global__ void rng_init(curandStatePhilox4_32_10_t* states, uint64_t seed, int 
 // Continuous: ignores mask.
 __global__ void sample_logits(
         Prec dec_out,              // (B, logits_dim + 1)
-        Prec logstd,           // (1, od) continuous only; .data null if discrete
+        Prec logstd,               // (1, od) continuous only; .data null if discrete
         int* act_sizes,            // (NUM_ATNS,)
-        float* actions,                       // (B, num_atns) float32 rollout store
-        float* env_actions,                   // (B, num_atns) env dispatch
-        precision_t* logprobs,                // (B,)
-        precision_t* value_out,               // (B,)
+        float* actions,            // (B, num_atns) float32 rollout store
+        float* env_actions,        // (B, num_atns) env dispatch
+        precision_t* logprobs,     // (B,)
+        precision_t* value_out,    // (B,)
         curandStatePhilox4_32_10_t* rng_states,
-        precision_t* action_mask,             // (B, A_total); always allocated
+        precision_t* action_mask,  // (B, A_total); always allocated
         int mask_stride) {
     int B = dec_out.shape[0];
     int fused_cols = dec_out.shape[1];
@@ -801,7 +800,7 @@ static void pufferl_forward_step(PuffeRL* pufferl, int buf, int t,
     ObsTensor* obs_env = &env->obs;
     int n = block_size * obs_env->shape[1];
     Prec obs_dst = puf_slice(rollouts.observations, t, start, block_size);
-    // Env obs → rollout: D2D if same type, else cast (float/uchar → precision_t).
+    // Env obs -> rollout: D2D if same type, else cast (float/uchar → precision_t).
     if (sizeof(obs_t) == sizeof(precision_t)) {
         cudaMemcpyAsync(obs_dst.data,
             obs_env->data + (long)start * obs_env->shape[1],
@@ -3420,5 +3419,4 @@ int main(int argc, char** argv) {
     puf_ini_free(&ini);
     return 0;
 }
-
 #endif
