@@ -807,11 +807,200 @@ static uint32_t inf_route_topology_los_flags(void* data, int x, int y) {
     return 0;
 }
 
+#define INF_ROUTE_BAKE_PATH "inferno_route.bin"
+#define INF_ROUTE_REVISION_BASE UINT64_C(0x494e4645524e4f02)
+#define INF_ROUTE_BAKE_VERSION 1u
+#define INF_ROUTE_BAKE_COUNT (1 << INF_NUM_PILLARS)
+
+typedef struct InfRouteBakeHeader {
+    char magic[8];
+    uint32_t version;
+    uint32_t topology_size;
+    uint32_t count;
+    int32_t origin_x;
+    int32_t origin_y;
+    int32_t width;
+    int32_t height;
+    int32_t max_footprint_size;
+    int32_t world_offset_x;
+    int32_t world_offset_y;
+    uint32_t pad;
+    uint64_t revision_base;
+} InfRouteBakeHeader;
+
+_Static_assert(sizeof(InfRouteBakeHeader) == 64,
+    "inferno route bake header must stay 64 bytes");
+
+static const char INF_ROUTE_BAKE_MAGIC[8] = {
+    'I', 'N', 'F', 'R', 'O', 'U', 'T', 'E'
+};
+
+static int inf_route_topologies_all_empty(void) {
+    for (int i = 0; i < INF_ROUTE_BAKE_COUNT; i++) {
+        if (inf_route_topology_owner.topologies[i]) return 0;
+    }
+    return 1;
+}
+
+static void inf_route_topologies_free_range(int count) {
+    for (int i = 0; i < count; i++) {
+        free(inf_route_topology_owner.topologies[i]);
+        inf_route_topology_owner.topologies[i] = NULL;
+    }
+}
+
+static int inf_route_bake_header_matches(
+    const InfRouteBakeHeader* header,
+    const InfernoContext* ctx
+) {
+    return header
+        && memcmp(header->magic, INF_ROUTE_BAKE_MAGIC, 8) == 0
+        && header->version == INF_ROUTE_BAKE_VERSION
+        && header->topology_size == (uint32_t)sizeof(EncounterArenaTopology)
+        && header->count == (uint32_t)INF_ROUTE_BAKE_COUNT
+        && header->origin_x == INF_TOPOLOGY_MIN_X
+        && header->origin_y == INF_TOPOLOGY_MIN_Y
+        && header->width == INF_TOPOLOGY_WIDTH
+        && header->height == INF_TOPOLOGY_HEIGHT
+        && header->max_footprint_size ==
+            ENCOUNTER_ARENA_TOPOLOGY_MAX_FOOTPRINT_SIZE
+        && header->world_offset_x == ctx->world_offset_x
+        && header->world_offset_y == ctx->world_offset_y
+        && header->revision_base == INF_ROUTE_REVISION_BASE;
+}
+
+static int inf_baked_topology_matches(
+    const EncounterArenaTopology* topology,
+    int pillar_mask
+) {
+    return topology
+        && topology->finalized
+        && topology->origin_x == INF_TOPOLOGY_MIN_X
+        && topology->origin_y == INF_TOPOLOGY_MIN_Y
+        && topology->width == INF_TOPOLOGY_WIDTH
+        && topology->height == INF_TOPOLOGY_HEIGHT
+        && topology->tile_count == INF_TOPOLOGY_WIDTH * INF_TOPOLOGY_HEIGHT
+        && topology->max_footprint_size ==
+            ENCOUNTER_ARENA_TOPOLOGY_MAX_FOOTPRINT_SIZE
+        && topology->revision ==
+            INF_ROUTE_REVISION_BASE + (uint64_t)pillar_mask
+        && topology->los_build_mode ==
+            ENCOUNTER_ARENA_TOPOLOGY_LOS_BUILD_FLAGGED;
+}
+
+static int inf_try_load_baked_route_topologies(const InfernoContext* ctx) {
+    if (!ctx || !ctx->collision_map || !inf_route_topologies_all_empty())
+        return 0;
+    if (!osrs_asset_exists(INF_ROUTE_BAKE_PATH)) return 0;
+
+    const char* path = osrs_asset_path(INF_ROUTE_BAKE_PATH);
+    FILE* f = osrs_asset_fopen(INF_ROUTE_BAKE_PATH, "rb");
+    if (!f) return 0;
+
+    InfRouteBakeHeader header;
+    if (fread(&header, sizeof(header), 1, f) != 1
+            || !inf_route_bake_header_matches(&header, ctx)) {
+        fprintf(stderr, "%s: stale or incompatible Inferno route bake\n", path);
+        fclose(f);
+        return 0;
+    }
+
+    for (int pillar_mask = 0; pillar_mask < INF_ROUTE_BAKE_COUNT; pillar_mask++) {
+        EncounterArenaTopology* topology =
+            (EncounterArenaTopology*)calloc(1, sizeof(*topology));
+        if (!topology) {
+            fprintf(stderr, "%s: malloc failed for baked topology %d\n",
+                path, pillar_mask);
+            inf_route_topologies_free_range(pillar_mask);
+            fclose(f);
+            abort();
+        }
+        if (fread(topology, sizeof(*topology), 1, f) != 1
+                || !inf_baked_topology_matches(topology, pillar_mask)) {
+            fprintf(stderr, "%s: bad baked topology %d\n", path, pillar_mask);
+            free(topology);
+            inf_route_topologies_free_range(pillar_mask);
+            fclose(f);
+            return 0;
+        }
+        inf_route_topology_owner.topologies[pillar_mask] = topology;
+    }
+    fclose(f);
+    fprintf(stderr, "inferno route topology loaded from %s\n", path);
+    return 1;
+}
+
+static void inf_write_baked_route_topologies(const InfernoContext* ctx) {
+#ifndef PLATFORM_WEB
+    if (!ctx || !ctx->collision_map) return;
+    for (int i = 0; i < INF_ROUTE_BAKE_COUNT; i++) {
+        if (!inf_baked_topology_matches(
+                inf_route_topology_owner.topologies[i], i))
+            return;
+    }
+
+    InfRouteBakeHeader header;
+    memset(&header, 0, sizeof(header));
+    memcpy(header.magic, INF_ROUTE_BAKE_MAGIC, 8);
+    header.version = INF_ROUTE_BAKE_VERSION;
+    header.topology_size = (uint32_t)sizeof(EncounterArenaTopology);
+    header.count = (uint32_t)INF_ROUTE_BAKE_COUNT;
+    header.origin_x = INF_TOPOLOGY_MIN_X;
+    header.origin_y = INF_TOPOLOGY_MIN_Y;
+    header.width = INF_TOPOLOGY_WIDTH;
+    header.height = INF_TOPOLOGY_HEIGHT;
+    header.max_footprint_size = ENCOUNTER_ARENA_TOPOLOGY_MAX_FOOTPRINT_SIZE;
+    header.world_offset_x = ctx->world_offset_x;
+    header.world_offset_y = ctx->world_offset_y;
+    header.revision_base = INF_ROUTE_REVISION_BASE;
+
+    const char* path = osrs_asset_path(INF_ROUTE_BAKE_PATH);
+    char tmp_path[2052];
+    int n = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    if (n < 0 || (size_t)n >= sizeof(tmp_path)) {
+        fprintf(stderr, "inferno route bake path too long: %s\n", path);
+        return;
+    }
+    FILE* f = fopen(tmp_path, "wb");
+    if (!f) {
+        fprintf(stderr, "inferno route bake: cannot write %s\n", tmp_path);
+        return;
+    }
+    if (fwrite(&header, sizeof(header), 1, f) != 1) {
+        fprintf(stderr, "inferno route bake: header write failed\n");
+        fclose(f);
+        remove(tmp_path);
+        return;
+    }
+    for (int i = 0; i < INF_ROUTE_BAKE_COUNT; i++) {
+        if (fwrite(inf_route_topology_owner.topologies[i],
+                sizeof(EncounterArenaTopology), 1, f) != 1) {
+            fprintf(stderr, "inferno route bake: topology %d write failed\n", i);
+            fclose(f);
+            remove(tmp_path);
+            return;
+        }
+    }
+    if (fclose(f) != 0 || rename(tmp_path, path) != 0) {
+        fprintf(stderr, "inferno route bake: failed to publish %s\n", path);
+        remove(tmp_path);
+        return;
+    }
+    fprintf(stderr, "inferno route topology baked to %s (%zu bytes)\n",
+        path,
+        sizeof(header) + sizeof(EncounterArenaTopology) * (size_t)INF_ROUTE_BAKE_COUNT);
+#else
+    (void)ctx;
+#endif
+}
+
 static void inf_finalize_route_topology(InfernoContext* ctx) {
     if (!ctx || ctx->route_topology) {
         fprintf(stderr, "inferno route topology finalized twice\n");
         abort();
     }
+    inf_try_load_baked_route_topologies(ctx);
+    int built = 0;
     for (int pillar_mask = 0;
             pillar_mask < (1 << INF_NUM_PILLARS);
             pillar_mask++) {
@@ -829,7 +1018,7 @@ static void inf_finalize_route_topology(InfernoContext* ctx) {
             .max_footprint_size =
                 ENCOUNTER_ARENA_TOPOLOGY_MAX_FOOTPRINT_SIZE,
             .revision =
-                UINT64_C(0x494e4645524e4f02) + (uint64_t)pillar_mask,
+                INF_ROUTE_REVISION_BASE + (uint64_t)pillar_mask,
             .tile_flags = inf_route_topology_flags,
             .tile_flags_ctx = &build,
             .los_tile_flags = inf_route_topology_los_flags,
@@ -840,12 +1029,14 @@ static void inf_finalize_route_topology(InfernoContext* ctx) {
         if (!*topology) {
             *topology = encounter_arena_topology_build(&spec);
             encounter_arena_topology_finalize(*topology);
+            built = 1;
         } else {
             encounter_arena_topology_require_spec(
                 *topology, &spec, "inferno");
         }
     }
     ctx->route_topology = inf_route_topology_owner.topologies[0];
+    if (built) inf_write_baked_route_topologies(ctx);
 }
 
 static const EncounterArenaTopology* inf_route_topology_for_state(

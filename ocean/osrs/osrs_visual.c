@@ -5,6 +5,9 @@
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <signal.h>
 #include "osrs_env.h"
 #include "osrs_assets.h"
 #include "osrs_encounter.h"
@@ -1124,6 +1127,9 @@ static int g_cli_num_layers = -1;
 static int g_cli_entity_encoder = 0;
 static const char* g_cli_screenshot_path = NULL;
 static int g_cli_screenshot_frame = 0;
+static const char* g_cli_clip_dir = NULL;
+static int g_cli_clip_frames = 0;
+static int g_cli_clip_skip = 0;
 static int g_cli_gui_tab = -1;
 static float g_cli_tps = 0.0f;
 static float g_cli_camera_dist = -1.0f;
@@ -2049,6 +2055,7 @@ static void run_visual(
     uint32_t policy_seed
 ) {
     env->client = NULL;
+    double t0 = osrs_now_ms();
     const EncounterArenaTopology* direct_pvp_topology = NULL;
     if (!encounter_name) {
         const char* cmap_path = getenv("OSRS_COLLISION_MAP");
@@ -2085,11 +2092,13 @@ static void run_visual(
                 "loadout_profile_mode", g_cli_visual_loadout_mode);
         }
 
+        osrs_time_log("encounter_create", &t0);
         VisualCollisionLoad cload = visual_load_encounter_collision_map(edef, env, encounter_name);
         if (cload.cmap) {
             fprintf(stderr, "%s collision map: %d regions, offset (%d, %d)\n",
                     encounter_name, cload.cmap->count, cload.offset_x, cload.offset_y);
         }
+        osrs_time_log("collision_map", &t0);
 
         if (start_wave >= 0 && edef->put_int) {
             edef->put_int(
@@ -2099,11 +2108,13 @@ static void run_visual(
                 start_wave);
         }
         visual_finalize_encounter(edef, env);
+        osrs_time_log("finalize_context", &t0);
         edef->reset(env->encounter_state, env->encounter_context, 0);
         fprintf(stderr, "encounter: %s (obs=%d, heads=%d)\n",
                 edef->name, edef->obs_size, edef->num_action_heads);
         if (start_wave >= 0)
             fprintf(stderr, "start_wave: %d\n", start_wave);
+        osrs_time_log("encounter_reset", &t0);
     } else {
         env->pvp_runtime.use_c_opponent = 1;
         env->pvp_runtime.opponent.type = OPP_IMPROVED;
@@ -2116,6 +2127,7 @@ static void run_visual(
         env,
         encounter_name,
         direct_pvp_topology);
+    osrs_time_log("visual_init_render_scene", &t0);
     pvp_render(env);
 
     ReplayFile* replay = NULL;
@@ -2167,6 +2179,7 @@ static void run_visual(
         g_cli_hidden_size,
         g_cli_num_layers,
         g_cli_entity_encoder);
+    osrs_time_log("visual_policy_init", &t0);
 
     render_save_snapshot(rc, env);
 
@@ -2208,8 +2221,20 @@ static void run_visual(
         rc->ticks_per_second = g_cli_tps;
 
     int frame_counter = 0;
+    int clip_i = 0;
+    int clip_mp4 = 0;
+    int clip_pid = 0;
+    int clip_fd = 0;
+    if (g_cli_clip_dir) {
+        size_t n = strlen(g_cli_clip_dir);
+        clip_mp4 = n >= 4 && g_cli_clip_dir[n - 4] == '.' &&
+            (g_cli_clip_dir[n - 3] == 'm' || g_cli_clip_dir[n - 3] == 'M') &&
+            (g_cli_clip_dir[n - 2] == 'p' || g_cli_clip_dir[n - 2] == 'P') &&
+            g_cli_clip_dir[n - 1] == '4';
+        if (!clip_mp4) mkdir(g_cli_clip_dir, 0755);
+    }
     while (!WindowShouldClose()) {
-        if (g_cli_screenshot_path && rc->entity_count > 0) {
+        if ((g_cli_screenshot_path || g_cli_clip_dir) && rc->entity_count > 0) {
             int eidx = rc->gui.gui_entity_idx;
             if (eidx >= 0 && eidx < rc->entity_count) {
                 rc->cam_target_x = (float)rc->sub_x[eidx] / 128.0f;
@@ -2224,7 +2249,66 @@ static void run_visual(
                 g_cli_screenshot_path, frame_counter);
             break;
         }
+        if (g_cli_clip_dir && frame_counter > g_cli_clip_skip &&
+                clip_i < g_cli_clip_frames && IsWindowReady()) {
+            Image shot = LoadImageFromScreen();
+            if (clip_mp4) {
+                if (clip_pid == 0) {
+                    int pipefd[2];
+                    signal(SIGPIPE, SIG_IGN);
+                    if (pipe(pipefd) < 0) {
+                        fprintf(stderr, "clip: pipe failed\n");
+                        UnloadImage(shot);
+                        break;
+                    }
+                    clip_pid = fork();
+                    if (clip_pid == 0) {
+                        close(pipefd[1]);
+                        dup2(pipefd[0], STDIN_FILENO);
+                        close(pipefd[0]);
+                        char sz[32];
+                        snprintf(sz, sizeof sz, "%dx%d", shot.width, shot.height);
+                        execlp("ffmpeg", "ffmpeg", "-y",
+                               "-f", "rawvideo", "-pix_fmt", "rgba",
+                               "-s", sz, "-r", "30", "-i", "-",
+                               "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                               "-preset", "medium", "-crf", "23",
+                               "-movflags", "+faststart",
+                               "-loglevel", "error",
+                               g_cli_clip_dir, (char *)NULL);
+                        _exit(1);
+                    }
+                    close(pipefd[0]);
+                    clip_fd = pipefd[1];
+                    fprintf(stderr, "clip: recording %s %dx%d\n",
+                        g_cli_clip_dir, shot.width, shot.height);
+                }
+                size_t nbytes = (size_t)shot.width * (size_t)shot.height * 4u;
+                if (write(clip_fd, shot.data, nbytes) != (ssize_t)nbytes) {
+                    fprintf(stderr, "clip: ffmpeg pipe closed\n");
+                    UnloadImage(shot);
+                    break;
+                }
+            } else {
+                char path[512];
+                snprintf(path, sizeof path, "%s/%04d.png", g_cli_clip_dir, clip_i);
+                ExportImage(shot, path);
+            }
+            UnloadImage(shot);
+            clip_i++;
+            if (clip_i >= g_cli_clip_frames) {
+                if (clip_fd > 0) close(clip_fd);
+                if (clip_pid > 0) waitpid(clip_pid, NULL, 0);
+                clip_fd = 0;
+                clip_pid = 0;
+                fprintf(stderr, "clip: wrote %d frames to %s\n",
+                    clip_i, g_cli_clip_dir);
+                break;
+            }
+        }
     }
+    if (clip_fd > 0) close(clip_fd);
+    if (clip_pid > 0) waitpid(clip_pid, NULL, 0);
 
     async_policy_join(&vs.async_policy);
 
@@ -2290,6 +2374,14 @@ int main(int argc, char** argv) {
             g_cli_screenshot_path = argv[++i];
         else if (strcmp(argv[i], "--screenshot-frame") == 0 && i + 1 < argc)
             g_cli_screenshot_frame = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--clip") == 0 && i + 1 < argc) {
+            g_cli_clip_dir = argv[++i];
+            g_cli_clip_frames = 450;
+        }
+        else if (strcmp(argv[i], "--clip-frames") == 0 && i + 1 < argc)
+            g_cli_clip_frames = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--clip-skip") == 0 && i + 1 < argc)
+            g_cli_clip_skip = atoi(argv[++i]);
         else if (strcmp(argv[i], "--tab") == 0 && i + 1 < argc)
             g_cli_gui_tab = atoi(argv[++i]);
         else if (strcmp(argv[i], "--tps") == 0 && i + 1 < argc)
@@ -2321,15 +2413,10 @@ int main(int argc, char** argv) {
         }
     }
 
-#ifdef __EMSCRIPTEN__
-    if (!encounter_name) encounter_name = "inferno";
-    if (encounter_name && strcmp(encounter_name, "pvp") == 0) encounter_name = "nh_pvp";
-#else
 #ifdef OSRS_VISUAL_DEFAULT_ENCOUNTER
     if (!encounter_name) encounter_name = OSRS_VISUAL_DEFAULT_ENCOUNTER;
 #endif
     if (encounter_name && strcmp(encounter_name, "pvp") == 0) encounter_name = "nh_pvp";
-#endif
     VisualPolicyMode policy_mode __attribute__((unused)) =
         visual_policy_parse_mode(policy_mode_name);
 

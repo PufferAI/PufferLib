@@ -2509,6 +2509,11 @@ typedef struct {
 #define SELFPLAY_MAX_HIST 8
 #define SELFPLAY_MAX_LADDER 16
 #define SELFPLAY_PATH_MAX 4096
+// Bot-ladder parallelism, held fixed so rung scores stay comparable across
+// sweep trials that vary vec.total_agents. selfplay.eval_bot_games / this is
+// the games each env plays; scripted bots keep their kNN across episodes, so
+// one game per env measures only cold bots.
+#define SELFPLAY_LADDER_ENVS 8192
 
 // One historical opponent ↔ policies[policy_idx] (env tag == policy_idx).
 typedef struct {
@@ -2898,7 +2903,11 @@ static PuffeRL* eval_make(Ini* ini, TrainContext* ctx, int mode, int render) {
     int match = mode == EVAL_MATCH;
     long eval_agents = puf_ini_get(ini, "base", "eval_agents");
     if (render) {
-        puf_ini_put(ini, "vec.total_agents", "1");
+        // One env on screen, whatever its agent count. env_setup allocates whole
+        // envs, so total_agents must be a multiple of env.num_agents.
+        char nb[32];
+        snprintf(nb, sizeof(nb), "%d", (int)puf_ini_get(ini, "env", "num_agents"));
+        puf_ini_put(ini, "vec.total_agents", nb);
         puf_ini_put(ini, "vec.num_buffers", "1");
         puf_ini_put(ini, "vec.num_threads", "1");
         puf_ini_put(ini, "train.verb_eps", "1");
@@ -3260,9 +3269,11 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
             snprintf(ek, sizeof(ek), "env.%s", over->key);
             puf_ini_put(ini, ek, over->str);
         }
-        // One finished 1v1 per eval env; ignore swept train total_agents.
+        // Fixed parallelism; ignore swept train total_agents. Each env plays
+        // bot_games / SELFPLAY_LADDER_ENVS games, so bots face a warmed-up kNN
+        // rather than being re-measured cold once per env.
         char nbuf[32];
-        snprintf(nbuf, sizeof(nbuf), "%ld", bot_games);
+        snprintf(nbuf, sizeof(nbuf), "%d", SELFPLAY_LADDER_ENVS);
         puf_ini_put(ini, "vec.total_agents", nbuf);
         double ladder[SELFPLAY_MAX_LADDER];
         int rungs = puf_ini_get_list(ini, "selfplay", "eval_bots", ladder,
