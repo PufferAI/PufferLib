@@ -1,13 +1,4 @@
-// Vector backends for the ocean/mujoco envs, included at the end of each
-// mjc_<env>.h after Env, mjc_reset, mjc_step, mjc_render and mjc_init. All
-// memory is bound at create time: the solver scratch (MJ_SCRATCH floats per
-// env, see mj_makeData) and, on the GPU, the whole batch. CPU: the puf_* per-env
-// API calls straight through. GPU (mjc_<env>.cu defines PUF_BACKEND PUF_GPU):
-// one thread per env steps a thread-local Env (local memory is lane interleaved,
-// so every access coalesces) and copies only the persistent prefix, everything
-// before MjData.xquat, in and out of the device batch; the scratch is laid out
-// lane interleaved too (element stride 32). The trainer's device obs/action/
-// reward/terminal buffers are bound into Env.agents at create time.
+// Vector backend, included at the end of each mjc_<env>.h.
 
 #if PUF_BACKEND == PUF_GPU
 #define MJC_BLOCK 128
@@ -19,24 +10,25 @@ struct {
     cudaStream_t stream;
 } mjc_gpu;
 
-__global__ void mjc_reset_kernel(Env* envs, int n) {
+__global__ void mjc_kernel(Env* envs, int n, int reset) {
     int i = blockIdx.x*blockDim.x + threadIdx.x;
     if (i < n) {
         Env env;
         memcpy(&env, &envs[i], MJC_STATE);
-        mjc_reset(&env);
+        if (reset) {
+            mjc_reset(&env);
+        } else {
+            mjc_step(&env);
+        }
         memcpy(&envs[i], &env, MJC_STATE);
     }
 }
 
-__global__ void mjc_step_kernel(Env* envs, int n) {
-    int i = blockIdx.x*blockDim.x + threadIdx.x;
-    if (i < n) {
-        Env env;
-        memcpy(&env, &envs[i], MJC_STATE);
-        mjc_step(&env);
-        memcpy(&envs[i], &env, MJC_STATE);
-    }
+// The trainer resets before binding its stream, so resets go to the null stream
+void mjc_launch(int reset) {
+    mjc_kernel<<<(mjc_gpu.n + MJC_BLOCK - 1) / MJC_BLOCK, MJC_BLOCK, 0, mjc_gpu.stream>>>(
+        mjc_gpu.envs, mjc_gpu.n, reset);
+    assert(cudaGetLastError() == cudaSuccess);
 }
 
 Env* puf_vec_create(int n, Dict* kwargs, obs_t* observations, float* actions, float* rewards,
@@ -45,8 +37,7 @@ Env* puf_vec_create(int n, Dict* kwargs, obs_t* observations, float* actions, fl
     MjModel* m;
     assert(cudaMalloc((void**)&m, sizeof(MjModel)) == cudaSuccess);
     float* scratch;
-    size_t groups = (n + 31) / 32;
-    assert(cudaMalloc((void**)&scratch, groups*32*MJ_SCRATCH*sizeof(float)) == cudaSuccess
+    assert(cudaMalloc((void**)&scratch, sizeof(float)*((n + 31) / 32*32)*MJ_SCRATCH) == cudaSuccess
         && "GPU env solver scratch does not fit in device memory");
     for (int i = 0; i < n; i++) {
         Env* env = &host[i];
@@ -76,19 +67,14 @@ void puf_init(Env* env, Dict* kwargs) {
 }
 
 void puf_reset(Env* envs) {
-    mjc_reset_kernel<<<(mjc_gpu.n + MJC_BLOCK - 1) / MJC_BLOCK, MJC_BLOCK>>>(mjc_gpu.envs,
-        mjc_gpu.n);
-    assert(cudaGetLastError() == cudaSuccess);
+    mjc_launch(1);
 }
 
 void puf_step(Env* envs) {
-    mjc_step_kernel<<<(mjc_gpu.n + MJC_BLOCK - 1) / MJC_BLOCK, MJC_BLOCK, 0, mjc_gpu.stream>>>(
-        mjc_gpu.envs, mjc_gpu.n);
-    assert(cudaGetLastError() == cudaSuccess);
+    mjc_launch(0);
 }
 
-// Copy env 0's state back and draw it with the host model (mj_render recomputes
-// kinematics and contacts from qpos)
+// Draw env 0 with the host model (mj_render recomputes kinematics from qpos)
 void puf_render(Env* envs) {
     Env env;
     cudaStreamSynchronize(mjc_gpu.stream);
@@ -109,6 +95,40 @@ void puf_init(Env* env, Dict* kwargs) {
     mj_makeData(&env->d, (float*)calloc(MJ_SCRATCH, sizeof(float)), 1);
 }
 
+#ifdef PUFFERCPU_EVAL_MAIN
+// Whole control steps (MJC_FRAME_SKIP substeps at once) strobe on screen at
+// 20 Hz. Run the real mjc_step for exact rewards, logs and resets, then
+// rewind and re-integrate the same deterministic substeps one per rendered
+// frame; PUF_STEPS_PER_SEC is therefore the substep rate 1/opt_timestep.
+#define PUF_EVAL_SHOULD_FORWARD
+#define MJC_STATE (offsetof(MjData, xquat))
+char mjc_true[MJC_STATE];
+
+void puf_reset(Env* env) {
+    mjc_reset(env);
+    memcpy(mjc_true, &env->d, MJC_STATE);
+}
+
+void puf_step(Env* env) {
+    MjData* d = &env->d;
+    if (env->tick_frames_left > 0) {
+        env->tick_frames_left--;
+        mj_step(env->m, d);
+        return;
+    }
+    memcpy(d, mjc_true, MJC_STATE);
+    mjc_step(env);
+    float ctrl[MJ_MAX_NU];
+    memcpy(ctrl, d->ctrl, sizeof(ctrl));
+    char post[MJC_STATE];
+    memcpy(post, d, MJC_STATE);
+    memcpy(d, mjc_true, MJC_STATE);
+    memcpy(mjc_true, post, MJC_STATE);
+    memcpy(d->ctrl, ctrl, sizeof(ctrl));
+    mj_step(env->m, d);
+    env->tick_frames_left = MJC_FRAME_SKIP - 1;
+}
+#else
 void puf_reset(Env* env) {
     mjc_reset(env);
 }
@@ -116,6 +136,7 @@ void puf_reset(Env* env) {
 void puf_step(Env* env) {
     mjc_step(env);
 }
+#endif
 
 void puf_render(Env* env) {
     mjc_render(env);

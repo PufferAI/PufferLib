@@ -1,8 +1,6 @@
-// Ant (gymnasium Ant-v5) on the MuJoCo-style physics core: obs = qpos[2:] +
-// qvel + clip(cfrc_ext[1:], -1, 1), reward = healthy + forward velocity - ctrl
-// cost - contact cost, terminates when the torso leaves [0.2, 1.0] m. Model:
-// resources/mujoco/ant.xml compiled by mjcf2bin.py. mjc_reset/mjc_step are
-// host+device (see backend.h).
+// Ant (gymnasium Ant-v5): obs = qpos[2:] + qvel scaled by mj_obsJoints +
+// clip(cfrc_ext[1:], -1, 1), reward = healthy + forward velocity - ctrl cost
+// - contact cost, terminates when the torso leaves z in [0.2, 1.0].
 
 #include <assert.h>
 #include <math.h>
@@ -11,7 +9,7 @@
 #include "raylib.h"
 typedef float obs_t;
 #include "pufferenv.h"
-// physics.h capacities sized to this model (checked by mj_loadModel)
+// model capacities, checked by mj_loadModel
 #define MJ_MAX_NQ 15
 #define MJ_MAX_NV 14
 #define MJ_MAX_NBODY 14
@@ -23,11 +21,13 @@ typedef float obs_t;
 #include "physics.h"
 #include "render.h"
 
-#define ANT_FRAME_SKIP 5
+// forward velocity worth perf 1 and a trainer reward of 1 per step
+#define ANT_TARGET_VEL 5.0f
+#define MJC_FRAME_SKIP 5
 #define OBS_SIZE 105
 #define NUM_ATNS 8
 #define ACT_SIZES {1, 1, 1, 1, 1, 1, 1, 1}
-#define PUF_STEPS_PER_SEC 20
+#define PUF_STEPS_PER_SEC 100
 
 MjModel mj_model;
 
@@ -50,6 +50,7 @@ struct Env {
     unsigned int rng;
     const MjModel* m;
     int tick;
+    int tick_frames_left;
     float x_start;
     float episode_return;
     int max_steps;
@@ -65,10 +66,7 @@ typedef Env Ant;
 // Returns the contact cost (sum of squared clipped external forces)
 MJ_HD float compute_observations(Ant* env) {
     const MjModel* m = env->m;
-    float* obs = env->agents[0].observations;
-    memcpy(obs, env->d.qpos + 2, (m->nq - 2)*sizeof(float));
-    memcpy(obs + m->nq - 2, env->d.qvel, m->nv*sizeof(float));
-    float* cfrc = obs + m->nq - 2 + m->nv;
+    float* cfrc = mj_obsJoints(m, &env->d, env->agents[0].observations, 2, 20.0f);
     float cost = 0.0f;
     for (int b = 1; b < m->nbody; b++) {
         for (int k = 0; k < 6; k++) {
@@ -105,15 +103,14 @@ MJ_HD void mjc_step(Ant* env) {
         env->d.ctrl[i] = fminf(fmaxf(actions[i], -1.0f), 1.0f);
         cost += env->d.ctrl[i]*env->d.ctrl[i];
     }
-    // Gym measures the torso displacement with body xpos, which lags qpos by
-    // one substep (kinematics of the last forward pass)
+    // Gym measures displacement with body xpos, which lags qpos by one substep
     float x0 = env->d.xpos[1][0];
-    for (int k = 0; k < ANT_FRAME_SKIP; k++) {
+    for (int k = 0; k < MJC_FRAME_SKIP; k++) {
         mj_step(m, &env->d);
     }
     mj_rnePostConstraint(m, &env->d);
     float* q = env->d.qpos;
-    float dt = ANT_FRAME_SKIP*m->opt_timestep;
+    float dt = MJC_FRAME_SKIP*m->opt_timestep;
     float x_velocity = (env->d.xpos[1][0] - x0) / dt;
     int healthy = isfinite(q[2]) && q[2] >= 0.2f && q[2] <= 1.0f;
     float contact_cost = compute_observations(env);
@@ -121,7 +118,7 @@ MJ_HD void mjc_step(Ant* env) {
         - contact_cost + (healthy ? env->healthy_reward : 0.0f);
     env->tick++;
     env->episode_return += reward;
-    env->agents[0].rewards[0] = reward;
+    env->agents[0].rewards[0] = reward / ANT_TARGET_VEL;
     env->agents[0].terminals[0] = 0.0f;
     if (healthy && env->tick < env->max_steps) {
         return;
@@ -129,7 +126,7 @@ MJ_HD void mjc_step(Ant* env) {
     float distance = q[0] - env->x_start;
     float xvel = distance / (env->tick*dt);
     env->agents[0].terminals[0] = 1.0f;
-    env->log.perf += fminf(fmaxf(xvel / 5.0f, 0.0f), 1.0f);
+    env->log.perf += fminf(fmaxf(xvel / ANT_TARGET_VEL, 0.0f), 1.0f);
     env->log.score += env->episode_return;
     env->log.episode_return += env->episode_return;
     env->log.episode_length += env->tick;
@@ -155,7 +152,6 @@ void mjc_init(Ant* env, Dict* kwargs) {
     env->m = &mj_model;
     env->num_agents = 1;
     env->agents[0].policy = 0;
-    env->agents[0].action_mask = NULL;
     env->max_steps = dict_get(kwargs, "max_steps");
     env->reset_noise_scale = dict_get(kwargs, "reset_noise_scale");
     env->forward_reward_weight = dict_get(kwargs, "forward_reward_weight");

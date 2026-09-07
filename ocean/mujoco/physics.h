@@ -1,12 +1,4 @@
-// MuJoCo-style rigid body physics for PufferLib envs. CUDA C99, fixed capacity,
-// float. Ports mj_step's pipeline (same algorithms, names and layouts as the
-// MuJoCo engine) for the features the classic Gym models use: free/ball/hinge/
-// slide joints, plane/sphere/capsule geoms, motor actuators, joint springs and
-// dampers, joint limits and pyramidal friction contacts with MuJoCo's soft
-// constraint model, semi-implicit Euler with implicit damping, and RK4.
-// Models are compiled from MJCF by ocean/mujoco/mjcf2bin.py and loaded with
-// mj_loadModel; arrays have fixed MJ_MAX_* capacity (defaults below, envs
-// define tighter ones for their model before including) and runtime counts.
+// MuJoCo-style rigid body physics for PufferLib envs.
 
 #include <assert.h>
 #include <math.h>
@@ -51,7 +43,7 @@
 #ifndef MJ_MAXEFC
 #define MJ_MAXEFC 128
 #endif
-#define MJ_MAGIC 0x4e424a4d
+#define MJ_MAGIC 0x4e424a4d // Basically a checksum to make sure the loaded model is valid
 enum {MJ_JNT_FREE, MJ_JNT_BALL, MJ_JNT_SLIDE, MJ_JNT_HINGE};
 enum {MJ_GEOM_PLANE, MJ_GEOM_HFIELD, MJ_GEOM_SPHERE, MJ_GEOM_CAPSULE, MJ_GEOM_ELLIPSOID,
     MJ_GEOM_CYLINDER, MJ_GEOM_BOX};
@@ -134,7 +126,6 @@ typedef struct {
     int efc_address;
 } MjContact;
 
-// Constraint solver scratch: MJ_SCRATCH floats per env
 #define MJ_SCRATCH (2*MJ_MAXEFC*MJ_MAXEFC + MJ_MAXEFC*MJ_MAX_NV)
 
 typedef struct {
@@ -200,16 +191,10 @@ void mj_read(FILE* fp, void* dst, int count, int size) {
 void mj_loadModel(MjModel* m, const char* path) {
     FILE* fp = fopen(path, "rb");
     assert(fp && "cannot open model file");
-    int head[9];
-    mj_read(fp, head, 9, sizeof(int));
+    int head[2];
+    mj_read(fp, head, 2, sizeof(int));
     assert(head[0] == MJ_MAGIC && head[1] == 1 && "bad model file");
-    m->nq = head[2];
-    m->nv = head[3];
-    m->nbody = head[4];
-    m->njnt = head[5];
-    m->ngeom = head[6];
-    m->nsite = head[7];
-    m->nu = head[8];
+    mj_read(fp, &m->nq, 7, sizeof(int));
     assert(m->nq <= MJ_MAX_NQ && m->nv <= MJ_MAX_NV && m->nbody <= MJ_MAX_NBODY
         && m->njnt <= MJ_MAX_NJNT && m->ngeom <= MJ_MAX_NGEOM && m->nsite <= MJ_MAX_NSITE
         && m->nu <= MJ_MAX_NU && "model exceeds MJ_MAX_* capacity");
@@ -321,11 +306,16 @@ MJ_HD void mju_normalize4(float* q) {
     }
 }
 
+// res may alias qa (kinematics accumulates joint rotations in place)
 MJ_HD void mju_mulQuat(float* res, const float* qa, const float* qb) {
-    res[0] = qa[0]*qb[0] - qa[1]*qb[1] - qa[2]*qb[2] - qa[3]*qb[3];
-    res[1] = qa[0]*qb[1] + qa[1]*qb[0] + qa[2]*qb[3] - qa[3]*qb[2];
-    res[2] = qa[0]*qb[2] - qa[1]*qb[3] + qa[2]*qb[0] + qa[3]*qb[1];
-    res[3] = qa[0]*qb[3] + qa[1]*qb[2] - qa[2]*qb[1] + qa[3]*qb[0];
+    float t0 = qa[0]*qb[0] - qa[1]*qb[1] - qa[2]*qb[2] - qa[3]*qb[3];
+    float t1 = qa[0]*qb[1] + qa[1]*qb[0] + qa[2]*qb[3] - qa[3]*qb[2];
+    float t2 = qa[0]*qb[2] - qa[1]*qb[3] + qa[2]*qb[0] + qa[3]*qb[1];
+    float t3 = qa[0]*qb[3] + qa[1]*qb[2] - qa[2]*qb[1] + qa[3]*qb[0];
+    res[0] = t0;
+    res[1] = t1;
+    res[2] = t2;
+    res[3] = t3;
 }
 
 MJ_HD void mju_rotVecQuat(float* res, const float* vec, const float* quat) {
@@ -449,6 +439,42 @@ MJ_HD float mju_randn(unsigned int* rng) {
     return sqrtf(-2.0f*logf(u1))*cosf(2.0f*(float)M_PI*u2);
 }
 
+// Gym joint obs (qpos[skip:] + qvel) scaled to O(1): limited joints by range,
+// unlimited hinges by pi, qvel by vel_scale, all clamped to [-1, 1]; quats and
+// unlimited slides as is. Returns the advanced obs pointer.
+MJ_HD float* mj_obsJoints(const MjModel* m, const MjData* d, float* obs, int skip,
+    float vel_scale) {
+    float q[MJ_MAX_NQ];
+    for (int j = 0; j < m->njnt; j++) {
+        int adr = m->jnt_qposadr[j];
+        int type = m->jnt_type[j];
+        if (type == MJ_JNT_FREE || type == MJ_JNT_BALL) {
+            memcpy(q + adr, d->qpos + adr, (type == MJ_JNT_FREE ? 7 : 4)*sizeof(float));
+        } else if (m->jnt_limited[j]) {
+            float lo = m->jnt_range[j][0];
+            float hi = m->jnt_range[j][1];
+            q[adr] = fminf(fmaxf((2.0f*d->qpos[adr] - lo - hi) / (hi - lo), -1.0f), 1.0f);
+        } else if (type == MJ_JNT_HINGE) {
+            q[adr] = fminf(fmaxf(d->qpos[adr] / (float)M_PI, -1.0f), 1.0f);
+        } else {
+            q[adr] = d->qpos[adr];
+        }
+    }
+    memcpy(obs, q + skip, (m->nq - skip)*sizeof(float));
+    obs += m->nq - skip;
+    for (int i = 0; i < m->nv; i++) {
+        obs[i] = fminf(fmaxf(d->qvel[i] / vel_scale, -1.0f), 1.0f);
+    }
+    return obs + m->nv;
+}
+
+MJ_HD float* mj_obsScaled(float* obs, const float* src, int n, float scale) {
+    for (int i = 0; i < n; i++) {
+        obs[i] = fminf(fmaxf(src[i] / scale, -1.0f), 1.0f);
+    }
+    return obs + n;
+}
+
 // In-place Cholesky factor A = L L^T
 MJ_HD void mju_cholFactor(float* A, int n, int lda, int es) {
     for (int j = 0; j < n; j++) {
@@ -499,15 +525,11 @@ MJ_HD void mj_local2Global(MjData* d, float* xpos, float* xmat, const float* pos
 }
 
 MJ_HD void mj_kinematics(const MjModel* m, MjData* d) {
-    memset(d->xpos[0], 0, 3*sizeof(float));
-    memset(d->xmat[0], 0, 9*sizeof(float));
-    d->xquat[0][0] = 1.0f;
-    d->xquat[0][1] = 0.0f;
-    d->xquat[0][2] = 0.0f;
-    d->xquat[0][3] = 0.0f;
-    d->xmat[0][0] = 1.0f;
-    d->xmat[0][4] = 1.0f;
-    d->xmat[0][8] = 1.0f;
+    // world body at the origin (ident also starts with the identity quaternion)
+    float ident[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    memset(d->xpos[0], 0, sizeof(d->xpos[0]));
+    memcpy(d->xquat[0], ident, sizeof(d->xquat[0]));
+    memcpy(d->xmat[0], ident, sizeof(ident));
     for (int i = 1; i < m->nbody; i++) {
         float xpos[3], xquat[4];
         int jntadr = m->body_jntadr[i];
@@ -602,7 +624,8 @@ MJ_HD void mj_comPos(const MjModel* m, MjData* d) {
     memset(d->cinert[0], 0, 10*sizeof(float));
     for (int i = 1; i < m->nbody; i++) {
         float* com = d->subtree_com[m->body_rootid[i]];
-        float offset[3] = {d->xipos[i][0] - com[0], d->xipos[i][1] - com[1], d->xipos[i][2] - com[2]};
+        float offset[3] = {d->xipos[i][0] - com[0], d->xipos[i][1] - com[1],
+            d->xipos[i][2] - com[2]};
         mju_inertCom(d->cinert[i], m->body_inertia[i], d->ximat[i], offset, m->body_mass[i]);
     }
     for (int i = 1; i < m->nbody; i++) {
@@ -745,9 +768,7 @@ MJ_HD void mj_passive(const MjModel* m, MjData* d) {
             continue;
         }
         int padr = m->jnt_qposadr[j];
-        int dadr = m->jnt_dofadr[j];
-        assert(m->jnt_type[j] >= MJ_JNT_SLIDE && "free/ball joint springs not supported");
-        d->qfrc_passive[dadr] -= k*(d->qpos[padr] - m->qpos_spring[padr]);
+        d->qfrc_passive[m->jnt_dofadr[j]] -= k*(d->qpos[padr] - m->qpos_spring[padr]);
     }
     for (int i = 0; i < m->nv; i++) {
         d->qfrc_passive[i] -= m->dof_damping[i]*d->qvel[i];
@@ -944,17 +965,14 @@ MJ_HD void mj_collision(const MjModel* m, MjData* d) {
             } else if (t1 == MJ_GEOM_SPHERE && t2 == MJ_GEOM_SPHERE) {
                 n = mjraw_SphereSphere(pre, margin, pos1, mat1, size1[0], pos2, mat2, size2[0]);
             } else if (t1 == MJ_GEOM_SPHERE && t2 == MJ_GEOM_CAPSULE) {
-                // sphere against the nearest point of the capsule segment
                 float vec[3] = {pos1[0] - pos2[0], pos1[1] - pos2[1], pos1[2] - pos2[2]};
                 float x = fminf(fmaxf(mju_dot3(axis2, vec), -size2[1]), size2[1]);
                 for (int k = 0; k < 3; k++) {
                     vec[k] = pos2[k] + x*axis2[k];
                 }
                 n = mjraw_SphereSphere(pre, margin, pos1, mat1, size1[0], vec, mat2, size2[0]);
-            } else if (t1 == MJ_GEOM_CAPSULE && t2 == MJ_GEOM_CAPSULE) {
-                n = mjc_CapsuleCapsule(pre, margin, pos1, mat1, size1, pos2, mat2, size2);
             } else {
-                assert(0 && "unsupported geom pair");
+                n = mjc_CapsuleCapsule(pre, margin, pos1, mat1, size1, pos2, mat2, size2);
             }
             for (int c = 0; c < n && d->ncon < MJ_MAXCON; c++) {
                 MjContact* con = &d->contact[d->ncon];
@@ -1027,22 +1045,16 @@ MJ_HD void mj_collision(const MjModel* m, MjData* d) {
     }
 }
 
-// Constraints: rows of efc_J with pos/margin, MuJoCo's impedance and
-// reference acceleration, then the dual QP for the constraint forces
+// Constraints: efc rows, impedance/reference acceleration, dual QP solve
 
-// Jacobian of a world point attached to body (jacp: translation, 3 x nv rows)
+// Translational and rotational Jacobians (3 x nv each) of a world point on body
 MJ_HD void mj_jac(const MjModel* m, MjData* d, float jacp[3][MJ_MAX_NV], float jacr[3][MJ_MAX_NV],
     const float* point, int body) {
     memset(jacp, 0, 3*MJ_MAX_NV*sizeof(float));
-    if (jacr) {
-        memset(jacr, 0, 3*MJ_MAX_NV*sizeof(float));
-    }
+    memset(jacr, 0, 3*MJ_MAX_NV*sizeof(float));
     float* com = d->subtree_com[m->body_rootid[body]];
     float offset[3] = {point[0] - com[0], point[1] - com[1], point[2] - com[2]};
     body = m->body_weldid[body];
-    if (m->body_dofnum[body] == 0) {
-        return;
-    }
     for (int i = m->body_dofadr[body] + m->body_dofnum[body] - 1; i >= 0;
             i = m->dof_parentid[i]) {
         float* cdof = d->cdof[i];
@@ -1051,11 +1063,9 @@ MJ_HD void mj_jac(const MjModel* m, MjData* d, float jacp[3][MJ_MAX_NV], float j
         jacp[0][i] = cdof[3] + tmp[0];
         jacp[1][i] = cdof[4] + tmp[1];
         jacp[2][i] = cdof[5] + tmp[2];
-        if (jacr) {
-            jacr[0][i] = cdof[0];
-            jacr[1][i] = cdof[1];
-            jacr[2][i] = cdof[2];
-        }
+        jacr[0][i] = cdof[0];
+        jacr[1][i] = cdof[1];
+        jacr[2][i] = cdof[2];
     }
 }
 
@@ -1099,7 +1109,6 @@ MJ_HD void mj_makeConstraint(const MjModel* m, MjData* d) {
         if (!m->jnt_limited[j]) {
             continue;
         }
-        assert(m->jnt_type[j] == MJ_JNT_HINGE || m->jnt_type[j] == MJ_JNT_SLIDE);
         float value = d->qpos[m->jnt_qposadr[j]];
         for (int side = -1; side <= 1; side += 2) {
             float dist = side*(m->jnt_range[j][(side + 1)/2] - value);
@@ -1127,12 +1136,11 @@ MJ_HD void mj_makeConstraint(const MjModel* m, MjData* d) {
             break;
         }
         // Jacobian difference (body2 - body1) at the contact point, rotated
-        // into the contact frame: rows normal, tangent1, tangent2, and for
-        // condim > 3 the rotational rows torsion, roll1, roll2
+        // into the contact frame; condim > 3 adds the rotational rows
         float jac1[3][MJ_MAX_NV], jac2[3][MJ_MAX_NV], jac[6][MJ_MAX_NV];
         float jacr1[3][MJ_MAX_NV], jacr2[3][MJ_MAX_NV];
-        mj_jac(m, d, jac1, dim > 3 ? jacr1 : NULL, con->pos, b1);
-        mj_jac(m, d, jac2, dim > 3 ? jacr2 : NULL, con->pos, b2);
+        mj_jac(m, d, jac1, jacr1, con->pos, b1);
+        mj_jac(m, d, jac2, jacr2, con->pos, b2);
         for (int r = 0; r < 3; r++) {
             for (int v = 0; v < m->nv; v++) {
                 float dp = jac2[0][v] - jac1[0][v];
@@ -1186,19 +1194,14 @@ MJ_HD void mj_makeConstraint(const MjModel* m, MjData* d) {
     }
 }
 
-// Constraint forces: min 1/2 f^T (A + R) f - f^T (aref - J qacc_smooth) with
-// f >= 0 and A = J M^-1 J^T, by active-set (Lawson-Hanson NNLS) on the free
-// set. Sets efc_force, qfrc_constraint and qacc. The dense matrices are the
-// scratch bound by mj_makeData: efc_AR = A + R, efc_ARfree its factored
-// free-set block and efc_MinvJT = M^-1 J^T, indexed with stride s.
+// Constraint forces by active-set NNLS on the dual QP: min 1/2 f^T (A + R) f
+// - f^T (aref - J qacc_smooth) with f >= 0 and A = J M^-1 J^T. efc_AR,
+// efc_ARfree and efc_MinvJT are the strided scratch bound by mj_makeData.
 MJ_HD void mj_solveConstraint(const MjModel* m, MjData* d) {
     int nefc = d->nefc;
     int s = d->efc_stride;
     memcpy(d->qacc, d->qacc_smooth, sizeof(d->qacc));
     memset(d->qfrc_constraint, 0, sizeof(d->qfrc_constraint));
-    if (nefc == 0) {
-        return;
-    }
     float* MinvJT = d->efc_MinvJT;
     float* G = d->efc_AR;
     float* Gp = d->efc_ARfree;
@@ -1298,9 +1301,8 @@ MJ_HD void mj_solveConstraint(const MjModel* m, MjData* d) {
     }
 }
 
-// Body accelerations and interaction forces including constraint forces:
-// cacc, cfrc_int and cfrc_ext (torque:force in the subtree COM frame; contact
-// forces decoded from the pyramid rows)
+// cacc, cfrc_int and cfrc_ext including constraint forces (torque:force in
+// the subtree COM frame; contact forces decoded from the pyramid rows)
 MJ_HD void mj_rnePostConstraint(const MjModel* m, MjData* d) {
     memset(d->cfrc_ext, 0, sizeof(d->cfrc_ext));
     for (int c = 0; c < d->ncon; c++) {
@@ -1430,13 +1432,13 @@ MJ_HD void mj_RungeKutta4(const MjModel* m, MjData* d) {
     float B[4] = {1.0f/6.0f, 1.0f/3.0f, 1.0f/3.0f, 1.0f/6.0f};
     float X[4][MJ_MAX_NQ + MJ_MAX_NV], F[4][MJ_MAX_NV];
     float qpos0[MJ_MAX_NQ], time0 = d->time;
+    float dv[MJ_MAX_NV], da[MJ_MAX_NV];
     memcpy(qpos0, d->qpos, sizeof(qpos0));
     memcpy(X[0], d->qpos, sizeof(qpos0));
     memcpy(X[0] + m->nq, d->qvel, sizeof(d->qvel));
     memcpy(F[0], d->qacc, sizeof(d->qacc));
     for (int i = 1; i < 4; i++) {
         // stage i uses only stage i-1 with weight A[i-1]
-        float dv[MJ_MAX_NV], da[MJ_MAX_NV];
         for (int v = 0; v < m->nv; v++) {
             dv[v] = A[i - 1]*X[i - 1][m->nq + v];
             da[v] = A[i - 1]*F[i - 1][v];
@@ -1451,7 +1453,6 @@ MJ_HD void mj_RungeKutta4(const MjModel* m, MjData* d) {
         memcpy(X[i] + m->nq, d->qvel, sizeof(d->qvel));
         memcpy(F[i], d->qacc, sizeof(d->qacc));
     }
-    float dv[MJ_MAX_NV], da[MJ_MAX_NV];
     for (int v = 0; v < m->nv; v++) {
         dv[v] = 0.0f;
         da[v] = 0.0f;
@@ -1473,7 +1474,6 @@ MJ_HD void mj_step(const MjModel* m, MjData* d) {
     if (m->opt_integrator == MJ_INT_RK4) {
         mj_RungeKutta4(m, d);
     } else {
-        assert(m->opt_integrator == MJ_INT_EULER);
         mj_Euler(m, d);
     }
 }

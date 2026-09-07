@@ -4,9 +4,9 @@
 #include "raylib.h"
 #include "rlgl.h"
 
-const Color MJ_BACKGROUND = (Color){6, 24, 24, 255};
-const Color MJ_BODY = (Color){0, 187, 187, 255};
-const Color MJ_CONTACT = (Color){187, 0, 0, 255};
+const Color MJ_BACKGROUND = {6, 24, 24, 255};
+const Color MJ_BODY = {0, 187, 187, 255};
+const Color MJ_CONTACT = {187, 0, 0, 255};
 
 Vector3 mj_rl(const float* p) {
     return (Vector3){p[0], p[2], -p[1]};
@@ -39,8 +39,10 @@ void mj_render(const MjModel* m, MjData* d, const char* title, const float* targ
         float b[3] = {pos[0] + size[1]*mat[2], pos[1] + size[1]*mat[5], pos[2] + size[1]*mat[8]};
         int type = m->geom_type[g];
         if (type == MJ_GEOM_PLANE) {
+            // DrawGrid is finite: follow the camera in whole-tile steps
             rlPushMatrix();
-            rlTranslatef(pos[0], pos[2], -pos[1]);
+            rlTranslatef(pos[0] + floorf(target[0] - pos[0]), pos[2],
+                -pos[1] - floorf(target[1] - pos[1]));
             DrawGrid(400, 1.0f);
             rlPopMatrix();
         } else if (type == MJ_GEOM_SPHERE) {
