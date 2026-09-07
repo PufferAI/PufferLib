@@ -224,6 +224,21 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
             result_queue.put((args['gpu_id'], [], [], []))
         return
 
+    load_path = args.get('load_model_path')
+    if load_path:
+        if load_path == 'latest':
+            pattern = os.path.join(
+                args['checkpoint_dir'], args['env_name'], '**', '*.bin')
+            candidates = glob.glob(pattern, recursive=True)
+            if not candidates:
+                raise FileNotFoundError(
+                    f'No .bin checkpoints found in '
+                    f'{args["checkpoint_dir"]}/{args["env_name"]}/')
+            load_path = max(candidates, key=os.path.getctime)
+        backend.load_weights(pufferl, load_path)
+        if verbose:
+            print(f'Loaded weights from {load_path}')
+
     args.pop('nccl_id', None)
     model_size = pufferl.num_params()
     if verbose:

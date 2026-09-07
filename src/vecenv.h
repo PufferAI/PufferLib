@@ -64,7 +64,12 @@ static inline void dict_set(Dict* dict, const char* key, double value) {
 }
 
 // Forward declare CUDA stream type
+#ifdef __HIP_PLATFORM_AMD__
+#include <hip/hip_runtime.h>
+#define cudaStream_t hipStream_t
+#else
 typedef struct CUstream_st* cudaStream_t;
+#endif
 
 // Threading state
 typedef struct StaticThreading StaticThreading;
@@ -188,6 +193,23 @@ typedef int cudaMemcpyKind;
 #define cudaHostAllocPortable 1
 #define cudaStreamNonBlocking 1
 
+#ifdef __HIP_PLATFORM_AMD__
+#include <hip/hip_runtime.h>
+#define cudaMemcpyKind hipMemcpyKind
+#define cudaHostAlloc hipHostAlloc
+#define cudaMalloc hipMalloc
+#define cudaMemcpy hipMemcpy
+#define cudaMemcpyAsync hipMemcpyAsync
+#define cudaMemset hipMemset
+#define cudaFree hipFree
+#define cudaFreeHost hipHostFree
+#define cudaSetDevice hipSetDevice
+#define cudaDeviceSynchronize hipDeviceSynchronize
+#define cudaStreamSynchronize hipStreamSynchronize
+#define cudaStreamCreateWithFlags hipStreamCreateWithFlags
+#define cudaStreamQuery hipStreamQuery
+#define cudaGetErrorString hipGetErrorString
+#else
 extern cudaError_t cudaHostAlloc(void**, size_t, unsigned int);
 extern cudaError_t cudaMalloc(void**, size_t);
 extern cudaError_t cudaMemcpy(void*, const void*, size_t, cudaMemcpyKind);
@@ -201,6 +223,7 @@ extern cudaError_t cudaStreamSynchronize(cudaStream_t);
 extern cudaError_t cudaStreamCreateWithFlags(cudaStream_t*, unsigned int);
 extern cudaError_t cudaStreamQuery(cudaStream_t);
 extern const char* cudaGetErrorString(cudaError_t);
+#endif
 
 #define OMP_WAITING 5
 #define OMP_RUNNING 6
