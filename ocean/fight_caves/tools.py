@@ -534,10 +534,8 @@ def check_openmp(errors: list[str], compiler_value: str | None, language: str) -
                 *compiler, str(source_path), "-fopenmp", "-o", str(root / "test")
             ]
             if language == "c++":
-                omp_library = os.environ.get(
-                    "PUFFER_OMP_LIB", "-lomp5" if sys.platform == "linux" else "-lomp"
-                )
-                arguments.extend(shlex.split(omp_library))
+                # Match the unmodified Puffer 4.0 build.sh link flags.
+                arguments.append("-lomp5" if sys.platform == "linux" else "-lomp")
             result = subprocess.run(
                 arguments,
                 text=True,
@@ -603,7 +601,10 @@ def preflight_args() -> argparse.Namespace:
 
 
 def preflight_main() -> int:
-    args = preflight_args()
+    return run_preflight(preflight_args().mode)
+
+
+def run_preflight(mode: str) -> int:
     errors: list[str] = []
     if sys.version_info < (3, 10):
         errors.append(
@@ -611,17 +612,18 @@ def preflight_main() -> int:
         )
 
     compiler = command_name(os.environ.get("CC"), "clang")
-    if args.mode != "viewer-runtime":
+    if mode != "viewer-runtime":
         require_command(errors, compiler, "C compilation")
 
-    if args.mode in ("core", "native", "cpu", "cuda", "web"):
+    if mode in ("core", "native", "cpu", "cuda", "web"):
         verify_assets(errors, ("core",))
-    elif args.mode in ("viewer", "viewer-runtime"):
+    elif mode in ("viewer", "viewer-runtime"):
         verify_assets(errors, ("core", "viewer"))
 
-    if args.mode in ("native", "cpu", "cuda"):
+    if mode in ("native", "cpu", "cuda"):
         require_command(errors, "ar", "static library creation")
-    if args.mode in ("cpu", "cuda"):
+    if mode in ("cpu", "cuda"):
+        require_command(errors, "python", "Puffer build.sh; activate your Python environment")
         cxx = command_name(os.environ.get("CXX"), "g++")
         require_command(errors, cxx, "C++ extension compilation")
         for module, purpose in (
@@ -631,21 +633,21 @@ def preflight_main() -> int:
         ):
             require_python_module(errors, module, purpose)
         check_openmp(errors, os.environ.get("CXX"), "c++")
-    if args.mode in ("native", "cpu", "cuda"):
+    if mode in ("native", "cpu", "cuda"):
         check_openmp(errors, os.environ.get("CC"), "c")
-    if args.mode == "native" and sys.platform == "linux":
+    if mode == "native" and sys.platform == "linux":
         check_linux_viewer_link(errors, os.environ.get("CC"))
-    if args.mode == "cuda":
+    if mode == "cuda":
         cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
         nvcc = str(Path(cuda_home) / "bin" / "nvcc") if cuda_home else "nvcc"
         require_command(errors, nvcc, "CUDA backend compilation")
         require_command(errors, "nvidia-smi", "CUDA device validation")
-    if args.mode == "viewer":
+    if mode == "viewer":
         require_command(errors, "cmake", "viewer configuration")
         check_linux_viewer_link(errors, os.environ.get("CC"))
-    if args.mode == "viewer-runtime":
+    if mode == "viewer-runtime":
         check_graphical_display(errors)
-    if args.mode == "web":
+    if mode == "web":
         require_command(errors, "emcc", "WebAssembly compilation")
 
     if errors:
@@ -660,7 +662,85 @@ def preflight_main() -> int:
             )
         return 1
 
-    print(f"Fight Caves {args.mode} preflight passed.")
+    print(f"Fight Caves {mode} preflight passed.")
+    return 0
+
+
+# Optional viewer build; the shared Puffer build.sh remains unmodified.
+
+RAYLIB_FILES = ("include/raylib.h", "include/raymath.h", "include/rlgl.h",
+                "lib/libraylib.a")
+
+
+def require_raylib(root: Path) -> Path:
+    missing = [name for name in RAYLIB_FILES if not (root / name).is_file()]
+    if missing:
+        raise AssetError(f"Raylib is incomplete at {root}: missing {', '.join(missing)}. "
+                         "Supply a complete installation with --raylib-root.")
+    return root
+
+
+def viewer_raylib(explicit_root: Path | None) -> Path:
+    if explicit_root is not None:
+        return require_raylib(explicit_root.expanduser().resolve())
+    if sys.platform == "linux" and os.uname().machine in ("x86_64", "amd64"):
+        name = "raylib-5.5_linux_amd64"
+    elif sys.platform == "darwin":
+        name = "raylib-5.5_macos"
+    else:
+        raise AssetError("No bundled Raylib 5.5 for this platform. "
+                         "Supply a compatible build with --raylib-root.")
+
+    # Reuse Puffer's download when available; otherwise keep this optional
+    # dependency under build/, without creating a partial shared installation.
+    shared = REPO_ROOT / name
+    root = REPO_ROOT / "build" / name
+    for existing in (shared, root):
+        if existing.exists():
+            return require_raylib(existing)
+    root.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="fight-caves-raylib-", dir=root.parent) as value:
+        staging = Path(value)
+        archive_path = staging / f"{name}.tar.gz"
+        download(f"https://github.com/raysan5/raylib/releases/download/5.5/{name}.tar.gz",
+                 archive_path)
+        with tarfile.open(archive_path, "r:gz") as archive:
+            # Copy only the exact headers/static library used by this viewer.
+            # No archive paths or links are ever extracted to the filesystem.
+            for relative in RAYLIB_FILES:
+                member = archive.getmember(f"{name}/{relative}")
+                if not member.isfile():
+                    raise AssetError(f"Raylib archive contains a non-file: {member.name}")
+                source = archive.extractfile(member)
+                if source is None:
+                    raise AssetError(f"Raylib archive cannot read {member.name}")
+                target = staging / name / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+        require_raylib(staging / name).rename(root)
+    return root
+
+
+def build_viewer_main() -> int:
+    parser = argparse.ArgumentParser(description="Build the optional Fight Caves viewer.")
+    parser.add_argument("--raylib-root", type=Path,
+                        help="use an existing Raylib installation instead of downloading 5.5")
+    args = parser.parse_args()
+    if run_preflight("viewer") != 0:
+        return 1
+    try:
+        raylib = viewer_raylib(args.raylib_root)
+        build = REPO_ROOT / "build" / "fight_caves-viewer"
+        subprocess.run(["cmake", "-S", str(ENV_ROOT), "-B", str(build),
+                        "-DCMAKE_BUILD_TYPE=Release", f"-DRAYLIB_ROOT={raylib}"],
+                       cwd=REPO_ROOT, check=True)
+        subprocess.run(["cmake", "--build", str(build), "--parallel"],
+                       cwd=REPO_ROOT, check=True)
+    except (AssetError, OSError, KeyError, tarfile.TarError, subprocess.CalledProcessError) as exc:
+        print(f"Fight Caves viewer build failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"Built: {build / 'fc_viewer'}")
     return 0
 
 
@@ -1310,7 +1390,7 @@ def eval_main():
     if not viewer_path:
         print(
             "Error: fc_viewer binary not found. Build with: "
-            "./build.sh fight_caves --viewer",
+            "python3 ocean/fight_caves/tools.py build-viewer",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1320,7 +1400,7 @@ def eval_main():
             file=sys.stderr,
         )
         print(
-            "Rebuild it first with: ./build.sh fight_caves --viewer",
+            "Rebuild it first with: python3 ocean/fight_caves/tools.py build-viewer",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1501,7 +1581,7 @@ def play_main() -> int:
     viewer = REPO_ROOT / "build/fight_caves-viewer/fc_viewer"
     if not viewer.is_file() or not os.access(viewer, os.X_OK):
         print(f"Fight Caves viewer is not built: {viewer}\n"
-              "Build it with: ./build.sh fight_caves --viewer", file=sys.stderr)
+              "Build it with: python3 ocean/fight_caves/tools.py build-viewer", file=sys.stderr)
         return 1
     os.chdir(REPO_ROOT)
     os.execv(str(viewer), [str(viewer), *sys.argv[1:]])
@@ -1509,10 +1589,11 @@ def play_main() -> int:
 
 def main() -> int:
     commands = {"setup": setup_main, "bundle": bundle_main,
-                "preflight": preflight_main, "play": play_main, "eval": eval_main}
+                "preflight": preflight_main, "build-viewer": build_viewer_main,
+                "play": play_main, "eval": eval_main}
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print("Usage: python3 ocean/fight_caves/tools.py "
-              "{setup,bundle,preflight,play,eval} [options]\n"
+              "{setup,bundle,preflight,build-viewer,play,eval} [options]\n"
               "Use COMMAND --help for command options (play forwards viewer options).")
         return 0 if len(sys.argv) > 1 else 2
     command = sys.argv.pop(1)

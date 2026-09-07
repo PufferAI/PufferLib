@@ -14,7 +14,7 @@ endif()
 set(RAYLIB_ROOT "${RAYLIB_ROOT}" CACHE PATH "Raylib distribution root")
 if(NOT EXISTS "${RAYLIB_ROOT}/include/raylib.h" OR
    NOT EXISTS "${RAYLIB_ROOT}/lib/libraylib.a")
-    message(FATAL_ERROR "Raylib unavailable at ${RAYLIB_ROOT}. Run ./build.sh fight_caves --viewer")
+    message(FATAL_ERROR "Raylib unavailable at ${RAYLIB_ROOT}. Run python3 ocean/fight_caves/tools.py build-viewer")
 endif()
 
 add_executable(fc_viewer viewer.c)

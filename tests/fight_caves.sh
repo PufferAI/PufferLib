@@ -36,8 +36,7 @@ if [ "$MODE" = "--puffer" ] || [ "$MODE" = "--all" ]; then
 fi
 
 if [ "$MODE" = "--all" ]; then
-    "$PYTHON" ocean/fight_caves/tools.py preflight --mode viewer
-    ./build.sh fight_caves --viewer
+    "$PYTHON" ocean/fight_caves/tools.py build-viewer
 fi
 
 echo "Fight Caves environment tests passed ($MODE)."
@@ -84,6 +83,7 @@ expect_failure \
 "$PYTHON" ocean/fight_caves/tools.py setup --all --verify-only
 
 bash tests/fight_caves.sh test --all
+"$PYTHON" ocean/fight_caves/tools.py preflight --mode native
 ./build.sh fight_caves --fast
 ./fight_caves >"$VALIDATION_ROOT/native-smoke.log"
 grep -F "Episodes:    100" "$VALIDATION_ROOT/native-smoke.log" >/dev/null \
@@ -215,6 +215,7 @@ if [ "$SKIP_PIP" != "1" ]; then
 fi
 
 export PYTHON="$PWD/.venv/bin/python"
+export PATH="$PWD/.venv/bin:$PATH"
 bash tests/fight_caves.sh checkout
 
 test -z "$(git status --porcelain)" \

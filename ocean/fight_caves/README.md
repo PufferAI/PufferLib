@@ -18,7 +18,7 @@ The environment uses flat implementation headers, with no separate `src/`,
 - `ui.h`: OSRS interfaces, sprites, fonts, minimap and orbs.
 - `render.h`: actor motion, animation selection, combat effects and debug overlays.
 - `tools.py`: asset installation/verification, bundle creation, preflight,
-  playable launch and checkpoint replay.
+  optional viewer build, playable launch and checkpoint replay.
 - `CMakeLists.txt`: optional viewer build using Puffer's pinned Raylib 5.5.
 
 Acceptance tests live in the repository's `tests/` directory. The full graphical
@@ -28,6 +28,8 @@ change the simulation, policy contract, or configuration.
 ## Requirements
 
 Python 3.10 or newer and the normal PufferLib Python dependencies are required.
+Activate your Python environment first: Puffer's stock `build.sh` invokes
+`python` from `PATH`, which must be the same interpreter used for training.
 Native builds require Clang, `ar`, and an OpenMP development runtime. The viewer
 also requires CMake, OpenGL development libraries, and X11 development headers
 on Linux.
@@ -40,8 +42,10 @@ sudo apt-get install clang libomp-dev libomp5 cmake \
   libxcursor-dev libxinerama-dev x11-utils xvfb
 ```
 
-The build preflight exits with a nonzero status and names any missing
-dependency. It never substitutes a reduced simulator or viewer.
+The environment-local preflight exits with a nonzero status and names any
+missing dependency. It never substitutes a reduced simulator or viewer.
+The shared `build.sh` is unchanged and does not invoke Fight Caves preflight;
+run the explicit check before building a backend as shown below.
 
 ## Install assets
 
@@ -58,6 +62,17 @@ or installation error exits nonzero without replacing an existing installation.
 
 ## Build and test
 
+Use Puffer's standard build commands for the training backend:
+
+```bash
+python ocean/fight_caves/tools.py preflight --mode cpu
+./build.sh fight_caves --cpu
+```
+
+For CUDA, use `preflight --mode cuda` followed by `./build.sh fight_caves`.
+For the standalone simulator, use `preflight --mode native` followed by
+`./build.sh fight_caves --fast`.
+
 Build the CPU Puffer backend and run the environment acceptance tests:
 
 ```bash
@@ -73,9 +88,15 @@ bash tests/fight_caves.sh test --all
 Run the playable viewer through its asset-verifying launcher:
 
 ```bash
-./build.sh fight_caves --viewer
+python3 ocean/fight_caves/tools.py build-viewer
 python3 ocean/fight_caves/tools.py play
 ```
+
+`build-viewer` checks dependencies and assets, reuses Puffer's Raylib 5.5
+installation if present, or downloads the same official release into `build/`.
+Use `--raylib-root /path/to/raylib` to supply an existing installation, including
+on platforms without a matching prebuilt release. An incomplete installation
+fails explicitly. Viewer building does not require the Puffer backend or CUDA.
 
 The launcher verifies all required assets and checks the graphical display.
 The viewer retains tile clicking and route previews, OSRS click indicators,
@@ -106,7 +127,7 @@ The viewer defaults to `resources/fight_caves/viewer`; arena maps default to
 `resources/fight_caves/runtime`. Explicit `FC_ASSET_ROOT`, `FC_REPO_ROOT`,
 `FC_COLLISION_PATH`, `FC_MOVEMENT_PATH` and `FC_LOS_PATH` overrides remain available.
 Use `python3 ocean/fight_caves/tools.py COMMAND --help` for setup, bundle,
-preflight and replay options.
+preflight, viewer-build and replay options.
 
 ## Clean-clone acceptance
 

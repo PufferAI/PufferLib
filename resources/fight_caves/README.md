@@ -31,10 +31,13 @@ existing installation without downloading or changing it with:
 python3 ocean/fight_caves/tools.py setup --all --verify-only
 ```
 
-Fight Caves build, viewer-launch, and policy-replay entry points invoke this
-verification automatically and fail with a nonzero exit status when required
-data is absent or corrupt. They do not fall back to open arena maps or an
-incomplete graphical asset set.
+The `tools.py build-viewer`, `play`, and `eval` commands verify required assets
+automatically and fail with a nonzero exit status when data is absent or corrupt.
+Before using Puffer's unchanged `build.sh`, run
+`python3 ocean/fight_caves/tools.py preflight --mode cpu` (or `cuda`/`native` for
+those builds). The simulator also refuses to start when required arena maps
+cannot be loaded; it does not fall back to open maps. Viewer launch never
+substitutes an incomplete graphical asset set.
 
 The simulator retains the `FC_COLLISION_PATH`, `FC_MOVEMENT_PATH`, and
 `FC_LOS_PATH` environment-variable overrides for controlled development and
