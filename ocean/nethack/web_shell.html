@@ -17,7 +17,14 @@
 <pre id="term">loading engine + weights…</pre>
 <script>
 var term = document.getElementById('term');
-var pending = [];
+var pending = [], flushTimer = null;
+// a frame is printed in one synchronous burst, so flushing on a 0 ms timer never splits one
+function flush() {
+  flushTimer = null;
+  if (!pending.length) return;
+  term.innerHTML = pending.join('\n');
+  pending = [];
+}
 var C = {30:'#3a3a45',31:'#e05555',32:'#4fb455',33:'#c8a03c',34:'#5a78e0',
          35:'#b060c0',36:'#3ab5b5',37:'#c8c8cf',39:null,
          90:'#6a6a78',91:'#ff7a7a',92:'#7ce07c',93:'#ffd75f',94:'#8fa8ff',
@@ -54,16 +61,22 @@ function ansiToHtml(line) {
   return out + span(line.slice(idx));
 }
 var Module = {
-  arguments: ['1000000000', '50'],
-  preRun: [function() { ENV.NH_MULTI = '1'; }], // random role/race/gender/align per game, as trained
+  arguments: ['1000000000', '50'], // 20 Hz; ?hz=N overrides
+  preRun: [function() {
+    // ?seed=N replays that game exactly; ?multi=0 pins the compiled default role
+    let qs = location.search;
+    try { if (!qs && top !== window) qs = top.location.search; } catch (e) {} // site iframe: read the outer page's query
+    const q = new URLSearchParams(qs);
+    ENV.NH_MULTI = q.get('multi') || '1';
+    if (q.get('seed')) ENV.NH_SEED = q.get('seed');
+    if (q.get('skip')) ENV.NH_SKIP = q.get('skip'); // fast-forward N steps unrendered
+    if (q.get('hz')) Module.arguments[1] = String(Math.max(1, Math.round(1000 / Number(q.get('hz')))));
+  }],
   print: function(line) {
     var j = line.indexOf('\x1b[2J');
-    if (j !== -1) {
-      term.innerHTML = pending.join('\n');
-      pending = [];
-      line = line.slice(j + 4);
-    }
+    if (j !== -1) { flush(); line = line.slice(j + 4); }
     pending.push(ansiToHtml(line));
+    if (!flushTimer) flushTimer = setTimeout(flush, 0);
   },
   printErr: function(t) { console.log(t); }
 };

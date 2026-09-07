@@ -1,4 +1,5 @@
 #include <time.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <string.h>
 #ifdef __EMSCRIPTEN__
@@ -30,6 +31,7 @@ static void demo_view_setup(void) {
 // single-agent env, reset immediately (training's puf_reset is lazy)
 static void env_open(Nethack* env) {
     demo_view_setup();
+    nethack_want_chars = 1; // the demo renders and inspects the char grid
     memset(env, 0, sizeof(*env));
     // dungeon variety: rng feeds init()'s seed; srand() runs before env_open
     // in both demo modes, so NH_SEED replays exactly and no-seed varies by time
@@ -271,8 +273,28 @@ static int demo_infer_arch(int total, int* hidden, int* layers, int* actions) {
     return best_l == 1 << 30 ? -1 : 0;
 }
 
+// bf16 weights file (half the download for the web demo): the loader read it as
+// float32 pairs; if no architecture fits that count, expand each 16-bit value.
+static Weights* demo_expand_bf16(Weights* w) {
+    int n = (w->size - 7) * 2;
+    int h, l, a;
+    if (demo_infer_arch(n, &h, &l, &a) != 0) return w;
+    Weights* x = (Weights*)calloc(1, sizeof(Weights) + ((size_t)n + 7) * sizeof(float));
+    x->data = (float*)(x + 1);
+    const uint16_t* src = (const uint16_t*)w->data;
+    for (int i = 0; i < n; i++) {
+        uint32_t bits = (uint32_t)src[i] << 16;
+        memcpy(&x->data[i], &bits, sizeof(float));
+    }
+    x->size = n + 7;
+    x->idx = 0;
+    return x; // caller still owns (and later frees) the original buffer
+}
+
 static NethackNet* make_nethack_net(Weights* w) {
     NethackNet* net = (NethackNet*)calloc(1, sizeof(NethackNet));
+    int h, l, a;
+    if (demo_infer_arch(w->size - 7, &h, &l, &a) != 0) w = demo_expand_bf16(w);
     if (demo_infer_arch(w->size - 7, &net->hidden_size, &net->num_layers,
                         &net->num_actions) != 0) {
         fprintf(stderr, "nethack demo: cannot infer arch from %d floats — "
@@ -1179,6 +1201,21 @@ static void demo_inv_row(int k, int last, int pn,
     printf("%*s│\n", DEMO_INV_W - 1 - len, "");
 }
 
+// one box row: bytes in buf, visible columns in vis; segments past the box
+// width are clipped so the row never wraps
+typedef struct { char buf[512]; int pos, vis; } DemoLine;
+static void demo_line_add(DemoLine* l, const char* esc, const char* text) {
+    int n = (int)strlen(text), room = NH_COLS + 1 - l->vis; // rows are NH_COLS+2 wide with both edges
+    if (room <= 0 || n <= 0) return;
+    if (n > room) n = room;
+    l->pos += snprintf(l->buf + l->pos, sizeof(l->buf) - l->pos, "%s%.*s%s",
+                       esc, n, text, esc[0] ? "\x1b[0m" : "");
+    l->vis += n;
+}
+static void demo_line_flush(DemoLine* l) {
+    printf("%s%*s│", l->buf, NH_COLS + 1 - l->vis, "");
+}
+
 static void demo_render(Nethack* env, int rate_hz, long steps) {
     long* bl = env->blstats;
     printf("\x1b[H\x1b[2J");
@@ -1236,31 +1273,52 @@ static void demo_render(Nethack* env, int rate_hz, long steps) {
     int fill = (int)((hp * nl + hpm - 1) / hpm);
     if (fill > nl) fill = nl;
     int hpc = hp * 3 >= hpm * 2 ? 32 : hp * 3 >= hpm ? 33 : 31;
-    int len = printf("│ [\x1b[7;%dm%.*s\x1b[0m%s] \x1b[2m%s %s %s\x1b[0m"
-           " St:%ld Dx:%ld Co:%ld  Score:%ld",
-           hpc, fill, name, name + fill,
-           (ia >= 0 && ia < 3) ? alignnm[ia] : "?", ig == 1 ? "female" : "male",
-           (ic >= 0 && ic < 5) ? racenm[ic] : "?",
-           bl[NLE_BL_STR25], bl[NLE_BL_DEX], bl[NLE_BL_CON], bl[NLE_BL_SCORE]) - 23;
-    if (len < NH_COLS - 1) printf("%*s", NH_COLS - 1 - len, "");
-    printf("│");
+    // both status rows are clipped to the box width: a long spell list or
+    // several conditions used to wrap onto the next terminal line
+    DemoLine L = {"│", 3, 1};
+    char esc[16], tmp[160];
+    snprintf(esc, sizeof(esc), "\x1b[7;%dm", hpc);
+    demo_line_add(&L, "", " [");
+    snprintf(tmp, sizeof(tmp), "%.*s", fill, name);
+    demo_line_add(&L, esc, tmp);
+    snprintf(tmp, sizeof(tmp), "%s] ", name + fill);
+    demo_line_add(&L, "", tmp);
+    snprintf(tmp, sizeof(tmp), "%s %s %s",
+             (ia >= 0 && ia < 3) ? alignnm[ia] : "?", ig == 1 ? "female" : "male",
+             (ic >= 0 && ic < 5) ? racenm[ic] : "?");
+    demo_line_add(&L, "\x1b[2m", tmp);
+    snprintf(tmp, sizeof(tmp), " St:%ld Dx:%ld Co:%ld  Score:%ld",
+             bl[NLE_BL_STR25], bl[NLE_BL_DEX], bl[NLE_BL_CON], bl[NLE_BL_SCORE]);
+    demo_line_add(&L, "", tmp);
+    demo_line_flush(&L);
     demo_inv_row(k++, last, pn, plines, pclrs);
     static const char* conds[10] = {"Stone", "Slime", "Strngl", "FoodPois",
         "TermIll", "Blind", "Deaf", "Stun", "Conf", "Hallu"};
     static const char* hungers[5] = {"Satiated", "", "Hungry", "Weak", "Fainting"};
     long hu = bl[NLE_BL_HUNGER];
-    len = printf("│ Dlvl:%ld $:%ld HP:%ld(%ld) Pw:%ld(%ld) AC:%ld Xp:%ld/%ld T:%ld",
-           bl[NLE_BL_DEPTH], bl[NLE_BL_GOLD], hp, bl[NLE_BL_HPMAX],
-           bl[NLE_BL_ENE], bl[NLE_BL_ENEMAX], bl[NLE_BL_AC],
-           bl[NLE_BL_XP], bl[NLE_BL_EXP], bl[NLE_BL_TIME]) - 4;
-    if (hu >= 0 && hu < 5 && hungers[hu][0]) len += printf(" \x1b[33m%s\x1b[0m", hungers[hu]) - 9;
-    // known spells: name Lv fail%% (env->spell_* is refreshed each pack_obs)
+    L = (DemoLine){"│", 3, 1};
+    snprintf(tmp, sizeof(tmp), " Dlvl:%ld $:%ld HP:%ld(%ld) Pw:%ld(%ld) AC:%ld Xp:%ld/%ld T:%ld",
+             bl[NLE_BL_DEPTH], bl[NLE_BL_GOLD], hp, bl[NLE_BL_HPMAX],
+             bl[NLE_BL_ENE], bl[NLE_BL_ENEMAX], bl[NLE_BL_AC],
+             bl[NLE_BL_XP], bl[NLE_BL_EXP], bl[NLE_BL_TIME]);
+    demo_line_add(&L, "", tmp);
+    if (hu >= 0 && hu < 5 && hungers[hu][0]) {
+        demo_line_add(&L, "", " ");
+        demo_line_add(&L, "\x1b[33m", hungers[hu]);
+    }
+    for (int b = 0; b < 10; b++) {
+        if (!(bl[NLE_BL_CONDITION] & (1L << b))) continue;
+        demo_line_add(&L, "", " ");
+        demo_line_add(&L, "\x1b[31;1m", conds[b]);
+    }
+    // known spells: name Lv fail% (env->spell_* is refreshed each pack_obs);
+    // shown only when the whole list fits after the conditions
     if (env->n_spells > 0) {
         static const struct { int id; const char* nm; } spnames[] = {
             {344, "sleep"}, {348, "healing"}, {377, "protection"},
             {340, "force bolt"}, {342, "magic missile"}, {361, "cure blindness"},
         };
-        len += printf("  \x1b[36mSp:") - 5;
+        int n = snprintf(tmp, sizeof(tmp), "Sp:");
         for (int i = 0; i < env->n_spells && i < 2; i++) {
             const char* nm = NULL;
             for (unsigned s = 0; s < sizeof(spnames)/sizeof(spnames[0]); s++) {
@@ -1268,23 +1326,23 @@ static void demo_render(Nethack* env, int rate_hz, long steps) {
                 nm = spnames[s].nm;
                 break;
             }
-            len += printf("%s%s(L%d %d%%)", i ? "," : "",
-                   nm ? nm : "spell", env->spell_levs[i], env->spell_fails[i]);
+            n += snprintf(tmp + n, sizeof(tmp) - n, "%s%s(L%d %d%%)", i ? "," : "",
+                          nm ? nm : "spell", env->spell_levs[i], env->spell_fails[i]);
         }
-        printf("\x1b[0m");
+        if (L.vis + 2 + n <= NH_COLS + 1) {
+            demo_line_add(&L, "", "  ");
+            demo_line_add(&L, "\x1b[36m", tmp);
+        }
     }
-    for (int b = 0; b < 10; b++)
-        if (bl[NLE_BL_CONDITION] & (1L << b))
-            len += printf(" \x1b[31;1m%s\x1b[0m", conds[b]) - 11;
-    if (len < NH_COLS - 1) printf("%*s", NH_COLS - 1 - len, "");
-    printf("│");
+    demo_line_flush(&L);
     demo_inv_row(k++, last, pn, plines, pclrs);
     demo_box_edge("└", "┘", NULL, NH_COLS);
     demo_inv_row(k++, last, pn, plines, pclrs);
-    printf("\x1b[2msteps %ld  |  SPACE step/hold 5Hz  |  Shift+SPACE (or S) 20Hz  |  q quit",
-           steps);
-    if (rate_hz > 0) printf("  |  running %d Hz", rate_hz);
-    printf("\x1b[0m\n");
+    if (rate_hz > 0) // auto-run (web): no interactive keys to advertise
+        printf("\x1b[2mstep %ld  |  running %d Hz\x1b[0m\n", steps, rate_hz);
+    else
+        printf("\x1b[2msteps %ld  |  SPACE step/hold 5Hz  |  Shift+SPACE (or S) 20Hz  |  q quit\x1b[0m\n",
+               steps);
     fflush(stdout);
 }
 
@@ -1415,8 +1473,16 @@ static void run_demo_auto(long max_steps, int frame_ms) {
     float acts_f[DEMO_NUM_HEADS];
     // NH_TRACE=1: print a line on every floor change (route analysis)
     int trace = getenv("NH_TRACE") != NULL;
+    // NH_SKIP=N: run the first N steps unrendered, then play at frame_ms
+    long skip = getenv("NH_SKIP") ? atol(getenv("NH_SKIP")) : 0;
     long pf = -1;
     for (long t = 0; t < max_steps; t++) {
+#ifdef __EMSCRIPTEN__
+        // web: render the first playable frame (step 0, or the NH_SKIP point)
+        if (frame_ms > 0 && t == skip) {
+            demo_render(&env, 1000 / frame_ms, t);
+        }
+#endif
         demo_step_once(net, &env, acts_f, &ep_score, &ep_len,
                        &ep_depth, &ep_xp, &ep_gt);
         if (trace) {
@@ -1426,8 +1492,8 @@ static void run_demo_auto(long max_steps, int frame_ms) {
             }
             long f = env.blstats[23] << 8 | env.blstats[24];
             if (f != pf) {
-                printf("TRACE t=%ld d=%ld:%ld hp=%ld xp=%ld\n",
-                       env.blstats[NLE_BL_TIME], env.blstats[23],
+                printf("TRACE t=%ld s=%ld d=%ld:%ld hp=%ld xp=%ld\n",
+                       env.blstats[NLE_BL_TIME], t, env.blstats[23],
                        env.blstats[24], env.blstats[10], env.blstats[18]);
                 pf = f;
             }
@@ -1436,7 +1502,7 @@ static void run_demo_auto(long max_steps, int frame_ms) {
                 pf = -1;
             }
         }
-        if (frame_ms > 0) {
+        if (frame_ms > 0 && t >= skip) {
             demo_render(&env, 1000 / frame_ms, t);
 #ifdef __EMSCRIPTEN__
             emscripten_sleep(frame_ms); // usleep busy-waits in wasm: yield or the page never paints
@@ -1444,6 +1510,9 @@ static void run_demo_auto(long max_steps, int frame_ms) {
             usleep(frame_ms * 1000);
 #endif
         }
+#ifdef __EMSCRIPTEN__
+        else if (frame_ms > 0 && (t & 255) == 0) emscripten_sleep(0); // keep the tab responsive while skipping
+#endif
     }
     if (env.log.n > 0)
         printf("episodes=%.0f  avg_score=%.1f  avg_max_depth=%.2f  avg_xp=%.2f\n",
