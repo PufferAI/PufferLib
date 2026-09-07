@@ -2843,10 +2843,18 @@ void run_sweep(Ini* ini, const char* exe_path) {
     }
 }
 
+// Sweep objective: bare names → env/<name>; keys with '/' used as-is.
+static void sweep_metric_key(Ini* ini, char* buf, size_t n) {
+    const char* metric = puf_ini_get_str(ini, "sweep", "metric");
+    snprintf(buf, n, "%s%s", strchr(metric, '/') ? "" : "env/", metric);
+}
+
 // board!=NULL: merge env/* into train last_log (uptime + util/* stay frozen).
 static EvalResult eval_loop(Ini* ini, PuffeRL* p, int mode, int verbose,
         int render, long eval_episodes, Dict* board, int epoch) {
     int match = mode == EVAL_MATCH;
+    char metric_key[128];
+    sweep_metric_key(ini, metric_key, sizeof(metric_key));
     EvalResult result = {0};
     if (!render) {
         Dict wipe = {0};
@@ -2892,7 +2900,7 @@ static EvalResult eval_loop(Ini* ini, PuffeRL* p, int mode, int verbose,
             puf_dashboard_print(ini, p, show, board ? epoch : 0);
         }
         result.score = match ? dict_get(&el, "env/policy_0_score")
-            : dict_get(&el, "env/score");
+            : dict_get(&el, metric_key);
         result.perf = dict_get(&el, "env/perf");
         if (match) {
             result.draw = dict_get(&el, "env/draw_rate");
@@ -3051,11 +3059,8 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
     long local_timesteps = total_timesteps / ctx->world_size;
     long train_epochs = local_timesteps / batch_size;
     long checkpoint_interval = puf_ini_get(ini, "base", "checkpoint_interval");
-    // Sweep objective: bare names → env/<name>; keys with '/' used as-is.
     char target_key[128];
-    const char* metric = puf_ini_get_str(ini, "sweep", "metric");
-    snprintf(target_key, sizeof(target_key), "%s%s",
-        strchr(metric, '/') ? "" : "env/", metric);
+    sweep_metric_key(ini, target_key, sizeof(target_key));
     Dict last_log = {0};
     // At most one history entry per train epoch (+1 final snapshot for log dump).
     PufLogHistory log_history;
