@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+PYTHON=${PYTHON:-python3}
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    echo "Error: Python interpreter '$PYTHON' was not found. Set PYTHON to a Python 3.10+ executable." >&2
+    exit 1
+fi
+
 # Usage:
 #   ./build.sh breakout              # Build _C.so with breakout statically linked
 #   ./build.sh breakout --float      # float32 precision (required for --slowly)
@@ -9,11 +15,12 @@ set -e
 #   ./build.sh breakout --local      # Standalone executable (debug, sanitizers)
 #   ./build.sh breakout --fast       # Standalone executable (optimized)
 #   ./build.sh breakout --web        # Emscripten web build
+#   ./build.sh fight_caves --viewer # Optional environment viewer
 #   ./build.sh breakout --profile    # Kernel profiling binary
 #   ./build.sh all                   # Build all envs with default and --float
 
 if [ -z "$1" ]; then
-    echo "Usage: ./build.sh ENV_NAME [--float] [--debug] [--local|--fast|--web|--profile|--cpu|--all]"
+    echo "Usage: ./build.sh ENV_NAME [--float] [--debug] [--local|--fast|--web|--viewer|--profile|--cpu|--all]"
     exit 1
 fi
 ENV=$1
@@ -26,11 +33,28 @@ for arg in "$@"; do
         --local) MODE=local ;;
         --fast)  MODE=fast ;;
         --web)   MODE=web ;;
+        --viewer) MODE=viewer ;;
         --profile) MODE=profile ;;
         --cpu)   MODE=cpu; PRECISION="-DPRECISION_FLOAT" ;;
         *) echo "Error: unknown argument '$arg'" && exit 1 ;;
     esac
 done
+
+# Fight Caves ships authoritative runtime/viewer data separately. Validate its
+# selected build path before downloading or compiling anything so a missing
+# dependency or incomplete asset bundle cannot produce a degraded environment.
+if [ "$ENV" = "fight_caves" ]; then
+    FC_PREFLIGHT_MODE=cuda
+    case "${MODE:-}" in
+        local|fast) FC_PREFLIGHT_MODE=native ;;
+        cpu) FC_PREFLIGHT_MODE=cpu ;;
+        viewer) FC_PREFLIGHT_MODE=viewer ;;
+        web) FC_PREFLIGHT_MODE=web ;;
+        profile) FC_PREFLIGHT_MODE=cuda ;;
+    esac
+    "$PYTHON" ocean/fight_caves/scripts/preflight.py \
+        --mode "$FC_PREFLIGHT_MODE"
+fi
 
 if [ "$ENV" = "all" ]; then
     FAILED=""
@@ -54,13 +78,13 @@ fi
 PLATFORM="$(uname -s)"
 if [ "$PLATFORM" = "Linux" ]; then
     RAYLIB_NAME='raylib-5.5_linux_amd64'
-    OMP_LIB=-lomp5
+    OMP_LIB=${PUFFER_OMP_LIB:--lomp5}
     SANITIZE_FLAGS=(-fsanitize=address,undefined,bounds,pointer-overflow,leak -fno-omit-frame-pointer)
     STANDALONE_LDFLAGS=(-lGL)
     SHARED_LDFLAGS=(-Bsymbolic-functions)
 else
     RAYLIB_NAME='raylib-5.5_macos'
-    OMP_LIB=-lomp
+    OMP_LIB=${PUFFER_OMP_LIB:--lomp}
     SANITIZE_FLAGS=()
     STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
     SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup)
@@ -140,7 +164,46 @@ else
     echo "Error: environment '$ENV' not found" && exit 1
 fi
 
+# Environments with implementation split across multiple translation units can
+# list their additional C sources, relative to SRC_DIR, in sources.txt.
+ENV_SOURCES=()
+if [ -f "$SRC_DIR/sources.txt" ]; then
+    while IFS= read -r relative_source || [ -n "$relative_source" ]; do
+        case "$relative_source" in
+            ""|\#*) continue ;;
+        esac
+        source_path="$SRC_DIR/$relative_source"
+        if [ ! -f "$source_path" ]; then
+            echo "Error: source listed in $SRC_DIR/sources.txt not found: $source_path"
+            exit 1
+        fi
+        ENV_SOURCES+=("$source_path")
+    done < "$SRC_DIR/sources.txt"
+fi
+
+if [ -d "$SRC_DIR/include" ]; then
+    INCLUDES+=(-I"$SRC_DIR/include")
+fi
+if [ -d "$SRC_DIR/src" ]; then
+    INCLUDES+=(-I"$SRC_DIR/src")
+fi
+
 OUTPUT_NAME=${OUTPUT_NAME:-$ENV}
+
+if [ "$MODE" = "viewer" ]; then
+    VIEWER_SOURCE_DIR="$SRC_DIR/viewer"
+    VIEWER_BUILD_DIR="build/$ENV-viewer"
+    if [ ! -f "$VIEWER_SOURCE_DIR/CMakeLists.txt" ]; then
+        echo "Error: environment '$ENV' does not provide a viewer build"
+        exit 1
+    fi
+    cmake -S "$VIEWER_SOURCE_DIR" -B "$VIEWER_BUILD_DIR" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DRAYLIB_ROOT="$(pwd)/$RAYLIB_NAME"
+    cmake --build "$VIEWER_BUILD_DIR" --parallel
+    echo "Built: $VIEWER_BUILD_DIR/fc_viewer"
+    exit 0
+fi
 
 # Standalone environment build
 # -mavx2 enables AVX2 intrinsics (__m256, _mm256_*) which drive.h and
@@ -158,7 +221,7 @@ fi
 if [ "$MODE" = "local" ] || [ "$MODE" = "fast" ]; then
     FLAGS=(
         "${INCLUDES[@]}"
-        "$SRC_DIR/$ENV.c" $EXTRA_SRC -o "$OUTPUT_NAME"
+        "$SRC_DIR/$ENV.c" "${ENV_SOURCES[@]}" $EXTRA_SRC -o "$OUTPUT_NAME"
         "${LINK_ARCHIVES[@]}"
         "${EXTRA_LDFLAGS[@]}"
         "${STANDALONE_LDFLAGS[@]}"
@@ -174,7 +237,7 @@ elif [ "$MODE" = "web" ]; then
     echo "Compiling $ENV for web..."
     emcc \
         -o "build/web/$ENV/game.html" \
-        "$SRC_DIR/$ENV.c" $EXTRA_SRC \
+        "$SRC_DIR/$ENV.c" "${ENV_SOURCES[@]}" $EXTRA_SRC \
         -O3 -Wall \
         "${LINK_ARCHIVES[@]}" \
         "${INCLUDES[@]}" \
@@ -207,10 +270,10 @@ for dir in /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu; do
     fi
 done
 if [ -z "$CUDNN_IFLAG" ]; then
-    CUDNN_IFLAG=$(python -c "import nvidia.cudnn, os; print('-I' + os.path.join(nvidia.cudnn.__path__[0], 'include'))" 2>/dev/null || echo "")
+    CUDNN_IFLAG=$("$PYTHON" -c "import nvidia.cudnn, os; print('-I' + os.path.join(nvidia.cudnn.__path__[0], 'include'))" 2>/dev/null || echo "")
 fi
 if [ -z "$CUDNN_LFLAG" ]; then
-    CUDNN_LFLAG=$(python -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
+    CUDNN_LFLAG=$("$PYTHON" -c "import nvidia.cudnn, os; print('-L' + os.path.join(nvidia.cudnn.__path__[0], 'lib'))" 2>/dev/null || echo "")
 fi
 
 # NCCL include/lib fallback (mirrors the cuDNN fallback above).
@@ -224,10 +287,10 @@ for dir in /usr/lib/x86_64-linux-gnu /usr/local/cuda/lib64; do
     if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then NCCL_LFLAG="-L$dir"; break; fi
 done
 if [ -z "$NCCL_IFLAG" ]; then
-    NCCL_IFLAG=$(python -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
+    NCCL_IFLAG=$("$PYTHON" -c "import nvidia.nccl, os; print('-I' + os.path.join(nvidia.nccl.__path__[0], 'include'))" 2>/dev/null || echo "")
 fi
 if [ -z "$NCCL_LFLAG" ]; then
-    NCCL_LFLAG=$(python -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
+    NCCL_LFLAG=$("$PYTHON" -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
 fi
 
 WHEEL_RPATH_FLAGS=()
@@ -244,10 +307,10 @@ NVCC="ccache $CUDA_HOME/bin/nvcc"
 CC="${CC:-$(command -v ccache >/dev/null && echo 'ccache clang' || echo 'clang')}"
 ARCH=${NVCC_ARCH:-native}
 
-PYTHON_INCLUDE=$(python -c "import sysconfig; print(sysconfig.get_path('include'))")
-PYBIND_INCLUDE=$(python -c "import pybind11; print(pybind11.get_include())")
-NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())")
-EXT_SUFFIX=$(python -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
+PYTHON_INCLUDE=$("$PYTHON" -c "import sysconfig; print(sysconfig.get_path('include'))")
+PYBIND_INCLUDE=$("$PYTHON" -c "import pybind11; print(pybind11.get_include())")
+NUMPY_INCLUDE=$("$PYTHON" -c "import numpy; print(numpy.get_include())")
+EXT_SUFFIX=$("$PYTHON" -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 OUTPUT="pufferlib/_C${EXT_SUFFIX}"
 
 BINDING_SRC="$SRC_DIR/binding.c"
@@ -261,15 +324,30 @@ if [ ! -f "$BINDING_SRC" ]; then
 fi
 
 echo "Compiling static library for $ENV..."
-${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
-    -I. -Isrc -I$SRC_DIR -Ivendor \
-    "${INCLUDES[@]}" \
-    -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
-    -DPLATFORM_DESKTOP \
-    -fno-semantic-interposition -fvisibility=hidden \
-    -fPIC -fopenmp \
-    "$BINDING_SRC" -o "$STATIC_OBJ"
-ar rcs "$STATIC_LIB" "$STATIC_OBJ"
+compile_static_source() {
+    local source_file=$1
+    local object_file=$2
+    ${CC:-clang} -c "${CLANG_OPT[@]}" $EXTRA_CFLAGS \
+        -I. -Isrc -I$SRC_DIR -Ivendor \
+        "${INCLUDES[@]}" \
+        -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
+        -DPLATFORM_DESKTOP \
+        -fno-semantic-interposition -fvisibility=hidden \
+        -fPIC -fopenmp \
+        "$source_file" -o "$object_file"
+}
+
+compile_static_source "$BINDING_SRC" "$STATIC_OBJ"
+STATIC_OBJECTS=("$STATIC_OBJ")
+source_index=0
+for environment_source in "${ENV_SOURCES[@]}"; do
+    source_object="build/libstatic_${ENV}_source_${source_index}.o"
+    compile_static_source "$environment_source" "$source_object"
+    STATIC_OBJECTS+=("$source_object")
+    source_index=$((source_index + 1))
+done
+rm -f "$STATIC_LIB"
+ar rcs "$STATIC_LIB" "${STATIC_OBJECTS[@]}"
 
 # Brittle hack: have to extract the tensor type from the static lib to build trainer
 OBS_TENSOR_T=$(awk '/^#define OBS_TENSOR_T/{print $3}' "$BINDING_SRC")

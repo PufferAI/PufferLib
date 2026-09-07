@@ -1,0 +1,13 @@
+src/fc_state.c
+src/fc_loadouts.c
+src/fc_rng.c
+src/fc_tick.c
+src/fc_combat.c
+src/fc_prayer.c
+src/fc_pathfinding.c
+src/fc_spawn.c
+src/fc_npc.c
+src/fc_wave.c
+src/fc_hash.c
+src/fc_episode_summary.c
+src/fc_reward.c
