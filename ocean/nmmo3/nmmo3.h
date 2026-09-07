@@ -197,7 +197,10 @@ void shuffle(int* array, int n, unsigned int* rng) {
 }
 
 double sample_exponential(double halving_rate, unsigned int* rng) {
-    double u = (double)rand_r(rng) / RAND_MAX; // Random number u in [0, 1)
+    double u = (double)rand_r(rng) / ((double)RAND_MAX + 1.0);
+    if (u > 0.999999) {
+        u = 0.999999;
+    }
     return 1 + halving_rate*(-log(1 - u) / log(2));
 }
 
@@ -399,7 +402,14 @@ void cellular_automata(char* grid,
     }
 
     bool done = false;
-    while (!done) {
+    // Unfilled cells with no assigned neighbors never get a color, so this
+    // loop can run forever. Cap iterations; leftover cells stay -1.
+    int ca_guard = 0;
+    int ca_limit = width * height + 1;
+    while (!done && ca_guard++ < ca_limit) {
+        if (pos_sz <= 0) {
+            break;
+        }
         // In place shuffle on active buffer only
         for (int i = 0; i < pos_sz; i+=2) {
             int r = pos[i];
@@ -1098,30 +1108,38 @@ void compute_all_obs(MMO* env) {
 }
 
 int safe_tile(MMO* env, int delta) {
-    bool valid = false;
-    int idx;
-    while (!valid) {
-        valid = true;
-        idx = rand_r(&env->rng) % (env->width * env->height);
-        char tile = env->terrain[idx];
-        if (!is_grass(tile)) {
-            valid = false;
+    int n = env->width * env->height;
+    int idx = 0;
+    for (int attempt = 0; attempt < 1024; attempt++) {
+        idx = rand_r(&env->rng) % n;
+        if (!is_grass(env->terrain[idx])) {
             continue;
         }
         int r = idx / env->width;
         int c = idx % env->width;
- 
-        for (int dr = -delta; dr <= delta; dr++) {
+        bool ok = true;
+        for (int dr = -delta; dr <= delta && ok; dr++) {
             for (int dc = -delta; dc <= delta; dc++) {
-                int adr = map_offset(env, r+dr, c+dc);
-                if (env->pids[adr] != -1) {
-                    valid = false;
+                int rr = r + dr;
+                int cc = c + dc;
+                if (rr < 0 || rr >= env->height || cc < 0 || cc >= env->width) {
+                    ok = false;
+                    break;
+                }
+                if (env->pids[map_offset(env, rr, cc)] != -1) {
+                    ok = false;
                     break;
                 }
             }
-            if (!valid) {
-                break;
-            }
+        }
+        if (ok) {
+            return idx;
+        }
+    }
+    for (int attempt = 0; attempt < n; attempt++) {
+        idx = rand_r(&env->rng) % n;
+        if (is_grass(env->terrain[idx])) {
+            return idx;
         }
     }
     return idx;
@@ -1273,8 +1291,15 @@ void pickup_item(MMO* env, int pid) {
 
 bool dest_check(MMO* env, int r, int c);
 inline bool dest_check(MMO* env, int r, int c) {
+    if (r < 0 || r >= env->height || c < 0 || c >= env->width) {
+        return false;
+    }
     int adr = map_offset(env, r, c);
-    return PASSABLE[(int)env->terrain[adr]] & (env->pids[adr] == -1);
+    unsigned char tile = (unsigned char)env->terrain[adr];
+    if (tile >= 16) {
+        return false;
+    }
+    return PASSABLE[tile] & (env->pids[adr] == -1);
 }
 
 void move(MMO* env, int pid, int direction, bool run) {
@@ -1656,6 +1681,9 @@ void enemy_ai(MMO* env, int pid) {
 
     for (int rr = r-NPC_AGGRO_RANGE; rr <= r+NPC_AGGRO_RANGE; rr++) {
         for (int cc = c-NPC_AGGRO_RANGE; cc <= c+NPC_AGGRO_RANGE; cc++) {
+            if (rr < 0 || rr >= env->height || cc < 0 || cc >= env->width) {
+                continue;
+            }
             int adr = map_offset(env, rr, cc);
             int target_id = env->pids[adr];
             if (target_id == -1 || target_id >= env->num_agents) {
@@ -1806,8 +1834,14 @@ void puf_reset(Env* env) {
         int adr = map_offset(env, r, c);
         //int tier = 1 + env->tiers*level/env->levels;
         int tier = 0;
-        while (tier < 1 || tier > env->tiers) {
-            tier = sample_exponential(1, &env->rng);
+        for (int tries = 0; tries < 64 && (tier < 1 || tier > env->tiers); tries++) {
+            tier = (int)sample_exponential(1, &env->rng);
+        }
+        if (tier < 1) {
+            tier = 1;
+        }
+        if (tier > env->tiers) {
+            tier = env->tiers;
         }
 
         if (spawned) {
@@ -1882,8 +1916,14 @@ void puf_reset(Env* env) {
     //level = fmin(level, env->levels);
     for (int enemy_count = 0; enemy_count < env->num_enemies; enemy_count++) {
         int level = 0;
-        while (level < 1 || level > env->levels) {
-            level = sample_exponential(8, &env->rng);
+        for (int tries = 0; tries < 64 && (level < 1 || level > env->levels); tries++) {
+            level = (int)sample_exponential(8, &env->rng);
+        }
+        if (level < 1) {
+            level = 1;
+        }
+        if (level > env->levels) {
+            level = env->levels;
         }
         if (rand_r(&env->rng) % 8 == 0) {
             level = 1;
