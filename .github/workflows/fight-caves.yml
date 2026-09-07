@@ -1,0 +1,50 @@
+name: fight-caves
+
+on:
+  pull_request:
+    paths:
+      - "build.sh"
+      - "config/fight_caves.ini"
+      - "ocean/fight_caves/**"
+      - "resources/fight_caves/**"
+      - "tests/test_fight_caves.py"
+      - "tests/fight_caves.*"
+      - ".github/workflows/fight-caves.yml"
+  workflow_dispatch:
+
+jobs:
+  clean-checkout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CC: clang
+      CXX: clang++
+      PUFFER_OMP_LIB: -lomp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang libomp-dev libomp5 cmake \
+            libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev x11-utils xvfb
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . --no-build-isolation
+          python -m pip install pytest
+
+      - name: Validate clean checkout
+        env:
+          PYTHON: python
+        run: bash tests/fight_caves.sh checkout
