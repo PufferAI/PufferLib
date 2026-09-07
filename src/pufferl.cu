@@ -1144,9 +1144,14 @@ static void* vec_thread_main(void* arg) {
     float ms = 0.0f;
     while (true) {
         while (__atomic_load_n(state, __ATOMIC_SEQ_CST) != BUF_RUNNING) {
-            if (!__atomic_load_n(&vec->shutdown, __ATOMIC_SEQ_CST)) {
-                continue;
+            if (__atomic_load_n(&vec->shutdown, __ATOMIC_SEQ_CST)) {
+                for (int i = 0; i < NUM_EV; i++) {
+                    cudaEventDestroy(ev[i]);
+                }
+                return NULL;
             }
+        }
+        if (__atomic_load_n(&vec->shutdown, __ATOMIC_SEQ_CST)) {
             for (int i = 0; i < NUM_EV; i++) {
                 cudaEventDestroy(ev[i]);
             }
@@ -3234,12 +3239,31 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
     int pool_eval = !bot_ladder && use_selfplay && max_opp > 0
         && pool_games > 0 && final_checkpoint[0];
     long eval_episodes = puf_ini_get(ini, "base", "eval_episodes");
-    if (ctx->artifact_owner && !bot_ladder && !pool_eval && eval_episodes > 0) {
-        EvalResult r = eval_loop(ini, pufferl, EVAL_SCORE, 1, 0, eval_episodes,
-            &last_log, (int)pufferl->epoch);
-        result.score = result.scores[result.points - 1] = r.score;
+    int eval_epoch = (int)pufferl->epoch;
+    char eval_ckpt[4096] = {0};
+    if (final_checkpoint[0]) {
+        snprintf(eval_ckpt, sizeof(eval_ckpt), "%s", final_checkpoint);
     }
+    // Close every rank before rank-0 eval. Eval on the live DP trainer leaves
+    // child vec workers in BUF_RUNNING/BUF_WAITING while rank 0 waitpid()s
+    // (and previously poisoned rank-0 CUDA graphs if children exited early).
     close_pufferl(pufferl);
+    if (ctx->artifact_owner && !bot_ladder && !pool_eval && eval_episodes > 0
+            && eval_ckpt[0]) {
+        puf_ini_put(ini, "base.load_model_path", eval_ckpt);
+        TrainContext eval_ctx = {
+            .rank = 0,
+            .world_size = 1,
+            .gpu_id = ctx->gpu_id,
+            .artifact_owner = 1,
+            .nccl_id = NULL,
+        };
+        PuffeRL* ep = eval_make(ini, &eval_ctx, EVAL_SCORE, 0);
+        EvalResult r = eval_loop(ini, ep, EVAL_SCORE, 1, 0, eval_episodes,
+            &last_log, eval_epoch);
+        result.score = result.scores[result.points - 1] = r.score;
+        close_pufferl(ep);
+    }
 
     char log_path[4096];
     snprintf(log_path, sizeof(log_path), "%s/%s.ini", log_dir, run_id);
