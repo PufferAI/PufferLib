@@ -24,6 +24,9 @@ int main(void) {
     puf_render(&env);
 
     while (!WindowShouldClose()) {
+        if (IsKeyPressed(KEY_H)) {
+            show_hint(&env);
+        }
         puf_step(&env);
         puf_render(&env);
     }

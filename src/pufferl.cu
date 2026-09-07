@@ -759,6 +759,28 @@ __global__ void zero_term_state(Prec state, Float terminals,
     state.data[i] = from_float(0.0f);
 }
 
+__global__ void zero_term_state_agents(
+        Prec state, const float* terminals) {
+    __shared__ float terminal;
+    int rel = blockIdx.x;
+    if (threadIdx.x == 0) {
+        terminal = terminals[rel];
+    }
+    __syncthreads();
+    if (terminal == 0.0f) {
+        return;
+    }
+
+    int L = state.shape[0];
+    int H = state.shape[2];
+    for (int lh = threadIdx.x; lh < L * H; lh += blockDim.x) {
+        int h = lh % H;
+        int layer = lh / H;
+        long i = state_elem_idx(layer, (int)state.shape[1], rel, h, H);
+        state.data[i] = from_float(0.0f);
+    }
+}
+
 // Select time t, then agents [start, start+count). Rank-2 has F==0 (zero-term shape);
 // stride uses max(F, 1). Out shape {count, F} keeps ndim 1 when F==0.
 Prec puf_slice(Prec p, int t, int start, int count) {
@@ -848,9 +870,15 @@ static void pufferl_forward_step(PuffeRL* pufferl, int buf, int t,
         Prec mask_b = puf_slice(rollouts.action_mask,  t, sub, n);
 
         // Per-policy state is compact (n agents); local index 0..n-1.
-        int state_n = (int)st->shape[0] * n * (int)st->shape[2];
-        zero_term_state<<<grid_size(state_n), BLOCK_SIZE, 0, stream>>>(
-            *st, env->terminals, 0, sub, n);
+        int agent_state_n = (int)st->shape[0] * (int)st->shape[2];
+        int state_n = agent_state_n * n;
+        if (agent_state_n > BLOCK_SIZE && n >= BLOCK_SIZE) {
+            zero_term_state_agents<<<n, BLOCK_SIZE, 0, stream>>>(
+                *st, env->terminals.data + sub);
+        } else {
+            zero_term_state<<<grid_size(state_n), BLOCK_SIZE, 0, stream>>>(
+                *st, env->terminals, 0, sub, n);
+        }
 
         // Carry path: snapshot trainable policy state into per-slot initial_states.
         if (!pol->frozen && t == 0 && rollouts.initial_states.data != NULL) {
@@ -1268,14 +1296,21 @@ static void rollout_start(PuffeRL* p) {
                 && "cudaStreamBeginCapture failed");
         }
         int H = p->hypers.horizon;
-        for (int t = 0; t < H; t++) {
-            int base = t * EV_T;
+    bool record_step_timing = !p->hypers.cudagraphs;
+    for (int t = 0; t < H; t++) {
+        int base = t * EV_T;
+        if (record_step_timing) {
             cudaEventRecord(ev[base + MODEL_START], stream);
-            pufferl_forward_step(p, 0, t, stream);
+        }
+        pufferl_forward_step(p, 0, t, stream);
+        if (record_step_timing) {
             cudaEventRecord(ev[base + MODEL_END], stream);
-            puf_step(p->vec->envs);
+        }
+        puf_step(p->vec->envs);
+        if (record_step_timing) {
             cudaEventRecord(ev[base + ENV_END], stream);
         }
+    }
         if (first) {
             cudaGraph_t graph;
             assert(cudaStreamEndCapture(stream, &graph) == cudaSuccess
@@ -1557,13 +1592,8 @@ static void train_epoch_gpu(PuffeRL* pufferl, RolloutBuf src, int slot,
                 numel(pufferl->grad.shape), NCCL_PRECISION, ncclAvg,
                 pufferl->nccl_comm, stream);
         }
-        muon_step(&pufferl->muon, primary->master_weights,
+        muon_step(&pufferl->muon, primary->master_weights, primary->param,
             pufferl->grad, hypers->max_grad_norm, stream);
-        if (USE_BF16) {
-            int n = numel(primary->param.shape);
-            cast<<<grid_size(n), BLOCK_SIZE, 0, stream>>>(
-                primary->param.data, primary->master_weights.data, n);
-        }
     }
     puf_stamp<<<1, 1, 0, stream>>>(st + TE_E);
 }

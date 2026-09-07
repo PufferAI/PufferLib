@@ -1,3 +1,7 @@
+#include <cublasLt.h>
+#include <cstdint>
+#include <cstring>
+
 // PufferNet model API + architecture
 // Writing custom nets in 4.0+ requires a fair bit of code because you are
 // responsible for defining your own activation and gradient buffers.
@@ -85,6 +89,160 @@ thread_local void* g_cublas_dw_workspace = NULL;
 thread_local cudaStream_t g_dw_stream = NULL;
 thread_local cudaEvent_t g_dw_done = NULL;
 
+// CUDA 13.1 recommends a 32 MiB cuBLAS workspace for Hopper sm90 and
+// Blackwell sm10x/sm12x, which includes the local RTX 5090. It recommends
+// 4 MiB for other architectures, and these recommendations can change with
+// the toolkit version. Workspace size affects which cuBLAS algorithms are
+// eligible, their performance, and potentially their bitwise outputs. Every
+// concurrent lane therefore needs a distinct workspace; the eight-lane cap
+// bounds these allocations to 256 MiB. cublasSetStream resets a user-provided
+// workspace, so lane handles restore their workspace after binding their stream
+// and never change streams afterward. This path is qualified only on RTX 5090
+// with CUDA 13.1; before portable enablement it should select workspace by
+// architecture/toolkit or fall back to serial Muon.
+// https://docs.nvidia.com/cuda/archive/13.1.0/cublas/index.html#cublassetworkspace
+static constexpr size_t CUBLAS_WORKSPACE_BYTES = 32 * 1024 * 1024;
+
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+struct PinnedLtPlan {
+    int M, N, K;
+    cublasOperation_t op_b;
+    cublasLtMatmulDesc_t op;
+    cublasLtMatrixLayout_t a_layout, b_layout, c_layout;
+    cublasLtMatmulAlgo_t algo;
+};
+
+thread_local cublasLtHandle_t g_cublaslt_handle = NULL;
+thread_local PinnedLtPlan g_cublaslt_plans[4] = {};
+thread_local bool g_cublaslt_enabled = false;
+thread_local bool g_cublaslt_muon_enabled = false;
+
+static bool cublaslt_make_row_layout(cublasLtMatrixLayout_t* layout,
+        uint64_t rows, uint64_t cols, int64_t ld) {
+    cublasLtOrder_t order = CUBLASLT_ORDER_ROW;
+    return cublasLtMatrixLayoutCreate(
+            layout, CUDA_R_16BF, rows, cols, ld) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatrixLayoutSetAttribute(*layout,
+            CUBLASLT_MATRIX_LAYOUT_ORDER, &order,
+            sizeof(order)) == CUBLAS_STATUS_SUCCESS;
+}
+
+static bool cublaslt_init_plan(PinnedLtPlan* plan,
+        int M, int N, int K, cublasOperation_t op_b,
+        uint32_t tile = 15, uint32_t stages = 12) {
+    plan->M = M;
+    plan->N = N;
+    plan->K = K;
+    plan->op_b = op_b;
+    cublasOperation_t op_a = CUBLAS_OP_N;
+    if (cublasLtMatmulDescCreate(
+            &plan->op, CUBLAS_COMPUTE_32F,
+            CUDA_R_32F) != CUBLAS_STATUS_SUCCESS
+            || cublasLtMatmulDescSetAttribute(plan->op,
+                CUBLASLT_MATMUL_DESC_TRANSA, &op_a,
+                sizeof(op_a)) != CUBLAS_STATUS_SUCCESS
+            || cublasLtMatmulDescSetAttribute(plan->op,
+                CUBLASLT_MATMUL_DESC_TRANSB, &op_b,
+                sizeof(op_b)) != CUBLAS_STATUS_SUCCESS
+            || !cublaslt_make_row_layout(
+                &plan->a_layout, M, K, K)
+            || !cublaslt_make_row_layout(&plan->b_layout,
+                op_b == CUBLAS_OP_T ? N : K,
+                op_b == CUBLAS_OP_T ? K : N,
+                op_b == CUBLAS_OP_T ? K : N)
+            || !cublaslt_make_row_layout(
+                &plan->c_layout, M, N, N)
+            || cublasLtMatmulAlgoInit(g_cublaslt_handle,
+                CUBLAS_COMPUTE_32F, CUDA_R_32F,
+                CUDA_R_16BF, CUDA_R_16BF,
+                CUDA_R_16BF, CUDA_R_16BF, 21,
+                &plan->algo) != CUBLAS_STATUS_SUCCESS) {
+        return false;
+    }
+
+    uint32_t split_k = 1;
+    uint32_t reduction = 0;
+    uint32_t swizzle = 0;
+    uint32_t custom = 0;
+    return cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_TILE_ID, &tile,
+            sizeof(tile)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_SPLITK_NUM, &split_k,
+            sizeof(split_k)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_REDUCTION_SCHEME, &reduction,
+            sizeof(reduction)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_CTA_SWIZZLING, &swizzle,
+            sizeof(swizzle)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_CUSTOM_OPTION, &custom,
+            sizeof(custom)) == CUBLAS_STATUS_SUCCESS
+        && cublasLtMatmulAlgoConfigSetAttribute(&plan->algo,
+            CUBLASLT_ALGO_CONFIG_STAGES_ID, &stages,
+            sizeof(stages)) == CUBLAS_STATUS_SUCCESS;
+}
+
+static void cublaslt_init_pinned() {
+    int runtime_version = 0;
+    int driver_version = 0;
+    int cublas_version = 0;
+    int device = 0;
+    cudaDeviceProp prop = {};
+    if (cudaRuntimeGetVersion(&runtime_version) != cudaSuccess
+            || runtime_version != 13010
+            || cudaDriverGetVersion(&driver_version) != cudaSuccess
+            || driver_version != 13000
+            || cublasGetVersion(
+                g_cublas_handle, &cublas_version) != CUBLAS_STATUS_SUCCESS
+            || cublas_version != 130201
+            || cudaGetDevice(&device) != cudaSuccess
+            || cudaGetDeviceProperties(&prop, device) != cudaSuccess
+            || prop.major != 12 || prop.minor != 0
+            || prop.multiProcessorCount != 170
+            || std::strcmp(prop.name, "NVIDIA GeForce RTX 5090") != 0
+            || cublasLtCreate(
+                &g_cublaslt_handle) != CUBLAS_STATUS_SUCCESS) {
+        return;
+    }
+    g_cublaslt_enabled =
+        cublaslt_init_plan(&g_cublaslt_plans[0],
+            8192, 1536, 512, CUBLAS_OP_T)
+        && cublaslt_init_plan(&g_cublaslt_plans[1],
+            8192, 512, 1536, CUBLAS_OP_N);
+    g_cublaslt_muon_enabled =
+        cublaslt_init_plan(&g_cublaslt_plans[2],
+            512, 512, 512, CUBLAS_OP_N, 11, 19)
+        && cublaslt_init_plan(&g_cublaslt_plans[3],
+            1536, 512, 512, CUBLAS_OP_N, 18, 15);
+}
+
+static bool cublaslt_try_pinned(cublasHandle_t handle,
+        cublasOperation_t op_a, cublasOperation_t op_b,
+        int M, int N, int K, void* A, void* B, void* C,
+        cudaStream_t stream, float alpha, float beta) {
+    uint32_t beta_bits = 0;
+    std::memcpy(&beta_bits, &beta, sizeof(beta_bits));
+    if (!g_cublaslt_enabled || handle != g_cublas_handle
+            || op_a != CUBLAS_OP_N || alpha != 1.0f || beta_bits != 0
+            || (((uintptr_t)A | (uintptr_t)B | (uintptr_t)C) & 255) != 0) {
+        return false;
+    }
+    for (int i = 0; i < 2; i++) {
+        PinnedLtPlan& plan = g_cublaslt_plans[i];
+        if (plan.M == M && plan.N == N && plan.K == K
+                && plan.op_b == op_b) {
+            return cublasLtMatmul(g_cublaslt_handle, plan.op,
+                &alpha, A, plan.a_layout, B, plan.b_layout,
+                &beta, C, plan.c_layout, C, plan.c_layout,
+                &plan.algo, NULL, 0, stream) == CUBLAS_STATUS_SUCCESS;
+        }
+    }
+    return false;
+}
+#endif
+
 static void cublas_init_one(cublasHandle_t* handle, void** workspace) {
     const size_t ws_bytes = 32 * 1024 * 1024;
     cublasCreate(handle);
@@ -96,6 +254,9 @@ static void cublas_init_one(cublasHandle_t* handle, void** workspace) {
 void cublas_init_handle() {
     cublas_init_one(&g_cublas_handle, &g_cublas_workspace);
     cublas_init_one(&g_cublas_dw_handle, &g_cublas_dw_workspace);
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+    cublaslt_init_pinned();
+#endif
     cudaStreamCreateWithFlags(&g_dw_stream, cudaStreamNonBlocking);
     cudaEventCreateWithFlags(&g_dw_done, cudaEventDisableTiming);
     cudaEventCreateWithFlags(&g_main_ready, cudaEventDisableTiming);
@@ -105,10 +266,19 @@ void cublas_init_handle() {
 static void cublasGemmExDense(cublasHandle_t handle,
         cublasOperation_t op_a, cublasOperation_t op_b,
         int M, int N, int K, void* A, void* B, void* C,
-        cudaStream_t stream, float alpha = 1.0f, float beta = 0.0f) {
+        cudaStream_t stream, float alpha = 1.0f, float beta = 0.0f,
+        bool handle_bound_to_stream = false) {
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+    if (cublaslt_try_pinned(handle, op_a, op_b,
+            M, N, K, A, B, C, stream, alpha, beta)) {
+        return;
+    }
+#endif
     int lda = (op_a == CUBLAS_OP_N) ? K : M;
     int ldb = (op_b == CUBLAS_OP_N) ? N : K;
-    cublasSetStream(handle, stream);
+    if (!handle_bound_to_stream) {
+        cublasSetStream(handle, stream);
+    }
     cublasGemmEx(handle, op_b, op_a, N, M, K, &alpha,
         B, CUBLAS_PRECISION, ldb, A, CUBLAS_PRECISION, lda, &beta,
         C, CUBLAS_PRECISION, N, CUBLAS_COMPUTE, CUBLAS_GEMM_DEFAULT);
@@ -116,33 +286,41 @@ static void cublasGemmExDense(cublasHandle_t handle,
 
 // out(...,N) = alpha * a(...,K) @ b(N,K)^T + beta * out: leading dims folded into M
 void puf_mm(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
-        float alpha = 1.0f, float beta = 0.0f) {
+        float alpha = 1.0f, float beta = 0.0f,
+        cublasHandle_t handle = g_cublas_handle,
+        bool handle_bound_to_stream = false) {
     int M = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
     int K = a->shape[ndim(a->shape)-1];
     int N = b->shape[ndim(b->shape)-2];
-    cublasGemmExDense(g_cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T, M, N, K,
-        a->data, b->data, out->data, stream, alpha, beta);
+    cublasGemmExDense(handle, CUBLAS_OP_N, CUBLAS_OP_T, M, N, K,
+        a->data, b->data, out->data, stream, alpha, beta,
+        handle_bound_to_stream);
 }
 
 // out(M,N) = alpha * a(...,M)^T @ b(...,N) + beta * out: leading dims folded into K
 void puf_mm_tn(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
         float alpha = 1.0f, float beta = 0.0f,
-        cublasHandle_t handle = g_cublas_handle) {
+        cublasHandle_t handle = g_cublas_handle,
+        bool handle_bound_to_stream = false) {
     int M = a->shape[ndim(a->shape)-1];
     int K = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
     int N = b->shape[ndim(b->shape)-1];
     cublasGemmExDense(handle, CUBLAS_OP_T, CUBLAS_OP_N, M, N, K,
-        a->data, b->data, out->data, stream, alpha, beta);
+        a->data, b->data, out->data, stream, alpha, beta,
+        handle_bound_to_stream);
 }
 
 // out(...,N) = alpha * a(...,K) @ b(K,N) + beta * out: leading dims folded into M
 void puf_mm_nn(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
-        float alpha = 1.0f, float beta = 0.0f) {
+        float alpha = 1.0f, float beta = 0.0f,
+        cublasHandle_t handle = g_cublas_handle,
+        bool handle_bound_to_stream = false) {
     int M = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
     int K = a->shape[ndim(a->shape)-1];
     int N = b->shape[ndim(b->shape)-1];
-    cublasGemmExDense(g_cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K,
-        a->data, b->data, out->data, stream, alpha, beta);
+    cublasGemmExDense(handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K,
+        a->data, b->data, out->data, stream, alpha, beta,
+        handle_bound_to_stream);
 }
 
 // Queue dW (mm_tn) on side stream once inputs are ready on main. Per-layer
@@ -1062,6 +1240,29 @@ __global__ void muon_clip_nesterov(float* __restrict__ mb,
     }
 }
 
+// Preserves the BF16 round-trip and bit-identical result while fusing work;
+// measured about 0.5% higher SPS.
+__global__ void muon_clip_nesterov_sum_sq_partials(
+        float* __restrict__ partials, float* __restrict__ mb,
+        precision_t* __restrict__ gc, const float* __restrict__ sum_sq_ptr,
+        float max_norm, float eps, float mu, int n) {
+    __shared__ float sdata[256];
+    int tid = threadIdx.x;
+    float clip_coef = fminf(max_norm / (sqrtf(*sum_sq_ptr) + eps), 1.0f);
+    float sum = 0.0f;
+    for (int i = blockIdx.x * blockDim.x + tid; i < n; i += blockDim.x * gridDim.x) {
+        float g = to_float(gc[i]) * clip_coef;
+        float m = mu * mb[i] + g;
+        mb[i] = m;
+        precision_t update = from_float(g + mu * m);
+        gc[i] = update;
+        float v = to_float(update);
+        sum += v * v;
+    }
+    sdata[tid] = sum;
+    block_reduce_sum(sdata, &partials[blockIdx.x], tid, blockDim.x, 1);
+}
+
 // x *= 1 / max(sqrt(sum_sq), eps)  — NS input normalize
 __global__ void muon_l2_normalize(precision_t* __restrict__ dst,
         const float* __restrict__ sum_sq_ptr, float eps, int n) {
@@ -1083,13 +1284,20 @@ __global__ void muon_store_update(precision_t* __restrict__ dst,
 
 // wb = wb * (1 - lr*wd) - lr * update  (update already scaled; one call for all params)
 __global__ void muon_weight_update(float* __restrict__ wb,
+        precision_t* __restrict__ model_weights,
         const precision_t* __restrict__ update,
         const float* __restrict__ lr_ptr, float wd, int n) {
     float lr = *lr_ptr;
     float wd_scale = 1.0f - lr * wd;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
-        wb[idx] = wb[idx] * wd_scale - lr * to_float(update[idx]);
+        float new_weight = wb[idx] * wd_scale - lr * to_float(update[idx]);
+        wb[idx] = new_weight;
+        // Reuse the exact FP32 update to remove the later cast: about 0.17% SPS,
+        // bit-identical across the golden environments.
+        if (USE_BF16) {
+            model_weights[idx] = from_float(new_weight);
+        }
     }
 }
 
@@ -1099,6 +1307,50 @@ constexpr double ns_coeffs[5][3] = {
     {3.7418, -5.5913, 2.3037},
     {2.8769, -3.1427, 1.2046},
     {2.8366, -3.0525, 1.2012},
+};
+
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+// H512 separate-C/D removes Newton-Schulz copies: about 0.8% Affine578 SPS,
+// bit-identical across the golden environments.
+static bool cublaslt_try_muon_nn(int M, int N, int K,
+        void* A, void* B, void* C, void* D,
+        cudaStream_t stream, int round, bool square) {
+    if (!g_cublaslt_muon_enabled
+            || (((uintptr_t)A | (uintptr_t)B
+                | (uintptr_t)C | (uintptr_t)D) & 255) != 0) {
+        return false;
+    }
+    float alpha = square ? (float)ns_coeffs[round][2] : 1.0f;
+    float beta = square
+        ? (float)ns_coeffs[round][1] : (float)ns_coeffs[round][0];
+    PinnedLtPlan& plan = g_cublaslt_plans[square ? 2 : 3];
+    if (plan.M != M || plan.N != N || plan.K != K) {
+        return false;
+    }
+    cublasLtMatmul(g_cublaslt_handle, plan.op,
+        &alpha, A, plan.a_layout, B, plan.b_layout,
+        &beta, C, plan.c_layout, D, plan.c_layout,
+        &plan.algo, NULL, 0, stream);
+    return true;
+}
+#endif
+
+struct MuonMatrix {
+    long offset;
+    long rows;
+    long cols;
+    long work;
+};
+
+struct MuonLane {
+    float* norm_partials;
+    precision_t* gram;
+    precision_t* gram_buf;
+    precision_t* x_buf;
+    cudaStream_t stream;
+    cudaEvent_t done;
+    cublasHandle_t cublas_handle;
+    void* cublas_workspace;
 };
 
 // Muon optimizer. Our benchmarks show this is a major
@@ -1113,6 +1365,10 @@ struct Muon {
     Float mb;              // flat momentum buffer (param-sized)
     Prec gram, gram_buf, x_buf;
     Allocator* param_alloc;
+    int num_lanes;
+    cudaEvent_t matrices_ready;
+    MuonMatrix matrices[8];
+    MuonLane lanes[8];
 };
 
 void muon_init(Muon* m, Allocator* param_alloc, double momentum, Allocator* alloc) {
@@ -1125,13 +1381,28 @@ void muon_init(Muon* m, Allocator* param_alloc, double momentum, Allocator* allo
     m->mb = {.shape = {param_alloc->total_elems}};
     alloc_register(alloc, &m->mb);
     long max_M = 0, max_N = 0;
+    long offset = 0;
+    int num_matrices = 0;
+    int heavy_ns_lanes = 0;
     for (int _i = 0; _i < param_alloc->num_regs; _i++) {
         AllocEntry& e = param_alloc->regs[_i];
+        long ne = numel(e.shape);
         if (ndim(e.shape) >= 2) {
-            long R = e.shape[0], C = numel(e.shape) / R;
-            max_M = max(max_M, min(R, C));
+            long R = e.shape[0], C = ne / R;
+            long M = min(R, C);
+            if (num_matrices < 8) {
+                MuonMatrix& matrix = m->matrices[num_matrices];
+                matrix.offset = offset;
+                matrix.rows = R;
+                matrix.cols = C;
+                matrix.work = ne * M;
+            }
+            num_matrices++;
+            heavy_ns_lanes += min(R, C) >= 1024 && max(R, C) >= 3072;
+            max_M = max(max_M, M);
             max_N = max(max_N, max(R, C));
         }
+        offset += ne;
     }
     m->gram =     {.shape = {max_M, max_M}};
     m->gram_buf = {.shape = {max_M, max_M}};
@@ -1139,75 +1410,189 @@ void muon_init(Muon* m, Allocator* param_alloc, double momentum, Allocator* allo
     alloc_register(alloc, &m->gram);
     alloc_register(alloc, &m->gram_buf);
     alloc_register(alloc, &m->x_buf);
+
+    bool saturated_workload = num_matrices >= 7 && heavy_ns_lanes >= 5;
+    m->num_lanes = num_matrices >= 2 && num_matrices <= 8
+        && max_N <= 4096 && !saturated_workload ? num_matrices : 0;
+    if (m->num_lanes == 0) {
+        return;
+    }
+
+    // Stable largest-work-first schedule. Equal-work matrices retain their
+    // parameter registration order.
+    for (int i = 1; i < m->num_lanes; i++) {
+        MuonMatrix key = m->matrices[i];
+        int j = i;
+        while (j > 0 && m->matrices[j - 1].work < key.work) {
+            m->matrices[j] = m->matrices[j - 1];
+            j--;
+        }
+        m->matrices[j] = key;
+    }
+
+    cudaEventCreateWithFlags(&m->matrices_ready, cudaEventDisableTiming);
+    for (int i = 0; i < m->num_lanes; i++) {
+        MuonMatrix& matrix = m->matrices[i];
+        MuonLane& lane = m->lanes[i];
+        long M = min(matrix.rows, matrix.cols);
+        long ne = matrix.rows * matrix.cols;
+        cudaMalloc((void**)&lane.norm_partials, 257 * sizeof(float));
+        cudaMalloc((void**)&lane.gram, M * M * sizeof(precision_t));
+        cudaMalloc((void**)&lane.gram_buf, M * M * sizeof(precision_t));
+        cudaMalloc((void**)&lane.x_buf, ne * sizeof(precision_t));
+        cudaStreamCreateWithFlags(&lane.stream, cudaStreamNonBlocking);
+        cudaEventCreateWithFlags(&lane.done, cudaEventDisableTiming);
+        cublas_init_one(&lane.cublas_handle, &lane.cublas_workspace);
+        cublasSetStream(lane.cublas_handle, lane.stream);
+        cublasSetWorkspace(lane.cublas_handle, lane.cublas_workspace,
+            CUBLAS_WORKSPACE_BYTES);
+    }
 }
 
-void muon_step(Muon* m, Float weights, Prec grads,
+static void muon_matrix_step(precision_t* gc_ptr, long R, long C,
+        float* ns_norm, float* norm_partials,
+        precision_t* gram_storage, precision_t* gram_buf_storage,
+        precision_t* x_buf_storage,
+        cudaStream_t stream, cublasHandle_t handle,
+        bool handle_bound_to_stream, bool norm_partials_ready) {
+    long ne = R * C;
+    long M = min(R, C);
+    bool tall = R > C;
+    Prec x = {.data = gc_ptr, .shape = {R, C}};
+    Prec x_buf = {.data = x_buf_storage, .shape = {R, C}};
+    Prec gram = {.data = gram_storage, .shape = {M, M}};
+    Prec gram_buf = {.data = gram_buf_storage, .shape = {M, M}};
+
+    int nblk = min((int)grid_size(ne), 256);
+    if (!norm_partials_ready) {
+        muon_sum_sq_partials<<<nblk, 256, 0, stream>>>(
+            norm_partials, x.data, (int)ne);
+    }
+    muon_sum_sq_reduce<<<1, 256, 0, stream>>>(
+        ns_norm, norm_partials, nblk);
+    muon_l2_normalize<<<grid_size(ne), BLOCK_SIZE, 0, stream>>>(
+        x.data, ns_norm, 1e-7f, (int)ne);
+
+    // 5 steps land in x_buf. 4 = you break it.
+    for (int i = 0; i < 5; ++i) {
+        Prec& src = (i % 2 == 0) ? x : x_buf;
+        Prec& dst = (i % 2 == 0) ? x_buf : x;
+        if (tall) {
+            puf_mm_tn(&src, &src, &gram, stream, 1.0f, 0.0f,
+                handle, handle_bound_to_stream);
+        } else {
+            puf_mm(&src, &src, &gram, stream, 1.0f, 0.0f,
+                handle, handle_bound_to_stream);
+        }
+        bool lt_square = false;
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+        if (handle_bound_to_stream) {
+            lt_square = cublaslt_try_muon_nn(M, M, M,
+                gram.data, gram.data, gram.data, gram_buf.data,
+                stream, i, true);
+        }
+#endif
+        if (!lt_square) {
+            puf_copy(&gram_buf, &gram, stream);
+            puf_mm_nn(&gram, &gram, &gram_buf, stream,
+                (float)ns_coeffs[i][2], (float)ns_coeffs[i][1],
+                handle, handle_bound_to_stream);
+        }
+        bool lt_x = false;
+#if CUDART_VERSION == 13010 && !defined(PRECISION_FLOAT)
+        if (handle_bound_to_stream && tall) {
+            lt_x = cublaslt_try_muon_nn(R, C, C,
+                src.data, gram_buf.data, src.data, dst.data,
+                stream, i, false);
+        }
+#endif
+        if (!lt_x) {
+            puf_copy(&dst, &src, stream);
+            if (tall) {
+                puf_mm_nn(&src, &gram_buf, &dst,
+                    stream, 1.0f, (float)ns_coeffs[i][0],
+                    handle, handle_bound_to_stream);
+            } else {
+                puf_mm_nn(&gram_buf, &src, &dst,
+                    stream, 1.0f, (float)ns_coeffs[i][0],
+                    handle, handle_bound_to_stream);
+            }
+        }
+    }
+    float scale = sqrtf(fmaxf(1.0f, (float)R / (float)C));
+    muon_store_update<<<grid_size(ne), BLOCK_SIZE, 0, stream>>>(
+        gc_ptr, x_buf.data, scale, (int)ne);
+}
+
+void muon_step(Muon* m, Float weights, Prec model_weights, Prec grads,
         float max_grad_norm, cudaStream_t stream = 0) {
     int n_grad = (int)numel(grads.shape);
+    bool fuse_clip_nesterov = m->num_lanes > 0
+        && m->num_lanes == m->param_alloc->num_regs;
     int sum_blocks = min((int)grid_size(n_grad), 256);
     muon_sum_sq_partials<<<sum_blocks, 256, 0, stream>>>(
         m->norm_partials, grads.data, n_grad);
     muon_sum_sq_reduce<<<1, 256, 0, stream>>>(
         m->grad_norm, m->norm_partials, sum_blocks);
-    muon_clip_nesterov<<<grid_size(n_grad), BLOCK_SIZE, 0, stream>>>(
-        m->mb.data, grads.data, m->grad_norm,
-        max_grad_norm, 1e-6f, (float)m->momentum, n_grad);
+    if (!fuse_clip_nesterov) {
+        muon_clip_nesterov<<<grid_size(n_grad), BLOCK_SIZE, 0, stream>>>(
+            m->mb.data, grads.data, m->grad_norm,
+            max_grad_norm, 1e-6f, (float)m->momentum, n_grad);
+    }
 
     // Per-param NS into workspace; write scaled update back into flat grads.
     // 1D params already hold their update in-place (scale 1).
-    long offset = 0;
-    for (int _i = 0; _i < m->param_alloc->num_regs; _i++) {
-        AllocEntry& e = m->param_alloc->regs[_i];
-        precision_t* gc_ptr = grads.data + offset;
-        long ne = numel(e.shape);
-        offset += ne;
-        if (ndim(e.shape) < 2) {
-            continue;
+    if (m->num_lanes > 0) {
+        // Fork each matrix lane from the post-clip point on the caller stream.
+        cudaEventRecord(m->matrices_ready, stream);
+        for (int i = 0; i < m->num_lanes; i++) {
+            cudaStreamWaitEvent(
+                m->lanes[i].stream, m->matrices_ready, 0);
         }
-
-        long R = e.shape[0], C = ne / R;
-        long M = min(R, C);
-        bool tall = R > C;
-        Prec x = {.data = gc_ptr, .shape = {R, C}};
-        Prec x_buf = {.data = m->x_buf.data, .shape = {R, C}};
-        Prec gram = {.data = m->gram.data, .shape = {M, M}};
-        Prec gram_buf = {.data = m->gram_buf.data, .shape = {M, M}};
-
-        int nblk = min((int)grid_size(ne), 256);
-        muon_sum_sq_partials<<<nblk, 256, 0, stream>>>(
-            m->norm_partials, x.data, (int)ne);
-        muon_sum_sq_reduce<<<1, 256, 0, stream>>>(
-            m->ns_norm, m->norm_partials, nblk);
-        muon_l2_normalize<<<grid_size(ne), BLOCK_SIZE, 0, stream>>>(
-            x.data, m->ns_norm, 1e-7f, (int)ne);
-
-        // 5 steps land in x_buf. 4 = you break it.
-        for (int i = 0; i < 5; ++i) {
-            Prec& src = (i % 2 == 0) ? x : x_buf;
-            Prec& dst = (i % 2 == 0) ? x_buf : x;
-            if (tall) {
-                puf_mm_tn(&src, &src, &gram, stream);
-            } else {
-                puf_mm(&src, &src, &gram, stream);
+        // Enqueue in the stable descending-work schedule. Each matrix has its
+        // own stream and private scratch.
+        for (int i = 0; i < m->num_lanes; i++) {
+            MuonMatrix& matrix = m->matrices[i];
+            MuonLane& lane = m->lanes[i];
+            long ne = matrix.rows * matrix.cols;
+            if (fuse_clip_nesterov) {
+                int nblk = min((int)grid_size(ne), 256);
+                muon_clip_nesterov_sum_sq_partials<<<
+                    nblk, 256, 0, lane.stream>>>(lane.norm_partials,
+                    m->mb.data + matrix.offset, grads.data + matrix.offset,
+                    m->grad_norm, max_grad_norm, 1e-6f,
+                    (float)m->momentum, (int)ne);
             }
-            puf_copy(&gram_buf, &gram, stream);
-            puf_mm_nn(&gram, &gram, &gram_buf, stream,
-                (float)ns_coeffs[i][2], (float)ns_coeffs[i][1]);
-            puf_copy(&dst, &src, stream);
-            if (tall) {
-                puf_mm_nn(&src, &gram_buf, &dst,
-                    stream, 1.0f, (float)ns_coeffs[i][0]);
-            } else {
-                puf_mm_nn(&gram_buf, &src, &dst,
-                    stream, 1.0f, (float)ns_coeffs[i][0]);
-            }
+            muon_matrix_step(grads.data + matrix.offset,
+                matrix.rows, matrix.cols,
+                lane.norm_partials + 256, lane.norm_partials,
+                lane.gram, lane.gram_buf, lane.x_buf,
+                lane.stream, lane.cublas_handle, true,
+                fuse_clip_nesterov);
         }
-        float scale = sqrtf(fmaxf(1.0f, (float)R / (float)C));
-        muon_store_update<<<grid_size(ne), BLOCK_SIZE, 0, stream>>>(
-            gc_ptr, x_buf.data, scale, (int)ne);
+        for (int i = 0; i < m->num_lanes; i++) {
+            MuonLane& lane = m->lanes[i];
+            cudaEventRecord(lane.done, lane.stream);
+            cudaStreamWaitEvent(stream, lane.done, 0);
+        }
+    } else {
+        long offset = 0;
+        for (int _i = 0; _i < m->param_alloc->num_regs; _i++) {
+            AllocEntry& e = m->param_alloc->regs[_i];
+            long ne = numel(e.shape);
+            if (ndim(e.shape) >= 2) {
+                long R = e.shape[0], C = ne / R;
+                muon_matrix_step(grads.data + offset, R, C,
+                    m->ns_norm, m->norm_partials,
+                    m->gram.data, m->gram_buf.data, m->x_buf.data,
+                    stream, g_cublas_handle, false, false);
+            }
+            offset += ne;
+        }
     }
     muon_weight_update<<<grid_size(n_grad), BLOCK_SIZE, 0, stream>>>(
-        weights.data, grads.data, m->lr, 0.0f, n_grad);
+        weights.data, model_weights.data, grads.data,
+        m->lr, 0.0f, n_grad);
 }
 
 // Train layout is (B, T). Views are sliced each mb; scratch is allocated.
