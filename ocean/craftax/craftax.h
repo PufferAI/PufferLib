@@ -734,35 +734,26 @@ void generate_world(State* state, unsigned int* rng) {
 void write_mob_obs(float* obs, const State* state, const Mobs* mobs, int slots,
         int channel) {
     int level = state->player_level;
-    int half_r = OBS_ROWS / 2;
-    int half_c = OBS_COLS / 2;
     for (int i = 0; i < slots; i++) {
-        int local_row = mobs->position[i][0] - state->player_position[0] + half_r;
-        int local_col = mobs->position[i][1] - state->player_position[1] + half_c;
-        int on_screen = mobs->mask[i]
-            && local_row >= 0 && local_row < OBS_ROWS
-            && local_col >= 0 && local_col < OBS_COLS;
-        if (local_row >= OBS_ROWS || local_row < -OBS_ROWS
-                || local_col >= OBS_COLS || local_col < -OBS_COLS) {
+        if (!mobs->mask[i]) {
             continue;
         }
-        if (local_row < 0) {
-            local_row += OBS_ROWS;
+        int type_id = mobs->type_id[i];
+        int world_row = mobs->position[i][0];
+        int world_col = mobs->position[i][1];
+        int local_row = world_row - state->player_position[0] + OBS_ROWS / 2;
+        int local_col = world_col - state->player_position[1] + OBS_COLS / 2;
+        if ((unsigned)local_row >= OBS_ROWS
+                || (unsigned)local_col >= OBS_COLS) {
+            continue;
         }
-        if (local_col < 0) {
-            local_col += OBS_COLS;
-        }
-        int dest_row = state->player_position[0] + local_row - half_r;
-        int dest_col = state->player_position[1] + local_col - half_c;
-        int dest_visible = dest_row >= 0 && dest_row < MAP_SIZE
-            && dest_col >= 0 && dest_col < MAP_SIZE
-            && state->light_map[level][dest_row][dest_col] > VISIBLE_LIGHT_THRESHOLD;
-        float value = 0.0f;
-        if (on_screen && dest_visible) {
-            value = (float)(mobs->type_id[i] + 1);
+        if ((unsigned)world_row >= MAP_SIZE
+                || (unsigned)world_col >= MAP_SIZE
+                || state->light_map[level][world_row][world_col] <= VISIBLE_LIGHT_THRESHOLD) {
+            continue;
         }
         int base = (local_row * OBS_COLS + local_col) * OBS_TILE_CHANNELS;
-        obs[base + 3 + channel] = value;
+        obs[base + 3 + channel] = type_id + 1;
     }
 }
 
@@ -821,18 +812,20 @@ void action_to_direction(int action, int direction[2]) {
 }
 
 bool is_solid_block(int block) {
-    static const unsigned char solid[NUM_BLOCK_TYPES] = {
-        [BLOCK_STONE] = 1, [BLOCK_TREE] = 1, [BLOCK_COAL] = 1,
-        [BLOCK_IRON] = 1, [BLOCK_DIAMOND] = 1, [BLOCK_CRAFTING_TABLE] = 1,
-        [BLOCK_FURNACE] = 1, [BLOCK_PLANT] = 1, [BLOCK_RIPE_PLANT] = 1,
-        [BLOCK_WALL] = 1, [BLOCK_WALL_MOSS] = 1, [BLOCK_STALAGMITE] = 1,
-        [BLOCK_RUBY] = 1, [BLOCK_SAPPHIRE] = 1, [BLOCK_CHEST] = 1,
-        [BLOCK_FOUNTAIN] = 1, [BLOCK_FIRE_TREE] = 1,
-        [BLOCK_ENCHANTMENT_TABLE_FIRE] = 1, [BLOCK_ENCHANTMENT_TABLE_ICE] = 1,
-        [BLOCK_GRAVE] = 1, [BLOCK_GRAVE2] = 1, [BLOCK_GRAVE3] = 1,
-        [BLOCK_NECROMANCER] = 1,
-    };
-    return (unsigned)block < NUM_BLOCK_TYPES && solid[block];
+    switch (block) {
+        case BLOCK_STONE: case BLOCK_TREE: case BLOCK_COAL:
+        case BLOCK_IRON: case BLOCK_DIAMOND: case BLOCK_CRAFTING_TABLE:
+        case BLOCK_FURNACE: case BLOCK_PLANT: case BLOCK_RIPE_PLANT:
+        case BLOCK_WALL: case BLOCK_WALL_MOSS: case BLOCK_STALAGMITE:
+        case BLOCK_RUBY: case BLOCK_SAPPHIRE: case BLOCK_CHEST:
+        case BLOCK_FOUNTAIN: case BLOCK_FIRE_TREE:
+        case BLOCK_ENCHANTMENT_TABLE_FIRE: case BLOCK_ENCHANTMENT_TABLE_ICE:
+        case BLOCK_GRAVE: case BLOCK_GRAVE2: case BLOCK_GRAVE3:
+        case BLOCK_NECROMANCER:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool mob_at(const State* state, int level, int row, int col) {
