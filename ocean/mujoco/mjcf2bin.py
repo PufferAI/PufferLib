@@ -23,6 +23,10 @@ def compile_model(xml, out):
     assert all(m.actuator_trntype == 0) and all(m.actuator_dyntype == 0), "motors only"
     assert all(m.jnt_type[m.actuator_trnid[:, 0]] >= 2), "actuators on hinge/slide joints only"
     assert m.opt.cone == 0, "pyramidal cones only"
+    assert m.opt.integrator <= 1, "Euler/RK4 integrators only"
+    assert all(np.isin(m.geom_type, [0, 2, 3])), "plane/sphere/capsule geoms only"
+    assert all(m.jnt_type[m.jnt_limited.astype(bool) | (m.jnt_stiffness != 0)] >= 2), \
+        "limits and springs on hinge/slide joints only"
     # fixed tendons without limits, springs or dampers (humanoid) exert no force
     assert not m.tendon_limited.any() and not m.tendon_stiffness.any() \
         and not m.tendon_damping.any(), "tendon limits/springs/dampers unsupported"

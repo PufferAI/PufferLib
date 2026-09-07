@@ -1,9 +1,7 @@
-// Humanoid (gymnasium Humanoid-v5) on the MuJoCo-style physics core: obs =
-// qpos[2:] + qvel + cinert[1:] + cvel[1:] + qfrc_actuator[6:] + cfrc_ext[1:],
-// reward = healthy + forward COM velocity - ctrl cost - contact cost (clamped
-// at 10), terminates when the torso leaves z in (1, 2). Model:
-// resources/mujoco/humanoid.xml compiled by mjcf2bin.py. mjc_reset/mjc_step
-// are host+device (see backend.h).
+// Humanoid (gymnasium Humanoid-v5): obs = qpos[2:] + qvel + cinert[1:] +
+// cvel[1:] + qfrc_actuator[6:] + cfrc_ext[1:], each block scaled to O(1),
+// reward = healthy + forward COM velocity - ctrl cost - contact cost,
+// terminates when the torso leaves z in (1, 2).
 
 #include <assert.h>
 #include <math.h>
@@ -12,7 +10,7 @@
 #include "raylib.h"
 typedef float obs_t;
 #include "pufferenv.h"
-// physics.h capacities sized to this model (checked by mj_loadModel)
+// model capacities, checked by mj_loadModel
 #define MJ_MAX_NQ 24
 #define MJ_MAX_NV 23
 #define MJ_MAX_NBODY 14
@@ -24,12 +22,17 @@ typedef float obs_t;
 #include "physics.h"
 #include "render.h"
 
-#define HM_FRAME_SKIP 5
+// forward velocity worth perf 1 and a trainer reward of 1 per step
+#define HM_TARGET_VEL 3.0f
+#define MJC_FRAME_SKIP 5
 #define HM_CONTACT_COST_MAX 10.0f
+#define HM_VEL_SCALE 20.0f
+#define HM_INERTIA_SCALE 10.0f
+#define HM_FORCE_SCALE 100.0f
 #define OBS_SIZE 348
 #define NUM_ATNS 17
 #define ACT_SIZES {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
-#define PUF_STEPS_PER_SEC 67
+#define PUF_STEPS_PER_SEC 333
 
 MjModel mj_model;
 
@@ -52,6 +55,7 @@ struct Env {
     unsigned int rng;
     const MjModel* m;
     int tick;
+    int tick_frames_left;
     float x_start;
     float episode_return;
     int max_steps;
@@ -67,18 +71,11 @@ typedef Env Humanoid;
 // Returns the contact cost (sum of squared external forces, clamped)
 MJ_HD float compute_observations(Humanoid* env) {
     const MjModel* m = env->m;
-    float* obs = env->agents[0].observations;
-    memcpy(obs, env->d.qpos + 2, (m->nq - 2)*sizeof(float));
-    obs += m->nq - 2;
-    memcpy(obs, env->d.qvel, m->nv*sizeof(float));
-    obs += m->nv;
-    memcpy(obs, env->d.cinert[1], 10*(m->nbody - 1)*sizeof(float));
-    obs += 10*(m->nbody - 1);
-    memcpy(obs, env->d.cvel[1], 6*(m->nbody - 1)*sizeof(float));
-    obs += 6*(m->nbody - 1);
-    memcpy(obs, env->d.qfrc_actuator + 6, (m->nv - 6)*sizeof(float));
-    obs += m->nv - 6;
-    memcpy(obs, env->d.cfrc_ext[1], 6*(m->nbody - 1)*sizeof(float));
+    float* obs = mj_obsJoints(m, &env->d, env->agents[0].observations, 2, HM_VEL_SCALE);
+    obs = mj_obsScaled(obs, env->d.cinert[1], 10*(m->nbody - 1), HM_INERTIA_SCALE);
+    obs = mj_obsScaled(obs, env->d.cvel[1], 6*(m->nbody - 1), HM_VEL_SCALE);
+    obs = mj_obsScaled(obs, env->d.qfrc_actuator + 6, m->nv - 6, HM_FORCE_SCALE);
+    mj_obsScaled(obs, env->d.cfrc_ext[1], 6*(m->nbody - 1), HM_FORCE_SCALE);
     float cost = 0.0f;
     for (int b = 1; b < m->nbody; b++) {
         cost += mju_dot6(env->d.cfrc_ext[b], env->d.cfrc_ext[b]);
@@ -86,8 +83,7 @@ MJ_HD float compute_observations(Humanoid* env) {
     return fminf(env->contact_cost_weight*cost, HM_CONTACT_COST_MAX);
 }
 
-// x of the whole-body center of mass from the inertial frames of the last
-// kinematics pass (Gym's mass_center)
+// Gym's mass_center: whole-body COM x from the last kinematics pass
 MJ_HD float mjc_com_x(Humanoid* env) {
     const MjModel* m = env->m;
     float num = 0.0f;
@@ -126,12 +122,12 @@ MJ_HD void mjc_step(Humanoid* env) {
         cost += env->d.ctrl[i]*env->d.ctrl[i];
     }
     float x0 = mjc_com_x(env);
-    for (int k = 0; k < HM_FRAME_SKIP; k++) {
+    for (int k = 0; k < MJC_FRAME_SKIP; k++) {
         mj_step(m, &env->d);
     }
     mj_rnePostConstraint(m, &env->d);
     float* q = env->d.qpos;
-    float dt = HM_FRAME_SKIP*m->opt_timestep;
+    float dt = MJC_FRAME_SKIP*m->opt_timestep;
     float x_velocity = (mjc_com_x(env) - x0) / dt;
     int healthy = q[2] > 1.0f && q[2] < 2.0f;
     float contact_cost = compute_observations(env);
@@ -139,7 +135,7 @@ MJ_HD void mjc_step(Humanoid* env) {
         - contact_cost + (healthy ? env->healthy_reward : 0.0f);
     env->tick++;
     env->episode_return += reward;
-    env->agents[0].rewards[0] = reward;
+    env->agents[0].rewards[0] = reward / HM_TARGET_VEL;
     env->agents[0].terminals[0] = 0.0f;
     if (healthy && env->tick < env->max_steps) {
         return;
@@ -147,7 +143,7 @@ MJ_HD void mjc_step(Humanoid* env) {
     float distance = q[0] - env->x_start;
     float xvel = distance / (env->tick*dt);
     env->agents[0].terminals[0] = 1.0f;
-    env->log.perf += fminf(fmaxf(xvel / 3.0f, 0.0f), 1.0f);
+    env->log.perf += fminf(fmaxf(xvel / HM_TARGET_VEL, 0.0f), 1.0f);
     env->log.score += env->episode_return;
     env->log.episode_return += env->episode_return;
     env->log.episode_length += env->tick;
@@ -173,7 +169,6 @@ void mjc_init(Humanoid* env, Dict* kwargs) {
     env->m = &mj_model;
     env->num_agents = 1;
     env->agents[0].policy = 0;
-    env->agents[0].action_mask = NULL;
     env->max_steps = dict_get(kwargs, "max_steps");
     env->reset_noise_scale = dict_get(kwargs, "reset_noise_scale");
     env->forward_reward_weight = dict_get(kwargs, "forward_reward_weight");

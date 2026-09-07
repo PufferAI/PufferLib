@@ -1,8 +1,5 @@
-// HalfCheetah (gymnasium HalfCheetah-v5) on the MuJoCo-style physics core:
-// obs = qpos[1:] + qvel, reward = forward velocity - ctrl cost, 1000 step
-// episodes. Model: resources/mujoco/half_cheetah.xml compiled by mjcf2bin.py.
-// mjc_reset/mjc_step are host+device; backend.h wraps them for the CPU vec
-// or launches them one thread per env on the GPU (--cu).
+// HalfCheetah (gymnasium HalfCheetah-v5): obs = qpos[1:] + qvel scaled by
+// mj_obsJoints, reward = forward velocity - ctrl cost, 1000 step episodes.
 
 #include <assert.h>
 #include <math.h>
@@ -11,7 +8,7 @@
 #include "raylib.h"
 typedef float obs_t;
 #include "pufferenv.h"
-// physics.h capacities sized to this model (checked by mj_loadModel)
+// model capacities, checked by mj_loadModel
 #define MJ_MAX_NQ 9
 #define MJ_MAX_NV 9
 #define MJ_MAX_NBODY 8
@@ -23,11 +20,13 @@ typedef float obs_t;
 #include "physics.h"
 #include "render.h"
 
-#define HC_FRAME_SKIP 5
+// forward velocity worth perf 1 and a trainer reward of 1 per step
+#define HC_TARGET_VEL 10.0f
+#define MJC_FRAME_SKIP 5
 #define OBS_SIZE 17
 #define NUM_ATNS 6
 #define ACT_SIZES {1, 1, 1, 1, 1, 1}
-#define PUF_STEPS_PER_SEC 20
+#define PUF_STEPS_PER_SEC 100
 
 MjModel mj_model;
 
@@ -51,6 +50,7 @@ struct Env {
     unsigned int rng;
     const MjModel* m;
     int tick;
+    int tick_frames_left;
     float x_start;
     float episode_return;
     float episode_ctrl_cost;
@@ -61,12 +61,6 @@ struct Env {
     MjData d;
 };
 typedef Env HalfCheetah;
-
-MJ_HD void compute_observations(HalfCheetah* env) {
-    float* obs = env->agents[0].observations;
-    memcpy(obs, env->d.qpos + 1, (env->m->nq - 1)*sizeof(float));
-    memcpy(obs + env->m->nq - 1, env->d.qvel, env->m->nv*sizeof(float));
-}
 
 MJ_HD void mjc_reset(HalfCheetah* env) {
     const MjModel* m = env->m;
@@ -82,7 +76,7 @@ MJ_HD void mjc_reset(HalfCheetah* env) {
     env->x_start = env->d.qpos[0];
     env->episode_return = 0.0f;
     env->episode_ctrl_cost = 0.0f;
-    compute_observations(env);
+    mj_obsJoints(m, &env->d, env->agents[0].observations, 1, 20.0f);
 }
 
 MJ_HD void mjc_step(HalfCheetah* env) {
@@ -94,25 +88,25 @@ MJ_HD void mjc_step(HalfCheetah* env) {
         cost += env->d.ctrl[i]*env->d.ctrl[i];
     }
     float x0 = env->d.qpos[0];
-    for (int k = 0; k < HC_FRAME_SKIP; k++) {
+    for (int k = 0; k < MJC_FRAME_SKIP; k++) {
         mj_step(m, &env->d);
     }
-    float dt = HC_FRAME_SKIP*m->opt_timestep;
+    float dt = MJC_FRAME_SKIP*m->opt_timestep;
     float x_velocity = (env->d.qpos[0] - x0) / dt;
     float reward = env->forward_reward_weight*x_velocity - env->ctrl_cost_weight*cost;
     env->tick++;
     env->episode_return += reward;
     env->episode_ctrl_cost += env->ctrl_cost_weight*cost;
-    env->agents[0].rewards[0] = reward;
+    env->agents[0].rewards[0] = reward / HC_TARGET_VEL;
     env->agents[0].terminals[0] = 0.0f;
     if (env->tick < env->max_steps) {
-        compute_observations(env);
+        mj_obsJoints(m, &env->d, env->agents[0].observations, 1, 20.0f);
         return;
     }
     float distance = env->d.qpos[0] - env->x_start;
     float xvel = distance / (env->tick*dt);
     env->agents[0].terminals[0] = 1.0f;
-    env->log.perf += fminf(fmaxf(xvel / 10.0f, 0.0f), 1.0f);
+    env->log.perf += fminf(fmaxf(xvel / HC_TARGET_VEL, 0.0f), 1.0f);
     env->log.score += env->episode_return;
     env->log.episode_return += env->episode_return;
     env->log.episode_length += env->tick;
@@ -138,7 +132,6 @@ void mjc_init(HalfCheetah* env, Dict* kwargs) {
     env->m = &mj_model;
     env->num_agents = 1;
     env->agents[0].policy = 0;
-    env->agents[0].action_mask = NULL;
     env->max_steps = dict_get(kwargs, "max_steps");
     env->reset_noise_scale = dict_get(kwargs, "reset_noise_scale");
     env->forward_reward_weight = dict_get(kwargs, "forward_reward_weight");

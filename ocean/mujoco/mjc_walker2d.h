@@ -1,8 +1,6 @@
-// Walker2d (gymnasium Walker2d-v5) on the MuJoCo-style physics core: obs =
-// qpos[1:] + clip(qvel, -10, 10), reward = healthy + forward velocity - ctrl
-// cost, terminates when the torso leaves z in (0.8, 2) or |angle| >= 1.
-// Model: resources/mujoco/walker2d.xml (gymnasium walker2d_v5.xml) compiled by
-// mjcf2bin.py. mjc_reset/mjc_step are host+device (see backend.h).
+// Walker2d (gymnasium Walker2d-v5): obs = qpos[1:] + qvel scaled by
+// mj_obsJoints, reward = healthy + forward velocity - ctrl cost, terminates
+// when the torso leaves z in (0.8, 2) or |angle| >= 1.
 
 #include <assert.h>
 #include <math.h>
@@ -11,7 +9,7 @@
 #include "raylib.h"
 typedef float obs_t;
 #include "pufferenv.h"
-// physics.h capacities sized to this model (checked by mj_loadModel)
+// model capacities, checked by mj_loadModel
 #define MJ_MAX_NQ 9
 #define MJ_MAX_NV 9
 #define MJ_MAX_NBODY 8
@@ -23,11 +21,13 @@ typedef float obs_t;
 #include "physics.h"
 #include "render.h"
 
-#define WK_FRAME_SKIP 4
+// forward velocity worth perf 1 and a trainer reward of 1 per step
+#define WK_TARGET_VEL 5.0f
+#define MJC_FRAME_SKIP 4
 #define OBS_SIZE 17
 #define NUM_ATNS 6
 #define ACT_SIZES {1, 1, 1, 1, 1, 1}
-#define PUF_STEPS_PER_SEC 125
+#define PUF_STEPS_PER_SEC 500
 
 MjModel mj_model;
 
@@ -50,6 +50,7 @@ struct Env {
     unsigned int rng;
     const MjModel* m;
     int tick;
+    int tick_frames_left;
     float x_start;
     float episode_return;
     int max_steps;
@@ -60,15 +61,6 @@ struct Env {
     MjData d;
 };
 typedef Env Walker2d;
-
-MJ_HD void compute_observations(Walker2d* env) {
-    const MjModel* m = env->m;
-    float* obs = env->agents[0].observations;
-    memcpy(obs, env->d.qpos + 1, (m->nq - 1)*sizeof(float));
-    for (int i = 0; i < m->nv; i++) {
-        obs[m->nq - 1 + i] = fminf(fmaxf(env->d.qvel[i], -10.0f), 10.0f);
-    }
-}
 
 MJ_HD void mjc_reset(Walker2d* env) {
     const MjModel* m = env->m;
@@ -83,7 +75,7 @@ MJ_HD void mjc_reset(Walker2d* env) {
     env->tick = 0;
     env->x_start = env->d.qpos[0];
     env->episode_return = 0.0f;
-    compute_observations(env);
+    mj_obsJoints(m, &env->d, env->agents[0].observations, 1, 10.0f);
 }
 
 MJ_HD void mjc_step(Walker2d* env) {
@@ -95,27 +87,27 @@ MJ_HD void mjc_step(Walker2d* env) {
         cost += env->d.ctrl[i]*env->d.ctrl[i];
     }
     float x0 = env->d.qpos[0];
-    for (int k = 0; k < WK_FRAME_SKIP; k++) {
+    for (int k = 0; k < MJC_FRAME_SKIP; k++) {
         mj_step(m, &env->d);
     }
     float* q = env->d.qpos;
-    float dt = WK_FRAME_SKIP*m->opt_timestep;
+    float dt = MJC_FRAME_SKIP*m->opt_timestep;
     float x_velocity = (q[0] - x0) / dt;
     int healthy = q[1] > 0.8f && q[1] < 2.0f && q[2] > -1.0f && q[2] < 1.0f;
     float reward = env->forward_reward_weight*x_velocity - env->ctrl_cost_weight*cost
         + (healthy ? env->healthy_reward : 0.0f);
     env->tick++;
     env->episode_return += reward;
-    env->agents[0].rewards[0] = reward;
+    env->agents[0].rewards[0] = reward / WK_TARGET_VEL;
     env->agents[0].terminals[0] = 0.0f;
     if (healthy && env->tick < env->max_steps) {
-        compute_observations(env);
+        mj_obsJoints(m, &env->d, env->agents[0].observations, 1, 10.0f);
         return;
     }
     float distance = q[0] - env->x_start;
     float xvel = distance / (env->tick*dt);
     env->agents[0].terminals[0] = 1.0f;
-    env->log.perf += fminf(fmaxf(xvel / 5.0f, 0.0f), 1.0f);
+    env->log.perf += fminf(fmaxf(xvel / WK_TARGET_VEL, 0.0f), 1.0f);
     env->log.score += env->episode_return;
     env->log.episode_return += env->episode_return;
     env->log.episode_length += env->tick;
@@ -140,7 +132,6 @@ void mjc_init(Walker2d* env, Dict* kwargs) {
     env->m = &mj_model;
     env->num_agents = 1;
     env->agents[0].policy = 0;
-    env->agents[0].action_mask = NULL;
     env->max_steps = dict_get(kwargs, "max_steps");
     env->reset_noise_scale = dict_get(kwargs, "reset_noise_scale");
     env->forward_reward_weight = dict_get(kwargs, "forward_reward_weight");
