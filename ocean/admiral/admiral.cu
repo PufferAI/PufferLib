@@ -292,8 +292,8 @@ static __device__ void gpu_observe(
             obs[idx++] = flip * ship->vx / MS;
             obs[idx++] = flip * ship->vy / MS;
             obs[idx++] = ship->health;
-            obs[idx++] = fminf(fmaxf(ship->cooldown_left, 0.0f), 1.0f);
-            obs[idx++] = fminf(fmaxf(ship->cooldown_right, 0.0f), 1.0f);
+            obs[idx++] = ship->cooldown_left;
+            obs[idx++] = ship->cooldown_right;
             obs[idx++] = ship->rudder / MAX_RUDDER;
             obs[idx++] = ship->sail_angle / MAX_SAIL_ANGLE;
             obs[idx++] = flip * cosf(ship->heading);
@@ -479,8 +479,7 @@ static __device__ void gpu_fire(
 
     if (hit_idx < 0) return;
     Ship* hit_ship = &env->ships[hit_idx];
-    float range_factor = hit_distance >= CANNON_RANGE
-        ? 0.0f : 1.0f - hit_distance / CANNON_RANGE;
+    float range_factor = 1.0f - hit_distance / CANNON_RANGE;
     float damage_mult = ship->team_idx == env->curr_adv_team ? env->damage_mult : 1.0f;
     float damage = fminf(
         CANNON_MAX_DAMAGE * damage_mult * range_factor, hit_ship->health);
@@ -602,7 +601,7 @@ static __device__ void gpu_step(
             gpu_turn(&ship->heading, body_turn, MAX_TURN_RATE * DT);
 
             float fire_action = d_fire_values[(int)ship_actions[2]];
-            if (fabsf(fire_action) > 0.1f) {
+            if (fire_action != 0.0f) {
                 gpu_fire(env, rewards, ship, ship_idx, (int)fire_action);
             }
 

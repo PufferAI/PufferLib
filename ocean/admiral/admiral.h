@@ -520,11 +520,8 @@ void move(Admiral* env, Ship* ship) {
     ship->vx = ship->speed * dx;
     ship->vy = ship->speed * dy;
 
-    float new_x = ship->x + ship->speed * dx * DT;
-    float new_y = ship->y + ship->speed * dy * DT;
-
-    ship->x = new_x;
-    ship->y = new_y;
+    ship->x += ship->speed * dx * DT;
+    ship->y += ship->speed * dy * DT;
 }
 
 void turn(float* heading, float radians, float d_angle) {
@@ -578,7 +575,7 @@ void fire(Admiral* env, Ship* ship, int ship_idx, int fire_side) {
     }
 
     if (hit_ship == NULL) return;
-    float range_factor = hit_distance >= CANNON_RANGE ? 0.0f : 1.0f - hit_distance / CANNON_RANGE;
+    float range_factor = 1.0f - hit_distance / CANNON_RANGE;
     float damage_mult = ship->team_idx == env->curr_adv_team ? env->damage_mult : 1.0f;
     float damage = fminf(CANNON_MAX_DAMAGE * damage_mult * range_factor, hit_ship->health);
     bool hit_enemy = hit_ship->team_idx != ship->team_idx;
@@ -624,8 +621,8 @@ void compute_observations(Admiral* env) {
                 obs[idx++] = flip * ship->vx / MS;
                 obs[idx++] = flip * ship->vy / MS;
                 obs[idx++] = ship->health;
-                obs[idx++] = fminf(fmaxf(ship->cooldown_left, 0.0f), 1.0f);
-                obs[idx++] = fminf(fmaxf(ship->cooldown_right, 0.0f), 1.0f);
+                obs[idx++] = ship->cooldown_left;
+                obs[idx++] = ship->cooldown_right;
                 obs[idx++] = ship->rudder / MAX_RUDDER;
                 obs[idx++] = ship->sail_angle / MAX_SAIL_ANGLE;
                 obs[idx++] = flip * cosf(ship->heading);
@@ -858,7 +855,7 @@ void puf_step(Admiral* env) {
             turn(&ship->heading, body_turn_radians, MAX_TURN_RATE * DT);
 
             float fire_atn = FIRE_VALUES[(int)atn[2]];
-            if (fabs(fire_atn) > 0.1f) {
+            if (fire_atn != 0.0f) {
                 fire(env, ship, ship_idx, fire_atn);
             }
 
