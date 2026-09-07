@@ -71,6 +71,26 @@ int nh_dec_pad()     { return NH_DEC_PAD; }
 int nh_num_actions() { return NH_ACTIONS; }
 int nh_heads()       { return NH_HEADS; }
 
+#if 0
+void nh_get_gA(void* dst, int B) {
+    cudaMemcpy(dst, g_a->gA.data, (size_t)B * NH_INV * NH_GK * sizeof(float), cudaMemcpyDeviceToDevice);
+}
+void nh_get_gS(void* dst, int B) {
+    cudaMemcpy(dst, g_a->gS.data, (size_t)B * NH_INV * NH_GK * sizeof(float), cudaMemcpyDeviceToDevice);
+}
+#endif
+void nh_get_invout(void* dst, int B) {
+    cudaMemcpy(dst, g_a->inv_out.data, (size_t)B * NH_INV * 16 * sizeof(float), cudaMemcpyDeviceToDevice);
+}
+void nh_get_sfeat(void* dst, int B) {
+    cudaMemcpy(dst, g_a->inv_sfeat.data, (size_t)B * NH_INV * 24 * sizeof(float), cudaMemcpyDeviceToDevice);
+}
+// per-entity last-layer outputs (post-activation) for dead-unit analysis
+void nh_get_mvv(void* dst, int B) { cudaMemcpy(dst, g_a->mvv.data, (size_t)B * NH_INV * NH_MV * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+void nh_get_mvm(void* dst, int B) { cudaMemcpy(dst, g_a->mvm.data, (size_t)B * NH_LABK * NH_MV * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+void nh_get_mvi(void* dst, int B) { cudaMemcpy(dst, g_a->mvi.data, (size_t)B * NH_LABK * NH_MV * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+void nh_get_spv(void* dst, int B) { cudaMemcpy(dst, g_a->spv.data, (size_t)B * NH_SPELL_SLOTS * NH_SPM * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+int nh_inv_n() { return NH_INV; } int nh_labk() { return NH_LABK; } int nh_mv() { return NH_MV; } int nh_spell_slots() { return NH_SPELL_SLOTS; } int nh_spm() { return NH_SPM; }
 void nh_forward(void* out, void* obs, int B) {
     Prec in = {.data = (precision_t*)obs, .shape = {B, NH_OBS_SIZE}};
     Prec r = g_enc.forward(g_w, g_a, in, 0);
@@ -98,26 +118,59 @@ TENSOR_ACC(proj_w,  proj_w)
 TENSOR_ACC(proj_b,  proj_b)
 TENSOR_ACC(loc_w,   loc_w)
 TENSOR_ACC(loc_b,   loc_b)
-TENSOR_ACC(glb1_w,  glb1_w)
-TENSOR_ACC(glb1_xy, glb1_xy)
-TENSOR_ACC(glb1_b,  glb1_b)
-TENSOR_ACC(glb2_w,  glb2_w)
-TENSOR_ACC(glb2_b,  glb2_b)
+TENSOR_ACC(terr1_w, terr1_w)
+TENSOR_ACC(terr1_b, terr1_b)
+TENSOR_ACC(terr2_w, terr2_w)
+TENSOR_ACC(terr2_b, terr2_b)
+TENSOR_ACC(locc_w,  locc_w)
 TENSOR_ACC(inv1_w,  inv1_w)
 TENSOR_ACC(inv1_b,  inv1_b)
 TENSOR_ACC(inv1s_w, inv1s_w)
 TENSOR_ACC(invt_w,  invt_w)
-TENSOR_ACC(inv2_w,  inv2_w)
-TENSOR_ACC(inv2_b,  inv2_b)
 TENSOR_ACC(msg_w,   msg_w)
 TENSOR_ACC(spk_w,   spk_w)
-TENSOR_ACC(spk2_w,  spk2_w)
-TENSOR_ACC(spk2_b,  spk2_b)
-#if NH_ID_EMBED
+TENSOR_ACC(spm1_w, spm1_w)
+TENSOR_ACC(spm1_b, spm1_b)
+TENSOR_ACC(spm2_w, spm2_w)
+TENSOR_ACC(spm2_b, spm2_b)
+TENSOR_ACC(loc2_w, loc2_w)
+TENSOR_ACC(loc2_b, loc2_b)
 TENSOR_ACC(ide_role_w, ide_role_w)
 TENSOR_ACC(ide_race_w, ide_race_w)
 TENSOR_ACC(ide_gend_w, ide_gend_w)
 TENSOR_ACC(ide_algn_w, ide_algn_w)
+#if NH_FILM
+TENSOR_ACC(film_g_w, film_g_w)
+TENSOR_ACC(film_b_w, film_b_w)
+#endif
+#if 0
+TENSOR_ACC(gln_g, gln_g)
+TENSOR_ACC(gln_b, gln_b)
+TENSOR_ACC(gnv_w, gnv_w)
+TENSOR_ACC(gnv_b, gnv_b)
+TENSOR_ACC(gns_w, gns_w)
+#endif
+TENSOR_ACC(mv1_w, mv1_w)
+TENSOR_ACC(mv1_b, mv1_b)
+TENSOR_ACC(mv2_w, mv2_w)
+TENSOR_ACC(mv2_b, mv2_b)
+TENSOR_ACC(mr_w, mr_w)
+TENSOR_ACC(mr_b, mr_b)
+TENSOR_ACC(mm1_w, mm1_w)
+TENSOR_ACC(mm1_b, mm1_b)
+TENSOR_ACC(mm2_w, mm2_w)
+TENSOR_ACC(mm2_b, mm2_b)
+TENSOR_ACC(ir_w, ir_w)
+TENSOR_ACC(ir_b, ir_b)
+TENSOR_ACC(im1_w, im1_w)
+TENSOR_ACC(im1_b, im1_b)
+TENSOR_ACC(im2_w, im2_w)
+TENSOR_ACC(im2_b, im2_b)
+#if 0
+TENSOR_ACC(gws_w, gws_w)
+TENSOR_ACC(gv_w, gv_w)
+TENSOR_ACC(gv_b, gv_b)
+TENSOR_ACC(gtau, gtau)
 #endif
 
 #define GRAD_ACC(name, field) \
@@ -131,28 +184,68 @@ GRAD_ACC(proj_w,  proj_wgrad)
 GRAD_ACC(proj_b,  proj_bgrad)
 GRAD_ACC(loc_w,   loc_wgrad)
 GRAD_ACC(loc_b,   loc_bgrad)
-GRAD_ACC(glb1_w,  glb1_wgrad)
-GRAD_ACC(glb1_xy, glb1_xygrad)
-GRAD_ACC(glb1_b,  glb1_bgrad)
-GRAD_ACC(glb2_w,  glb2_wgrad)
-GRAD_ACC(glb2_b,  glb2_bgrad)
+GRAD_ACC(terr1_w, terr1_wgrad)
+GRAD_ACC(terr1_b, terr1_bgrad)
+GRAD_ACC(terr2_w, terr2_wgrad)
+GRAD_ACC(terr2_b, terr2_bgrad)
+GRAD_ACC(locc_w,  locc_wgrad)
 GRAD_ACC(inv1_w,  inv1_wgrad)
 GRAD_ACC(inv1_b,  inv1_bgrad)
 GRAD_ACC(inv1s_w, inv1s_wgrad)
 GRAD_ACC(invt_w,  invt_wgrad)
-GRAD_ACC(inv2_w,  inv2_wgrad)
-GRAD_ACC(inv2_b,  inv2_bgrad)
+void nh_get_locc_lut(void* dst) { cudaMemcpy(dst, nh_locc_lut_dev, NH_GLYPH_VOCAB, cudaMemcpyDeviceToHost); cudaDeviceSynchronize(); }
+void nh_get_terrc_lut(void* dst) { cudaMemcpy(dst, nh_terrc_lut_dev, NH_GLYPH_VOCAB, cudaMemcpyDeviceToHost); cudaDeviceSynchronize(); }
+void nh_get_terr_tf(void* dst, int B) { cudaMemcpy(dst, g_a->terr_tf.data, (size_t)B * NH_TERRF * sizeof(float), cudaMemcpyDeviceToHost); cudaDeviceSynchronize(); }
+int nh_terrf() { return NH_TERRF; }
+void nh_get_haz_lut(void* dst) { cudaMemcpy(dst, nh_haz_lut_dev, 381, cudaMemcpyDeviceToHost); cudaDeviceSynchronize(); }
 GRAD_ACC(msg_w,   msg_wgrad)
 GRAD_ACC(spk_w,   spk_wgrad)
-GRAD_ACC(spk2_w,  spk2_wgrad)
-GRAD_ACC(spk2_b,  spk2_bgrad)
-#if NH_ID_EMBED
+GRAD_ACC(spm1_w, spm1_wgrad)
+GRAD_ACC(spm1_b, spm1_bgrad)
+GRAD_ACC(spm2_w, spm2_wgrad)
+GRAD_ACC(spm2_b, spm2_bgrad)
+GRAD_ACC(loc2_w, loc2_wgrad)
+GRAD_ACC(loc2_b, loc2_bgrad)
 GRAD_ACC(ide_role_w, ide_role_wgrad)
 GRAD_ACC(ide_race_w, ide_race_wgrad)
 GRAD_ACC(ide_gend_w, ide_gend_wgrad)
 GRAD_ACC(ide_algn_w, ide_algn_wgrad)
+#if NH_FILM
+GRAD_ACC(film_g_w, film_g_wgrad)
+GRAD_ACC(film_b_w, film_b_wgrad)
 #endif
-int nh_id_embed() { return NH_ID_EMBED; }
+#if 0
+GRAD_ACC(gln_g, gln_ggrad)
+GRAD_ACC(gln_b, gln_bgrad)
+GRAD_ACC(gnv_w, gnv_wgrad)
+GRAD_ACC(gnv_b, gnv_bgrad)
+GRAD_ACC(gns_w, gns_wgrad)
+#endif
+GRAD_ACC(mv1_w, mv1_wgrad)
+GRAD_ACC(mv1_b, mv1_bgrad)
+GRAD_ACC(mv2_w, mv2_wgrad)
+GRAD_ACC(mv2_b, mv2_bgrad)
+GRAD_ACC(mr_w, mr_wgrad)
+GRAD_ACC(mr_b, mr_bgrad)
+GRAD_ACC(mm1_w, mm1_wgrad)
+GRAD_ACC(mm1_b, mm1_bgrad)
+GRAD_ACC(mm2_w, mm2_wgrad)
+GRAD_ACC(mm2_b, mm2_bgrad)
+GRAD_ACC(ir_w, ir_wgrad)
+GRAD_ACC(ir_b, ir_bgrad)
+GRAD_ACC(im1_w, im1_wgrad)
+GRAD_ACC(im1_b, im1_bgrad)
+GRAD_ACC(im2_w, im2_wgrad)
+GRAD_ACC(im2_b, im2_bgrad)
+#if 0
+GRAD_ACC(gws_w, gws_wgrad)
+GRAD_ACC(gv_w, gv_wgrad)
+GRAD_ACC(gv_b, gv_bgrad)
+GRAD_ACC(gtau, gtau_grad)
+#endif
+int nh_id_embed() { return 1; }
+void nh_get_eeff(void* dst) { cudaMemcpy(dst, g_a->e_eff.data, (size_t)NH_GLYPH_VOCAB * NH_EMBED_DIM * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
+void nh_get_concat(void* dst, int B) { cudaMemcpy(dst, g_a->concat.data, (size_t)B * NH_CONCAT * sizeof(float), cudaMemcpyDeviceToDevice); cudaDeviceSynchronize(); }
 
 // ---- pointer decoder (fed by the encoder's inv_out keys) ----
 // forward: encoder -> decoder directly (no mingru in the harness); the

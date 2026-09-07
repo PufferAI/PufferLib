@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NetHack — PufferLib</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg: #0b0b10; --fg: #c8c8cf; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+               background: var(--bg); color: var(--fg); }
+  body { display: flex; align-items: center; justify-content: center;
+         font-family: ui-monospace, "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  #term { font-size: 13px; line-height: 1.18; white-space: pre; margin: 0; padding: 0 8px; }
+</style>
+</head>
+<body>
+<pre id="term">loading engine + weights…</pre>
+<script>
+var term = document.getElementById('term');
+var pending = [], flushTimer = null;
+// a frame is printed in one synchronous burst, so flushing on a 0 ms timer never splits one
+function flush() {
+  flushTimer = null;
+  if (!pending.length) return;
+  term.innerHTML = pending.join('\n');
+  pending = [];
+}
+var C = {30:'#3a3a45',31:'#e05555',32:'#4fb455',33:'#c8a03c',34:'#5a78e0',
+         35:'#b060c0',36:'#3ab5b5',37:'#c8c8cf',39:null,
+         90:'#6a6a78',91:'#ff7a7a',92:'#7ce07c',93:'#ffd75f',94:'#8fa8ff',
+         95:'#e08fe0',96:'#6fe0e0',97:'#ffffff'};
+function ansiToHtml(line) {
+  var out = '', fg = null, bold = false, dim = false, rev = false, idx = 0, m;
+  var esc = /\x1b\[([0-9;?]*)[A-Za-z]/g;
+  function span(t) {
+    if (!t) return '';
+    var style = '';
+    if (rev) style += 'background:' + (fg || '#c8c8cf') + ';color:#0b0b10;';
+    else if (fg) style += 'color:' + fg + ';';
+    if (bold) style += 'font-weight:600;';
+    if (dim) style += 'opacity:.45;';
+    var e = t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    return style ? '<span style="' + style + '">' + e + '</span>' : e;
+  }
+  while ((m = esc.exec(line))) {
+    out += span(line.slice(idx, m.index));
+    idx = m.index + m[0].length;
+    if (m[0].slice(-1) === 'm') {
+      var ps = (m[1] || '0').split(';').map(Number);
+      for (var i = 0; i < ps.length; i++) {
+        var p = ps[i];
+        if (p === 0) { fg = null; bold = dim = rev = false; }
+        else if (p === 1) bold = true;
+        else if (p === 2) dim = true;
+        else if (p === 7) rev = true;
+        else if (p === 38 && ps[i+1] === 2) { fg = 'rgb(' + ps[i+2] + ',' + ps[i+3] + ',' + ps[i+4] + ')'; i += 4; }
+        else if (C.hasOwnProperty(p)) fg = C[p];
+      }
+    }
+  }
+  return out + span(line.slice(idx));
+}
+var Module = {
+  arguments: ['1000000000', '50'], // 20 Hz; ?hz=N overrides
+  preRun: [function() {
+    // ?seed=N replays that game exactly; ?multi=0 pins the compiled default role
+    let qs = location.search;
+    try { if (!qs && top !== window) qs = top.location.search; } catch (e) {} // site iframe: read the outer page's query
+    const q = new URLSearchParams(qs);
+    ENV.NH_MULTI = q.get('multi') || '1';
+    if (q.get('seed')) ENV.NH_SEED = q.get('seed');
+    if (q.get('skip')) ENV.NH_SKIP = q.get('skip'); // fast-forward N steps unrendered
+    if (q.get('hz')) Module.arguments[1] = String(Math.max(1, Math.round(1000 / Number(q.get('hz')))));
+  }],
+  print: function(line) {
+    var j = line.indexOf('\x1b[2J');
+    if (j !== -1) { flush(); line = line.slice(j + 4); }
+    pending.push(ansiToHtml(line));
+    if (!flushTimer) flushTimer = setTimeout(flush, 0);
+  },
+  printErr: function(t) { console.log(t); }
+};
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
