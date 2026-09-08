@@ -343,7 +343,11 @@ static void load_env(const char* env, int full_dataset, Table* out) {
     }
 
     int cost_col = table_col(out, "uptime");
-    int score_col = table_col(out, "env/score");
+    // Selfplay envs: prefer policy-0 win rate over damage/margin aggregates.
+    int score_col = table_col(out, "env/policy_0_score");
+    if (score_col < 0) {
+        score_col = table_col(out, "env/score");
+    }
     if (score_col < 0) {
         score_col = table_col(out, "env/perf");
     }
@@ -385,6 +389,10 @@ static void write_env(FILE* fp, const char* env, Table* table) {
 
     fprintf(fp, "\n[%s]\n", env);
     for (int c = 0; c < table->cols; c++) {
+        // Search-space bounds bloat the cache and are unused by constellation.
+        if (strncmp(table->labels[c], "sweep/", 6) == 0) {
+            continue;
+        }
         fprintf(fp, "%s = ", table->labels[c]);
         for (int r = 0; r < table->rows; r++) {
             if (r > 0) {

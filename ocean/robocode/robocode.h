@@ -259,7 +259,7 @@ void add_log(Robocode* env) {
     // then fold per-agent running logs into the aggregate env->log.
     for (int i = 0; i < env->num_agents; i++) {
         env->logs[i].damage_received = 100.0f - (float)env->robots[i].energy;
-        env->log.perf            += env->logs[i].perf;
+        // perf is win-rate from end_episode (policy_0), not bot-kill counts.
         env->log.episode_return  += env->logs[i].episode_return;
         env->log.episode_length  += env->logs[i].episode_length;
         env->log.score                   += env->logs[i].score;
@@ -704,6 +704,7 @@ static inline void end_episode(Robocode* env, int outcome) {
     // reads this from env/policy_0_score after eval_log divides by n.
     env->log.policy_0_score += s0_score * env->num_agents;
     env->log.policy_1_score += (1.0f - s0_score) * env->num_agents;
+    env->log.perf += s0_score * env->num_agents;
     env->log.cl_perf += s0_score * (1.0f - noise) * env->num_agents;
     if (outcome == 0) env->log.draw_rate += env->num_agents;
     if (env->tag > 0) {

@@ -689,7 +689,8 @@ static void nethack_pack_obs(Nethack* env) {
 static void nethack_add_log(Nethack* env, int how) { // how: nle how_done, -1 = truncated
     for (int v = 0; v < NETHACK_NUM_ACTIONS; v++)
         env->log.verb_uses[v] += (float)env->stats.verb_uses[v];
-    env->log.perf += (float)env->prev_score;
+    // perf is normalized depth progress (Gehennom ~50); score stays raw BL_SCORE.
+    env->log.perf += (float)env->stats.max_depth / 50.0f;
     env->log.score += (float)env->prev_score;
     env->log.valid_moves += (float)env->stats.valid_moves;
     env->log.illegal_actions += (float)env->stats.illegal_actions;

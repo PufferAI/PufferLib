@@ -438,11 +438,10 @@ void end_episode(SlimeVolley* env, int outcome) {
     if (env->tag > 0) {
         env->boundary_reached = 1;
     }
-    int margin = env->players[0].lives - env->players[1].lives;
+    // Selfplay seats cancel if both accumulate margin; use policy-0 outcome only.
+    env->log.perf += s0_score * env->num_agents;
+    env->log.score += s0_score * env->num_agents;
     for (int i = 0; i < env->num_agents; i++) {
-        int slot_margin = (i == 0) ? margin : -margin;
-        env->log.perf += (slot_margin + MAXLIVES) / (2.0f*MAXLIVES);
-        env->log.score += slot_margin;
         env->log.episode_return += env->episode_return[i];
         env->log.episode_length += env->tick;
         env->log.n += 1.0f;
