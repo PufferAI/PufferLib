@@ -2812,7 +2812,7 @@ void puf_step(Chess* env) {
 
     populate_observations(env);
 }
-static void draw_piece_icon(Chess* env, Piece pc, Rectangle box) {
+static void draw_piece_icon(Chess* env, Piece pc, Rectangle box, int size, Color color) {
     if (pc == NO_PIECE) {
         return;
     }
@@ -2829,15 +2829,10 @@ static void draw_piece_icon(Chess* env, Piece pc, Rectangle box) {
         return;
     }
 
-    Color pc_color = color_of(pc) == CHESS_WHITE 
-        ? (Color){255, 255, 255, 255}
-        : (Color){0, 0, 0, 255};
-    
     Color outline = (color_of(pc) == CHESS_WHITE) 
         ? (Color){0, 0, 0, 220} 
         : (Color){255, 255, 255, 180};
 
-    int size = (int)(box.height / 2);
     int x = (int)(box.x + (box.width - MeasureText(PIECE_CHARS[pc], size)) / 2);
     int y = (int)(box.y + (box.height - size) / 2);
     for (int dx = -1; dx <= 1; dx++) {
@@ -2847,12 +2842,13 @@ static void draw_piece_icon(Chess* env, Piece pc, Rectangle box) {
             }
         }
     }
-    DrawText(PIECE_CHARS[pc], x, y, size, pc_color);
+    DrawText(PIECE_CHARS[pc], x, y, size, color);
 }
 
 static void draw_piece(Chess* env, Piece pc, int file, int rank, int cell_size) {
+    Color color = color_of(pc) == CHESS_WHITE ? WHITE : (Color){0, 0, 0, 255};
     draw_piece_icon(env, pc, (Rectangle){file * cell_size, (7 - rank) * cell_size,
-                                       cell_size, cell_size});
+                                       cell_size, cell_size}, cell_size / 2, color);
 }
 
 static void init_chess_client(Chess* env, int cell_size) {
@@ -3146,7 +3142,7 @@ human_wait_retry:
             if (wc > 0) {
                 Piece wpc = (Piece)(W_PAWN + pt);
                 DrawRectangle(white_x, cap_y, 16, 16, LIGHTGRAY);
-                draw_piece_icon(env, wpc, (Rectangle){white_x, cap_y, 16, 16});
+                draw_piece_icon(env, wpc, (Rectangle){white_x, cap_y, 16, 16}, 14, white_cap_color);
                 white_x += 16;
                 if (wc > 1) {
                     char mult[8];
@@ -3163,7 +3159,7 @@ human_wait_retry:
                 Piece bpc = (Piece)(B_PAWN + pt);
                 Color outline = (Color){255, 255, 255, 180};
                 DrawRectangle(black_x, cap_y + 18, 16, 16, LIGHTGRAY);
-                draw_piece_icon(env, bpc, (Rectangle){black_x, cap_y + 18, 16, 16});
+                draw_piece_icon(env, bpc, (Rectangle){black_x, cap_y + 18, 16, 16}, 14, black_cap_color);
                 black_x += 16;
                 if (bc > 1) {
                     char mult[8];
