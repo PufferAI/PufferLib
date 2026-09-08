@@ -152,14 +152,6 @@ static const char* PIECE_CHARS[] = {
     "p", "n", "b", "r", "q", "k"
 };
 
-static const char* PIECE_FILLED[] = {
-    "",
-    "♟", "♞", "♝", "♜", "♛", "♚",
-    "", "",
-    "♟", "♞", "♝", "♜", "♛", "♚"
-};
-
-
 static uint64_t prng_state = 1070372;
 static inline uint64_t prng_rand(void) {
     prng_state ^= prng_state >> 12;
@@ -420,9 +412,8 @@ struct Log {
 };
 
 typedef struct {
-    int cell_size;
-    Font piece_font;
-    int use_unicode_pieces;
+    Texture2D pieces;
+    Rectangle piece_bounds[16];
 } Client;
 
 typedef struct {
@@ -2821,83 +2812,43 @@ void puf_step(Chess* env) {
 
     populate_observations(env);
 }
-static Font load_piece_font(int cell_size, int* loaded) {
-    const char* candidates[] = {
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
-        "/System/Library/Fonts/Supplemental/Apple Symbols.ttf",
-        "C:\\Windows\\Fonts\\seguisym.ttf"
-    };
-
-    int codepoints[] = {0x2654, 0x2655, 0x2656, 0x2657, 0x2658, 0x2659, 0x265A, 0x265B, 0x265C, 0x265D, 0x265E, 0x265F};
-    Font font = (Font){0};
-    size_t candidate_count = sizeof(candidates) / sizeof(candidates[0]);
-    size_t codepoint_count = sizeof(codepoints) / sizeof(codepoints[0]);
-
-    for (size_t i = 0; i < candidate_count; i++) {
-        if (!FileExists(candidates[i])) {
-            continue;
-        }
-        font = LoadFontEx(candidates[i], cell_size, codepoints, (int)codepoint_count);
-        if (font.texture.id != 0) {
-            if (loaded) {
-                *loaded = 1;
-            }
-            SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
-            return font;
-        }
-    }
-
-    if (loaded) {
-        *loaded = 0;
-    }
-    return GetFontDefault();
-}
-
-static void draw_piece(Chess* env, Piece pc, int file, int rank, int cell_size) {
+static void draw_piece_icon(Chess* env, Piece pc, Rectangle box, int size, Color color) {
     if (pc == NO_PIECE) {
         return;
     }
     
-    Color pc_color = color_of(pc) == CHESS_WHITE 
-        ? (Color){255, 255, 255, 255}
-        : (Color){0, 0, 0, 255};
-    
+    if (env->client && env->client->pieces.id != 0) {
+        Rectangle source = env->client->piece_bounds[pc];
+        float scale = box.width / (env->client->pieces.width / 6.0f);
+        Rectangle dest = {
+            box.x + (box.width - source.width * scale) / 2.0f,
+            box.y + (box.height - source.height * scale) / 2.0f,
+            source.width * scale, source.height * scale
+        };
+        DrawTexturePro(env->client->pieces, source, dest, (Vector2){0}, 0, WHITE);
+        return;
+    }
+
     Color outline = (color_of(pc) == CHESS_WHITE) 
         ? (Color){0, 0, 0, 220} 
         : (Color){255, 255, 255, 180};
 
-    int draw_x = file * cell_size;
-    int draw_y = (7 - rank) * cell_size;
-
-    if (env->client && env->client->use_unicode_pieces) {
-        float icon_size = cell_size * 0.85f;
-        Vector2 pos = (Vector2){
-            draw_x + (cell_size - icon_size) / 2.0f,
-            draw_y + (cell_size - icon_size) / 2.0f - cell_size * 0.05f
-        };
-        const char* str = PIECE_FILLED[pc];
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                if (dx != 0 || dy != 0) {
-                    Vector2 opos = (Vector2){pos.x + dx, pos.y + dy};
-                    DrawTextEx(env->client->piece_font, str, opos, icon_size, 0, outline);
-                }
+    int x = (int)(box.x + (box.width - MeasureText(PIECE_CHARS[pc], size)) / 2);
+    int y = (int)(box.y + (box.height - size) / 2);
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+            if (dx != 0 || dy != 0) {
+                DrawText(PIECE_CHARS[pc], x + dx, y + dy, size, outline);
             }
         }
-        DrawTextEx(env->client->piece_font, str, pos, icon_size, 0, pc_color);
-    } else {
-        int x = draw_x + cell_size / 4;
-        int y = draw_y + cell_size / 8;
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                if (dx != 0 || dy != 0) {
-                    DrawText(PIECE_CHARS[pc], x + dx, y + dy, cell_size / 2, outline);
-                }
-            }
-        }
-        DrawText(PIECE_CHARS[pc], x, y, cell_size / 2, pc_color);
     }
+    DrawText(PIECE_CHARS[pc], x, y, size, color);
+}
+
+static void draw_piece(Chess* env, Piece pc, int file, int rank, int cell_size) {
+    Color color = color_of(pc) == CHESS_WHITE ? WHITE : (Color){0, 0, 0, 255};
+    draw_piece_icon(env, pc, (Rectangle){file * cell_size, (7 - rank) * cell_size,
+                                       cell_size, cell_size}, cell_size / 2, color);
 }
 
 static void init_chess_client(Chess* env, int cell_size) {
@@ -2910,10 +2861,31 @@ static void init_chess_client(Chess* env, int cell_size) {
     SetTargetFPS(env->render_fps > 0 ? env->render_fps : 30);
 #endif
     env->client = (Client*)calloc(1, sizeof(Client));
-    env->client->cell_size = cell_size;
-    int font_loaded = 0;
-    env->client->piece_font = load_piece_font(cell_size, &font_loaded);
-    env->client->use_unicode_pieces = font_loaded;
+    // pieces.png: "Chess Pieces Sprite" by Jurgenwesterhof, adapted from Cburnett; unmodified PNG reproduction.
+    // Artwork license: CC BY-SA 3.0, https://creativecommons.org/licenses/by-sa/3.0/
+    // Source: https://commons.wikimedia.org/wiki/File:Chess_Pieces_Sprite.svg
+    Image image = LoadImage("resources/chess/pieces.png");
+    if (image.data && image.width % 6 == 0 && image.height == image.width / 3) {
+        env->client->pieces = LoadTextureFromImage(image);
+        if (env->client->pieces.id != 0) {
+            SetTextureFilter(env->client->pieces, TEXTURE_FILTER_BILINEAR);
+            // Columns: king, queen, bishop, knight, rook, pawn; white above black.
+            const int columns[] = {0, 5, 3, 2, 4, 1, 0};
+            int tile = image.width / 6;
+            for (int color = CHESS_WHITE; color <= CHESS_BLACK; color++) {
+                for (int pt = PAWN; pt <= KING; pt++) {
+                    Rectangle cell = {columns[pt] * tile, color * tile, tile, tile};
+                    Image piece = ImageFromImage(image, cell);
+                    Rectangle bounds = GetImageAlphaBorder(piece, 0.0f);
+                    UnloadImage(piece);
+                    bounds.x += cell.x;
+                    bounds.y += cell.y;
+                    env->client->piece_bounds[make_piece(color, pt)] = bounds;
+                }
+            }
+        }
+    }
+    if (image.data) UnloadImage(image);
 }
 
 void puf_render(Chess* env) {
@@ -3170,14 +3142,9 @@ human_wait_retry:
             int wc = env->white_captured[pt];
             if (wc > 0) {
                 Piece wpc = (Piece)(W_PAWN + pt);
-                if (env->client && env->client->use_unicode_pieces) {
-                    DrawTextEx(env->client->piece_font, PIECE_FILLED[wpc],
-                        (Vector2){(float)white_x, (float)(cap_y - 1)}, 16.0f, 0.0f, white_cap_color);
-                    white_x += 16;
-                } else {
-                    DrawText(PIECE_CHARS[wpc], white_x, cap_y, 14, white_cap_color);
-                    white_x += 12;
-                }
+                DrawRectangle(white_x, cap_y, 16, 16, LIGHTGRAY);
+                draw_piece_icon(env, wpc, (Rectangle){white_x, cap_y, 16, 16}, 14, white_cap_color);
+                white_x += 16;
                 if (wc > 1) {
                     char mult[8];
                     snprintf(mult, sizeof(mult), "x%d", wc);
@@ -3192,28 +3159,9 @@ human_wait_retry:
             if (bc > 0) {
                 Piece bpc = (Piece)(B_PAWN + pt);
                 Color outline = (Color){255, 255, 255, 180};
-                if (env->client && env->client->use_unicode_pieces) {
-                    Vector2 pos = {(float)black_x, (float)(cap_y + 17)};
-                    for (int dx = -1; dx <= 1; dx++) {
-                        for (int dy = -1; dy <= 1; dy++) {
-                            if (dx != 0 || dy != 0) {
-                                DrawTextEx(env->client->piece_font, PIECE_FILLED[bpc],
-                                    (Vector2){pos.x + dx, pos.y + dy}, 16.0f, 0.0f, outline);
-                            }
-                        }
-                    }
-                    DrawTextEx(env->client->piece_font, PIECE_FILLED[bpc], pos, 16.0f, 0.0f, black_cap_color);
-                    black_x += 16;
-                } else {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        for (int dy = -1; dy <= 1; dy++) {
-                            if (dx != 0 || dy != 0)
-                                DrawText(PIECE_CHARS[bpc], black_x + dx, cap_y + 18 + dy, 14, outline);
-                        }
-                    }
-                    DrawText(PIECE_CHARS[bpc], black_x, cap_y + 18, 14, black_cap_color);
-                    black_x += 12;
-                }
+                DrawRectangle(black_x, cap_y + 18, 16, 16, LIGHTGRAY);
+                draw_piece_icon(env, bpc, (Rectangle){black_x, cap_y + 18, 16, 16}, 14, black_cap_color);
+                black_x += 16;
                 if (bc > 1) {
                     char mult[8];
                     snprintf(mult, sizeof(mult), "x%d", bc);
@@ -3325,8 +3273,8 @@ human_wait_retry:
 
 void puf_close(Chess* env) {
     if (env->client != NULL) {
-        if (env->client->use_unicode_pieces && env->client->piece_font.texture.id != 0) {
-            UnloadFont(env->client->piece_font);
+        if (env->client->pieces.id != 0) {
+            UnloadTexture(env->client->pieces);
         }
         if (IsWindowReady()) {
             CloseWindow();
