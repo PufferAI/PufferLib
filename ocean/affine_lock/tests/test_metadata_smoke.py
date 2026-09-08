@@ -67,8 +67,8 @@ def check_config():
     assert parse_float(config["train"]["vf_coef"]) == 4.75
     assert parse_float(config["train"]["vf_clip_coef"]) == 0.8
     assert parse_float(config["train"]["max_grad_norm"]) == 3.0
-    assert parse_float(config["train"]["vtrace_rho_clip"]) == 1.4
-    assert parse_float(config["train"]["vtrace_c_clip"]) == 3.75
+    assert parse_float(config["train"]["vtrace_rho_clip"]) == 1.0
+    assert parse_float(config["train"]["vtrace_c_clip"]) == 1.0
     assert "prio_alpha" not in config["train"]
     assert "prio_beta0" not in config["train"]
     assert_sweep_mean(config, "sweep.train.total_timesteps", 200_000_000.0)
@@ -181,8 +181,8 @@ def check_backend_metadata():
     assert base_args["train"]["vf_coef"] == 4.75
     assert base_args["train"]["vf_clip_coef"] == 0.8
     assert base_args["train"]["max_grad_norm"] == 3.0
-    assert base_args["train"]["vtrace_rho_clip"] == 1.4
-    assert base_args["train"]["vtrace_c_clip"] == 3.75
+    assert base_args["train"]["vtrace_rho_clip"] == 1.0
+    assert base_args["train"]["vtrace_c_clip"] == 1.0
     assert "prio_alpha" not in base_args["train"]
     assert "prio_beta0" not in base_args["train"]
 

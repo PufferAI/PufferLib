@@ -15,16 +15,15 @@ typedef struct {
 } Arena;
 
 Arena* make_allocator(size_t total_size) {
-    void* buffer = (void*)calloc(1, total_size + sizeof(Arena));
-    Arena* allocator = (Arena*)buffer;
-    allocator->data = (void*)((char*)buffer + sizeof(Arena));
+    Arena* allocator = calloc(1, total_size + sizeof(Arena));
+    allocator->data = (char*)allocator + sizeof(Arena);
     allocator->capacity = total_size;
     allocator->used = 0;
     return allocator;
 }
 
 void* alloc(Arena* allocator, size_t size) {
-    void* ptr = (void*)((char*)allocator->data + allocator->used);
+    void* ptr = (char*)allocator->data + allocator->used;
     if (allocator->used + size > allocator->capacity) {
         return NULL;
     }
@@ -47,19 +46,19 @@ Weights* load_weights(const char* filename) {
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     rewind(file);
-    size_t num_weights = (size_t)file_size / sizeof(float);
+    size_t num_weights = file_size / sizeof(float);
     // +7 ensures get_weights_aligned never reads past the buffer: the native
     // backend uses 16-byte alignment with bf16 params (2 bytes), so each tensor
     // starts at an 8-float boundary. After the last tensor, up to 7 extra floats
     // may be addressed before the next 8-aligned boundary.
-    Weights* weights = (Weights*)calloc(1, sizeof(Weights) + (num_weights + 7)*sizeof(float));
+    Weights* weights = calloc(1, sizeof(Weights) + (num_weights + 7)*sizeof(float));
     weights->data = (float*)(weights + 1);
     size_t read_size = fread(weights->data, sizeof(float), num_weights, file);
     fclose(file);
     if (read_size != num_weights) {
         perror("Error reading file");
     }
-    weights->size = (int)num_weights + 7;
+    weights->size = num_weights + 7;
     weights->idx = 0;
     return weights;
 }
@@ -161,7 +160,7 @@ void _one_hot(int* input, int* output, int batch_size, int input_size, int num_c
                 + i*num_classes
                 + input[in_adr]
             );
-            output[out_adr] = 1.0f;
+            output[out_adr] = 1;
         }
     }
 }
@@ -196,7 +195,7 @@ void _gaussian_sample(float* input, float* log_std, float* output, int batch_siz
             int out_adr = b * num_actions + a;
             float mean = input[in_adr + a];
             float std = expf(log_std[a]);
-            output[out_adr] = (float)_randn(mean, std);
+            output[out_adr] = _randn(mean, std);
         }
     }
 }
@@ -231,7 +230,7 @@ void _multidiscrete(float* input, float* output, int batch_size, int logit_sizes
             }
             if (hard) {
                 float max_logit = input[in_adr + first];
-                output[out_adr] = (float)first;
+                output[out_adr] = first;
                 for (int i = first + 1; i < n; i++) {
                     if (head_mask && !head_mask[i]) {
                         continue;
@@ -239,7 +238,7 @@ void _multidiscrete(float* input, float* output, int batch_size, int logit_sizes
                     float out = input[in_adr + i];
                     if (out > max_logit) {
                         max_logit = out;
-                        output[out_adr] = (float)i;
+                        output[out_adr] = i;
                     }
                 }
             } else {
@@ -258,14 +257,14 @@ void _multidiscrete(float* input, float* output, int batch_size, int logit_sizes
                 }
                 float prob = rand() / (float)RAND_MAX;
                 float logit_prob = 0.0f;
-                output[out_adr] = (float)first;
+                output[out_adr] = first;
                 for (int i = 0; i < n; i++) {
                     if (head_mask && !head_mask[i]) {
                         continue;
                     }
                     logit_prob += expf(input[in_adr + i] - max_logit) / logit_exp_sum;
                     if (prob < logit_prob) {
-                        output[out_adr] = (float)i;
+                        output[out_adr] = i;
                         break;
                     }
                 }
@@ -302,7 +301,7 @@ typedef struct Linear {
 
 Linear* make_linear(Weights* weights, int batch_size, int input_dim, int output_dim) {
     size_t buffer_size = batch_size*output_dim*sizeof(float);
-    Linear* layer = (Linear*)calloc(1, sizeof(Linear) + buffer_size);
+    Linear* layer = calloc(1, sizeof(Linear) + buffer_size);
     *layer = (Linear){
         .output = (float*)(layer + 1),
         .weights = get_weights_aligned(weights, output_dim*input_dim),
@@ -332,7 +331,7 @@ typedef struct ReLU {
 
 ReLU* make_relu(int batch_size, int input_dim) {
     size_t buffer_size = batch_size*input_dim*sizeof(float);
-    ReLU* layer = (ReLU*)calloc(1, sizeof(ReLU) + buffer_size);
+    ReLU* layer = calloc(1, sizeof(ReLU) + buffer_size);
     *layer = (ReLU){
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
@@ -354,7 +353,7 @@ typedef struct MaxDim1 {
 
 MaxDim1* make_max_dim1(int batch_size, int seq_len, int feature_dim) {
     size_t buffer_size = batch_size*feature_dim*sizeof(float);
-    MaxDim1* layer = (MaxDim1*)calloc(1, sizeof(MaxDim1) + buffer_size);
+    MaxDim1* layer = calloc(1, sizeof(MaxDim1) + buffer_size);
     *layer = (MaxDim1){
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
@@ -384,7 +383,7 @@ Conv2D* make_conv2d(Weights* weights, int batch_size, int in_width, int in_heigh
         int in_channels, int out_channels, int kernel_size, int stride) {
     size_t buffer_size = batch_size*out_channels*in_height*in_width*sizeof(float);
     int num_weights = out_channels*in_channels*kernel_size*kernel_size;
-    Conv2D* layer = (Conv2D*)calloc(1, sizeof(Conv2D) + buffer_size);
+    Conv2D* layer = calloc(1, sizeof(Conv2D) + buffer_size);
     *layer = (Conv2D){
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, num_weights),
@@ -415,7 +414,7 @@ typedef struct Embedding {
 
 Embedding* make_embedding(Weights* weights, int batch_size, int num_embeddings, int embedding_dim) {
     size_t output_size = batch_size*embedding_dim*sizeof(float);
-    Embedding* layer = (Embedding*)calloc(1, sizeof(Embedding) + batch_size + output_size);
+    Embedding* layer = calloc(1, sizeof(Embedding) + batch_size + output_size);
     *layer = (Embedding){
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, num_embeddings*embedding_dim),
@@ -439,7 +438,7 @@ typedef struct OneHot {
 
 OneHot* make_one_hot(int batch_size, int input_size, int num_classes) {
     size_t buffer_size = batch_size*input_size*num_classes*sizeof(int);
-    OneHot* layer = (OneHot*)calloc(1, sizeof(OneHot) + buffer_size);
+    OneHot* layer = calloc(1, sizeof(OneHot) + buffer_size);
     *layer = (OneHot){
         .output = (int*)(layer + 1),
         .batch_size = batch_size,
@@ -460,7 +459,7 @@ typedef struct Multidiscrete {
 } Multidiscrete;
 
 Multidiscrete* make_multidiscrete(int batch_size, int logit_sizes[], int num_actions) {
-    Multidiscrete* layer = (Multidiscrete*)calloc(1, sizeof(Multidiscrete));
+    Multidiscrete* layer = calloc(1, sizeof(Multidiscrete));
     layer->batch_size = batch_size;
     layer->num_actions = num_actions;
     memcpy(layer->logit_sizes, logit_sizes, num_actions*sizeof(int));
@@ -487,10 +486,10 @@ typedef struct MinGRU {
 } MinGRU;
 
 MinGRU* make_mingru(Weights* weights, int batch_size, int hidden_size, int num_layers) {
-    MinGRU* layer = (MinGRU*)calloc(1, sizeof(MinGRU));
-    layer->state = (float*)calloc(num_layers * batch_size * hidden_size, sizeof(float));
-    layer->output = (float*)calloc(batch_size * hidden_size, sizeof(float));
-    layer->proj = (Linear**)calloc(num_layers, sizeof(Linear*));
+    MinGRU* layer = calloc(1, sizeof(MinGRU));
+    layer->state = calloc(num_layers * batch_size * hidden_size, sizeof(float));
+    layer->output = calloc(batch_size * hidden_size, sizeof(float));
+    layer->proj = calloc(num_layers, sizeof(Linear*));
     layer->batch_size  = batch_size;
     layer->hidden_size = hidden_size;
     layer->num_layers  = num_layers;
@@ -573,9 +572,9 @@ typedef struct PufferNet {
 
 PufferNet* make_puffernet(Weights* weights, int num_agents, int input_dim,
         int hidden_dim, int num_layers, int logit_sizes[], int num_actions) {
-    PufferNet* net = (PufferNet*)calloc(1, sizeof(PufferNet));
+    PufferNet* net = calloc(1, sizeof(PufferNet));
     net->num_agents = num_agents;
-    net->obs = (float*)calloc(num_agents * input_dim, sizeof(float));
+    net->obs = calloc(num_agents * input_dim, sizeof(float));
     int atn_sum = 0;
     int is_continuous = 1;
     for (int i = 0; i < num_actions; i++) {
@@ -624,9 +623,7 @@ void free_puffernet(PufferNet* net) {
     free(net->encoder);
     free(net->decoder);
     free_mingru(net->mingru);
-    if (net->multidiscrete) {
-        free(net->multidiscrete);
-    }
+    free(net->multidiscrete);
     free(net);
 }
 
@@ -673,7 +670,7 @@ static void puf_find_latest_checkpoint(const char* dir,
         return;
     }
 
-    struct dirent* ent = NULL;
+    struct dirent* ent;
     while ((ent = readdir(dp))) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
             continue;
@@ -714,8 +711,12 @@ static const char* puf_model_path(const char* env_name, const char* cli_path,
         puf_find_latest_checkpoint(root, out, out_size, &best_time);
         return out[0] ? out : NULL;
     }
+#ifdef PLATFORM_WEB
     snprintf(out, out_size, "resources/%s/%s_weights.bin", env_name, env_name);
     return out;
+#else
+    return NULL;
+#endif
 }
 
 int main(int argc, char** argv) {
@@ -735,7 +736,7 @@ int main(int argc, char** argv) {
     const char* cli_path = NULL;
     int cli_latest = 0;
 
-    char* ini_argv[argc > 0 ? (size_t)argc : 1];
+    char* ini_argv[argc > 0 ? argc : 1];
     int ini_argc = 0;
     for (int i = argi; i < argc; i++) {
         if (strcmp(argv[i], "--headless") == 0) {
@@ -754,16 +755,24 @@ int main(int argc, char** argv) {
         ini_argv[ini_argc++] = argv[i];
     }
     puf_ini_load_env(&ini, env_name, ini_argc, ini_argv);
-    int eval_episodes = (int)puf_ini_get(&ini, "base", "eval_episodes");
+    // Trainer default.ini eval_episodes is for ./puffer eval, not CPU play.
+    // Honor it only when the CLI actually passed --eval_episodes=N.
+    int eval_episodes = 0;
+    for (int i = 0; i < ini_argc; i++) {
+        if (strstr(ini_argv[i], "eval_episodes") != NULL) {
+            eval_episodes = puf_ini_get(&ini, "base", "eval_episodes");
+            break;
+        }
+    }
 
     int act_sizes[] = ACT_SIZES;
-    int num_actions = (int)(sizeof(act_sizes) / sizeof(act_sizes[0]));
+    int num_actions = sizeof(act_sizes) / sizeof(act_sizes[0]);
     char path_buf[1024];
     const char* path = puf_model_path(env_name, cli_path, cli_latest,
         path_buf, sizeof(path_buf));
     Weights* weights = path ? load_weights(path) : NULL;
-    int hidden_size = (int)puf_ini_get(&ini, "policy", "hidden_size");
-    int num_layers = (int)puf_ini_get(&ini, "policy", "num_layers");
+    int hidden_size = puf_ini_get(&ini, "policy", "hidden_size");
+    int num_layers = puf_ini_get(&ini, "policy", "num_layers");
     int file_floats = weights ? (weights->size - 7) : 0;
 #ifdef PUF_NMMO3_NET
     int need = nmmo3_weight_count(hidden_size, num_layers);
@@ -779,7 +788,7 @@ int main(int argc, char** argv) {
 #endif
     assert(!weights || (need - file_floats <= 7 && file_floats <= need));
     int have_net = weights != NULL;
-    if (headless) {
+    if (headless && eval_episodes > 0) {
         printf("CPU_META env=%s path=%s file_floats=%d need=%d untrained=%d hidden=%d layers=%d\n",
             env_name, path ? path : "-", file_floats, need, !have_net,
             hidden_size, num_layers);
@@ -790,7 +799,7 @@ int main(int argc, char** argv) {
     int frameskip = 1;
     DictItem* fs_item = dict_find(env_sec, "frameskip");
     if (fs_item && fs_item->value > 1.0) {
-        frameskip = (int)fs_item->value;
+        frameskip = fs_item->value;
         dict_set(env_sec, "frameskip", 1);
     }
 #ifdef PUF_EVAL_SHOULD_FORWARD
@@ -798,26 +807,25 @@ int main(int argc, char** argv) {
 #endif
 
     Env env = {0};
-    env.rng = 0;
     puf_init(&env, env_sec);
 
     // Heap, not VLAs: multiagent envs (snake=256, obs=968) overflow the
     // 512KB WASM stack (obs_f alone is ~1MB).
     size_t n_obs = (size_t)env.num_agents * (size_t)OBS_SIZE;
     size_t n_atn = (size_t)env.num_agents * (size_t)NUM_ATNS;
-    size_t n_agt = (size_t)env.num_agents;
-    obs_t* observations = (obs_t*)calloc(n_obs, sizeof(obs_t));
+    size_t n_agt = env.num_agents;
+    obs_t* observations = calloc(n_obs, sizeof(obs_t));
 #if !defined(PUF_NMMO3_NET) && !defined(PUF_ASTEROIDS_NET) && !defined(PUF_MINIMAL_NET) && !defined(PUF_CRAFTAX_NET)
-    float* obs_f = (float*)calloc(n_obs, sizeof(float));
+    float* obs_f = calloc(n_obs, sizeof(float));
 #endif
-    float* actions = (float*)calloc(n_atn, sizeof(float));
-    float* rewards = (float*)calloc(n_agt, sizeof(float));
-    float* terminals = (float*)calloc(n_agt, sizeof(float));
+    float* actions = calloc(n_atn, sizeof(float));
+    float* rewards = calloc(n_agt, sizeof(float));
+    float* terminals = calloc(n_agt, sizeof(float));
     int act_n = 0;
     for (int i = 0; i < num_actions; i++) {
         act_n += act_sizes[i];
     }
-    unsigned char* masks = (unsigned char*)calloc(
+    unsigned char* masks = calloc(
         (size_t)env.num_agents * (size_t)act_n, 1);
     memset(masks, 1, (size_t)env.num_agents * (size_t)act_n);
     for (int i = 0; i < env.num_agents; i++) {
@@ -872,7 +880,7 @@ int main(int argc, char** argv) {
     // Interactive: keep sim at PUF_STEPS_PER_SEC using wall clock.
     // Each tick is still one training step (one forward + one puf_step / ACTION_DT).
     // Slow renders catch up with extra ticks; they do not stretch dt.
-    const double sim_dt = 1.0 / (double)PUF_STEPS_PER_SEC;
+    const double sim_dt = 1.0 / PUF_STEPS_PER_SEC;
     double sim_accum = 0.0;
     double sim_prev = -1.0;
     int sim_tick_cap = 5;
@@ -890,7 +898,8 @@ int main(int argc, char** argv) {
     // With ASYNCIFY that wait is ~40ms; plus puf_web_vsync rAF => ~18fps.
     // Pace frames only with puf_web_vsync. Native still uses WindowShouldClose.
     while (headless
-            ? (env.log.n < (float)eval_episodes)
+            ? (eval_episodes > 0 ? (env.log.n < eval_episodes)
+                                 : (steps < 1024))
 #ifdef PLATFORM_WEB
             : IsWindowReady()) {
 #else
@@ -905,8 +914,8 @@ int main(int argc, char** argv) {
                 if (dt < 0.0) dt = 0.0;
                 if (dt > 0.25) dt = 0.25;
                 sim_accum += dt;
-                if (sim_accum > sim_dt * (double)sim_tick_cap) {
-                    sim_accum = sim_dt * (double)sim_tick_cap;
+                if (sim_accum > sim_dt * sim_tick_cap) {
+                    sim_accum = sim_dt * sim_tick_cap;
                 }
                 while (sim_accum >= sim_dt && ticks < sim_tick_cap) {
                     sim_accum -= sim_dt;
@@ -938,8 +947,8 @@ int main(int argc, char** argv) {
 #else
                 float* fwd = (float*)observations;
                 if (sizeof(obs_t) != sizeof(float)) {
-                    for (int i = 0; i < (int)n_obs; i++) {
-                        obs_f[i] = (float)observations[i];
+                    for (size_t i = 0; i < n_obs; i++) {
+                        obs_f[i] = observations[i];
                     }
                     fwd = obs_f;
                 }
@@ -965,14 +974,14 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (headless) {
+    if (headless && eval_episodes > 0) {
         float n = env.log.n;
         float perf = 0.0f;
         float score = 0.0f;
         if (n > 0.0f) {
             Log avg = env.log;
             float* acc = (float*)&avg;
-            int nf = (int)(sizeof(Log) / sizeof(float));
+            int nf = sizeof(Log) / sizeof(float);
             for (int i = 0; i < nf; i++) {
                 acc[i] /= n;
             }
@@ -981,8 +990,8 @@ int main(int argc, char** argv) {
             dict_set(&out, "n", n);
             DictItem* pi = dict_find(&out, "perf");
             DictItem* si = dict_find(&out, "score");
-            if (pi) perf = (float)pi->value;
-            if (si) score = (float)si->value;
+            if (pi) perf = pi->value;
+            if (si) score = si->value;
             dict_clear(&out);
         }
         printf("CPU_EVAL env=%s file_floats=%d need=%d match=%d untrained=%d n=%.0f perf=%.6f score=%.6f steps=%d agents=%d\n",

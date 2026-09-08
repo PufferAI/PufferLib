@@ -9,6 +9,7 @@ set -e
 #   ./build.sh breakout --float      # float32 precision (required for --slowly)
 #   ./build.sh breakout --cpu        # Play/eval binary (optimized) -> ./ENV
 #   ./build.sh osrs_inferno --cpu     # OSRS visual policy viewer -> ./osrs_inferno
+#   ./build.sh nethack --cpu          # NetHack TTY demo (ocean/nethack/nethack.c)
 #   ./build.sh breakout myplay --cpu # Play -> ./myplay
 #   ./build.sh breakout --debug      # Debug (-O0 -g; sanitizers on --cpu)
 #   ./build.sh breakout --web        # Emscripten web build
@@ -220,6 +221,8 @@ OUTPUT_NAME=${OUTPUT_NAME:-$ENV}
 if [ -n "$OUT" ]; then
     OUTPUT_NAME=$OUT
 fi
+# Header-only envs compile src/puffercpu.c. SRC_FILE is the custom standalone
+# for osrs_* (visual sim) and nethack (TTY demo); see --cpu / web.sh.
 SRC_FILE=${SRC_FILE:-$SRC_DIR/$ENV.c}
 
 if [ "$(uname -m)" = "x86_64" ]; then
@@ -276,7 +279,7 @@ if [ "$MODE" = "cpu" ]; then
     STANDALONE_SOURCE="src/puffercpu.c"
     STANDALONE_DEFINES=()
     case "$ENV" in
-        osrs_*)
+        osrs_*|nethack)
             STANDALONE_SOURCE="$SRC_FILE"
             ;;
         *)
