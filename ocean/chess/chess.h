@@ -2861,7 +2861,8 @@ static void init_chess_client(Chess* env, int cell_size) {
     SetTargetFPS(env->render_fps > 0 ? env->render_fps : 30);
 #endif
     env->client = (Client*)calloc(1, sizeof(Client));
-    // pieces.png: unchanged Jurgenwesterhof/Cburnett artwork, CC BY-SA 3.0 (https://creativecommons.org/licenses/by-sa/3.0/).
+    // pieces.png: "Chess Pieces Sprite" by Jurgenwesterhof, adapted from Cburnett; unmodified PNG reproduction.
+    // Artwork license: CC BY-SA 3.0, https://creativecommons.org/licenses/by-sa/3.0/
     // Source: https://commons.wikimedia.org/wiki/File:Chess_Pieces_Sprite.svg
     Image image = LoadImage("resources/chess/pieces.png");
     if (image.data && image.width % 6 == 0 && image.height == image.width / 3) {
