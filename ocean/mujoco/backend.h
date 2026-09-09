@@ -1,5 +1,34 @@
 // Vector backend, included at the end of each mjc_<env>.h.
 
+#ifndef PUFFERCPU_EVAL_MAIN
+
+static void mjc_render_paced(Env* env) {
+    int nq = env->m->nq;
+    static float prev[MJ_MAX_NQ];
+    static int have_prev = 0;
+    static float credit = 0.0f;
+    credit += MJC_FRAME_SKIP*env->m->opt_timestep*60.0f;
+    int frames = (int)credit;
+    credit -= frames;
+    if (have_prev && frames > 1) {
+        float cur[MJ_MAX_NQ];
+        memcpy(cur, env->d.qpos, nq*sizeof(float));
+        for (int f = 1; f <= frames; f++) {
+            float a = (float)f/frames;
+            for (int i = 0; i < nq; i++) {
+                env->d.qpos[i] = prev[i] + a*(cur[i] - prev[i]);
+            }
+            mjc_render(env);
+        }
+        memcpy(env->d.qpos, cur, nq*sizeof(float));
+    } else if (!have_prev || frames >= 1) {
+        mjc_render(env);
+    }
+    memcpy(prev, env->d.qpos, nq*sizeof(float));
+    have_prev = 1;
+}
+#endif
+
 #if PUF_BACKEND == PUF_GPU
 #define MJC_BLOCK 128
 #define MJC_STATE (offsetof(Env, d) + offsetof(MjData, xquat))
@@ -80,7 +109,7 @@ void puf_render(Env* envs) {
     cudaStreamSynchronize(mjc_gpu.stream);
     cudaMemcpy(&env, mjc_gpu.envs, sizeof(Env), cudaMemcpyDeviceToHost);
     env.m = &mj_model;
-    mjc_render(&env);
+    mjc_render_paced(&env);
 }
 
 void puf_close(Env* envs) {
@@ -96,10 +125,6 @@ void puf_init(Env* env, Dict* kwargs) {
 }
 
 #ifdef PUFFERCPU_EVAL_MAIN
-// Whole control steps (MJC_FRAME_SKIP substeps at once) strobe on screen at
-// 20 Hz. Run the real mjc_step for exact rewards, logs and resets, then
-// rewind and re-integrate the same deterministic substeps one per rendered
-// frame; PUF_STEPS_PER_SEC is therefore the substep rate 1/opt_timestep.
 #define PUF_EVAL_SHOULD_FORWARD
 #define MJC_STATE (offsetof(MjData, xquat))
 char mjc_true[MJC_STATE];
@@ -139,7 +164,11 @@ void puf_step(Env* env) {
 #endif
 
 void puf_render(Env* env) {
+#ifdef PUFFERCPU_EVAL_MAIN
     mjc_render(env);
+#else
+    mjc_render_paced(env);
+#endif
 }
 
 void puf_close(Env* env) {
