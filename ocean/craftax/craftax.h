@@ -2737,7 +2737,7 @@ void puf_render(Craftax* env) {
     const int view_h = RENDER_ROWS * TEX_DRAW_PX;
     const int hud_h = 142;
     const int origin_x = ACH_PANEL_W;
-    const int window_w = origin_x + view_w + OBS_PANEL_W + ACTION_PANEL_W;
+    const int window_w = origin_x + view_w;
 
     if (env->client == NULL) {
         env->client = (Client*)calloc(1, sizeof(Client));
@@ -2880,8 +2880,6 @@ void puf_render(Craftax* env) {
         DrawText(TextFormat("%d", f), x + 4, 2, 10, reached ? BLACK : (Color){140, 140, 140, 255});
     }
 
-    draw_agent_obs(env, origin_x + view_w, 0, OBS_PANEL_W, view_h + hud_h);
-
     int hud_y = view_h;
     Inventory* inv = &env->state.inventory;
     DrawRectangle(origin_x, hud_y, view_w, hud_h, (Color){20, 20, 20, 255});
@@ -3018,32 +3016,9 @@ void puf_render(Craftax* env) {
         human ? (Color){255, 210, 40, 255} : (Color){200, 200, 140, 255}
     );
 
-    int panel_x = origin_x + view_w + OBS_PANEL_W;
-    int panel_h = view_h + hud_h;
-    int taken_action = env->agents[0].actions[0];
-    DrawRectangle(panel_x, 0, ACTION_PANEL_W, panel_h, (Color){12, 18, 22, 255});
-    DrawRectangleLines(panel_x, 0, ACTION_PANEL_W, panel_h, (Color){55, 70, 76, 255});
-    DrawText("Actions", panel_x + 10, 8, 18, RAYWHITE);
-    DrawText("key", panel_x + 12, 32, 11, (Color){140, 160, 166, 255});
-    DrawText("action", panel_x + 78, 32, 11, (Color){140, 160, 166, 255});
-    for (int action = 0; action < ATN_DIM; action++) {
-        int y = 48 + action * 15;
-        bool selected = action == taken_action;
-        bool legal = env->agents[0].action_mask == NULL
-            || env->agents[0].action_mask[action];
-        if (selected) {
-            DrawRectangle(panel_x + 6, y - 2, ACTION_PANEL_W - 12, 15, (Color){0, 210, 220, 255});
-        }
-        Color text_color = selected ? BLACK
-            : (legal ? (Color){220, 230, 230, 255} : (Color){80, 90, 90, 255});
-        DrawText(action_keys[action], panel_x + 12, y, 10, text_color);
-        DrawText(TextFormat("%02d %s", action, action_names[action]),
-            panel_x + 78, y, 10, text_color);
-    }
-
     int ach_h = view_h + hud_h;
-    DrawRectangle(0, 0, ACH_PANEL_W, ach_h, WHITE);
-    DrawText("Achievements", 8, 6, 16, BLACK);
+    DrawRectangle(0, 0, ACH_PANEL_W, ach_h, BLACK);
+    DrawText("Achievements", 8, 6, 16, WHITE);
     int ach_top = 26;
     int ach_row = (ach_h - ach_top) / NUM_ACHIEVEMENTS;
     if (ach_row < 10) {
@@ -3060,7 +3035,7 @@ void puf_render(Craftax* env) {
             6,
             y + (ach_row > 10 ? 1 : 0),
             10,
-            done ? WHITE : (Color){50, 50, 50, 255}
+            done ? WHITE : (Color){200, 200, 200, 255}
         );
     }
 

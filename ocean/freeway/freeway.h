@@ -496,17 +496,41 @@ static inline bool file_exists(const char* path) {
     return access(path, F_OK) != -1;
 }
 
+static Texture2D freeway_load_tex(const char* path) {
+    Texture2D tex = LoadTexture(path);
+    if (tex.id != 0) {
+        SetTextureFilter(tex, TEXTURE_FILTER_POINT);
+        SetTextureWrap(tex, TEXTURE_WRAP_CLAMP);
+    }
+    return tex;
+}
+
+// Flip via dest width. Negative *source* width samples UVs outside [0,1] on
+// GLES CLAMP_TO_EDGE and paints a solid rectangle (web). Desktop GL_REPEAT
+// hid that.
+static void freeway_draw_tex(Texture2D tex, Rectangle dest, int flip, Color tint) {
+    if (tex.id == 0) {
+        return;
+    }
+    Rectangle src = {0, 0, (float)tex.width, (float)tex.height};
+    if (flip < 0) {
+        dest.x += dest.width;
+        dest.width = -dest.width;
+    }
+    DrawTexturePro(tex, src, dest, (Vector2){0, 0}, 0, tint);
+}
+
 Client* make_client(Freeway* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     
     InitWindow(env->width, env->height, "PufferLib Freeway");
     SetTargetFPS(60/env->frameskip);
-    client->car_body = LoadTexture("resources/freeway/tex_car_body.png");
-    client->car_wheels = LoadTexture("resources/freeway/tex_car_wheels.png");
-    client->chicken = LoadTexture("resources/freeway/tex_chicken0.png");
-    client->puffer = LoadTexture("resources/shared/puffers.png");
-    client->truck_body = LoadTexture("resources/freeway/tex_truck_body.png");
-    client->truck_wheels = LoadTexture("resources/freeway/tex_truck_wheels.png");
+    client->car_body = freeway_load_tex("resources/freeway/tex_car_body.png");
+    client->car_wheels = freeway_load_tex("resources/freeway/tex_car_wheels.png");
+    client->chicken = freeway_load_tex("resources/freeway/tex_chicken0.png");
+    client->puffer = freeway_load_tex("resources/shared/puffers.png");
+    client->truck_body = freeway_load_tex("resources/freeway/tex_truck_body.png");
+    client->truck_wheels = freeway_load_tex("resources/freeway/tex_truck_wheels.png");
     return client;
 }
 
@@ -630,33 +654,15 @@ void puf_render(Freeway* env) {
             if (enemy->is_enabled) {
                 Texture2D body = enemy->type == 0 ? client->car_body : client->truck_body;
                 Texture2D wheels = enemy->type == 0 ? client->car_wheels : client->truck_wheels;
-                // Single-frame PNGs (car 16x10, truck 32x10). Negative width
-                // flips in place. Starting the flip at `sw` (old sheet frame 1)
-                // samples UVs in [1,2]; desktop GL_REPEAT wraps, web
-                // CLAMP_TO_EDGE paints a solid box — that was the top-half bug.
-                float flip = (lane < NUM_LANES / 2) ? 1.0f : -1.0f;
+                int flip = (lane < NUM_LANES / 2) ? 1 : -1;
                 Rectangle dest = {
                     enemy->enemy_x - enemy->enemy_width / 2,
                     enemy->enemy_y - enemy->enemy_height / 2,
                     enemy->enemy_width,
                     enemy->enemy_height,
                 };
-                DrawTexturePro(
-                    body,
-                    (Rectangle){0, 0, flip * (float)body.width, (float)body.height},
-                    dest,
-                    (Vector2){0, 0},
-                    0,
-                    CAR_COLORS[lane]
-                );
-                DrawTexturePro(
-                    wheels,
-                    (Rectangle){0, 0, flip * (float)wheels.width, (float)wheels.height},
-                    dest,
-                    (Vector2){0, 0},
-                    0,
-                    CAR_COLORS[lane]
-                );
+                freeway_draw_tex(body, dest, flip, CAR_COLORS[lane]);
+                freeway_draw_tex(wheels, dest, flip, WHITE);
             }
         }
     }

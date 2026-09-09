@@ -464,7 +464,7 @@ static const DungeonConfig DUNGEON_LEVEL_CONFIGS[3] = {
 #define RENDER_COLS 16
 #define ACTION_PANEL_W 280
 #define ACH_PANEL_W 196
-#define OBS_PANEL_W 280
+#define OBS_PANEL_W (OBS_COLS * TEX_DRAW_PX + 20)
 #define TEX_PLAYER_DOWN 37
 #define TEX_PLAYER_UP 38
 #define TEX_PLAYER_LEFT 39

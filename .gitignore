@@ -3,6 +3,7 @@ c_*.c
 pufferlib/extensions.c
 pufferlib/puffernet.c
 logs/
+logs_release/
 ocean/osrs/data/
 
 # Build dir
@@ -181,11 +182,12 @@ resources/boxoban/boxoban_maps_*.bin
 
 # Policy weights live in the website repo (docs/assets/models/)
 resources/**/*_weights.bin
-
-# Pretrained weights live on puffer.ai; fetched on first load
 resources/**/*weights*.bin
 resources/onlyfish/danadvantage.bin
 resources/onlyfish/lonelypuff.bin
+/*_weights.bin
+/*_best.bin
+/*_web.bin
 
 
 # Local refactor baselines (not for commit)

@@ -8,29 +8,6 @@
 #include <dirent.h>
 #include <time.h>
 
-typedef struct {
-    void* data;
-    size_t capacity;
-    size_t used;
-} Arena;
-
-Arena* make_allocator(size_t total_size) {
-    Arena* allocator = calloc(1, total_size + sizeof(Arena));
-    allocator->data = (char*)allocator + sizeof(Arena);
-    allocator->capacity = total_size;
-    allocator->used = 0;
-    return allocator;
-}
-
-void* alloc(Arena* allocator, size_t size) {
-    void* ptr = (char*)allocator->data + allocator->used;
-    if (allocator->used + size > allocator->capacity) {
-        return NULL;
-    }
-    allocator->used += size;
-    return ptr;
-}
-
 // File format: flat fp32 tensors.
 typedef struct Weights {
     float* data;
