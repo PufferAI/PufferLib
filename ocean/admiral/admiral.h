@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,16 +13,13 @@ typedef float obs_t;
 #define MY_VEC_INIT
 #endif
 
-/* TODO add wind "patterns" where we can sort of signal what the wind will do next we intentionally
-    add wind direction patterns they might learn and exploit, like "if it bounces twice it will go left next" or some shit like that*/
-// TODO whole wind vector field, this is for later
+// TODO add predictable wind patterns the policy can learn.
+// TODO add a spatial wind field.
 
 #define ENVS_PER_LEVEL 32
 #define FAVORABLE_WIND_LEVELS 14
 #define FLAWLESS_LEVELS 7
 #define FULL_KILL_LEVELS 7
-#define KILL_BONUS_START 10
-#define KILL_BONUS_TICKS 0
 #define MASTERY_ENVS_BIN 100
 #define MASTERY_WINS 90
 #define MAX_LEVEL 20
@@ -30,7 +28,7 @@ typedef float obs_t;
 #define COOLDOWN_PER_TICK 0.5f
 #define CANNON_MAX_DAMAGE 0.1f
 #define CANNON_RANGE 400.0f         // meters
-#define K_SAIL 4.0f                 // unitless I think
+#define K_SAIL 4.0f                 // more or less air density * normal-force coefficient (kg/m^3)
 #define GLOBAL_OBS_FEATURES 3
 #define MASS 3000000.0f             // 3M kg
 #define MAX_HEALTH 1.0f
@@ -260,6 +258,9 @@ typedef struct {
     int num_wins;
     int mastered_level;
     int total_games;
+    Env* envs;
+    int num_envs;
+    int stepped;
 } Curriculum;
 
 static Curriculum curriculum;
@@ -277,7 +278,6 @@ struct Env {
     int max_ticks;
     int width;
     int height;
-    int obs_scheme;
     int curr_level;
     int curr_adv_team;
     int next_adv_team;
@@ -334,6 +334,9 @@ static inline void rotate_spawn(Admiral* env, float center_x, float center_y, fl
 }
 
 void init(Admiral* env){
+    curriculum.envs = env;
+    curriculum.num_envs = 1;
+    curriculum.stepped = 0;
     int spawn_variant = env->rng % (4 * N_TEAMS);
     int pair_variant = spawn_variant / N_TEAMS;
     env->next_adv_team = spawn_variant % N_TEAMS;
@@ -360,7 +363,6 @@ void puf_init(Env* env, Dict* kwargs) {
     env->width = dict_get(kwargs, "width");
     env->height = dict_get(kwargs, "height");
     env->num_bots = dict_get(kwargs, "num_bots");
-    env->obs_scheme = (int)dict_get(kwargs, "obs_scheme");
     env->curr_level = (int)admiral_get_float(kwargs, "curriculum_level", 1);
     env->reward_damage_mult = admiral_get_float(kwargs, "reward_damage_mult", 0.0f);
     env->reward_kill = admiral_get_float(kwargs, "reward_kill", 0.0f);
@@ -384,7 +386,6 @@ void puf_log(Log* log, Dict* out) {
     dict_set(out, "draw_rate", log->draw_rate);
     dict_set(out, "curr_level", log->curr_level);
     dict_set(out, "curr_win_rate", log->curr_win_rate);
-    dict_set(out, "MASTERY_WINS", curriculum.num_wins);
     dict_set(out, "curr_mastered_level", log->curr_mastered_level);
     dict_set(out, "total_games", curriculum.total_games);
     dict_set(out, "n", log->n);
@@ -405,7 +406,7 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
                  Dict* vec_kwargs, Dict* env_kwargs) {
     int total_agents = (int)dict_get(vec_kwargs, "total_agents");
     int num_buffers = (int)dict_get(vec_kwargs, "num_buffers");
-    int agents_per_buffer = total_agents / num_buffers;
+    assert(num_buffers == 1 && "Admiral curriculum requires one buffer");
     int num_envs = total_agents / N_TEAMS;
     int curriculum_level = (int)admiral_get_float(env_kwargs, "curriculum_level", 1);
     int num_levels = sizeof CURRICULUM / sizeof *CURRICULUM;
@@ -415,27 +416,18 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     curriculum.mastered_level = curriculum_level - 1;
 
     Env* envs = (Env*)calloc(num_envs, sizeof(Env));
-    int buf = 0;
-    int buf_agents = 0;
     buffer_env_starts[0] = 0;
-    buffer_env_counts[0] = 0;
+    buffer_env_counts[0] = num_envs;
     for (int i = 0; i < num_envs; i++) {
         Env* env = &envs[i];
         env->env_id = i;
         env->rng = i;
         puf_init(env, env_kwargs);
         env->curr_level = curriculum_level_for_env(i, curriculum_level, num_levels);
-
-        buf_agents += env->num_agents;
-        buffer_env_counts[buf] += 1;
-        if (buf_agents >= agents_per_buffer && buf < num_buffers - 1) {
-            buf += 1;
-            buffer_env_starts[buf] = i + 1;
-            buffer_env_counts[buf] = 0;
-            buf_agents = 0;
-        }
     }
 
+    curriculum.envs = envs;
+    curriculum.num_envs = num_envs;
     *num_envs_out = num_envs;
     return envs;
 }
@@ -451,31 +443,28 @@ void add_log(Admiral* env) {
 }
 
 static inline void record_curriculum_result(Admiral* env, bool mastery_win) {
-    #pragma omp critical(admiral_curriculum) // avoid race
-    {
-        int num_levels = sizeof CURRICULUM / sizeof *CURRICULUM;
-        int perf_slot = curriculum_perf_slot(env->env_id, env->curr_level, num_levels);
-        if (perf_slot >= 0) curriculum.level_wins[perf_slot] = mastery_win;
+    int num_levels = sizeof CURRICULUM / sizeof *CURRICULUM;
+    int perf_slot = curriculum_perf_slot(env->env_id, env->curr_level, num_levels);
+    if (perf_slot >= 0) curriculum.level_wins[perf_slot] = mastery_win;
 
-        curriculum.total_games += 1;
-        int env_id = env->env_id;
-        if (env_id < MASTERY_ENVS_BIN && env->curr_level > curriculum.mastered_level) {
-            curriculum.num_wins = curriculum.num_wins - curriculum.wins[env_id] + mastery_win;
-            curriculum.wins[env_id] = mastery_win;
-            if (curriculum.num_wins >= MASTERY_WINS) {
-                curriculum.mastered_level = env->curr_level;
-                curriculum.num_wins = 0;
-                memset(curriculum.wins, 0, sizeof curriculum.wins);
-            }
+    curriculum.total_games += 1;
+    int env_id = env->env_id;
+    if (env_id < MASTERY_ENVS_BIN && env->curr_level > curriculum.mastered_level) {
+        curriculum.num_wins = curriculum.num_wins - curriculum.wins[env_id] + mastery_win;
+        curriculum.wins[env_id] = mastery_win;
+        if (curriculum.num_wins >= MASTERY_WINS) {
+            curriculum.mastered_level = env->curr_level;
+            curriculum.num_wins = 0;
+            memset(curriculum.wins, 0, sizeof curriculum.wins);
         }
+    }
 
-        env->log.curr_mastered_level += curriculum.mastered_level * env->num_agents;
-        if (curriculum.mastered_level == num_levels) {
-            env->curr_level = num_levels;
-        } else {
-            env->curr_level = curriculum_level_for_env(
-                env_id, curriculum.mastered_level + 1, num_levels);
-        }
+    env->log.curr_mastered_level += curriculum.mastered_level * env->num_agents;
+    if (curriculum.mastered_level == num_levels) {
+        env->curr_level = num_levels;
+    } else {
+        env->curr_level = curriculum_level_for_env(
+            env_id, curriculum.mastered_level + 1, num_levels);
     }
 }
 
@@ -589,9 +578,6 @@ void fire(Admiral* env, Ship* ship, int ship_idx, int fire_side) {
     if (hit_enemy && damage >= hit_ship->health) {
         add_agent_reward(env, ship->team_idx, env->reward_kill);
         env->team_kills[ship->team_idx]++;
-        if (env->curr_level >= KILL_BONUS_START) {
-            env->max_ticks += KILL_BONUS_TICKS;
-        }
     }
     hit_ship->health -= damage;
 }
@@ -641,11 +627,6 @@ void compute_observations(Admiral* env) {
                 obs[idx++] = (heading_cos * dx + heading_sin * dy) * inverse_diagonal;
                 obs[idx++] = (-heading_sin * dx + heading_cos * dy) * inverse_diagonal;
             }
-        }
-
-        if (env->obs_scheme == 0) {
-            memset(&obs[idx], 0, SAIL_OBS_SIZE * sizeof(obs_t));
-            continue;
         }
 
         for (int ship_num = 0; ship_num < SHIPS_PER_TEAM; ship_num++) {
@@ -810,7 +791,7 @@ static inline void end_episode(Admiral* env, int outcome) {
     puf_reset(env);
 }
 
-void puf_step(Admiral* env) {
+bool step(Admiral* env) {
     for (int a = 0; a < N_TEAMS; a++) {
         *env->agents[a].rewards = 0.0f;
         *env->agents[a].terminals = 0.0f;
@@ -818,8 +799,7 @@ void puf_step(Admiral* env) {
 
     env->tick += 1;
     if (env->tick > env->max_ticks) {
-        end_episode(env, team_kill_outcome(env));
-        return;
+        return true;
     }
 
     for (int i = 0; i < env->num_agents; i++) {
@@ -877,8 +857,7 @@ void puf_step(Admiral* env) {
     }
 
     if (env->team_kills[0] == SHIPS_PER_TEAM || env->team_kills[1] == SHIPS_PER_TEAM) {
-        end_episode(env, team_kill_outcome(env));
-        return;
+        return true;
     }
 
     for (int i = 0; i < NUM_SHIPS; i++) {
@@ -886,6 +865,19 @@ void puf_step(Admiral* env) {
     }
 
     compute_observations(env);
+    return false;
+}
+
+void puf_step(Admiral* env) {
+    *env->agents[0].terminals = step(env);
+    if (__atomic_add_fetch(&curriculum.stepped, 1, __ATOMIC_ACQ_REL) != curriculum.num_envs) return;
+
+    // The last arrival finishes terminals in order, before the trainer's loop barrier releases.
+    for (int i = 0; i < curriculum.num_envs; i++) {
+        Admiral* finished = &curriculum.envs[i];
+        if (*finished->agents[0].terminals) end_episode(finished, team_kill_outcome(finished));
+    }
+    curriculum.stepped = 0;
 }
 
 Client* make_client(Admiral* env) {

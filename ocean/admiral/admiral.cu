@@ -30,7 +30,6 @@ typedef struct {
 typedef struct {
     int width;
     int height;
-    int obs_scheme;
     int curriculum_level;
     int num_levels;
     float reward_damage;
@@ -321,13 +320,6 @@ static __device__ void gpu_observe(
                 ship_num < SHIPS_PER_TEAM;
                 ship_num += ADMIRAL_THREADS_PER_ENV) {
             int idx = SAIL_OBS_START + ship_num * SAIL_OBS_FEATURES;
-            if (d_admiral.obs_scheme == 0) {
-                for (int feature = 0; feature < SAIL_OBS_FEATURES; feature++) {
-                    obs[idx + feature] = 0.0f;
-                }
-                continue;
-            }
-
             Ship* ship = &env->ships[team * SHIPS_PER_TEAM + ship_num];
             float heading_cos = cosf(ship->heading);
             float heading_sin = sinf(ship->heading);
@@ -496,9 +488,6 @@ static __device__ void gpu_fire(
     if (hit_enemy && damage >= hit_ship->health) {
         gpu_add_reward(env, rewards, ship->team_idx, d_admiral.reward_kill);
         env->team_kills[ship->team_idx] += 1;
-        if (env->curr_level >= KILL_BONUS_START) {
-            env->max_ticks += KILL_BONUS_TICKS;
-        }
     }
     hit_ship->health -= damage;
 }
@@ -723,7 +712,6 @@ static GpuAdmiralConfig gpu_admiral_config(Dict* kwargs) {
     GpuAdmiralConfig config = {};
     config.width = dict_get(kwargs, "width");
     config.height = dict_get(kwargs, "height");
-    config.obs_scheme = (int)dict_get(kwargs, "obs_scheme");
     config.curriculum_level =
         (int)gpu_admiral_get_float(kwargs, "curriculum_level", 1);
     config.reward_damage = gpu_admiral_get_float(kwargs, "reward_damage_mult", 0.0f);
@@ -773,7 +761,6 @@ void puf_log(Log* log, Dict* out) {
     dict_set(out, "draw_rate", log->draw_rate);
     dict_set(out, "curr_level", log->curr_level);
     dict_set(out, "curr_win_rate", log->curr_win_rate);
-    dict_set(out, "MASTERY_WINS", curriculum.num_wins);
     dict_set(out, "curr_mastered_level", log->curr_mastered_level);
     dict_set(out, "total_games", curriculum.total_games);
     dict_set(out, "n", log->n);
