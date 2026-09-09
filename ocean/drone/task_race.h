@@ -6,6 +6,7 @@
 #define RACE_RING_MAX_DIST 8.0f
 #define RACE_RING_SEPARATION (3.0f * RING_RADIUS)
 #define RACE_MAX_PLACE_ATTEMPTS 100
+#define RACE_MAX_TRACK_ATTEMPTS 16
 
 // types
 
@@ -124,10 +125,15 @@ static void race_env_reset(DroneEnv* env) {
     RaceConfig* cfg = (RaceConfig*)env->task_config;
     RaceState* state = (RaceState*)env->task_state;
 
-    state->ring_buffer[0] = rndring(&env->rng, RING_RADIUS);
-    for (int i = 1; i < cfg->max_rings; i++) {
-        const Target* close = (i == cfg->max_rings - 1) ? &state->ring_buffer[0] : NULL;
-        state->ring_buffer[i] = gen_next_ring(&env->rng, state->ring_buffer, i, close);
+    // regenerate the track when the closing segment (last ring back to ring 0) falls outside the gap band,
+    // which the per-ring fallback allowed for about one track in nine
+    for (int attempt = 0; attempt < RACE_MAX_TRACK_ATTEMPTS; attempt++) {
+        state->ring_buffer[0] = rndring(&env->rng, RING_RADIUS);
+        for (int i = 1; i < cfg->max_rings; i++) {
+            const Target* close = (i == cfg->max_rings - 1) ? &state->ring_buffer[0] : NULL;
+            state->ring_buffer[i] = gen_next_ring(&env->rng, state->ring_buffer, i, close);
+        }
+        if (in_gap_band(state->ring_buffer[cfg->max_rings - 1].pos, state->ring_buffer[0].pos)) break;
     }
 
     center_rings(state->ring_buffer, cfg->max_rings);
@@ -175,6 +181,7 @@ static float race_reward(DroneEnv* env, Drone* agent, int idx, StepCache* cache)
     } else if (result == -1) {
         state->collisions[idx] += 1.0f;
     }
+    if (out_of_bounds(agent->state.pos, RACE_OOB_SCALE)) reward -= env->oob_penalty; // the death step
 
     return reward;
 }
