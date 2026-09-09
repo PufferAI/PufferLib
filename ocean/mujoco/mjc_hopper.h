@@ -8,7 +8,6 @@
 #include "raylib.h"
 typedef float obs_t;
 #include "pufferenv.h"
-// model capacities, checked by mj_loadModel
 #define MJ_MAX_NQ 6
 #define MJ_MAX_NV 6
 #define MJ_MAX_NBODY 5
