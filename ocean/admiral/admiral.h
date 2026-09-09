@@ -387,12 +387,6 @@ void puf_log(Log* log, Dict* out) {
     dict_set(out, "n", log->n);
 }
 
-void allocate_env(Admiral* env) {
-    curriculum = (Curriculum){.envs = env, .num_envs = 1};
-    env->curr_level = 1;
-    init(env);
-}
-
 void puf_close(Admiral* env) {
     free(env->ships);
     free(env->logs);
