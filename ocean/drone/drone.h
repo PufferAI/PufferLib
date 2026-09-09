@@ -88,6 +88,7 @@ struct Env {
 
     // Domain randomisation
     float dr;
+    float oob_penalty; // subtracted from the task reward on the step that ends an episode out of bounds
 
     // Physics integrator (0=RK4, 1=RK2)
     int integrator;
@@ -283,6 +284,7 @@ void puf_init(Env* env, Dict* kwargs) {
     env->alpha_omega = dict_get(kwargs, "alpha_omega");
     env->alpha_action = dict_get(kwargs, "alpha_action");
     env->dr = dict_get(kwargs, "dr");
+    env->oob_penalty = dict_get(kwargs, "oob_penalty");
     env->integrator = dict_get(kwargs, "use_rk2");
 
     task_fracs[TASK_HOVER] = dict_get(kwargs, "hover_frac");

@@ -156,6 +156,7 @@ static float hover_reward(DroneEnv* env, Drone* agent, int idx, StepCache* cache
     state->ema_dist[idx] = 0.99f * state->ema_dist[idx] + 0.01f * cache->dist;
     state->ema_vel[idx] = 0.99f * state->ema_vel[idx] + 0.01f * cache->vel;
     state->ema_omega[idx] = 0.99f * state->ema_omega[idx] + 0.01f * cache->omega;
+    if (cache->dist > cfg->target_dist + 1.0f) reward -= env->oob_penalty; // sphere exit ends the episode
     return reward;
 }
 

@@ -42,7 +42,7 @@
 #define RING_RADIUS 0.5f
 #define V_TARGET 0.05f
 
-#define DRONE_OBS_SIZE 21
+#define DRONE_OBS_SIZE 23
 
 // Core Parameters
 #define DT 0.002f // 500 Hz
@@ -254,10 +254,14 @@ void compute_drone_observations(Drone* agent, float* observations, bool is_race)
     observations[idx++] = agent->state.omega.y / agent->params.max_omega;
     observations[idx++] = agent->state.omega.z / agent->params.max_omega;
 
-    observations[idx++] = q.w;
-    observations[idx++] = q.x;
-    observations[idx++] = q.y;
-    observations[idx++] = q.z;
+    Vec3 down_body = quat_rotate(q_inv, (Vec3){0.0f, 0.0f, -1.0f});
+    observations[idx++] = down_body.x;
+    observations[idx++] = down_body.y;
+    observations[idx++] = down_body.z;
+    Vec3 fwd_body = quat_rotate(q_inv, (Vec3){1.0f, 0.0f, 0.0f});
+    observations[idx++] = fwd_body.x;
+    observations[idx++] = fwd_body.y;
+    observations[idx++] = fwd_body.z;
 
     // this is body frame so we have to be careful about scaling
     // because distances are relative to the drone orientation
