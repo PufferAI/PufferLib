@@ -17,7 +17,6 @@ void performance_test() {
     long test_time = 10;
     Admiral env = {
         .num_agents = N_TEAMS,
-        .num_bots = 0,
         .width = 800,
         .height = 600,
         .reward_damage_mult = 0.01f,
@@ -52,7 +51,6 @@ void performance_test() {
 void demo(void) {
     Admiral env = {
         .num_agents = N_TEAMS,
-        .num_bots = 0,
         .reward_damage_mult = 0.01,
         .width = 800,
         .height = 600,

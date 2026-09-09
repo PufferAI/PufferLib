@@ -22,7 +22,6 @@ typedef float obs_t;
 #define FULL_KILL_LEVELS 7
 #define MASTERY_ENVS_BIN 100
 #define MASTERY_WINS 90
-#define MAX_LEVEL 20
 
 #define DT 0.5f                     // seconds per tick
 #define COOLDOWN_PER_TICK 0.5f
@@ -129,6 +128,8 @@ static const CurriculumConfig CURRICULUM[] = {
         350.0f, 60.0f, 30.0f, 180.0f, 10.0f, 1.0f, 0.3f, 1.0f, 0.3f, 60.0f, 10.0f, 10.0f,  1.0f, 1.00f,   300},
     //  sep(m)  brg    jitter nme-hdg jitter Aspd  Ajit  Bspd  Bjit  wind  jitter windspd damage  health ticks
 };
+
+#define MAX_LEVEL (sizeof CURRICULUM / sizeof *CURRICULUM)
 
 static inline int curriculum_level_for_env(int env_id, int current_level, int num_levels) {
     if (current_level == num_levels) return current_level;
@@ -273,7 +274,6 @@ struct Env {
 
     int env_id;
     int num_agents;
-    int num_bots;
     int tick;
     int max_ticks;
     int width;
@@ -334,9 +334,6 @@ static inline void rotate_spawn(Admiral* env, float center_x, float center_y, fl
 }
 
 void init(Admiral* env){
-    curriculum.envs = env;
-    curriculum.num_envs = 1;
-    curriculum.stepped = 0;
     int spawn_variant = env->rng % (4 * N_TEAMS);
     int pair_variant = spawn_variant / N_TEAMS;
     env->next_adv_team = spawn_variant % N_TEAMS;
@@ -362,7 +359,6 @@ static inline float admiral_get_float(Dict* kwargs, const char* key, float defau
 void puf_init(Env* env, Dict* kwargs) {
     env->width = dict_get(kwargs, "width");
     env->height = dict_get(kwargs, "height");
-    env->num_bots = dict_get(kwargs, "num_bots");
     env->curr_level = (int)admiral_get_float(kwargs, "curriculum_level", 1);
     env->reward_damage_mult = admiral_get_float(kwargs, "reward_damage_mult", 0.0f);
     env->reward_kill = admiral_get_float(kwargs, "reward_kill", 0.0f);
@@ -392,7 +388,7 @@ void puf_log(Log* log, Dict* out) {
 }
 
 void allocate_env(Admiral* env) {
-    curriculum = (Curriculum){0};
+    curriculum = (Curriculum){.envs = env, .num_envs = 1};
     env->curr_level = 1;
     init(env);
 }
@@ -409,7 +405,7 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     assert(num_buffers == 1 && "Admiral curriculum requires one buffer");
     int num_envs = total_agents / N_TEAMS;
     int curriculum_level = (int)admiral_get_float(env_kwargs, "curriculum_level", 1);
-    int num_levels = sizeof CURRICULUM / sizeof *CURRICULUM;
+    int num_levels = MAX_LEVEL;
     if (dict_get(vec_kwargs, "hist_policy_percent") == 1.0f) curriculum_level = num_levels;
 
     curriculum = (Curriculum){0};
@@ -443,7 +439,7 @@ void add_log(Admiral* env) {
 }
 
 static inline void record_curriculum_result(Admiral* env, bool mastery_win) {
-    int num_levels = sizeof CURRICULUM / sizeof *CURRICULUM;
+    int num_levels = MAX_LEVEL;
     int perf_slot = curriculum_perf_slot(env->env_id, env->curr_level, num_levels);
     if (perf_slot >= 0) curriculum.level_wins[perf_slot] = mastery_win;
 
@@ -694,8 +690,6 @@ static inline void spawn_curriculum(Admiral* env, int level) {
 
     for (int idx = 0; idx < NUM_SHIPS; idx++) {
         env->ships[idx] = (Ship){
-            .x = center_x,
-            .y = center_y,
             .cooldown_left = 1.0f,
             .cooldown_right = 1.0f,
             .team_idx = idx / SHIPS_PER_TEAM,

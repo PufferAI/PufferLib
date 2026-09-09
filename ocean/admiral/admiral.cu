@@ -203,8 +203,6 @@ static __device__ void gpu_spawn(Env* env) {
 
     for (int idx = 0; idx < NUM_SHIPS; idx++) {
         Ship ship = {};
-        ship.x = center_x;
-        ship.y = center_y;
         ship.cooldown_left = 1.0f;
         ship.cooldown_right = 1.0f;
         ship.team_idx = idx / SHIPS_PER_TEAM;
@@ -722,7 +720,7 @@ static GpuAdmiralConfig gpu_admiral_config(Dict* kwargs) {
         gpu_admiral_get_float(kwargs, "penalty_used_volley", 0.0f);
     config.penalty_stationary =
         gpu_admiral_get_float(kwargs, "penalty_stationary", 0.0f);
-    config.num_levels = sizeof CURRICULUM / sizeof *CURRICULUM;
+    config.num_levels = MAX_LEVEL;
 
     for (int i = 0; i < config.num_levels; i++) {
         const CurriculumConfig* source = &CURRICULUM[i];
