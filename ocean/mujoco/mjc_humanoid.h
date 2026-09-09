@@ -117,8 +117,9 @@ MJ_HD void mjc_step(Humanoid* env) {
     float* actions = env->agents[0].actions;
     float cost = 0.0f;
     for (int i = 0; i < m->nu; i++) {
+        // policy actions rescaled to +-1 (gym clips at +-0.4)
         const float* range = m->actuator_ctrlrange[i];
-        env->d.ctrl[i] = fminf(fmaxf(actions[i], range[0]), range[1]);
+        env->d.ctrl[i] = range[1]*fminf(fmaxf(actions[i], -1.0f), 1.0f);
         cost += env->d.ctrl[i]*env->d.ctrl[i];
     }
     float x0 = mjc_com_x(env);
