@@ -785,7 +785,22 @@ static inline void end_episode(Admiral* env, int outcome) {
     puf_reset(env);
 }
 
+static void admiral_human_controls(Admiral* env) {
+    if (!IsWindowReady() || !IsKeyDown(KEY_RIGHT_SHIFT)) return;
+    float* actions = env->agents[0].actions;
+    actions[0] = 2.0f;
+    actions[1] = 2.0f;
+    actions[2] = 1.0f;
+    if (IsKeyDown(KEY_W)) actions[1] = 4.0f; // Increase sail angle
+    if (IsKeyDown(KEY_S)) actions[1] = 0.0f; // Decrease sail angle
+    if (IsKeyDown(KEY_A)) actions[0] = 0.0f; // Rudder left
+    if (IsKeyDown(KEY_D)) actions[0] = 4.0f; // Rudder right
+    if (IsKeyDown(KEY_Q)) actions[2] = 0.0f; // Fire left broadside
+    if (IsKeyDown(KEY_E)) actions[2] = 2.0f; // Fire right broadside
+}
+
 bool step(Admiral* env) {
+    admiral_human_controls(env);
     for (int a = 0; a < N_TEAMS; a++) {
         *env->agents[a].rewards = 0.0f;
         *env->agents[a].terminals = 0.0f;
@@ -908,6 +923,7 @@ void puf_render(Admiral* env) {
         last_episode = env->curr_side_episodes;
         env->client = make_client(env);
     }
+    SetTargetFPS(IsKeyDown(KEY_RIGHT_SHIFT) ? 20 : 80);
     BeginDrawing();
     ClearBackground((Color){6, 6, 120, 255});
 
@@ -984,6 +1000,9 @@ void puf_render(Admiral* env) {
             }
 
             float ship_alpha = ship.health > 0.0f ? 1.0f : 0.2f;
+            if (ship_idx == 0 && IsKeyDown(KEY_RIGHT_SHIFT)) {
+                DrawCircleLinesV(pos, ship_length * 0.5f + 8.0f, YELLOW);
+            }
             Color ship_color = Fade(team ? GREEN : RED, ship_alpha);
             Vector2 forward = {cosf(ship.heading), sinf(ship.heading)};
             Vector2 side = {-forward.y, forward.x};
