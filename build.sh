@@ -18,7 +18,7 @@ set -e
 #   ./build.sh breakout --profile    # Kernel profiling binary
 #   ./build.sh constellation         # Sweep dashboard -> ./seethestars
 #   ./build.sh cache_data            # Sweep log cache -> ./cache_data
-#   ./build.sh trailer               # 5.0 trailer -> ./trailer/trailer (also exports diagrams)
+#   ./build.sh trailer               # 5.0 trailer -> ./resources/trailer/trailer (also exports diagrams)
 #   ./build.sh all                   # Build all envs native and native float32
 #
 # Env is compiled in. Run: ./puffer train|eval|match|sweep [--section.key=value ...]
@@ -158,11 +158,11 @@ elif [ "$ENV" = "cache_data" ]; then
     STANDALONE=1
     CLANG_WARN+=(-Wno-unused-function)
 elif [ "$ENV" = "trailer" ]; then
-    SRC_DIR="trailer"
-    OUTPUT_NAME="trailer/trailer"
-    SRC_FILE="trailer/puffer5.c"
-    EXTRA_SRC="trailer/architecture.c trailer/stars.c trailer/plot_scale.c"
-    EXTRA_CFLAGS+=(-DARCHITECTURE_LIB)
+    SRC_DIR="resources/trailer"
+    OUTPUT_NAME="resources/trailer/trailer"
+    SRC_FILE="resources/trailer/puffer5.c"
+    EXTRA_SRC="resources/trailer/architecture.c resources/trailer/stars.c resources/trailer/plot_scale.c resources/trailer/fonts.c"
+    EXTRA_CFLAGS+=(-DARCHITECTURE_LIB -Iresources)
     STANDALONE=1
     CLANG_WARN+=(-Wno-unused-function)
 elif [ "$ENV" = "impulse_wars" ]; then
@@ -261,17 +261,18 @@ if [ "$STANDALONE" = "1" ]; then
         echo "Compiling architecture..."
         ${CC:-clang} "${CLANG_OPT[@]}" \
             -I. "${INCLUDES[@]}" \
-            trailer/architecture.c -o trailer/architecture \
+            resources/trailer/architecture.c resources/trailer/fonts.c -o resources/trailer/architecture \
             "${LINK_ARCHIVES[@]}" \
             "${EXTRA_LDFLAGS[@]}" \
             "${STANDALONE_LDFLAGS[@]}" \
             -lm -lpthread \
-            -DPLATFORM_DESKTOP
-        echo "Built: ./trailer/architecture"
+            -DPLATFORM_DESKTOP \
+            -Iresources
+        echo "Built: ./resources/trailer/architecture"
         echo "Exporting diagrams..."
-        mkdir -p trailer/shots
-        ./trailer/architecture --shot trailer/shots/loop.png
-        ./"$OUTPUT_NAME" --plot trailer/shots/fig_scale.png
+        mkdir -p resources/trailer/shots
+        ./resources/trailer/architecture --shot resources/trailer/shots/loop.png
+        ./"$OUTPUT_NAME" --plot resources/trailer/shots/fig_scale.png
     fi
     exit 0
 fi

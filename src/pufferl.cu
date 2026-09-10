@@ -2915,10 +2915,16 @@ static PuffeRL* eval_make(Ini* ini, TrainContext* ctx, int mode, int render) {
     int match = mode == EVAL_MATCH;
     long eval_agents = puf_ini_get(ini, "base", "eval_agents");
     if (render) {
-        // One env on screen, whatever its agent count. env_setup allocates whole
-        // envs, so total_agents must be a multiple of env.num_agents.
+        // One env on screen. Some envs (drone num_drones, boids num_boids) do
+        // not use env.num_agents; default.ini's 1 then under-sizes the buffer
+        // and env_setup's offset==apb assert fires.
+        Env probe = {0};
+        puf_init(&probe, puf_ini_section(ini, "env", 0));
+        int n = probe.num_agents;
+        puf_close(&probe);
+        assert(n > 0 && "render eval: env reported 0 agents");
         char nb[32];
-        snprintf(nb, sizeof(nb), "%d", (int)puf_ini_get(ini, "env", "num_agents"));
+        snprintf(nb, sizeof(nb), "%d", n);
         puf_ini_put(ini, "vec.total_agents", nb);
         puf_ini_put(ini, "vec.num_buffers", "1");
         puf_ini_put(ini, "vec.num_threads", "1");

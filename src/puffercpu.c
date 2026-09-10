@@ -871,17 +871,12 @@ int main(int argc, char** argv) {
     if (!headless) {
         puf_render(&env);
     }
-    // Raylib 5.5 WindowShouldClose() on web always emscripten_sleep(16).
-    // With ASYNCIFY that wait is ~40ms; plus puf_web_vsync rAF => ~18fps.
-    // Pace frames only with puf_web_vsync. Native still uses WindowShouldClose.
+    // Web: Raylib 5.5 WindowShouldClose() always emscripten_sleep(16).
+    // Pace frames with puf_web_vsync. Native checks WindowShouldClose after render.
     while (headless
             ? (eval_episodes > 0 ? (env.log.n < eval_episodes)
                                  : (steps < 1024))
-#ifdef PLATFORM_WEB
             : IsWindowReady()) {
-#else
-            : (!IsWindowReady() || !WindowShouldClose())) {
-#endif
         int ticks = 1;
         if (!headless) {
             double now = GetTime();
@@ -948,6 +943,11 @@ int main(int argc, char** argv) {
         }
         if (!headless) {
             puf_render(&env);
+#ifndef PLATFORM_WEB
+            if (WindowShouldClose()) {
+                break;
+            }
+#endif
         }
     }
 

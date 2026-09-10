@@ -161,32 +161,23 @@ static void update_camera_position(Client* c, Vec3 target_pos) {
 }
 
 void handle_camera_controls(Client* client, Vec3 target_pos, float min_zoom) {
-    Vector2 mouse_pos = GetMousePosition();
-
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    // Same as web: use the last EndDrawing poll. Do not call PollInputEvents
+    // here — that double-polls with EndDrawing and zeros mouse delta.
+    int orbit = IsMouseButtonDown(MOUSE_BUTTON_LEFT) ||
+                IsMouseButtonDown(MOUSE_BUTTON_RIGHT);
+    if (orbit) {
+        Vector2 d = GetMouseDelta();
+        if (d.x != 0.0f || d.y != 0.0f) {
+            const float sensitivity = 0.005f;
+            client->camera_azimuth -= d.x * sensitivity;
+            client->camera_elevation += d.y * sensitivity;
+            client->camera_elevation =
+                clampf(client->camera_elevation, -PI / 2.0f + 0.1f, PI / 2.0f - 0.1f);
+            update_camera_position(client, target_pos);
+        }
         client->is_dragging = true;
-        client->last_mouse_pos = mouse_pos;
-    }
-
-    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+    } else {
         client->is_dragging = false;
-    }
-
-    if (client->is_dragging && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        Vector2 mouse_delta = {mouse_pos.x - client->last_mouse_pos.x,
-                               mouse_pos.y - client->last_mouse_pos.y};
-
-        float sensitivity = 0.005f;
-
-        client->camera_azimuth -= mouse_delta.x * sensitivity;
-
-        client->camera_elevation += mouse_delta.y * sensitivity;
-        client->camera_elevation =
-            clampf(client->camera_elevation, -PI / 2.0f + 0.1f, PI / 2.0f - 0.1f);
-
-        client->last_mouse_pos = mouse_pos;
-
-        update_camera_position(client, target_pos);
     }
 
     float wheel = GetMouseWheelMove();
@@ -286,6 +277,8 @@ Client* make_client(DroneEnv* env) {
         free(client);
         return NULL;
     }
+    SetWindowFocused();
+    EnableCursor();
 
     client->camera_distance = 40.0f;
     client->camera_azimuth = 0.0f;
@@ -423,16 +416,22 @@ void DrawDroneModel(Client* client, Drone* agent, int drone_idx, float dt, Color
 
         Material mat = model->materials[model->meshMaterial[m]];
 
+        // maps[] is shared; always restore after DrawMesh.
         Color origColor = mat.maps[MATERIAL_MAP_DIFFUSE].color;
         int brightness = (origColor.r + origColor.g + origColor.b) / 3;
-
-        if (is_prop || brightness > 64) {
-            mat.maps[MATERIAL_MAP_DIFFUSE].color = body_color;
-        } else {
-            mat.maps[MATERIAL_MAP_DIFFUSE].color = origColor;
+        Color drawColor = body_color;
+        if (!is_prop && brightness <= 64) {
+            // GLB PCB/motors are near-black (baseColor 0) and vanish on the
+            // dark clear color. Keep a darker team tint so the body reads.
+            drawColor = (Color){
+                (unsigned char)(body_color.r * 0.35f + 28),
+                (unsigned char)(body_color.g * 0.35f + 28),
+                (unsigned char)(body_color.b * 0.35f + 28),
+                255};
         }
-
+        mat.maps[MATERIAL_MAP_DIFFUSE].color = drawColor;
         DrawMesh(model->meshes[m], mat, meshWorld);
+        mat.maps[MATERIAL_MAP_DIFFUSE].color = origColor;
     }
 }
 
@@ -486,28 +485,6 @@ void puf_render(DroneEnv* env) {
             return;
         }
     }
-
-    // Capture modes must not hard-exit the process when the display is headless
-    // or the window is closed programmatically mid-recording.
-    // Raylib 5.5 WindowShouldClose() on web is emscripten_sleep(16) every call
-    // (ASYNCIFY makes that ~40ms -> ~25fps). Never call it on web.
-#if defined(__EMSCRIPTEN__) || defined(PLATFORM_WEB)
-    if (IsKeyDown(KEY_ESCAPE)) {
-        puf_close(env);
-        exit(0);
-    }
-#else
-    if (WindowShouldClose() || IsKeyDown(KEY_ESCAPE)) {
-        if (!IsWindowReady()) {
-            return;
-        }
-        if (IsKeyDown(KEY_ESCAPE)) {
-            puf_close(env);
-            exit(0);
-        }
-        return;
-    }
-#endif
 
     Client* client = env->client;
     float dt = ACTION_DT;
@@ -586,7 +563,6 @@ void puf_render(DroneEnv* env) {
     ClearBackground(PUFF_BACKGROUND);
     BeginMode3D(client->camera);
 
-    // Bounding cube
     DrawCubeWires((Vector3){0, 0, 0}, GRID_X * 2.0f, GRID_Y * 2.0f, GRID_Z * 2.0f, WHITE);
 
     // Draw drones
@@ -599,14 +575,6 @@ void puf_render(DroneEnv* env) {
             DrawDroneModel(client, agent, i, dt, body_color);
         } else {
             DrawDronePrimitive(client, agent, env->agents[i].actions, body_color);
-        }
-
-        // Velocity vector
-        if (norm3(agent->state.vel) > 0.1f) {
-            Vec3 p = agent->state.pos;
-            Vec3 v = scalmul3(agent->state.vel, 0.1f);
-            DrawLine3D((Vector3){p.x, p.y, p.z}, (Vector3){p.x + v.x, p.y + v.y, p.z + v.z},
-                       MAGENTA);
         }
 
         // Target line (shown in inspect mode)
@@ -736,7 +704,6 @@ void puf_render(DroneEnv* env) {
         y += 30;
     }
 
-    // Controls (always visible)
     DrawText("Left click + drag: Rotate camera", 10, y, 16, LIGHTGRAY);
     y += 18;
     DrawText("Mouse wheel: Zoom in/out", 10, y, 16, LIGHTGRAY);
@@ -748,4 +715,8 @@ void puf_render(DroneEnv* env) {
 
     EndDrawing();
     puf_web_vsync();
+    if (IsKeyDown(KEY_ESCAPE)) {
+        puf_close(env);
+        exit(0);
+    }
 }

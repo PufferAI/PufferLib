@@ -190,6 +190,9 @@ resources/onlyfish/lonelypuff.bin
 /*_web.bin
 
 
+# Generated trailer recording
+resources/trailer/shots/*.mp4
+
 # Local refactor baselines (not for commit)
 .refactor-snapshots/
 
