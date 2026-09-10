@@ -154,87 +154,50 @@ def test_preflight_reports_missing_commands_instead_of_continuing(mode, missing)
     assert result.returncode != 0
     assert f"required command '{missing}' is unavailable" in result.stderr
 
-def test_viewer_build_stops_before_download_when_preflight_fails(monkeypatch):
-    tools = load_setup_data()
-    monkeypatch.setattr(sys, "argv", [str(SETUP_DATA)])
-    monkeypatch.setattr(tools, "run_preflight", lambda mode: 1)
-    monkeypatch.setattr(tools, "viewer_raylib", lambda root: pytest.fail("unexpected download"))
-    assert tools.build_viewer_main() == 1
-
-
-def test_viewer_build_uses_local_cmake_not_shared_build(tmp_path, monkeypatch):
+@pytest.mark.parametrize("status", [0, 1])
+def test_legacy_viewer_build_delegates_to_standard_build(tmp_path, monkeypatch, status):
     tools = load_setup_data()
     monkeypatch.setattr(sys, "argv", [str(SETUP_DATA)])
     monkeypatch.setattr(tools, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(tools, "ENV_ROOT", tmp_path / "ocean" / "fight_caves")
-    monkeypatch.setattr(tools, "run_preflight", lambda mode: 0)
-    monkeypatch.setattr(tools, "viewer_raylib", lambda root: tmp_path / "raylib")
     calls = []
-    monkeypatch.setattr(tools.subprocess, "run", lambda args, **kwargs: calls.append(args))
-    assert tools.build_viewer_main() == 0
-    assert calls == [
-        ["cmake", "-S", str(tools.ENV_ROOT), "-B", str(tmp_path / "build/fight_caves-viewer"),
-         "-DCMAKE_BUILD_TYPE=Release", f"-DRAYLIB_ROOT={tmp_path / 'raylib'}"],
-        ["cmake", "--build", str(tmp_path / "build/fight_caves-viewer"), "--parallel"],
-    ]
+    def build(args, **kwargs):
+        calls.append((args, kwargs))
+        return status
+    monkeypatch.setattr(tools.subprocess, "call", build)
+    assert tools.build_viewer_main() == status
+    assert calls == [(["bash", "build.sh", "fight_caves", "--fast"], {"cwd": tmp_path})]
 
 
-def test_viewer_build_reports_cmake_failure(tmp_path, monkeypatch, capsys):
+def test_compatibility_replay_uses_standard_executable(tmp_path, monkeypatch):
     tools = load_setup_data()
-    monkeypatch.setattr(sys, "argv", [str(SETUP_DATA)])
-    monkeypatch.setattr(tools, "run_preflight", lambda mode: 0)
-    monkeypatch.setattr(tools, "viewer_raylib", lambda root: tmp_path)
-
-    def fail(args, **kwargs):
-        raise subprocess.CalledProcessError(1, args)
-
-    monkeypatch.setattr(tools.subprocess, "run", fail)
-    assert tools.build_viewer_main() == 1
-    assert "viewer build failed" in capsys.readouterr().err
+    monkeypatch.setattr(tools, "repo_root", lambda: str(tmp_path))
+    assert tools.find_viewer() is None
+    viewer = tmp_path / "fight_caves"
+    viewer.write_text("#!/bin/sh\nexit 0\n")
+    viewer.chmod(0o755)
+    assert tools.find_viewer() == str(viewer)
 
 
-def test_explicit_raylib_is_validated_without_downloading(tmp_path, monkeypatch):
+def test_standard_build_prepares_both_asset_bundles():
+    build = (REPO_ROOT / "build.sh").read_text()
+    branch = build.split('elif [ "$ENV" = "fight_caves" ]; then', 1)[1].split("elif ", 1)[0]
+    assert 'tools.py" setup --all' in branch
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_replay_asset_check_is_independent_of_display(monkeypatch, broken):
     tools = load_setup_data()
-    monkeypatch.setattr(tools, "download", lambda *args: pytest.fail("unexpected download"))
-    with pytest.raises(tools.AssetError, match="Raylib is incomplete"):
-        tools.viewer_raylib(tmp_path)
-    for relative in tools.RAYLIB_FILES:
-        path = tmp_path / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"existing dependency")
-    assert tools.viewer_raylib(tmp_path) == tmp_path
-
-
-@pytest.mark.parametrize("complete", [False, True])
-def test_raylib_download_is_staged_and_confined(tmp_path, monkeypatch, complete):
-    tools = load_setup_data()
-    monkeypatch.setattr(tools, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(tools.sys, "platform", "darwin")
-    name = "raylib-5.5_macos"
-    files = {f"{name}/{relative}": b"dependency" for relative in tools.RAYLIB_FILES}
-    files["../../outside"] = b"not part of the viewer dependency"
-    if not complete:
-        del files[f"{name}/lib/libraylib.a"]
-
-    def download(url, destination):
-        assert url == f"https://github.com/raysan5/raylib/releases/download/5.5/{name}.tar.gz"
-        make_archive(destination, files)
-
-    monkeypatch.setattr(tools, "download", download)
-    if complete:
-        root = tools.viewer_raylib(None)
-        assert root == tmp_path / "build" / name
-        for relative in tools.RAYLIB_FILES:
-            assert (root / relative).read_bytes() == b"dependency"
-        monkeypatch.setattr(tools, "download", lambda *args: pytest.fail("unexpected download"))
-        assert tools.viewer_raylib(None) == root
+    monkeypatch.delenv("DISPLAY", raising=False)
+    def verify(errors, names):
+        assert names == ("core", "viewer")
+        if broken:
+            errors.append("missing viewer asset")
+    monkeypatch.setattr(tools, "verify_assets", verify)
+    if broken:
+        with pytest.raises(tools.AssetError, match="Restore assets"):
+            tools.verify_runtime_assets()
     else:
-        with pytest.raises(KeyError):
-            tools.viewer_raylib(None)
-        assert not (tmp_path / "build" / name).exists()
-    assert not (tmp_path / "outside").exists()
-    assert not (tmp_path / name).exists()
-    assert not list((tmp_path / "build").glob("fight-caves-raylib-*"))
+        tools.verify_runtime_assets()
 
 
 MODULE_PATH = REPO_ROOT / "ocean" / "fight_caves" / "tools.py"

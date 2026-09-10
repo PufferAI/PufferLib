@@ -668,80 +668,10 @@ def run_preflight(mode: str) -> int:
 
 # Optional viewer build; the shared Puffer build.sh remains unmodified.
 
-RAYLIB_FILES = ("include/raylib.h", "include/raymath.h", "include/rlgl.h",
-                "lib/libraylib.a")
-
-
-def require_raylib(root: Path) -> Path:
-    missing = [name for name in RAYLIB_FILES if not (root / name).is_file()]
-    if missing:
-        raise AssetError(f"Raylib is incomplete at {root}: missing {', '.join(missing)}. "
-                         "Supply a complete installation with --raylib-root.")
-    return root
-
-
-def viewer_raylib(explicit_root: Path | None) -> Path:
-    if explicit_root is not None:
-        return require_raylib(explicit_root.expanduser().resolve())
-    if sys.platform == "linux" and os.uname().machine in ("x86_64", "amd64"):
-        name = "raylib-5.5_linux_amd64"
-    elif sys.platform == "darwin":
-        name = "raylib-5.5_macos"
-    else:
-        raise AssetError("No bundled Raylib 5.5 for this platform. "
-                         "Supply a compatible build with --raylib-root.")
-
-    # Reuse Puffer's download when available; otherwise keep this optional
-    # dependency under build/, without creating a partial shared installation.
-    shared = REPO_ROOT / name
-    root = REPO_ROOT / "build" / name
-    for existing in (shared, root):
-        if existing.exists():
-            return require_raylib(existing)
-    root.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="fight-caves-raylib-", dir=root.parent) as value:
-        staging = Path(value)
-        archive_path = staging / f"{name}.tar.gz"
-        download(f"https://github.com/raysan5/raylib/releases/download/5.5/{name}.tar.gz",
-                 archive_path)
-        with tarfile.open(archive_path, "r:gz") as archive:
-            # Copy only the exact headers/static library used by this viewer.
-            # No archive paths or links are ever extracted to the filesystem.
-            for relative in RAYLIB_FILES:
-                member = archive.getmember(f"{name}/{relative}")
-                if not member.isfile():
-                    raise AssetError(f"Raylib archive contains a non-file: {member.name}")
-                source = archive.extractfile(member)
-                if source is None:
-                    raise AssetError(f"Raylib archive cannot read {member.name}")
-                target = staging / name / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with source, target.open("wb") as output:
-                    shutil.copyfileobj(source, output)
-        require_raylib(staging / name).rename(root)
-    return root
-
-
 def build_viewer_main() -> int:
-    parser = argparse.ArgumentParser(description="Build the optional Fight Caves viewer.")
-    parser.add_argument("--raylib-root", type=Path,
-                        help="use an existing Raylib installation instead of downloading 5.5")
-    args = parser.parse_args()
-    if run_preflight("viewer") != 0:
-        return 1
-    try:
-        raylib = viewer_raylib(args.raylib_root)
-        build = REPO_ROOT / "build" / "fight_caves-viewer"
-        subprocess.run(["cmake", "-S", str(ENV_ROOT), "-B", str(build),
-                        "-DCMAKE_BUILD_TYPE=Release", f"-DRAYLIB_ROOT={raylib}"],
-                       cwd=REPO_ROOT, check=True)
-        subprocess.run(["cmake", "--build", str(build), "--parallel"],
-                       cwd=REPO_ROOT, check=True)
-    except (AssetError, OSError, KeyError, tarfile.TarError, subprocess.CalledProcessError) as exc:
-        print(f"Fight Caves viewer build failed: {exc}", file=sys.stderr)
-        return 1
-    print(f"Built: {build / 'fc_viewer'}")
-    return 0
+    """Compatibility alias; the standard standalone build owns dependencies."""
+    argparse.ArgumentParser(description="Alias for ./build.sh fight_caves --fast").parse_args()
+    return subprocess.call(["bash", "build.sh", "fight_caves", "--fast"], cwd=REPO_ROOT)
 
 
 # Checkpoint contract
@@ -1099,16 +1029,13 @@ def expected_parameter_bytes(contract):
 
 
 def verify_runtime_assets():
-    preflight = os.path.join(
-        repo_root(), "ocean", "fight_caves", "tools.py"
-    )
-    result = subprocess.run(
-        [sys.executable, preflight, "preflight", "--mode", "viewer-runtime"],
-        cwd=repo_root(),
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError("Fight Caves runtime/viewer asset preflight failed")
+    # Asset/checkpoint validation does not need an X11 utility or a window.
+    # Raylib checks the display when the actual viewer is launched.
+    errors: list[str] = []
+    verify_assets(errors, ("core", "viewer"))
+    if errors:
+        raise AssetError("; ".join(errors) +
+                         ". Restore assets with: ./build.sh fight_caves --fast")
 
 
 def checkpoint_diagnostic(reason, checkpoint_path, expected_bytes, contract):
@@ -1148,41 +1075,8 @@ def latest_source_mtime():
 
 
 def find_viewer():
-    """Find the fc_viewer binary."""
-    override = os.environ.get("FC_VIEWER_PATH")
-    if override:
-        if os.path.isfile(override):
-            return override
-        raise RuntimeError(f"FC_VIEWER_PATH does not point to a file: {override}")
-
-    repo = repo_root()
-    source_mtime = latest_source_mtime()
-    preferred = [
-        os.path.join(repo, "build", "fight_caves-viewer", "fc_viewer"),
-    ]
-    candidates = [path for path in preferred if os.path.isfile(path)]
-
-    patterns = [
-        os.path.join(repo, "build*", "fight_caves-viewer", "fc_viewer"),
-    ]
-    for pattern in patterns:
-        candidates.extend(glob.glob(pattern))
-    candidates = [path for path in candidates if os.path.isfile(path)]
-    if not candidates:
-        return None
-
-    seen = set()
-    unique = []
-    for path in candidates:
-        if path in seen:
-            continue
-        seen.add(path)
-        unique.append(path)
-
-    for path in unique:
-        if os.path.getmtime(path) >= source_mtime:
-            return path
-    return max(unique, key=os.path.getmtime)
+    viewer = Path(repo_root()) / "fight_caves"
+    return str(viewer) if viewer.is_file() and os.access(viewer, os.X_OK) else None
 
 
 def read_obs_line(proc, total_line_floats):
@@ -1399,7 +1293,7 @@ def eval_main():
     if not viewer_path:
         print(
             "Error: fc_viewer binary not found. Build with: "
-            "python3 ocean/fight_caves/tools.py build-viewer",
+            "./build.sh fight_caves --fast",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1409,7 +1303,7 @@ def eval_main():
             file=sys.stderr,
         )
         print(
-            "Rebuild it first with: python3 ocean/fight_caves/tools.py build-viewer",
+            "Rebuild it first with: ./build.sh fight_caves --fast",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1581,19 +1475,13 @@ def eval_main():
 
 
 def play_main() -> int:
-    result = subprocess.run(
-        [sys.executable, __file__, "preflight", "--mode", "viewer-runtime"],
-        cwd=REPO_ROOT,
-    )
-    if result.returncode:
-        return result.returncode
-    viewer = REPO_ROOT / "build/fight_caves-viewer/fc_viewer"
-    if not viewer.is_file() or not os.access(viewer, os.X_OK):
-        print(f"Fight Caves viewer is not built: {viewer}\n"
-              "Build it with: python3 ocean/fight_caves/tools.py build-viewer", file=sys.stderr)
+    """Compatibility alias; ordinary human play is simply ./fight_caves."""
+    viewer = find_viewer()
+    if not viewer:
+        print("Fight Caves is not built. Run: ./build.sh fight_caves --fast", file=sys.stderr)
         return 1
     os.chdir(REPO_ROOT)
-    os.execv(str(viewer), [str(viewer), *sys.argv[1:]])
+    os.execv(viewer, [viewer, *sys.argv[1:]])
 
 
 def main() -> int:

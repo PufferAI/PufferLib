@@ -36,8 +36,11 @@ if [ "$MODE" = "--puffer" ] || [ "$MODE" = "--all" ]; then
 fi
 
 if [ "$MODE" = "--all" ]; then
-    "$PYTHON" ocean/fight_caves/tools.py build-viewer
-    cmake --build build/fight_caves-viewer --target fc_viewer_tests --parallel
+    ./build.sh fight_caves --fast
+    cmake -S ocean/fight_caves -B build/fight_caves-standard-tests \
+        -DCMAKE_BUILD_TYPE=Release
+    cmake --build build/fight_caves-standard-tests \
+        --target fc_viewer_tests fc_integration_tests --parallel
     if command -v xvfb-run >/dev/null 2>&1; then
         DISPLAY_PREFIX=(xvfb-run -a)
     elif [ -n "${DISPLAY:-}" ]; then
@@ -53,8 +56,10 @@ if [ "$MODE" = "--all" ]; then
         export FC_COLLISION_PATH="$REPO_ROOT/resources/fight_caves/runtime/fightcaves.collision"
         export FC_MOVEMENT_PATH="$REPO_ROOT/resources/fight_caves/runtime/fightcaves.movement"
         export FC_LOS_PATH="$REPO_ROOT/resources/fight_caves/runtime/fightcaves.los"
-        "${DISPLAY_PREFIX[@]}" "$REPO_ROOT/build/fight_caves-viewer/fc_viewer_tests"
+        "${DISPLAY_PREFIX[@]}" "$REPO_ROOT/build/fight_caves-standard-tests/fc_viewer_tests"
     )
+    build/fight_caves-standard-tests/fc_integration_tests
+    "${DISPLAY_PREFIX[@]}" build/fight_caves-standard-tests/fc_integration_tests --render
 fi
 
 echo "Fight Caves environment tests passed ($MODE)."
@@ -97,16 +102,16 @@ expect_failure \
     "Install assets with: python3 ocean/fight_caves/tools.py setup --all" \
     "$PYTHON" ocean/fight_caves/tools.py preflight --mode core
 
-"$PYTHON" ocean/fight_caves/tools.py setup --all
+# Public build path: asset acquisition is automatic.
+./build.sh fight_caves --fast
 "$PYTHON" ocean/fight_caves/tools.py setup --all --verify-only
 
 bash tests/fight_caves.sh test --all
 "$PYTHON" ocean/fight_caves/tools.py preflight --mode native
 ./build.sh fight_caves --fast
-./fight_caves >"$VALIDATION_ROOT/native-smoke.log"
+./fight_caves --benchmark >"$VALIDATION_ROOT/native-smoke.log"
 grep -F "Episodes:    100" "$VALIDATION_ROOT/native-smoke.log" >/dev/null \
     || fail "standalone environment did not finish its smoke run"
-mv fight_caves "$VALIDATION_ROOT/fight_caves"
 
 CORE_MAP="resources/fight_caves/runtime/fightcaves.collision"
 mv "$CORE_MAP" "$VALIDATION_ROOT/fightcaves.collision"
@@ -127,7 +132,7 @@ mv "$VIEWER_ASSET" "$VALIDATION_ROOT/fightcaves.minimap.png"
 expect_failure \
     "missing viewer asset" \
     "viewer asset bundle is invalid: missing viewer/fightcaves.minimap.png" \
-    "$PYTHON" ocean/fight_caves/tools.py play --screenshot "$VALIDATION_ROOT/missing.png"
+    "$PYTHON" ocean/fight_caves/tools.py preflight --mode viewer-runtime
 mv "$VALIDATION_ROOT/fightcaves.minimap.png" "$VIEWER_ASSET"
 
 "$PYTHON" -m pufferlib.pufferl train fight_caves \
@@ -175,7 +180,7 @@ else
 fi
 
 SCREENSHOT_NAME="fight-caves-acceptance.png"
-"${DISPLAY_PREFIX[@]}" "$PYTHON" ocean/fight_caves/tools.py play \
+"${DISPLAY_PREFIX[@]}" ./fight_caves \
     --screenshot "$SCREENSHOT_NAME" \
     >"$VALIDATION_ROOT/viewer-smoke.log" 2>&1
 test -s "$SCREENSHOT_NAME" \

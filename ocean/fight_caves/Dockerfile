@@ -58,10 +58,7 @@ RUN python3 -m venv --prompt fight-caves "$VIRTUAL_ENV" \
 COPY . .
 RUN python -m pip install --no-cache-dir -c /opt/fight-caves/constraints.txt -e . pytest \
     && python -m pip check \
-    && python ocean/fight_caves/tools.py setup --all \
-    && python ocean/fight_caves/tools.py setup --all --verify-only \
-    && python ocean/fight_caves/tools.py build-viewer \
-    && ln -s build/raylib-5.5_linux_amd64 raylib-5.5_linux_amd64 \
+    && ./build.sh fight_caves --fast \
     && bash tests/fight_caves.sh test --core
 
 CMD ["bash"]

@@ -1,15 +1,15 @@
 /*
- * fight_caves.c — Standalone entry point for testing without PufferLib.
+ * fight_caves.c — Puffer's standalone playable Fight Caves executable.
  *
- * Compiled with: ./build.sh --local (debug) or ./build.sh --fast (optimized)
- * Runs N episodes with random actions and prints stats.
+ * Compiled with: ./build.sh fight_caves --local (debug) or --fast (optimized).
+ * --benchmark retains the optional random-action, headless smoke test.
  */
 
 #include "fight_caves.h"
 #include <stdio.h>
 #include <time.h>
 
-int main(void) {
+static int benchmark(void) {
     FightCaves env = {0};
     env.num_agents = 1;
     env.observations = (float*)calloc(FC_PUFFER_OBS_SIZE, sizeof(float));
@@ -79,4 +79,10 @@ int main(void) {
     free(env.rewards);
     free(env.terminals);
     return 0;
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 && strcmp(argv[1], "--benchmark") == 0)
+        return benchmark();
+    return fc_viewer_main(argc, argv);
 }

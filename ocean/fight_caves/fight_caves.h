@@ -7,7 +7,7 @@
  *   - FightCaves struct with PufferLib-required fields
  *   - c_reset: init game state, compute initial obs
  *   - c_step: read actions, step game, compute reward+obs, handle terminal
- *   - c_render: required no-op; evaluation uses the external viewer
+ *   - c_render: lazy full viewer for Puffer's standard evaluation loop
  *   - c_close: cleanup
  *
  * Single-agent environment (num_agents=1 always for Fight Caves).
@@ -19,6 +19,9 @@
 
 /* Shared simulation and contract implementation. */
 #include "simulation.h"
+#define FC_VIEWER_EMBEDDED
+#include "viewer.c"
+#undef FC_VIEWER_EMBEDDED
 /* ======================================================================== */
 /* PufferLib Log struct (required fields)                                    */
 /* ======================================================================== */
@@ -175,6 +178,7 @@ typedef struct FightCaves {
 
     /* Game state */
     FcState state;
+    ViewerState* viewer;         /* NULL throughout headless training */
 
     /* Reward weights and shaping configuration, initialized once per env. */
     FcRewardParams reward_params;
@@ -262,6 +266,7 @@ static float fc_puffer_compute_reward(FightCaves* env) {
     FcRewardBreakdown breakdown =
         fc_reward_compute_breakdown(
             &env->state, &env->reward_params, &env->reward_runtime);
+    if (env->viewer) env->viewer->pending_reward_breakdown = breakdown;
     fc_reward_sync_progress_state(&env->state, &env->reward_runtime);
 
     if (breakdown.threat_ctx.tokxil_melee) env->state.ep_tokxil_melee_ticks++;
@@ -406,6 +411,7 @@ void c_reset(FightCaves* env) {
 
     /* Compute initial observations */
     fc_puffer_write_obs(env);
+    if (env->viewer) env->viewer->reset_state = env->state;
 }
 
 void c_step(FightCaves* env) {
@@ -435,6 +441,15 @@ void c_step(FightCaves* env) {
     /* Write the current tick's observation. On terminal steps, c_reset()
      * below replaces it with the next episode's initial observation. */
     fc_puffer_write_obs(env);
+
+    /* A value snapshot survives same-step autoreset. Worker threads only copy
+     * data here; all graphics and frame pacing remain inside c_render(). */
+    if (env->viewer) {
+        env->viewer->pending_state = env->state;
+        env->viewer->pending_reward_runtime = env->reward_runtime;
+        memcpy(env->viewer->pending_actions, actions, sizeof(actions));
+        env->viewer->pending_frame = 1;
+    }
 
     /* Check terminal */
     if (fc_is_terminal(&env->state)) {
@@ -495,11 +510,46 @@ void c_step(FightCaves* env) {
 }
 
 void c_render(FightCaves* env) {
-    /* Rendering handled by external viewer via --policy-pipe mode.
-     * See tools.py's eval command for the eval pipeline. */
-    (void)env;
+    if (!env->viewer) {
+        env->viewer = fc_viewer_create(1);
+        if (!env->viewer) exit(EXIT_FAILURE);
+        ViewerState* v = env->viewer;
+        v->state = v->reset_state = env->state;
+        v->reward_params = env->reward_params;
+        v->reward_runtime = env->reward_runtime;
+        v->active_loadout = env->state.active_loadout;
+        v->obs_ablate_npc_distance = env->obs_ablate_npc_distance;
+        v->obs_ablate_incoming_aggregates = env->obs_ablate_incoming_aggregates;
+        v->obs_ablate_npc_valid = env->obs_ablate_npc_valid;
+        snprintf(v->reward_config_path, sizeof(v->reward_config_path),
+                 "Puffer environment configuration");
+        v->reward_config_loaded = 1;
+        fc_viewer_reset_presentation(v);
+    }
+    ViewerState* v = env->viewer;
+    if (!v->pending_frame &&
+        (v->state.rng_seed != env->state.rng_seed ||
+         v->state.tick != env->state.tick)) {
+        /* Also support an explicit VecEnv.reset() between render calls. */
+        v->state = env->state;
+        v->reward_runtime = env->reward_runtime;
+        memset(&v->reward_breakdown, 0, sizeof(v->reward_breakdown));
+        fc_viewer_reset_presentation(v);
+    }
+    fc_viewer_present_pending(v);
+    int frame;
+    do {
+        frame = fc_viewer_frame(env->viewer, 1);
+    } while (frame == 0);
+    if (frame < 0) {
+        fc_viewer_destroy(env->viewer);
+        env->viewer = NULL;
+        exit(EXIT_SUCCESS);
+    }
 }
 
 void c_close(FightCaves* env) {
+    fc_viewer_destroy(env->viewer);
+    env->viewer = NULL;
     fc_destroy(&env->state);
 }

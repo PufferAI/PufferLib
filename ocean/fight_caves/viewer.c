@@ -92,6 +92,12 @@ static const Color NPC_COLORS[] = {
 /* Viewer state */
 typedef struct {
     FcState state;
+    /* CPU snapshots only: worker-thread stepping must never call Raylib. */
+    FcState pending_state, reset_state;
+    FcRewardRuntime pending_reward_runtime;
+    FcRewardBreakdown pending_reward_breakdown;
+    int pending_actions[FC_NUM_ACTION_HEADS];
+    int pending_frame;
     FcRenderEvents render_events;
     FcActorAnimation actor_animation;
     FcCombatPresentation* combat_presentation;
@@ -380,7 +386,8 @@ static void sync_fc_ui(ViewerState* v) {
 
 static void queue_player_tile_request(ViewerState* v, int tx, int ty,
                                       float screen_x, float screen_y) {
-    if (!v || tx < 0 || tx >= FC_ARENA_WIDTH || ty < 0 || ty >= FC_ARENA_HEIGHT)
+    if (!v || v->policy_pipe || tx < 0 || tx >= FC_ARENA_WIDTH ||
+        ty < 0 || ty >= FC_ARENA_HEIGHT)
         return;
     v->pending_tile_x = tx;
     v->pending_tile_y = ty;
@@ -391,7 +398,7 @@ static void queue_player_tile_request(ViewerState* v, int tx, int ty,
 
 static void queue_player_attack_request(ViewerState* v, int npc_idx,
                                         float screen_x, float screen_y) {
-    if (!v || npc_idx < 0 || npc_idx >= FC_MAX_NPCS) return;
+    if (!v || v->policy_pipe || npc_idx < 0 || npc_idx >= FC_MAX_NPCS) return;
     v->pending_attack_npc = npc_idx;
     v->pending_tile_x = -1;
     v->pending_tile_y = -1;
@@ -479,10 +486,11 @@ static void handle_runec_ui_intent(ViewerState* v) {
              * prayer happens to be active when the option is selected. */
             if (intent->secondary == 1 && action == FC_PRAYER_OFF) action = 0;
             if (intent->secondary == -1 && action != FC_PRAYER_OFF) action = 0;
-            if (action) v->pending_prayer = action;
+            if (action && !v->policy_pipe) v->pending_prayer = action;
             break;
         }
         case RUNEC_UI_INTENT_COMBAT_STYLE:
+            if (v->policy_pipe) break;
             v->combat_style = intent->primary == 3 ? 2 : intent->primary;
             if (v->combat_style < 0) v->combat_style = 0;
             if (v->combat_style > 2) v->combat_style = 2;
@@ -776,7 +784,7 @@ static void toggle_debug_overlay(ViewerState* v) {
 }
 
 static void toggle_godmode(ViewerState* v) {
-    if (!v) return;
+    if (!v || v->policy_pipe) return;
     v->godmode = !v->godmode;
     fprintf(stderr, "GODMODE: %s\n", v->godmode ? "ON" : "OFF");
 }
@@ -889,6 +897,29 @@ static void sync_player_appearance(ViewerState *v) {
     }
 }
 
+static void fc_viewer_reset_presentation(ViewerState* v) {
+    v->seed = v->state.rng_seed;
+    sync_player_appearance(v);
+    v->item_message_seconds = 0.0f;
+    fc_fill_render_entities(&v->state, v->entities, &v->entity_count);
+    fc_fill_render_events(&v->state, &v->render_events);
+    v->last_hash = fc_state_hash(&v->state);
+    v->episode_count++;
+    v->attack_target = -1;
+    memset(v->actions, 0, sizeof(v->actions));
+    fc_combat_presentation_reset(v->combat_presentation);
+    fc_actor_animation_reset(&v->actor_animation, &v->state,
+                             v->appearance.model, v->active_loadout);
+    v->pending_prayer = 0;
+    v->pending_eat = 0;
+    v->pending_drink = 0;
+    v->pending_attack_npc = -1;
+    v->pending_tile_x = -1;
+    v->pending_tile_y = -1;
+    fc_click_feedback_reset(&v->click_feedback);
+    dbg_log_clear();
+}
+
 static void reset_ep(ViewerState* v) {
     runec_ui_close_context(&v->ui);
     v->scene_right_tracking = v->scene_right_dragged = 0;
@@ -909,30 +940,12 @@ static void reset_ep(ViewerState* v) {
         v->state.player.current_prayer = v->state.player.max_prayer;
     }
     apply_initial_supplies(v);
-    sync_player_appearance(v);
-    v->item_message_seconds = 0.0f;
     fc_reward_runtime_begin_episode(&v->reward_runtime, &v->state);
-    fc_fill_render_entities(&v->state, v->entities, &v->entity_count);
-    fc_fill_render_events(&v->state, &v->render_events);
-    v->last_hash = fc_state_hash(&v->state);
-    v->episode_count++;
-    v->attack_target = -1;
-    memset(v->actions, 0, sizeof(v->actions));
-    fc_combat_presentation_reset(v->combat_presentation);
-    fc_actor_animation_reset(&v->actor_animation, &v->state,
-                             v->appearance.model, v->active_loadout);
-    v->pending_prayer = 0;
-    v->pending_eat = 0;
-    v->pending_drink = 0;
-    v->pending_attack_npc = -1;
-    v->pending_tile_x = -1;
-    v->pending_tile_y = -1;
-    fc_click_feedback_reset(&v->click_feedback);
-    dbg_log_clear();
+    fc_viewer_reset_presentation(v);
 }
 
 static void viewer_jump_to_wave(ViewerState* v, int wave) {
-    if (!v) return;
+    if (!v || v->policy_pipe) return;
     runec_ui_close_context(&v->ui);
     if (wave < 1) wave = 1;
     if (wave > FC_NUM_WAVES) wave = FC_NUM_WAVES;
@@ -2208,8 +2221,592 @@ static int process_runec_prayer_click(ViewerState* v) {
 /* Main                                                                      */
 /* ======================================================================== */
 
-int main(int argc, char** argv) {
-    int exit_code = 0;
+/* The same viewer serves the standalone game, optional CPU compatibility
+ * replay, and Puffer's c_render(). No graphics are allocated by training. */
+static void fc_viewer_destroy(ViewerState* v) {
+    if (!v) return;
+    if (v->pray_melee_tex.id > 0) UnloadTexture(v->pray_melee_tex);
+    if (v->pray_missiles_tex.id > 0) UnloadTexture(v->pray_missiles_tex);
+    if (v->pray_magic_tex.id > 0) UnloadTexture(v->pray_magic_tex);
+    for (int i = 0; i < FC_CLICK_CROSS_FRAME_COUNT * 2; i++) {
+        if (v->click_cross_tex[i].id > 0)
+            UnloadTexture(v->click_cross_tex[i]);
+    }
+    if (v->tex_pray_melee_on.id > 0) UnloadTexture(v->tex_pray_melee_on);
+    if (v->tex_pray_melee_off.id > 0) UnloadTexture(v->tex_pray_melee_off);
+    if (v->tex_pray_range_on.id > 0) UnloadTexture(v->tex_pray_range_on);
+    if (v->tex_pray_range_off.id > 0) UnloadTexture(v->tex_pray_range_off);
+    if (v->tex_pray_magic_on.id > 0) UnloadTexture(v->tex_pray_magic_on);
+    if (v->tex_pray_magic_off.id > 0) UnloadTexture(v->tex_pray_magic_off);
+    fc_combat_presentation_destroy(v->combat_presentation);
+    fc_actor_animation_shutdown(&v->actor_animation);
+    if (v->object_anim_runtimes) {
+        for (int i = 0; i < v->object_anim_runtime_count; i++) {
+            if (v->object_anim_runtimes[i].anim_state)
+                anim_model_state_free(v->object_anim_runtimes[i].anim_state);
+        }
+        free(v->object_anim_runtimes);
+    }
+    if (v->anim_cache) anim_cache_free(v->anim_cache);
+    fc_player_appearance_free(&v->appearance);
+    if (v->npc_models) fc_npc_models_unload(v->npc_models);
+    if (v->object_anim_models) fc_npc_models_unload(v->object_anim_models);
+    fc_animated_atlas_unload(&v->shared_model_atlas);
+    if (v->object_anims) object_anims_free(v->object_anims);
+    objects_free(v->objects);
+    fc_minimap_scene_free(&v->minimap_scene);
+    terrain_free(v->terrain);
+    fc_osrs_text_shutdown();
+    runec_ui_shutdown(&v->ui);
+    CloseWindow();
+    fc_destroy(&v->state);
+    free(v);
+}
+
+static ViewerState* fc_viewer_create(int replay) {
+    fprintf(stderr,"=== Fight Caves Viewer (Phase 8 — Playable) ===\n");
+    /* In policy-pipe mode, suppress Raylib's INFO logs which go to stdout
+     * and would corrupt the pipe protocol. */
+    if (replay) {
+        SetTraceLogCallback(viewer_trace_log_to_stderr);
+        SetTraceLogLevel(LOG_WARNING);
+    }
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE|FLAG_MSAA_4X_HINT);
+    InitWindow(DEFAULT_WINDOW_W, DEFAULT_WINDOW_H, replay
+               ? "Fight Caves RL — Checkpoint Viewer"
+               : "Fight Caves RL — Playable Viewer");
+    SetExitKey(KEY_NULL); /* Escape first dismisses menus; handled below. */
+    if (!IsWindowReady()) {
+        fprintf(stderr,
+                "error: viewer window initialization failed; verify the "
+                "graphical display and OpenGL driver\n");
+        return NULL;
+    }
+    SetTargetFPS(60);
+
+    ViewerState* v = calloc(1, sizeof(*v));
+    if (!v) {
+        fprintf(stderr, "error: cannot allocate Fight Caves viewer state\n");
+        CloseWindow();
+        return NULL;
+    }
+    fc_init(&v->state);
+    fc_actor_animation_init(&v->actor_animation);
+    runec_ui_init(&v->ui);
+    if (!fc_osrs_text_init()) {
+        fprintf(stderr,
+                "error: required OSRS viewer fonts failed to load\n");
+        fc_viewer_destroy(v);
+        return NULL;
+    }
+    int item_icons_ready = load_fc_ui_item_icons(v);
+    v->paused = 1; v->tps = NORMAL_TPS;
+    v->active_loadout = FC_ACTIVE_LOADOUT;
+    v->attack_target = -1;
+    v->cam_yaw = 0; v->cam_pitch = 0.8f; v->cam_dist = 30;
+    v->camera_locked = 1;
+    v->camera.up = (Vector3){0,1,0}; v->camera.fovy = 32;
+    v->camera.projection = CAMERA_PERSPECTIVE;
+    v->camera.target = (Vector3){FC_ARENA_WIDTH * 0.5f, 0.5f, -(FC_ARENA_HEIGHT * 0.5f)};
+
+    v->terrain = load_terrain(v);
+    /* OSRS rasterizes the current 104x104 scene from cache terrain and
+     * locations into a 512x512 minimap. This asset contains the Fight Caves
+     * mapsquare centered in that same scene format; runtime only crops and
+     * rotates it around the player. */
+    Image minimap_image = fc_load_image_asset("fightcaves.minimap.png");
+    if (minimap_image.data) {
+        Color* minimap_pixels = LoadImageColors(minimap_image);
+        if (!minimap_pixels || !fc_minimap_scene_load_pixels(
+                &v->minimap_scene, minimap_pixels,
+                minimap_image.width, minimap_image.height)) {
+            fprintf(stderr, "error: Fight Caves minimap failed to load\n");
+        } else {
+            fprintf(stderr,
+                    "minimap: loaded cache scene raster %dx%d\n",
+                    minimap_image.width, minimap_image.height);
+        }
+        UnloadImageColors(minimap_pixels);
+        UnloadImage(minimap_image);
+    } else {
+        fprintf(stderr, "error: missing fightcaves.minimap.png\n");
+    }
+    v->objects = load_objects_with_terrain(v->terrain);
+    if (fc_asset_exists("fightcaves.oanim"))
+        v->object_anims = object_anims_load("fightcaves.oanim");
+    if (v->object_anims)
+        object_anims_offset(v->object_anims, FC_WORLD_ORIGIN_X, FC_WORLD_ORIGIN_Y);
+    if (!fc_animated_atlas_load(&v->shared_model_atlas, "fightcaves.atlas", 0))
+        fprintf(stderr, "error: shared model atlas failed to load\n");
+    if (fc_asset_exists("fightcaves.object_anim.models"))
+        v->object_anim_models = fc_npc_models_load(
+            "fightcaves.object_anim.models", v->shared_model_atlas.texture);
+    if (v->object_anims && v->object_anims->count > 0) {
+        v->object_anim_runtimes = (ObjectAnimRuntime*)calloc(
+            (size_t)v->object_anims->count, sizeof(*v->object_anim_runtimes));
+        if (v->object_anim_runtimes)
+            v->object_anim_runtime_count = v->object_anims->count;
+    }
+    if (!v->terrain || !v->terrain->loaded) v->show_grid = 1;
+
+    /* Load NPC models */
+    {
+        if (fc_asset_exists("fc_npcs.models"))
+            v->npc_models = fc_npc_models_load("fc_npcs.models", (Texture2D){0});
+        if (!v->npc_models) fprintf(stderr, "error: NPC models failed to load\n");
+    }
+
+    /* Load composable player body and equipment models. */
+    if (!fc_player_appearance_load(&v->appearance)) {
+        fprintf(stderr, "Required player appearance assets are missing or invalid.\n");
+        fc_viewer_destroy(v);
+        return NULL;
+    }
+
+    /* Load the animation cache shared by actor and combat presentation. */
+    if (fc_asset_exists("fc_all.anims"))
+        v->anim_cache = anim_cache_load("fc_all.anims");
+    v->combat_presentation = fc_combat_presentation_create(
+        v->shared_model_atlas.texture);
+    if (!v->combat_presentation)
+        fprintf(stderr, "error: combat presentation initialization failed\n");
+
+    /* Load prayer overhead icon textures */
+    {
+        if (fc_asset_exists("data/sprites/ui/prayeron_14.png")) {
+            v->pray_melee_tex = fc_load_texture_asset("data/sprites/ui/prayeron_14.png");
+            v->pray_missiles_tex = fc_load_texture_asset("data/sprites/ui/prayeron_13.png");
+            v->pray_magic_tex = fc_load_texture_asset("data/sprites/ui/prayeron_12.png");
+            fprintf(stderr, "Prayer icons loaded from %s\n", fc_asset_root());
+        } else {
+            fprintf(stderr, "error: prayer icons not found under asset root %s\n",
+                    fc_asset_root());
+        }
+    }
+
+    /* Native b237 click crosses: frames 0-3 are movement (yellow), frames
+     * 4-7 are interaction (red). RuneC advances one frame every 100 ms. */
+    int click_cross_loaded = 0;
+    {
+        for (int i = 0; i < FC_CLICK_CROSS_FRAME_COUNT * 2; i++) {
+            char path[64];
+            snprintf(path, sizeof(path),
+                     "data/sprites/ui/cross_%d.png", i);
+            v->click_cross_tex[i] = fc_load_texture_asset(path);
+            if (v->click_cross_tex[i].id > 0) {
+                SetTextureFilter(v->click_cross_tex[i], TEXTURE_FILTER_POINT);
+                click_cross_loaded++;
+            }
+        }
+        fprintf(stderr, "Click cross sprites loaded: %d/8\n",
+                click_cross_loaded);
+        if (click_cross_loaded != FC_CLICK_CROSS_FRAME_COUNT * 2)
+            fprintf(stderr, "error: required click cross sprites failed to load\n");
+    }
+
+    /* Load prayer icons used by the active RuneC prayer override. */
+    {
+        v->tex_pray_melee_on = fc_load_texture_asset(
+            "data/sprites/ui/prayeron_14.png");
+        v->tex_pray_melee_off = fc_load_texture_asset(
+            "data/sprites/ui/prayeroff_14.png");
+        v->tex_pray_range_on = fc_load_texture_asset(
+            "data/sprites/ui/prayeron_13.png");
+        v->tex_pray_range_off = fc_load_texture_asset(
+            "data/sprites/ui/prayeroff_13.png");
+        v->tex_pray_magic_on = fc_load_texture_asset(
+            "data/sprites/ui/prayeron_12.png");
+        v->tex_pray_magic_off = fc_load_texture_asset(
+            "data/sprites/ui/prayeroff_12.png");
+    }
+
+    int required_resources_ready = 1;
+#define REQUIRE_VIEWER_RESOURCE(condition, description) do {                 \
+        if (!(condition)) {                                                  \
+            fprintf(stderr, "error: required viewer resource failed: %s\n", \
+                    description);                                            \
+            required_resources_ready = 0;                                    \
+        }                                                                    \
+    } while (0)
+    REQUIRE_VIEWER_RESOURCE(v->ui.assets.missing_required_count == 0,
+                            "RuneC UI sprites");
+    REQUIRE_VIEWER_RESOURCE(v->ui.assets.font_loaded &&
+                            v->ui.assets.small_font_loaded,
+                            "RuneC UI fonts");
+    REQUIRE_VIEWER_RESOURCE(v->ui.minimap_texture_ready,
+                            "minimap render texture");
+    REQUIRE_VIEWER_RESOURCE(item_icons_ready, "Fight Caves item icons");
+    REQUIRE_VIEWER_RESOURCE(v->terrain && v->terrain->loaded, "terrain mesh");
+    REQUIRE_VIEWER_RESOURCE(v->minimap_scene.ready, "minimap scene raster");
+    REQUIRE_VIEWER_RESOURCE(v->objects && v->objects->loaded &&
+                            v->objects->atlas.texture.id > 0,
+                            "terrain objects and atlas");
+    REQUIRE_VIEWER_RESOURCE(v->object_anims && v->object_anims->loaded,
+                            "object animation placements");
+    REQUIRE_VIEWER_RESOURCE(v->shared_model_atlas.texture.id > 0,
+                            "shared model atlas");
+    REQUIRE_VIEWER_RESOURCE(v->object_anim_models &&
+                            v->object_anim_models->loaded,
+                            "animated object models");
+    REQUIRE_VIEWER_RESOURCE(!v->object_anims || v->object_anims->count == 0 ||
+                            v->object_anim_runtimes,
+                            "object animation runtime allocation");
+    REQUIRE_VIEWER_RESOURCE(v->npc_models && v->npc_models->loaded,
+                            "NPC models");
+    REQUIRE_VIEWER_RESOURCE(v->appearance.parts && v->appearance.parts->loaded,
+                            "player equipment and body models");
+    REQUIRE_VIEWER_RESOURCE(v->anim_cache, "actor animation data");
+    REQUIRE_VIEWER_RESOURCE(
+        fc_combat_presentation_ready(v->combat_presentation),
+        "projectile, spot-animation, healthbar, and hitsplat data");
+    REQUIRE_VIEWER_RESOURCE(v->pray_melee_tex.id > 0 &&
+                            v->pray_missiles_tex.id > 0 &&
+                            v->pray_magic_tex.id > 0,
+                            "overhead Prayer icons");
+    REQUIRE_VIEWER_RESOURCE(
+        click_cross_loaded == FC_CLICK_CROSS_FRAME_COUNT * 2,
+        "click cross sprites");
+    REQUIRE_VIEWER_RESOURCE(v->tex_pray_melee_on.id > 0 &&
+                            v->tex_pray_melee_off.id > 0 &&
+                            v->tex_pray_range_on.id > 0 &&
+                            v->tex_pray_range_off.id > 0 &&
+                            v->tex_pray_magic_on.id > 0 &&
+                            v->tex_pray_magic_off.id > 0,
+                            "Prayer interface icons");
+#undef REQUIRE_VIEWER_RESOURCE
+    if (!required_resources_ready) {
+        fprintf(stderr,
+                "error: viewer startup aborted instead of using reduced "
+                "graphics; restore assets with: ./build.sh fight_caves --fast\n");
+        fc_viewer_destroy(v);
+        return NULL;
+    }
+
+    v->combat_style = 1;
+    v->policy_pipe = replay;
+    v->paused = !replay;
+    return v;
+}
+
+static void fc_viewer_ingest_tick(ViewerState* v) {
+    fc_fill_render_events(&v->state, &v->render_events);
+    fc_actor_animation_ingest_tick(&v->actor_animation, &v->state,
+                                   &v->render_events);
+    fc_actor_animation_ingest_events(
+        &v->actor_animation, &v->render_events, v->anim_cache,
+        fc_player_equipment_visual_profile(&v->state.player), v->tps);
+
+    /* Debug event log — record events from this tick */
+    dbg_log_tick(&v->state);
+
+    /* Snap prev positions for newly spawned NPCs so they don't fly.
+     * An NPC that wasn't active last tick but is now = new spawn. */
+    for (int ni = 0; ni < FC_MAX_NPCS; ni++) {
+        if (v->state.npcs[ni].active &&
+            !fc_actor_animation_previous_npc_active(
+                &v->actor_animation, ni)) {
+            fc_combat_presentation_clear_npc_healthbar(
+                v->combat_presentation, ni);
+        }
+    }
+
+    fc_fill_render_entities(&v->state, v->entities, &v->entity_count);
+    v->last_hash = fc_state_hash(&v->state);
+
+    FcCombatPresentationContext combat_context = {
+        .state = &v->state,
+        .events = &v->render_events,
+        .scene = &v->actor_animation.scene,
+        .terrain = v->terrain,
+        .anim_cache = v->anim_cache,
+        .player_profile = fc_player_visual_profile(fc_player_equipment_visual_profile(&v->state.player)),
+        .tps = v->tps,
+    };
+    fc_combat_presentation_ingest_tick(v->combat_presentation,
+                                        &combat_context);
+    /* Sync viewer attack_target with player's backend target */
+    v->attack_target = v->state.player.attack_target_idx;
+    /* Auto-clear if target NPC died */
+    if (v->state.player.attack_target_idx >= 0) {
+        FcNpc* tn = &v->state.npcs[v->state.player.attack_target_idx];
+        if (!tn->active || tn->is_dead) {
+            v->attack_target = -1;
+        }
+    }
+
+}
+
+/* Return 1 when a simulation tick is due, 0 for another display frame,
+ * and -1 when the window closes. External evaluation never steps a copy. */
+static int fc_viewer_frame(ViewerState* v, int external) {
+    if (WindowShouldClose()) return -1;
+    int quit_after_tick = 0;
+    int ui_capture = 0;
+    /* Age the previous click before capturing this frame's input. A newly
+     * clicked cross must start at frame zero, even after a slow frame. */
+    fc_click_feedback_update(&v->click_feedback, GetFrameTime());
+
+    /* Global keys (always active) */
+    if (IsKeyPressed(KEY_Q)) return -1;
+    if (IsKeyPressed(KEY_ESCAPE) && !v->ui.context_open) return -1;
+    if (IsKeyPressed(KEY_SPACE)) v->paused = !v->paused;
+    if (IsKeyPressed(KEY_RIGHT)) v->step_once = 1;
+    if (v->policy_pipe) {
+        if (IsKeyPressed(KEY_ONE)) set_policy_replay_speed(v, 1);
+        if (IsKeyPressed(KEY_TWO)) set_policy_replay_speed(v, 2);
+        if (!IsKeyDown(KEY_LEFT_SHIFT) && !IsKeyDown(KEY_RIGHT_SHIFT) &&
+            IsKeyPressed(KEY_FOUR)) set_policy_replay_speed(v, 4);
+        if (IsKeyPressed(KEY_ZERO)) set_policy_replay_speed(v, 10);
+        if (IsKeyPressed(KEY_UP)) cycle_policy_replay_speed(v, +1);
+        if (IsKeyPressed(KEY_DOWN)) cycle_policy_replay_speed(v, -1);
+    }
+    if (!v->policy_pipe && IsKeyPressed(KEY_R)) reset_ep(v);
+    if (IsKeyPressed(KEY_L)) {
+        if (v->camera_locked) {
+            v->camera.target = camera_follow_target(v);
+        }
+        v->camera_locked = !v->camera_locked;
+    }
+
+    /* Toggle keys */
+    if (IsKeyPressed(KEY_G)) v->show_grid = !v->show_grid;
+    if (IsKeyPressed(KEY_C)) v->show_collision = !v->show_collision;
+    /* O: cycle debug overlay modes. O=all on/off, Shift+O=cycle sub-modes */
+    if (IsKeyPressed(KEY_O)) {
+        if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+            /* Cycle through individual modes */
+            if (v->dbg_flags == 0) v->dbg_flags = DBG_COLLISION;
+            else if (v->dbg_flags == DBG_COLLISION) v->dbg_flags = DBG_LOS;
+            else if (v->dbg_flags == DBG_LOS) v->dbg_flags = DBG_PATH | DBG_RANGE;
+            else v->dbg_flags = 0;
+        } else {
+            /* Toggle all on/off */
+            toggle_debug_overlay(v);
+        }
+    }
+    /* D: match the on-screen controls without interfering with east movement */
+    if (IsKeyPressed(KEY_D) && !IsKeyDown(KEY_W) && !IsKeyDown(KEY_A) && !IsKeyDown(KEY_S)) {
+        toggle_debug_overlay(v);
+    }
+    /* Camera presets */
+    if ((!v->policy_pipe && IsKeyPressed(KEY_FOUR)) ||
+        (v->policy_pipe &&
+         (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) &&
+         IsKeyPressed(KEY_FOUR))) {
+        v->cam_yaw=0; v->cam_pitch=1.35f; v->cam_dist=120;
+    }
+    if ((!v->policy_pipe && IsKeyPressed(KEY_FIVE)) ||
+        (v->policy_pipe &&
+         (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) &&
+         IsKeyPressed(KEY_FIVE))) {
+        v->cam_yaw=0; v->cam_pitch=0.6f; v->cam_dist=50;
+    }
+
+    sync_fc_ui(v);
+    if (v->ui.context_open) {
+        ui_capture = runec_ui_handle_input(&v->ui, GetScreenWidth(), GetScreenHeight());
+        handle_runec_ui_intent(v);
+    } else {
+        ui_capture = process_runec_prayer_click(v);
+        if (!ui_capture)
+            ui_capture = process_runec_console_input(v);
+        if (!ui_capture) {
+            ui_capture = runec_ui_handle_input(&v->ui, GetScreenWidth(), GetScreenHeight());
+            handle_runec_ui_intent(v);
+        } else {
+            v->ui.last_intent.kind = RUNEC_UI_INTENT_NONE;
+        }
+    }
+
+    /* RuneC: open on right press; a real drag dismisses the menu and
+     * retains the viewer's existing camera gesture. No game action fires. */
+    if (!ui_capture && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+        v->scene_right_tracking = 1;
+        v->scene_right_dragged = 0;
+        v->scene_right_start = GetMousePosition();
+        open_scene_context_menu(v);
+        ui_capture = 1;
+    }
+    if (v->scene_right_tracking && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+        Vector2 mouse = GetMousePosition();
+        float dx = mouse.x - v->scene_right_start.x;
+        float dy = mouse.y - v->scene_right_start.y;
+        if (dx * dx + dy * dy > 9.0f) v->scene_right_dragged = 1;
+        if (v->scene_right_dragged) {
+            runec_ui_close_context(&v->ui);
+            Vector2 d = GetMouseDelta();
+            v->cam_yaw += d.x*0.005f; v->cam_pitch -= d.y*0.005f;
+            if (v->cam_pitch < 0.1f) v->cam_pitch = 0.1f;
+            if (v->cam_pitch > 1.4f) v->cam_pitch = 1.4f;
+        }
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
+        v->scene_right_tracking = v->scene_right_dragged = 0;
+    }
+    float wh = GetMouseWheelMove();
+    if (!ui_capture && wh != 0) {
+        v->cam_dist *= (wh > 0) ? (1.0f/1.15f) : 1.15f;
+        if (v->cam_dist < 5) v->cam_dist = 5;
+        if (v->cam_dist > 300) v->cam_dist = 300;
+    }
+
+    /* Tick processing */
+    int tick = 0;
+    if (!v->paused) {
+        v->tick_acc += GetFrameTime() * (float)v->tps;
+        if (v->tick_acc >= 1.0f) {
+            v->tick_acc = fmodf(v->tick_acc, 1.0f);
+            tick = 1;
+        }
+    }
+    if (v->step_once) { tick = 1; v->step_once = 0; }
+
+    /* Capture clicks and key presses EVERY frame (60fps).
+     * These set routes/targets/buffers on the player struct.
+     * The tick loop reads them when the next tick fires. */
+    if (!v->policy_pipe && v->state.terminal == TERMINAL_NONE) {
+        process_human_clicks(v, ui_capture);
+        process_human_keys(v);
+    }
+
+    if (!external && tick && v->state.terminal == TERMINAL_NONE) {
+        int used_human_actions = 0;
+        /* Build action array for this tick */
+        if (v->policy_pipe) {
+            if (!read_policy_actions(v)) {
+                fprintf(stderr, "[policy-pipe] EOF on stdin, stopping.\n");
+                return -1;
+            }
+        } else {
+            build_human_actions(v);
+            used_human_actions = 1;
+        }
+
+        fc_actor_animation_capture_tick_start(&v->actor_animation,
+                                              &v->state);
+
+        /* Step simulation */
+        fc_step(&v->state, v->actions);
+        if (used_human_actions && v->actions[5] > 0 && v->actions[6] > 0)
+            fc_click_feedback_accept_move_tick(&v->click_feedback,
+                                               &v->state);
+        fc_click_feedback_sync(&v->click_feedback, &v->state);
+
+        /* Playable-viewer test aid only. The simulator has already
+         * resolved the hit; keep the local session alive at one HP. */
+        if (v->godmode &&
+            v->state.terminal == TERMINAL_PLAYER_DEATH) {
+            v->state.player.current_hp = 10;
+            v->state.terminal = TERMINAL_NONE;
+        }
+        update_reward_breakdown(v);
+        fc_viewer_ingest_tick(v);
+
+        if (v->state.terminal != TERMINAL_NONE) {
+            if (v->policy_pipe) {
+                print_policy_episode_summary(v);
+                v->policy_episode_count++;
+                /* Write terminal obs, then auto-reset unless a fixed episode limit was requested. */
+                write_obs_to_pipe(v);
+                if (v->policy_episode_limit > 0 &&
+                    v->policy_episode_count >= v->policy_episode_limit) {
+                    quit_after_tick = 1;
+                } else {
+                    reset_ep(v);
+                }
+            } else {
+                v->paused = 1;
+            }
+        } else if (v->policy_pipe) {
+            write_obs_to_pipe(v);
+        }
+    }
+
+    if (quit_after_tick) {
+        fprintf(stderr, "[policy-pipe] Episode limit reached, exiting viewer.\n");
+        return -1;
+    }
+
+    float frame_dt = GetFrameTime();
+    sync_player_appearance(v);
+    if (v->item_message_seconds > 0) v->item_message_seconds -= frame_dt;
+    FcCombatPresentationContext combat_context = {
+        .state = &v->state,
+        .events = &v->render_events,
+        .scene = &v->actor_animation.scene,
+        .terrain = v->terrain,
+        .anim_cache = v->anim_cache,
+        .player_profile = fc_player_visual_profile(fc_player_equipment_visual_profile(&v->state.player)),
+        .tps = v->tps,
+    };
+    unsigned char deferred_deaths[FC_MAX_NPCS];
+    fc_combat_presentation_deferred_deaths(
+        v->combat_presentation, &v->state, deferred_deaths);
+    fc_actor_animation_update_scene(
+        &v->actor_animation, &v->state, v->anim_cache, v->tps, frame_dt,
+        !v->paused || v->policy_pipe, deferred_deaths);
+    if (v->objects)
+        fc_animated_atlas_update(&v->objects->atlas, frame_dt);
+    fc_combat_presentation_update(v->combat_presentation,
+                                  &combat_context, frame_dt);
+    fc_combat_presentation_deferred_deaths(
+        v->combat_presentation, &v->state, deferred_deaths);
+    for (int i = 0; i < FC_MAX_NPCS; i++) {
+        if (!v->state.npcs[i].active && !v->state.npcs[i].died_this_tick)
+            fc_combat_presentation_clear_npc_healthbar(
+                v->combat_presentation, i);
+    }
+    fc_actor_animation_update_models(
+        &v->actor_animation, &v->state, v->appearance.model, v->npc_models,
+        v->anim_cache, v->active_loadout, v->tps, frame_dt, deferred_deaths);
+    /* Draw */
+    BeginDrawing();
+    ClearBackground(COL_BG);
+    draw_scene(v);
+    sync_fc_ui(v);
+    runec_ui_draw(&v->ui, GetScreenWidth(), GetScreenHeight());
+    draw_runec_side_overrides(v);
+    draw_runec_console(v);
+    draw_click_cross(v);
+    if (v->item_message_seconds > 0) {
+        DrawRectangle(8, GetScreenHeight() - 34, 490, 26, (Color){20, 16, 12, 240});
+        text_s(v->item_message, 16, GetScreenHeight() - 29, 16, YELLOW);
+    }
+    /* Menus must cover the console and prayer overrides, not sit behind them. */
+    runec_ui_draw_context(&v->ui);
+
+    EndDrawing();
+    return tick;
+}
+
+#ifdef FC_VIEWER_EMBEDDED
+
+/* Consume the latest authoritative transition, including a terminal snapshot
+ * saved before Puffer's same-step autoreset. State is copied, never advanced. */
+static void fc_viewer_present_pending(ViewerState* v) {
+    if (!v->pending_frame) return;
+    if (v->pending_state.rng_seed != v->state.rng_seed ||
+        v->pending_state.tick <= v->state.tick) {
+        v->state = v->reset_state;
+        fc_viewer_reset_presentation(v);
+    }
+    fc_actor_animation_capture_tick_start(&v->actor_animation, &v->state);
+    v->state = v->pending_state;
+    v->reward_runtime = v->pending_reward_runtime;
+    v->reward_breakdown = v->pending_reward_breakdown;
+    v->reward_breakdown_tick = v->state.tick;
+    memcpy(v->actions, v->pending_actions, sizeof(v->actions));
+    fc_viewer_ingest_tick(v);
+    if (fc_is_terminal(&v->state)) {
+        print_policy_episode_summary(v);
+        v->policy_episode_count++;
+    }
+    v->pending_frame = 0;
+}
+
+#endif
+
+int fc_viewer_main(int argc, char** argv) {
     int screenshot_mode = 0;
     const char* screenshot_path = NULL;
     int policy_pipe_flag = 0;
@@ -2230,561 +2827,30 @@ int main(int argc, char** argv) {
             start_wave_flag = atoi(argv[++i]);
         }
     }
-    fprintf(stderr,"=== Fight Caves Viewer (Phase 8 — Playable) ===\n");
-    /* In policy-pipe mode, suppress Raylib's INFO logs which go to stdout
-     * and would corrupt the pipe protocol. */
-    if (policy_pipe_flag) {
-        SetTraceLogCallback(viewer_trace_log_to_stderr);
-        SetTraceLogLevel(LOG_WARNING);
-    }
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE|FLAG_MSAA_4X_HINT);
-    InitWindow(DEFAULT_WINDOW_W, DEFAULT_WINDOW_H,
-               "Fight Caves RL — Playable Viewer");
-    SetExitKey(KEY_NULL); /* Escape first dismisses menus; handled below. */
-    if (!IsWindowReady()) {
-        fprintf(stderr,
-                "error: viewer window initialization failed; verify the "
-                "graphical display and OpenGL driver\n");
-        return 1;
-    }
-    SetTargetFPS(60);
-
-    ViewerState v; memset(&v, 0, sizeof(v));
-    fc_init(&v.state);
-    fc_actor_animation_init(&v.actor_animation);
-    runec_ui_init(&v.ui);
-    if (!fc_osrs_text_init()) {
-        fprintf(stderr,
-                "error: required OSRS viewer fonts failed to load\n");
-        runec_ui_shutdown(&v.ui);
-        CloseWindow();
-        return 1;
-    }
-    int item_icons_ready = load_fc_ui_item_icons(&v);
-    v.paused = 1; v.tps = NORMAL_TPS;
-    v.active_loadout = FC_ACTIVE_LOADOUT;
-    v.attack_target = -1;
-    v.cam_yaw = 0; v.cam_pitch = 0.8f; v.cam_dist = 30;
-    v.camera_locked = 1;
-    v.camera.up = (Vector3){0,1,0}; v.camera.fovy = 32;
-    v.camera.projection = CAMERA_PERSPECTIVE;
-    v.camera.target = (Vector3){FC_ARENA_WIDTH * 0.5f, 0.5f, -(FC_ARENA_HEIGHT * 0.5f)};
-
-    v.terrain = load_terrain(&v);
-    /* OSRS rasterizes the current 104x104 scene from cache terrain and
-     * locations into a 512x512 minimap. This asset contains the Fight Caves
-     * mapsquare centered in that same scene format; runtime only crops and
-     * rotates it around the player. */
-    Image minimap_image = fc_load_image_asset("fightcaves.minimap.png");
-    if (minimap_image.data) {
-        Color* minimap_pixels = LoadImageColors(minimap_image);
-        if (!minimap_pixels || !fc_minimap_scene_load_pixels(
-                &v.minimap_scene, minimap_pixels,
-                minimap_image.width, minimap_image.height)) {
-            fprintf(stderr, "error: Fight Caves minimap failed to load\n");
-        } else {
-            fprintf(stderr,
-                    "minimap: loaded cache scene raster %dx%d\n",
-                    minimap_image.width, minimap_image.height);
-        }
-        UnloadImageColors(minimap_pixels);
-        UnloadImage(minimap_image);
-    } else {
-        fprintf(stderr, "error: missing fightcaves.minimap.png\n");
-    }
-    v.objects = load_objects_with_terrain(v.terrain);
-    if (fc_asset_exists("fightcaves.oanim"))
-        v.object_anims = object_anims_load("fightcaves.oanim");
-    if (v.object_anims)
-        object_anims_offset(v.object_anims, FC_WORLD_ORIGIN_X, FC_WORLD_ORIGIN_Y);
-    if (!fc_animated_atlas_load(&v.shared_model_atlas, "fightcaves.atlas", 0))
-        fprintf(stderr, "error: shared model atlas failed to load\n");
-    if (fc_asset_exists("fightcaves.object_anim.models"))
-        v.object_anim_models = fc_npc_models_load(
-            "fightcaves.object_anim.models", v.shared_model_atlas.texture);
-    if (v.object_anims && v.object_anims->count > 0) {
-        v.object_anim_runtimes = (ObjectAnimRuntime*)calloc(
-            (size_t)v.object_anims->count, sizeof(*v.object_anim_runtimes));
-        if (v.object_anim_runtimes)
-            v.object_anim_runtime_count = v.object_anims->count;
-    }
-    if (!v.terrain || !v.terrain->loaded) v.show_grid = 1;
-
-    /* Load NPC models */
-    {
-        if (fc_asset_exists("fc_npcs.models"))
-            v.npc_models = fc_npc_models_load("fc_npcs.models", (Texture2D){0});
-        if (!v.npc_models) fprintf(stderr, "error: NPC models failed to load\n");
-    }
-
-    /* Load composable player body and equipment models. */
-    if (!fc_player_appearance_load(&v.appearance)) {
-        fprintf(stderr, "Required player appearance assets are missing or invalid.\n");
-        fc_player_appearance_free(&v.appearance);
-        return 1;
-    }
-
-    /* Load the animation cache shared by actor and combat presentation. */
-    if (fc_asset_exists("fc_all.anims"))
-        v.anim_cache = anim_cache_load("fc_all.anims");
-    v.combat_presentation = fc_combat_presentation_create(
-        v.shared_model_atlas.texture);
-    if (!v.combat_presentation)
-        fprintf(stderr, "error: combat presentation initialization failed\n");
-
-    /* Load prayer overhead icon textures */
-    {
-        if (fc_asset_exists("data/sprites/ui/prayeron_14.png")) {
-            v.pray_melee_tex = fc_load_texture_asset("data/sprites/ui/prayeron_14.png");
-            v.pray_missiles_tex = fc_load_texture_asset("data/sprites/ui/prayeron_13.png");
-            v.pray_magic_tex = fc_load_texture_asset("data/sprites/ui/prayeron_12.png");
-            fprintf(stderr, "Prayer icons loaded from %s\n", fc_asset_root());
-        } else {
-            fprintf(stderr, "error: prayer icons not found under asset root %s\n",
-                    fc_asset_root());
-        }
-    }
-
-    /* Native b237 click crosses: frames 0-3 are movement (yellow), frames
-     * 4-7 are interaction (red). RuneC advances one frame every 100 ms. */
-    int click_cross_loaded = 0;
-    {
-        for (int i = 0; i < FC_CLICK_CROSS_FRAME_COUNT * 2; i++) {
-            char path[64];
-            snprintf(path, sizeof(path),
-                     "data/sprites/ui/cross_%d.png", i);
-            v.click_cross_tex[i] = fc_load_texture_asset(path);
-            if (v.click_cross_tex[i].id > 0) {
-                SetTextureFilter(v.click_cross_tex[i], TEXTURE_FILTER_POINT);
-                click_cross_loaded++;
-            }
-        }
-        fprintf(stderr, "Click cross sprites loaded: %d/8\n",
-                click_cross_loaded);
-        if (click_cross_loaded != FC_CLICK_CROSS_FRAME_COUNT * 2)
-            fprintf(stderr, "error: required click cross sprites failed to load\n");
-    }
-
-    /* Load prayer icons used by the active RuneC prayer override. */
-    {
-        v.tex_pray_melee_on = fc_load_texture_asset(
-            "data/sprites/ui/prayeron_14.png");
-        v.tex_pray_melee_off = fc_load_texture_asset(
-            "data/sprites/ui/prayeroff_14.png");
-        v.tex_pray_range_on = fc_load_texture_asset(
-            "data/sprites/ui/prayeron_13.png");
-        v.tex_pray_range_off = fc_load_texture_asset(
-            "data/sprites/ui/prayeroff_13.png");
-        v.tex_pray_magic_on = fc_load_texture_asset(
-            "data/sprites/ui/prayeron_12.png");
-        v.tex_pray_magic_off = fc_load_texture_asset(
-            "data/sprites/ui/prayeroff_12.png");
-    }
-
-    int required_resources_ready = 1;
-#define REQUIRE_VIEWER_RESOURCE(condition, description) do {                 \
-        if (!(condition)) {                                                  \
-            fprintf(stderr, "error: required viewer resource failed: %s\n", \
-                    description);                                            \
-            required_resources_ready = 0;                                    \
-        }                                                                    \
-    } while (0)
-    REQUIRE_VIEWER_RESOURCE(v.ui.assets.missing_required_count == 0,
-                            "RuneC UI sprites");
-    REQUIRE_VIEWER_RESOURCE(v.ui.assets.font_loaded &&
-                            v.ui.assets.small_font_loaded,
-                            "RuneC UI fonts");
-    REQUIRE_VIEWER_RESOURCE(v.ui.minimap_texture_ready,
-                            "minimap render texture");
-    REQUIRE_VIEWER_RESOURCE(item_icons_ready, "Fight Caves item icons");
-    REQUIRE_VIEWER_RESOURCE(v.terrain && v.terrain->loaded, "terrain mesh");
-    REQUIRE_VIEWER_RESOURCE(v.minimap_scene.ready, "minimap scene raster");
-    REQUIRE_VIEWER_RESOURCE(v.objects && v.objects->loaded &&
-                            v.objects->atlas.texture.id > 0,
-                            "terrain objects and atlas");
-    REQUIRE_VIEWER_RESOURCE(v.object_anims && v.object_anims->loaded,
-                            "object animation placements");
-    REQUIRE_VIEWER_RESOURCE(v.shared_model_atlas.texture.id > 0,
-                            "shared model atlas");
-    REQUIRE_VIEWER_RESOURCE(v.object_anim_models &&
-                            v.object_anim_models->loaded,
-                            "animated object models");
-    REQUIRE_VIEWER_RESOURCE(!v.object_anims || v.object_anims->count == 0 ||
-                            v.object_anim_runtimes,
-                            "object animation runtime allocation");
-    REQUIRE_VIEWER_RESOURCE(v.npc_models && v.npc_models->loaded,
-                            "NPC models");
-    REQUIRE_VIEWER_RESOURCE(v.appearance.parts && v.appearance.parts->loaded,
-                            "player equipment and body models");
-    REQUIRE_VIEWER_RESOURCE(v.anim_cache, "actor animation data");
-    REQUIRE_VIEWER_RESOURCE(
-        fc_combat_presentation_ready(v.combat_presentation),
-        "projectile, spot-animation, healthbar, and hitsplat data");
-    REQUIRE_VIEWER_RESOURCE(v.pray_melee_tex.id > 0 &&
-                            v.pray_missiles_tex.id > 0 &&
-                            v.pray_magic_tex.id > 0,
-                            "overhead Prayer icons");
-    REQUIRE_VIEWER_RESOURCE(
-        click_cross_loaded == FC_CLICK_CROSS_FRAME_COUNT * 2,
-        "click cross sprites");
-    REQUIRE_VIEWER_RESOURCE(v.tex_pray_melee_on.id > 0 &&
-                            v.tex_pray_melee_off.id > 0 &&
-                            v.tex_pray_range_on.id > 0 &&
-                            v.tex_pray_range_off.id > 0 &&
-                            v.tex_pray_magic_on.id > 0 &&
-                            v.tex_pray_magic_off.id > 0,
-                            "Prayer interface icons");
-#undef REQUIRE_VIEWER_RESOURCE
-    if (!required_resources_ready) {
-        fprintf(stderr,
-                "error: viewer startup aborted instead of using reduced "
-                "graphics; reinstall and verify assets with: python3 "
-                "ocean/fight_caves/tools.py setup --all --force\n");
-        exit_code = 1;
-        goto cleanup;
-    }
-
-    v.combat_style = 1;  /* Rapid default */
-    v.policy_pipe = policy_pipe_flag;
-    v.policy_episode_limit = policy_episode_limit_flag;
-    v.start_wave = start_wave_flag;
-    if (v.policy_pipe)
-        set_policy_replay_speed(&v, policy_speed_flag);
-
-    reset_ep(&v);
-
-    /* Policy pipe: write initial obs so Python can send first action */
-    if (v.policy_pipe) {
-        v.paused = 0;
+    ViewerState* v = fc_viewer_create(policy_pipe_flag);
+    if (!v) return EXIT_FAILURE;
+    v->policy_episode_limit = policy_episode_limit_flag;
+    v->start_wave = start_wave_flag;
+    if (v->policy_pipe) set_policy_replay_speed(v, policy_speed_flag);
+    reset_ep(v);
+    if (v->policy_pipe) {
+        v->paused = 0;
         fprintf(stderr, "[policy-pipe] Mode active. Reading actions from stdin.\n");
-        write_obs_to_pipe(&v);
+        write_obs_to_pipe(v);
     }
-
     int frame_count = 0;
-
-    while (!WindowShouldClose()) {
-        int quit_after_tick = 0;
-        int ui_capture = 0;
-        /* Screenshot mode */
-        if (screenshot_mode && frame_count == 5) {
+    while (fc_viewer_frame(v, 0) >= 0) {
+        if (screenshot_mode && ++frame_count == 6) {
             TakeScreenshot(screenshot_path);
-            fprintf(stderr, "Screenshot saved to %s\n", screenshot_path);
             break;
         }
-        frame_count++;
-        /* Age the previous click before capturing this frame's input. A newly
-         * clicked cross must start at frame zero, even after a slow frame. */
-        fc_click_feedback_update(&v.click_feedback, GetFrameTime());
-
-        /* Global keys (always active) */
-        if (IsKeyPressed(KEY_Q)) break;
-        if (IsKeyPressed(KEY_ESCAPE) && !v.ui.context_open) break;
-        if (IsKeyPressed(KEY_SPACE)) v.paused = !v.paused;
-        if (IsKeyPressed(KEY_RIGHT)) v.step_once = 1;
-        if (v.policy_pipe) {
-            if (IsKeyPressed(KEY_ONE)) set_policy_replay_speed(&v, 1);
-            if (IsKeyPressed(KEY_TWO)) set_policy_replay_speed(&v, 2);
-            if (!IsKeyDown(KEY_LEFT_SHIFT) && !IsKeyDown(KEY_RIGHT_SHIFT) &&
-                IsKeyPressed(KEY_FOUR)) set_policy_replay_speed(&v, 4);
-            if (IsKeyPressed(KEY_ZERO)) set_policy_replay_speed(&v, 10);
-            if (IsKeyPressed(KEY_UP)) cycle_policy_replay_speed(&v, +1);
-            if (IsKeyPressed(KEY_DOWN)) cycle_policy_replay_speed(&v, -1);
-        }
-        if (IsKeyPressed(KEY_R)) reset_ep(&v);
-        if (IsKeyPressed(KEY_L)) {
-            if (v.camera_locked) {
-                v.camera.target = camera_follow_target(&v);
-            }
-            v.camera_locked = !v.camera_locked;
-        }
-
-        /* Toggle keys */
-        if (IsKeyPressed(KEY_G)) v.show_grid = !v.show_grid;
-        if (IsKeyPressed(KEY_C)) v.show_collision = !v.show_collision;
-        /* O: cycle debug overlay modes. O=all on/off, Shift+O=cycle sub-modes */
-        if (IsKeyPressed(KEY_O)) {
-            if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
-                /* Cycle through individual modes */
-                if (v.dbg_flags == 0) v.dbg_flags = DBG_COLLISION;
-                else if (v.dbg_flags == DBG_COLLISION) v.dbg_flags = DBG_LOS;
-                else if (v.dbg_flags == DBG_LOS) v.dbg_flags = DBG_PATH | DBG_RANGE;
-                else v.dbg_flags = 0;
-            } else {
-                /* Toggle all on/off */
-                toggle_debug_overlay(&v);
-            }
-        }
-        /* D: match the on-screen controls without interfering with east movement */
-        if (IsKeyPressed(KEY_D) && !IsKeyDown(KEY_W) && !IsKeyDown(KEY_A) && !IsKeyDown(KEY_S)) {
-            toggle_debug_overlay(&v);
-        }
-        /* Camera presets */
-        if ((!v.policy_pipe && IsKeyPressed(KEY_FOUR)) ||
-            (v.policy_pipe &&
-             (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) &&
-             IsKeyPressed(KEY_FOUR))) {
-            v.cam_yaw=0; v.cam_pitch=1.35f; v.cam_dist=120;
-        }
-        if ((!v.policy_pipe && IsKeyPressed(KEY_FIVE)) ||
-            (v.policy_pipe &&
-             (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) &&
-             IsKeyPressed(KEY_FIVE))) {
-            v.cam_yaw=0; v.cam_pitch=0.6f; v.cam_dist=50;
-        }
-
-        sync_fc_ui(&v);
-        if (v.ui.context_open) {
-            ui_capture = runec_ui_handle_input(&v.ui, GetScreenWidth(), GetScreenHeight());
-            handle_runec_ui_intent(&v);
-        } else {
-            ui_capture = process_runec_prayer_click(&v);
-            if (!ui_capture)
-                ui_capture = process_runec_console_input(&v);
-            if (!ui_capture) {
-                ui_capture = runec_ui_handle_input(&v.ui, GetScreenWidth(), GetScreenHeight());
-                handle_runec_ui_intent(&v);
-            } else {
-                v.ui.last_intent.kind = RUNEC_UI_INTENT_NONE;
-            }
-        }
-
-        /* RuneC: open on right press; a real drag dismisses the menu and
-         * retains the viewer's existing camera gesture. No game action fires. */
-        if (!ui_capture && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-            v.scene_right_tracking = 1;
-            v.scene_right_dragged = 0;
-            v.scene_right_start = GetMousePosition();
-            open_scene_context_menu(&v);
-            ui_capture = 1;
-        }
-        if (v.scene_right_tracking && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-            Vector2 mouse = GetMousePosition();
-            float dx = mouse.x - v.scene_right_start.x;
-            float dy = mouse.y - v.scene_right_start.y;
-            if (dx * dx + dy * dy > 9.0f) v.scene_right_dragged = 1;
-            if (v.scene_right_dragged) {
-                runec_ui_close_context(&v.ui);
-                Vector2 d = GetMouseDelta();
-                v.cam_yaw += d.x*0.005f; v.cam_pitch -= d.y*0.005f;
-                if (v.cam_pitch < 0.1f) v.cam_pitch = 0.1f;
-                if (v.cam_pitch > 1.4f) v.cam_pitch = 1.4f;
-            }
-        }
-        if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
-            v.scene_right_tracking = v.scene_right_dragged = 0;
-        }
-        float wh = GetMouseWheelMove();
-        if (!ui_capture && wh != 0) {
-            v.cam_dist *= (wh > 0) ? (1.0f/1.15f) : 1.15f;
-            if (v.cam_dist < 5) v.cam_dist = 5;
-            if (v.cam_dist > 300) v.cam_dist = 300;
-        }
-
-        /* Tick processing */
-        int tick = 0;
-        if (!v.paused) {
-            v.tick_acc += GetFrameTime() * (float)v.tps;
-            if (v.tick_acc >= 1.0f) {
-                v.tick_acc = fmodf(v.tick_acc, 1.0f);
-                tick = 1;
-            }
-        }
-        if (v.step_once) { tick = 1; v.step_once = 0; }
-
-        /* Capture clicks and key presses EVERY frame (60fps).
-         * These set routes/targets/buffers on the player struct.
-         * The tick loop reads them when the next tick fires. */
-        if (!v.policy_pipe && v.state.terminal == TERMINAL_NONE) {
-            process_human_clicks(&v, ui_capture);
-            process_human_keys(&v);
-        }
-
-        if (tick && v.state.terminal == TERMINAL_NONE) {
-            int used_human_actions = 0;
-            /* Build action array for this tick */
-            if (v.policy_pipe) {
-                if (!read_policy_actions(&v)) {
-                    fprintf(stderr, "[policy-pipe] EOF on stdin, stopping.\n");
-                    break;
-                }
-            } else {
-                build_human_actions(&v);
-                used_human_actions = 1;
-            }
-
-            fc_actor_animation_capture_tick_start(&v.actor_animation,
-                                                  &v.state);
-
-            /* Step simulation */
-            fc_step(&v.state, v.actions);
-            if (used_human_actions && v.actions[5] > 0 && v.actions[6] > 0)
-                fc_click_feedback_accept_move_tick(&v.click_feedback,
-                                                   &v.state);
-            fc_click_feedback_sync(&v.click_feedback, &v.state);
-
-            /* Playable-viewer test aid only. The simulator has already
-             * resolved the hit; keep the local session alive at one HP. */
-            if (v.godmode &&
-                v.state.terminal == TERMINAL_PLAYER_DEATH) {
-                v.state.player.current_hp = 10;
-                v.state.terminal = TERMINAL_NONE;
-            }
-            fc_fill_render_events(&v.state, &v.render_events);
-            fc_actor_animation_ingest_tick(&v.actor_animation, &v.state,
-                                           &v.render_events);
-            update_reward_breakdown(&v);
-            fc_actor_animation_ingest_events(
-                &v.actor_animation, &v.render_events, v.anim_cache,
-                fc_player_equipment_visual_profile(&v.state.player), v.tps);
-
-            /* Debug event log — record events from this tick */
-            dbg_log_tick(&v.state);
-
-            /* Snap prev positions for newly spawned NPCs so they don't fly.
-             * An NPC that wasn't active last tick but is now = new spawn. */
-            for (int ni = 0; ni < FC_MAX_NPCS; ni++) {
-                if (v.state.npcs[ni].active &&
-                    !fc_actor_animation_previous_npc_active(
-                        &v.actor_animation, ni)) {
-                    fc_combat_presentation_clear_npc_healthbar(
-                        v.combat_presentation, ni);
-                }
-            }
-
-            fc_fill_render_entities(&v.state, v.entities, &v.entity_count);
-            v.last_hash = fc_state_hash(&v.state);
-
-            FcCombatPresentationContext combat_context = {
-                .state = &v.state,
-                .events = &v.render_events,
-                .scene = &v.actor_animation.scene,
-                .terrain = v.terrain,
-                .anim_cache = v.anim_cache,
-                .player_profile = fc_player_visual_profile(fc_player_equipment_visual_profile(&v.state.player)),
-                .tps = v.tps,
-            };
-            fc_combat_presentation_ingest_tick(v.combat_presentation,
-                                                &combat_context);
-            /* Sync viewer attack_target with player's backend target */
-            v.attack_target = v.state.player.attack_target_idx;
-            /* Auto-clear if target NPC died */
-            if (v.state.player.attack_target_idx >= 0) {
-                FcNpc* tn = &v.state.npcs[v.state.player.attack_target_idx];
-                if (!tn->active || tn->is_dead) {
-                    v.attack_target = -1;
-                }
-            }
-
-            if (v.state.terminal != TERMINAL_NONE) {
-                if (v.policy_pipe) {
-                    print_policy_episode_summary(&v);
-                    v.policy_episode_count++;
-                    /* Write terminal obs, then auto-reset unless a fixed episode limit was requested. */
-                    write_obs_to_pipe(&v);
-                    if (v.policy_episode_limit > 0 &&
-                        v.policy_episode_count >= v.policy_episode_limit) {
-                        quit_after_tick = 1;
-                    } else {
-                        reset_ep(&v);
-                    }
-                } else {
-                    v.paused = 1;
-                }
-            } else if (v.policy_pipe) {
-                write_obs_to_pipe(&v);
-            }
-        }
-
-        if (quit_after_tick) {
-            fprintf(stderr, "[policy-pipe] Episode limit reached, exiting viewer.\n");
-            break;
-        }
-
-        float frame_dt = GetFrameTime();
-        sync_player_appearance(&v);
-        if (v.item_message_seconds > 0) v.item_message_seconds -= frame_dt;
-        FcCombatPresentationContext combat_context = {
-            .state = &v.state,
-            .events = &v.render_events,
-            .scene = &v.actor_animation.scene,
-            .terrain = v.terrain,
-            .anim_cache = v.anim_cache,
-            .player_profile = fc_player_visual_profile(fc_player_equipment_visual_profile(&v.state.player)),
-            .tps = v.tps,
-        };
-        unsigned char deferred_deaths[FC_MAX_NPCS];
-        fc_combat_presentation_deferred_deaths(
-            v.combat_presentation, &v.state, deferred_deaths);
-        fc_actor_animation_update_scene(
-            &v.actor_animation, &v.state, v.anim_cache, v.tps, frame_dt,
-            !v.paused || v.policy_pipe, deferred_deaths);
-        if (v.objects)
-            fc_animated_atlas_update(&v.objects->atlas, frame_dt);
-        fc_combat_presentation_update(v.combat_presentation,
-                                      &combat_context, frame_dt);
-        fc_combat_presentation_deferred_deaths(
-            v.combat_presentation, &v.state, deferred_deaths);
-        for (int i = 0; i < FC_MAX_NPCS; i++) {
-            if (!v.state.npcs[i].active && !v.state.npcs[i].died_this_tick)
-                fc_combat_presentation_clear_npc_healthbar(
-                    v.combat_presentation, i);
-        }
-        fc_actor_animation_update_models(
-            &v.actor_animation, &v.state, v.appearance.model, v.npc_models,
-            v.anim_cache, v.active_loadout, v.tps, frame_dt, deferred_deaths);
-        /* Draw */
-        BeginDrawing();
-        ClearBackground(COL_BG);
-        draw_scene(&v);
-        sync_fc_ui(&v);
-        runec_ui_draw(&v.ui, GetScreenWidth(), GetScreenHeight());
-        draw_runec_side_overrides(&v);
-        draw_runec_console(&v);
-        draw_click_cross(&v);
-        if (v.item_message_seconds > 0) {
-            DrawRectangle(8, GetScreenHeight() - 34, 490, 26, (Color){20, 16, 12, 240});
-            text_s(v.item_message, 16, GetScreenHeight() - 29, 16, YELLOW);
-        }
-        /* Menus must cover the console and prayer overrides, not sit behind them. */
-        runec_ui_draw_context(&v.ui);
-
-        EndDrawing();
     }
-
-cleanup:
-    if (v.pray_melee_tex.id > 0) UnloadTexture(v.pray_melee_tex);
-    if (v.pray_missiles_tex.id > 0) UnloadTexture(v.pray_missiles_tex);
-    if (v.pray_magic_tex.id > 0) UnloadTexture(v.pray_magic_tex);
-    for (int i = 0; i < FC_CLICK_CROSS_FRAME_COUNT * 2; i++) {
-        if (v.click_cross_tex[i].id > 0)
-            UnloadTexture(v.click_cross_tex[i]);
-    }
-    if (v.tex_pray_melee_on.id > 0) UnloadTexture(v.tex_pray_melee_on);
-    if (v.tex_pray_melee_off.id > 0) UnloadTexture(v.tex_pray_melee_off);
-    if (v.tex_pray_range_on.id > 0) UnloadTexture(v.tex_pray_range_on);
-    if (v.tex_pray_range_off.id > 0) UnloadTexture(v.tex_pray_range_off);
-    if (v.tex_pray_magic_on.id > 0) UnloadTexture(v.tex_pray_magic_on);
-    if (v.tex_pray_magic_off.id > 0) UnloadTexture(v.tex_pray_magic_off);
-    fc_combat_presentation_destroy(v.combat_presentation);
-    fc_actor_animation_shutdown(&v.actor_animation);
-    if (v.object_anim_runtimes) {
-        for (int i = 0; i < v.object_anim_runtime_count; i++) {
-            if (v.object_anim_runtimes[i].anim_state)
-                anim_model_state_free(v.object_anim_runtimes[i].anim_state);
-        }
-        free(v.object_anim_runtimes);
-    }
-    if (v.anim_cache) anim_cache_free(v.anim_cache);
-    fc_player_appearance_free(&v.appearance);
-    if (v.npc_models) fc_npc_models_unload(v.npc_models);
-    if (v.object_anim_models) fc_npc_models_unload(v.object_anim_models);
-    fc_animated_atlas_unload(&v.shared_model_atlas);
-    if (v.object_anims) object_anims_free(v.object_anims);
-    objects_free(v.objects);
-    fc_minimap_scene_free(&v.minimap_scene);
-    terrain_free(v.terrain);
-    fc_osrs_text_shutdown();
-    runec_ui_shutdown(&v.ui);
-    CloseWindow();
-    return exit_code;
+    fc_viewer_destroy(v);
+    return EXIT_SUCCESS;
 }
+
+#ifndef FC_VIEWER_EMBEDDED
+int main(int argc, char** argv) {
+    return fc_viewer_main(argc, argv);
+}
+#endif

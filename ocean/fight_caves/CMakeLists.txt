@@ -15,7 +15,7 @@ endif()
 set(RAYLIB_ROOT "${RAYLIB_ROOT}" CACHE PATH "Raylib distribution root")
 if(NOT EXISTS "${RAYLIB_ROOT}/include/raylib.h" OR
    NOT EXISTS "${RAYLIB_ROOT}/lib/libraylib.a")
-    message(FATAL_ERROR "Raylib unavailable at ${RAYLIB_ROOT}. Run python3 ocean/fight_caves/tools.py build-viewer")
+    message(FATAL_ERROR "Raylib unavailable at ${RAYLIB_ROOT}. Run ./build.sh fight_caves --fast")
 endif()
 
 add_executable(fc_viewer viewer.c)
@@ -40,3 +40,9 @@ target_include_directories(fc_viewer_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}" "${RAYLIB_ROOT}/include")
 get_target_property(FC_VIEWER_TEST_LIBRARIES fc_viewer LINK_LIBRARIES)
 target_link_libraries(fc_viewer_tests PRIVATE ${FC_VIEWER_TEST_LIBRARIES})
+
+add_executable(fc_integration_tests EXCLUDE_FROM_ALL
+    "${PUFFERLIB_ROOT}/tests/fight_caves_integration.c")
+target_include_directories(fc_integration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}" "${RAYLIB_ROOT}/include")
+target_link_libraries(fc_integration_tests PRIVATE ${FC_VIEWER_TEST_LIBRARIES})

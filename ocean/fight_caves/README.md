@@ -1,174 +1,138 @@
 # Fight Caves
 
-Fight Caves is a single-agent native C environment for PufferLib 4.0. Its
-training adapter, standalone simulator, and full Raylib viewer all compile the
-same `simulation.h` implementation. Presentation remains separate from gameplay.
+A single-agent native C Fight Caves environment for PufferLib 4.0. Training,
+human play, and checkpoint evaluation share the same simulation and full Raylib
+viewer. Gameplay, observations, rewards, action heads, and the default 750M-step
+configuration are unchanged by the standard-workflow integration.
 
-## Layout
+## Setup and training
 
-The environment uses flat implementation headers, with no separate `src/`,
-`include/`, or viewer source tree:
+Use a normal Puffer 4.0 development environment: Python 3.10+, Clang/OpenMP,
+Raylib's system/OpenGL dependencies, and the CUDA/cuDNN/NCCL development stack
+for native GPU training. These are shared Puffer prerequisites, not a separate
+Fight Caves installation. An optional reproducible Docker setup is below.
 
-- `fight_caves.h`: Puffer lifecycle, observations, rewards and episode logging.
-- `simulation.h`: game state, contracts, combat, routing, waves, loadouts and
-  inventory/equipment transactions.
-- `binding.c`: Puffer 4.0 binding, configuration and compiled-contract export.
-- `fight_caves.c`: standalone random-action simulator/benchmark.
-- `viewer.c`: playable and policy-pipe entry point, input and scene lifecycle.
-- `assets.h`: asset readers, models, animations, terrain, animated atlases and
-  equipment-based player appearance composition.
-- `ui.h`: OSRS interfaces, sprites, fonts, minimap, orbs and context menus.
-- `render.h`: actor motion, animation selection, combat effects and debug overlays.
-- `tools.py`: asset installation/verification, bundle creation, preflight,
-  optional viewer build, playable launch and checkpoint replay.
-- `CMakeLists.txt`: optional viewer build using Puffer's pinned Raylib 5.5.
-- `Dockerfile`, `Dockerfile.dockerignore`, `docker-constraints.txt`: optional
-  Ubuntu/CUDA setup with pinned Python dependencies.
-
-Acceptance tests live in the repository's `tests/` directory. The full graphical
-viewer is retained; the flat layout does not substitute a minimal renderer or
-change the simulation, policy contract, or configuration.
-
-## Requirements
-
-Python 3.10 or newer and the normal PufferLib Python dependencies are required.
-Activate your Python environment first: Puffer's stock `build.sh` invokes
-`python` from `PATH`, which must be the same interpreter used for training.
-Native builds require Clang, `ar`, and an OpenMP development runtime. The viewer
-also requires CMake, OpenGL development libraries, and X11 development headers
-on Linux.
-
-[Docker instructions](#docker-ubuntu--nvidia).
-
-On Ubuntu, the relevant system packages are:
+From the repository root, in your activated Python environment:
 
 ```bash
-sudo apt-get install clang libomp-dev libomp5 cmake \
-  libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev \
-  libxcursor-dev libxinerama-dev x11-utils xvfb
+python -m pip install -e .
+./build.sh fight_caves
+puffer train fight_caves --wandb
 ```
 
-The environment-local preflight exits with a nonzero status and names any
-missing dependency. It never substitutes a reduced simulator or viewer.
-The shared `build.sh` is unchanged and does not invoke Fight Caves preflight;
-run the explicit check before building a backend as shown below.
+The build **automatically installs and verifies both asset bundles**. There is
+no separate Fight Caves setup, preflight, or viewer-build command to remember.
+Verified assets are reused on subsequent builds, including offline builds.
+The first installation requires access to the pinned GitHub release.
 
-## Install assets
-
-The runtime maps and graphical viewer data are published as versioned GitHub
-release bundles. Install and verify both bundles from the repository root:
+CPU/PyTorch training follows Puffer's ordinary alternative:
 
 ```bash
-python3 ocean/fight_caves/tools.py setup --all
-```
-
-The installer verifies the archive and every installed file against
-`resources/fight_caves/asset_manifest.json`. A download, checksum, extraction,
-or installation error exits nonzero without replacing an existing installation.
-
-## Build and test
-
-Use Puffer's standard build commands for the training backend:
-
-```bash
-python ocean/fight_caves/tools.py preflight --mode cpu
 ./build.sh fight_caves --cpu
+puffer train fight_caves --slowly
 ```
 
-For CUDA, use `preflight --mode cuda` followed by `./build.sh fight_caves`.
-For the standalone simulator, use `preflight --mode native` followed by
-`./build.sh fight_caves --fast`.
+Puffer compiles one selected environment/backend into `pufferlib/_C`. Rebuild
+when switching environments or between native CUDA and CPU backends.
 
-Build the CPU Puffer backend and run the environment acceptance tests:
+## Play manually
 
 ```bash
-bash tests/fight_caves.sh test --puffer
+./build.sh fight_caves --fast
+./fight_caves
 ```
 
-Include the viewer build and explicit graphical regression tests (using
-`xvfb-run` when available, otherwise an existing display):
+Use `--local` instead of `--fast` for Puffer's debug/sanitizer build. Human play
+does not require CUDA or a compiled Python backend. A graphical desktop is
+required. The game starts paused; press Space to begin.
+
+The full viewer is retained: tile clicking and path previews, camera controls,
+equipment switching and right-click menus, inventory/prayer interfaces, minimap
+and run-energy orbs, wave/TPS/target controls, god mode, diagnostics, projectiles,
+animations, health bars, hitsplats, and Prayer-window indicators.
+
+Space pauses; Right Arrow single-steps; O toggles the debug overlay; right-drag
+orbits; the mouse wheel zooms; Q quits. The console contains wave, target,
+speed, and god-mode controls. `./fight_caves --benchmark` retains the optional
+headless random-action benchmark.
+
+## Watch a checkpoint
+
+After building the same backend used to train the checkpoint:
 
 ```bash
+puffer eval fight_caves --load-model-path latest
+```
+
+Or pass a specific checkpoint path. PyTorch checkpoints use Puffer's `--slowly`
+backend. Standard evaluation uses Puffer's own policy inference, masking, and
+environment stepping; the viewer only displays snapshots of the evaluated
+environment. Graphics are initialized lazily by `c_render()`, never by ordinary
+headless training. Terminal snapshots are retained before same-step autoreset.
+
+The same viewer supports camera/debug/pause/speed controls during evaluation.
+Gameplay-changing controls are disabled in replay. Keyboard 1/2/4/0 selects
+1x/2x/4x/10x playback. Closing the window or pressing Q ends evaluation.
+Puffer's standard `latest` means newest by file time, not highest-scoring.
+
+### Optional CPU-only compatibility replay
+
+Puffer's native CUDA and PyTorch backends use different checkpoint formats.
+The optional compatibility reader is retained for replaying native CUDA weights
+on the CPU, deterministic sampling, or a fixed episode limit:
+
+```bash
+./build.sh fight_caves --cpu
+./build.sh fight_caves --fast
+python ocean/fight_caves/tools.py eval --ckpt /path/to/checkpoint.bin --episodes 1
+```
+
+It uses the same `./fight_caves` executable and the existing contract checks.
+It is not required for ordinary `puffer eval`. Rebuild the CUDA backend before
+resuming native training after a CPU build.
+
+## Assets
+
+`build.sh` invokes the existing pinned installer automatically for Fight Caves.
+Archive and individual-file SHA-256 checks precede transactional installation:
+
+- `resources/fight_caves/runtime/`: collision, movement, and LOS maps.
+- `resources/fight_caves/viewer/`: models, equipment parts, animations, terrain,
+  textures, sprites, fonts, and the minimap raster.
+
+The simulator and viewer load these local paths directly; no cache export,
+reference repository, external codebase, or runtime network call is needed.
+Missing or invalid required data fails rather than substituting open maps or
+reduced graphics. Rerunning the build repairs missing/corrupt installed bundles;
+download or validation failure stops the build.
+
+`tools.py setup`, `bundle`, and `preflight` remain explicit maintenance tools.
+The old `tools.py build-viewer` and `play` commands are compatibility aliases
+for the standard standalone build and executable.
+
+## Maintainer checks and layout
+
+```bash
+bash tests/fight_caves.sh test --core
 bash tests/fight_caves.sh test --all
 ```
 
-Run the playable viewer through its asset-verifying launcher:
+The optional graphical test target uses CMake/Xvfb. Neither is required to
+build or launch the ordinary viewer. Tests cover assets/failure handling,
+contracts, equipment, graphics, and rendering-versus-headless trajectory parity.
 
-```bash
-python3 ocean/fight_caves/tools.py build-viewer
-python3 ocean/fight_caves/tools.py play
-```
+- `simulation.h`: unchanged combat, movement, waves, items, contracts and state.
+- `fight_caves.h`, `binding.c`: Puffer integration and lazy renderer connection.
+- `fight_caves.c`: conventional playable entry point and optional benchmark.
+- `viewer.c`: shared viewer lifecycle, input, frame rendering and compatibility pipe.
+- `assets.h`, `ui.h`, `render.h`: existing assets, interface and presentation.
+- `tools.py`: asset maintenance and optional cross-backend checkpoint replay.
+- `CMakeLists.txt`: optional graphical regression builds.
+- `Dockerfile` and constraints: optional reproducible development environment.
 
-`build-viewer` checks dependencies and assets, reuses Puffer's Raylib 5.5
-installation if present, or downloads the same official release into `build/`.
-Use `--raylib-root /path/to/raylib` to supply an existing installation, including
-on platforms without a matching prebuilt release. An incomplete installation
-fails explicitly. Viewer building does not require the Puffer backend or CUDA.
-
-The launcher verifies all required assets and checks the graphical display.
-The viewer retains tile clicking and route previews, OSRS click indicators,
-camera controls, equipment/prayer/inventory tabs, run-energy and minimap orbs,
-wave/TPS/target controls, god mode, debug information, prayer-window indicators,
-projectiles, impacts, health bars and hitsplats.
-
-In playable mode, click worn equipment to remove it and click equipment in the
-inventory to equip it. The player model and bonuses update together. Inventory
-capacity, two-handed weapon/shield swaps, requirements, ammunition compatibility,
-stack limits, loaded-weapon charges and consumable slots are handled by the core.
-These immediate transactions do not advance a tick or reset attack cooldowns.
-Equipment switching is not a policy action: training keeps the same three heads,
-320 model inputs (286 observations plus 34 mask values), rewards and config.
-
-Right-click items, NPCs or terrain to open the RuneC-style menu. It includes
-NPC combat levels and relative-level colors, uses the bold OSRS menu font, and
-picks NPCs against their animated models. Menu choices invoke existing viewer
-actions; yellow/red click animations and right-drag camera control are retained.
-
-Useful controls include `Space` to pause/resume, `Right Arrow` to step one tick,
-`O` for debug overlays, right-drag to orbit, the mouse wheel to zoom, and
-`Q`/`Escape` to quit.
-
-## Checkpoint replay
-
-Build the Fight Caves backend (`./build.sh fight_caves --cpu`, or the normal CUDA
-build), then replay a checkpoint in the same viewer:
-
-```bash
-python3 ocean/fight_caves/tools.py eval --ckpt /absolute/path/to/checkpoint.bin --episodes 1
-```
-
-Replay retains the raw CUDA and PyTorch CPU checkpoint readers, compiled-contract
-and size checks, masking, pause/speed controls and episode summaries. `--ckpt latest`
-selects the newest compatible checkpoint; `--random` uses random legal actions
-without loading a checkpoint. The existing dedicated policy-pipe evaluator is
-preserved, rather than changing inference or switching to a different renderer.
-The state hash is version 5 for inventory/equipment state. Version-4 checkpoint
-sidecars remain accepted only when every other contract field matches, since
-policy weights do not serialize equipment state.
-
-The viewer defaults to `resources/fight_caves/viewer`; arena maps default to
-`resources/fight_caves/runtime`. Explicit `FC_ASSET_ROOT`, `FC_REPO_ROOT`,
-`FC_COLLISION_PATH`, `FC_MOVEMENT_PATH` and `FC_LOS_PATH` overrides remain available.
-Use `python3 ocean/fight_caves/tools.py COMMAND --help` for setup, bundle,
-preflight, viewer-build and replay options.
-
-## Clean-clone acceptance
-
-Maintainers can reproduce installation, native and Puffer builds, a short
-training run, viewer startup, checkpoint replay, and deliberate failure cases
-from a new checkout with:
-
-```bash
-bash tests/fight_caves.sh clean-clone
-```
-
-The command clones the current origin branch into a temporary directory, creates
-a new virtual environment, downloads only the published pinned asset bundles,
-and runs the complete acceptance sequence. Set `FC_CLEAN_CLONE_KEEP=1` to retain
-the isolated checkout after a failure for inspection.
-This validates the committed branch, not uncommitted local changes. The
-`checkout` subcommand runs acceptance directly in a fresh checkout without
-installed assets, and `test --core` runs just the asset/contract and C checks.
+`bash tests/fight_caves.sh clean-clone` tests a committed branch, not uncommitted
+working-copy changes. Use `checkout` in an isolated source copy to validate
+uncommitted work.
 
 ## Docker (Ubuntu / NVIDIA)
 
@@ -224,7 +188,6 @@ examples use the same container name; choose one.
 Inside the container, in `/workspace/PufferLib`:
 
 ```bash
-python ocean/fight_caves/tools.py preflight --mode cuda
 ./build.sh fight_caves
 bash tests/fight_caves.sh test --core
 ```
@@ -233,19 +196,19 @@ bash tests/fight_caves.sh test --core
 
 ```bash
 wandb login
-python -m pufferlib.pufferl train fight_caves --wandb --wandb-project fight-caves
+puffer train fight_caves --wandb --wandb-project fight-caves
 ```
 
 Viewer and checkpoint replay:
 
 ```bash
-python ocean/fight_caves/tools.py play
-python ocean/fight_caves/tools.py eval --ckpt latest --episodes 1
+./fight_caves
+puffer eval fight_caves --load-model-path latest
 ```
 
 Headless viewer check:
 
 ```bash
 xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 \
-  python ocean/fight_caves/tools.py play --screenshot playable.png
+  ./fight_caves --screenshot playable.png
 ```
