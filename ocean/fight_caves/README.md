@@ -177,8 +177,8 @@ PyTorch 2.9.1+cu130 and W&B 0.28.1 for this branch's `wandb.util.generate_id()` 
 
 The host needs an NVIDIA GPU with a driver compatible with CUDA 13.0,
 and [NVIDIA Container Toolkit configured for Docker](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-Fresh installs and Docker builds are blocked until the `fight-caves-assets-v3`
-release pinned in `resources/fight_caves/asset_manifest.json` is published.
+Assets: [fight-caves-assets-v3](https://github.com/jordanbailey00/fc-rl/releases/tag/fight-caves-assets-v3),
+pinned in `resources/fight_caves/asset_manifest.json`.
 
 Build from the repository root:
 
