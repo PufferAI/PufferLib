@@ -215,8 +215,11 @@ static const RuneCUiWornButtonRef RUNEC_OSRS_WORN_BUTTONS[] = {
 
 #include "raylib.h"
 
+#define FC_OSRS_MENU_FONT_SIZE 16.0f
+
 int fc_osrs_text_init(void);
 void fc_osrs_text_shutdown(void);
+Font fc_osrs_menu_font(void);
 void fc_osrs_draw_text(const char* text, int x, int y, int font_size,
                        Color color);
 int fc_osrs_measure_text(const char* text, int font_size);
@@ -251,6 +254,27 @@ Vector2 fc_minimap_rotate_offset(float dx, float dy, float camera_yaw);
 int fc_minimap_click_to_tile(float map_x, float map_y, float player_x,
                              float player_y, float camera_yaw,
                              int* tile_x, int* tile_y);
+
+
+/* Context Menu */
+
+#include <stdint.h>
+
+/* RuneC's client-style geometry, shared by menu drawing and hit testing. */
+#define FC_MENU_HEADER_HEIGHT 24
+#define FC_MENU_ROW_HEIGHT 19
+#define FC_MENU_DISMISS_MARGIN 10
+
+typedef struct { int x, y, width, height; } FcMenuLayout;
+typedef struct { const char *name; int level; } FcNpcMenuInfo;
+
+FcNpcMenuInfo fc_menu_npc_info(int npc_type);
+uint32_t fc_menu_level_color(int player_level, int npc_level);
+
+FcMenuLayout fc_menu_layout(int x, int y, int screen_width, int screen_height,
+                             int text_width, int rows);
+int fc_menu_contains(FcMenuLayout menu, int x, int y, int margin);
+int fc_menu_action_at(FcMenuLayout menu, int rows, int x, int y);
 
 
 /* Ui */
@@ -299,6 +323,7 @@ typedef enum RuneCUiIntentKind {
     RUNEC_UI_INTENT_AUTO_RETALIATE,
     RUNEC_UI_INTENT_SPECIAL_ATTACK,
     RUNEC_UI_INTENT_CONTEXT_ACTION,
+    RUNEC_UI_INTENT_WORLD_ACTION,
     RUNEC_UI_INTENT_INVENTORY_ACTION,
     RUNEC_UI_INTENT_EQUIPMENT_ACTION,
     RUNEC_UI_INTENT_INVENTORY_DRAG,
@@ -323,6 +348,7 @@ typedef struct RuneCUiSlot {
     int quantity;
     char label[24];
     int enabled;
+    const char *action;           /* supplied by the inventory owner */
 } RuneCUiSlot;
 
 typedef enum RuneCUiMinimapDotKind {
@@ -356,7 +382,8 @@ typedef enum RuneCUiContextSourceKind {
     RUNEC_UI_CONTEXT_INVENTORY,
     RUNEC_UI_CONTEXT_EQUIPMENT,
     RUNEC_UI_CONTEXT_PRAYER,
-    RUNEC_UI_CONTEXT_SPELL
+    RUNEC_UI_CONTEXT_SPELL,
+    RUNEC_UI_CONTEXT_WORLD
 } RuneCUiContextSourceKind;
 
 typedef enum RuneCUiSelectedTargetKind {
@@ -387,8 +414,6 @@ typedef struct RuneCUiState {
 
     RuneCUiSlot inventory[RUNEC_UI_INV_SLOT_COUNT];
     RuneCUiSlot equipment[RUNEC_UI_EQUIP_SLOT_COUNT];
-    int selected_inventory_slot;
-    int selected_equipment_slot;
     int selected_combat_style;
     int auto_retaliate;
     int special_attack_enabled;
@@ -411,6 +436,8 @@ typedef struct RuneCUiState {
 
     int context_open;
     Vector2 context_pos;
+    Color context_target_color;
+    int context_combat_level;
     char context_title[48];
     char context_actions[RUNEC_UI_CONTEXT_ACTIONS][32];
     int context_action_count;
@@ -445,6 +472,10 @@ void runec_ui_set_combat_weapon_name(RuneCUiState *ui, const char *name);
 void runec_ui_set_combat_style_profile(RuneCUiState *ui, int core_weapon_category);
 void runec_ui_clear_selected_target(RuneCUiState *ui);
 int runec_ui_handle_input(RuneCUiState *ui, int screen_w, int screen_h);
+void runec_ui_open_world_context(RuneCUiState *ui, Vector2 pos, int npc_type, int can_walk);
+void runec_ui_open_prayer_context(RuneCUiState *ui, Vector2 pos, int slot);
+void runec_ui_close_context(RuneCUiState *ui);
+void runec_ui_draw_context(const RuneCUiState *ui);
 void runec_ui_draw(RuneCUiState *ui, int screen_w, int screen_h);
 Rectangle runec_ui_chat_panel_rect(int screen_w, int screen_h);
 const char *runec_ui_tab_name(RuneCUiTab tab);
@@ -1034,9 +1065,11 @@ void runec_ui_draw_text_shadow(const RuneCUiAssets *assets, const char *text,
 
 /* Osrs Text */
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #define FC_OSRS_FONT_ASSET "data/fonts/p11_full.png"
+#define FC_OSRS_MENU_FONT_ASSET "data/fonts/runescape_bold.ttf"
 #define FC_OSRS_FONT_CELL_SIZE 20
 #define FC_OSRS_FONT_COLUMNS 16
 #define FC_OSRS_FONT_GLYPHS 256
@@ -1050,6 +1083,7 @@ typedef struct {
 } FcOsrsGlyph;
 
 static Texture2D g_font_texture;
+static Font g_menu_font;
 static FcOsrsGlyph g_glyphs[FC_OSRS_FONT_GLYPHS];
 static int g_font_height;
 static int g_font_ready;
@@ -1133,6 +1167,9 @@ static void build_glyph_metrics(const Color* pixels, int image_width,
 }
 
 void fc_osrs_text_shutdown(void) {
+    if (g_menu_font.texture.id != 0)
+        UnloadFont(g_menu_font);
+    g_menu_font = (Font){0};
     if (g_font_texture.id != 0)
         UnloadTexture(g_font_texture);
     g_font_texture = (Texture2D){0};
@@ -1141,13 +1178,45 @@ void fc_osrs_text_shutdown(void) {
     g_font_ready = 0;
 }
 
+static int init_menu_font(void) {
+    g_menu_font = fc_load_font_asset(FC_OSRS_MENU_FONT_ASSET,
+                                    (int)FC_OSRS_MENU_FONT_SIZE);
+    if (g_menu_font.texture.id == 0) return 0;
+    /* RuneC ui_assets.c:runec_make_font_texture_crisp. Rasterize at the
+     * displayed size, then threshold alpha and use point sampling. */
+    Image image = LoadImageFromTexture(g_menu_font.texture);
+    if (!image.data) return 0;
+    ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    Color *pixels = image.data;
+    for (int i = 0; i < image.width * image.height; i++)
+        pixels[i].a = pixels[i].a >= 160 ? 255 : 0;
+    Texture2D texture = LoadTextureFromImage(image);
+    UnloadImage(image);
+    if (texture.id == 0) return 0;
+    UnloadTexture(g_menu_font.texture);
+    g_menu_font.texture = texture;
+    SetTextureFilter(g_menu_font.texture, TEXTURE_FILTER_POINT);
+    return 1;
+}
+
+Font fc_osrs_menu_font(void) {
+    return g_menu_font;
+}
+
 int fc_osrs_text_init(void) {
     fc_osrs_text_shutdown();
+    if (!init_menu_font()) {
+        fprintf(stderr, "error: failed to load required menu font %s\n",
+                FC_OSRS_MENU_FONT_ASSET);
+        fc_osrs_text_shutdown();
+        return 0;
+    }
 
     Image image = fc_load_image_asset(FC_OSRS_FONT_ASSET);
     if (!image.data || image.width != 320 || image.height != 320) {
         if (image.data)
             UnloadImage(image);
+        fc_osrs_text_shutdown();
         return 0;
     }
     ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
@@ -1257,6 +1326,7 @@ int fc_osrs_measure_text(const char* text, int font_size) {
 }
 
 #undef FC_OSRS_FONT_ASSET
+#undef FC_OSRS_MENU_FONT_ASSET
 #undef FC_OSRS_FONT_CELL_SIZE
 #undef FC_OSRS_FONT_COLUMNS
 #undef FC_OSRS_FONT_GLYPHS
@@ -1377,6 +1447,62 @@ int fc_minimap_click_to_tile(float map_x, float map_y, float player_x,
     *tile_x = x;
     *tile_y = y;
     return 1;
+}
+
+
+/* Context Menu */
+FcNpcMenuInfo fc_menu_npc_info(int npc_type) {
+    /* Fight Cave NPC display levels, not attack-skill levels or Inferno healers. */
+    static const FcNpcMenuInfo npcs[] = {
+        {"", 0}, {"Tz-Kih", 22}, {"Tz-Kek", 45}, {"Tz-Kek", 22},
+        {"Tok-Xil", 90}, {"Yt-MejKot", 180}, {"Ket-Zek", 360},
+        {"TzTok-Jad", 702}, {"Yt-HurKot", 108}
+    };
+    if (npc_type < 0 || npc_type >= (int)(sizeof(npcs) / sizeof(npcs[0]))) npc_type = 0;
+    return npcs[npc_type];
+}
+
+uint32_t fc_menu_level_color(int player_level, int npc_level) {
+    /* Client3 entry/client.c:getCombatLevelColorTag and defines.h RGB ramps. */
+    int difference = player_level - npc_level;
+    if (difference < -9) return 0xff0000;
+    if (difference < -6) return 0xff3000;
+    if (difference < -3) return 0xff7000;
+    if (difference < 0) return 0xffb000;
+    if (difference > 9) return 0x00ff00;
+    if (difference > 6) return 0x40ff00;
+    if (difference > 3) return 0x80ff00;
+    if (difference > 0) return 0xc0ff00;
+    return 0xffff00;
+}
+
+FcMenuLayout fc_menu_layout(int x, int y, int screen_width, int screen_height,
+                             int text_width, int rows) {
+    if (rows < 0) rows = 0;
+    FcMenuLayout menu = {0, 0, text_width + 12,
+                         FC_MENU_HEADER_HEIGHT + rows * FC_MENU_ROW_HEIGHT + 4};
+    if (menu.width < 1) menu.width = 1;
+    if (screen_width > 0 && menu.width > screen_width) menu.width = screen_width;
+    menu.x = x - menu.width / 2;
+    menu.y = y;
+    if (menu.x + menu.width > screen_width) menu.x = screen_width - menu.width;
+    if (menu.y + menu.height > screen_height) menu.y = screen_height - menu.height;
+    if (menu.x < 0) menu.x = 0;
+    if (menu.y < 0) menu.y = 0;
+    return menu;
+}
+
+int fc_menu_contains(FcMenuLayout menu, int x, int y, int margin) {
+    return x >= menu.x - margin && x < menu.x + menu.width + margin &&
+           y >= menu.y - margin && y < menu.y + menu.height + margin;
+}
+
+int fc_menu_action_at(FcMenuLayout menu, int rows, int x, int y) {
+    if (!fc_menu_contains(menu, x, y, 0)) return -1;
+    int offset = y - menu.y - FC_MENU_HEADER_HEIGHT;
+    if (offset < 0) return -1;
+    int row = offset / FC_MENU_ROW_HEIGHT;
+    return row < rows ? row : -1;
 }
 
 
@@ -1529,8 +1655,8 @@ static const char *spell_name(int slot) {
 }
 
 static const char *g_equipment_names[RUNEC_UI_EQUIP_SLOT_COUNT] = {
-    "Head", "Cape", "Neck", "Weapon", "Body", "Shield", "Ammo",
-    "Legs", "Unused", "Hands", "Feet", "Unused", "Ring", "Quiver",
+    "Head", "Cape", "Neck", "Weapon", "Body", "Shield", "Unused",
+    "Legs", "Unused", "Hands", "Feet", "Unused", "Ring", "Ammo",
 };
 
 static const Rectangle g_equipment_offsets[RUNEC_UI_EQUIP_SLOT_COUNT] = {
@@ -1540,14 +1666,14 @@ static const Rectangle g_equipment_offsets[RUNEC_UI_EQUIP_SLOT_COUNT] = {
     {21, 82, 36, 36},
     {77, 82, 36, 36},
     {133, 82, 36, 36},
-    {133, 43, 36, 36},
+    {-1000, -1000, 0, 0},
     {77, 122, 36, 36},
     {-1000, -1000, 0, 0},
     {21, 162, 36, 36},
     {77, 162, 36, 36},
     {-1000, -1000, 0, 0},
     {133, 162, 36, 36},
-    {118, 43, 36, 36},
+    {133, 43, 36, 36},
 };
 
 static const char *g_worn_icon_names[RUNEC_UI_EQUIP_SLOT_COUNT] = {
@@ -1982,12 +2108,16 @@ static void set_context(RuneCUiState *ui, Vector2 pos, const char *title,
                         const char **actions, int action_count) {
     ui->context_open = 1;
     ui->context_pos = pos;
+    ui->context_target_color = OSRS_ORANGE;
+    ui->context_combat_level = 0;
+    ui->drag.active = 0;
     copy_text(ui->context_title, sizeof(ui->context_title), title);
     ui->context_source_kind = RUNEC_UI_CONTEXT_NONE;
     ui->context_source_slot = -1;
     ui->context_source_item_id = 0;
     if (action_count > RUNEC_UI_CONTEXT_ACTIONS)
         action_count = RUNEC_UI_CONTEXT_ACTIONS;
+    if (action_count < 0) action_count = 0;
     ui->context_action_count = action_count;
     for (int i = 0; i < action_count; i++) {
         copy_text(ui->context_actions[i], sizeof(ui->context_actions[i]), actions[i]);
@@ -2001,6 +2131,64 @@ static void set_context_source(RuneCUiState *ui,
     ui->context_source_kind = source_kind;
     ui->context_source_slot = source_slot;
     ui->context_source_item_id = source_item_id;
+}
+
+void runec_ui_close_context(RuneCUiState *ui) {
+    ui->context_open = 0;
+    ui->context_source_kind = RUNEC_UI_CONTEXT_NONE;
+    ui->context_source_slot = -1;
+    ui->context_source_item_id = 0;
+}
+
+void runec_ui_open_world_context(RuneCUiState *ui, Vector2 pos, int npc_type, int can_walk) {
+    FcNpcMenuInfo npc = fc_menu_npc_info(npc_type);
+    const char *actions[4];
+    int count = 0;
+    if (npc.level) actions[count++] = "Attack";
+    if (can_walk) actions[count++] = "Walk here";
+    if (npc.level) actions[count++] = "Examine";
+    actions[count++] = "Cancel";
+    set_context(ui, pos, npc.name, actions, count);
+    ui->context_combat_level = npc.level;
+    ui->context_source_kind = RUNEC_UI_CONTEXT_WORLD;
+    ui->context_target_color = OSRS_YELLOW;
+    runec_ui_clear_selected_target(ui);
+}
+
+void runec_ui_open_prayer_context(RuneCUiState *ui, Vector2 pos, int slot) {
+    if (slot < 0 || slot >= 25) return;
+    const char *actions[] = {ui->active_prayers & (1u << slot) ? "Deactivate" : "Activate", "Cancel"};
+    set_context(ui, pos, g_prayer_names[slot], actions, 2);
+    set_context_source(ui, RUNEC_UI_CONTEXT_PRAYER, slot, 0);
+}
+
+static int context_has_target(const RuneCUiState *ui, const char *action) {
+    return ui->context_title[0] && strcmp(action, "Cancel") && strcmp(action, "Walk here");
+}
+
+static void context_level_suffix(const RuneCUiState *ui, char suffix[32]) {
+    suffix[0] = '\0';
+    if (ui->context_combat_level > 0)
+        snprintf(suffix, 32, " (level-%d)", ui->context_combat_level);
+}
+
+static FcMenuLayout context_layout(const RuneCUiState *ui) {
+    Font font = fc_osrs_menu_font();
+    float width = MeasureTextEx(font, "Choose Option", FC_OSRS_MENU_FONT_SIZE, 0).x;
+    char suffix[32];
+    context_level_suffix(ui, suffix);
+    for (int i = 0; i < ui->context_action_count; i++) {
+        char text[128];
+        const char *action = ui->context_actions[i];
+        snprintf(text, sizeof(text), "%s%s%s%s", action,
+                 context_has_target(ui, action) ? " " : "",
+                 context_has_target(ui, action) ? ui->context_title : "",
+                 context_has_target(ui, action) ? suffix : "");
+        float row_width = MeasureTextEx(font, text, FC_OSRS_MENU_FONT_SIZE, 0).x;
+        if (row_width > width) width = row_width;
+    }
+    return fc_menu_layout((int)ui->context_pos.x, (int)ui->context_pos.y,
+        GetScreenWidth(), GetScreenHeight(), (int)ceilf(width), ui->context_action_count);
 }
 
 void runec_ui_clear_selected_target(RuneCUiState *ui) {
@@ -2036,8 +2224,6 @@ static void set_selected_spell_target(RuneCUiState *ui, int slot,
 void runec_ui_init(RuneCUiState *ui) {
     memset(ui, 0, sizeof(*ui));
     ui->active_tab = RUNEC_UI_TAB_SKILLS;
-    ui->selected_inventory_slot = -1;
-    ui->selected_equipment_slot = -1;
     ui->context_source_slot = -1;
     ui->selected_target.source_slot = -1;
     ui->drag.source_slot = -1;
@@ -2085,28 +2271,6 @@ void runec_ui_init(RuneCUiState *ui) {
         ui->minimap_texture_ready = 1;
     }
 
-    ui->inventory[0] = (RuneCUiSlot){6570, 6570, 1, "Fire cape", 1};
-    ui->inventory[1] = (RuneCUiSlot){21295, 21295, 1, "Infernal cape", 1};
-    ui->inventory[2] = (RuneCUiSlot){1042, 1042, 1, "Blue partyhat", 1};
-    ui->inventory[3] = (RuneCUiSlot){1044, 1044, 1, "Green partyhat", 1};
-    ui->inventory[4] = (RuneCUiSlot){1046, 1046, 1, "Purple partyhat", 1};
-    ui->inventory[5] = (RuneCUiSlot){1048, 1048, 1, "White partyhat", 1};
-    ui->inventory[6] = (RuneCUiSlot){4151, 4151, 1, "Abyssal whip", 1};
-    ui->inventory[7] = (RuneCUiSlot){11802, 11802, 1, "Armadyl godsword", 1};
-    ui->inventory[8] = (RuneCUiSlot){11832, 11832, 1, "Bandos chestplate", 1};
-    ui->inventory[9] = (RuneCUiSlot){11834, 11834, 1, "Bandos tassets", 1};
-    ui->inventory[10] = (RuneCUiSlot){26382, 26382, 1, "Torva full helm", 1};
-    ui->inventory[11] = (RuneCUiSlot){26384, 26384, 1, "Torva platebody", 1};
-    ui->inventory[12] = (RuneCUiSlot){26386, 26386, 1, "Torva platelegs", 1};
-    ui->inventory[13] = (RuneCUiSlot){10350, 10350, 1, "3a full helmet", 1};
-    ui->inventory[14] = (RuneCUiSlot){10348, 10348, 1, "3a platebody", 1};
-    ui->inventory[15] = (RuneCUiSlot){10346, 10346, 1, "3a platelegs", 1};
-    ui->inventory[16] = (RuneCUiSlot){10352, 10352, 1, "3a kiteshield", 1};
-    ui->inventory[17] = (RuneCUiSlot){995, 1004, 10000000, "Coins", 1};
-    ui->equipment[0] = (RuneCUiSlot){11826, 11826, 1, "Helm", 1};
-    ui->equipment[3] = (RuneCUiSlot){4151, 4151, 1, "Abyssal whip", 1};
-    ui->equipment[4] = (RuneCUiSlot){11828, 11828, 1, "Body", 1};
-    ui->equipment[7] = (RuneCUiSlot){11830, 11830, 1, "Legs", 1};
 
 }
 
@@ -2171,21 +2335,32 @@ static int handle_context_click(RuneCUiState *ui, Vector2 mouse) {
     if (!ui->context_open)
         return 0;
 
-    Rectangle box = {ui->context_pos.x, ui->context_pos.y,
-                     158.0f, 24.0f + ui->context_action_count * 20.0f};
-    if (!CheckCollisionPointRec(mouse, box)) {
-        ui->context_open = 0;
-        ui->context_source_kind = RUNEC_UI_CONTEXT_NONE;
-        ui->context_source_slot = -1;
-        ui->context_source_item_id = 0;
-        return 0;
+    FcMenuLayout menu = context_layout(ui);
+    if (!fc_menu_contains(menu, (int)mouse.x, (int)mouse.y, 0)) {
+        runec_ui_close_context(ui);
+        return 1; /* Dismissal must not click through into the scene/UI. */
     }
 
     for (int i = 0; i < ui->context_action_count; i++) {
-        Rectangle item = {box.x + 4, box.y + 22 + i * 20.0f, box.width - 8, 18};
-        if (CheckCollisionPointRec(mouse, item)) {
+        if (fc_menu_action_at(menu, ui->context_action_count, (int)mouse.x, (int)mouse.y) == i) {
             const char *action = ui->context_actions[i];
-            if (ui->context_source_kind == RUNEC_UI_CONTEXT_INVENTORY) {
+            if (strcmp(action, "Cancel") == 0) {
+                runec_ui_close_context(ui);
+                return 1;
+            }
+            /* Do not act on a different item if the original slot changed
+             * while its menu was open (consumption, ammo depletion, etc.). */
+            if ((ui->context_source_kind == RUNEC_UI_CONTEXT_INVENTORY &&
+                 ui->inventory[ui->context_source_slot].item_id != ui->context_source_item_id) ||
+                (ui->context_source_kind == RUNEC_UI_CONTEXT_EQUIPMENT &&
+                 ui->equipment[ui->context_source_slot].item_id != ui->context_source_item_id)) {
+                runec_ui_close_context(ui);
+                return 1;
+            }
+            if (ui->context_source_kind == RUNEC_UI_CONTEXT_WORLD) {
+                ui->last_intent.kind = RUNEC_UI_INTENT_WORLD_ACTION;
+                ui->last_intent.primary = i;
+            } else if (ui->context_source_kind == RUNEC_UI_CONTEXT_INVENTORY) {
                 if (strcmp(action, "Use") == 0) {
                     set_selected_item_target(ui, ui->context_source_slot);
                     ui->last_intent.kind = RUNEC_UI_INTENT_SELECTED_ITEM;
@@ -2201,9 +2376,10 @@ static int handle_context_click(RuneCUiState *ui, Vector2 mouse) {
                 ui->last_intent.primary = ui->context_source_slot;
                 ui->last_intent.secondary = i;
             } else if (ui->context_source_kind == RUNEC_UI_CONTEXT_PRAYER) {
-                if (strcmp(action, "Activate") == 0) {
+                if (strcmp(action, "Activate") == 0 || strcmp(action, "Deactivate") == 0) {
                     ui->last_intent.kind = RUNEC_UI_INTENT_PRAYER_SLOT;
                     ui->last_intent.primary = ui->context_source_slot;
+                    ui->last_intent.secondary = strcmp(action, "Deactivate") == 0 ? -1 : 1;
                     copy_text(ui->last_intent.text,
                               sizeof(ui->last_intent.text),
                               ui->context_title);
@@ -2242,10 +2418,7 @@ static int handle_context_click(RuneCUiState *ui, Vector2 mouse) {
             if (!ui->last_intent.text[0])
                 copy_text(ui->last_intent.text, sizeof(ui->last_intent.text),
                           action);
-            ui->context_open = 0;
-            ui->context_source_kind = RUNEC_UI_CONTEXT_NONE;
-            ui->context_source_slot = -1;
-            ui->context_source_item_id = 0;
+            runec_ui_close_context(ui);
             return 1;
         }
     }
@@ -2420,17 +2593,13 @@ static int handle_drag_release(RuneCUiState *ui,
             ui->last_intent.position = mouse;
             return 1;
         }
-        int previous = ui->selected_inventory_slot;
-        ui->selected_inventory_slot = drag.source_slot;
         ui->last_intent.kind = RUNEC_UI_INTENT_INVENTORY_SLOT;
         ui->last_intent.primary = drag.source_slot;
-        ui->last_intent.secondary = previous;
         ui->last_intent.position = mouse;
         return 1;
     }
 
     if (drag.source_kind == RUNEC_UI_CONTEXT_EQUIPMENT) {
-        ui->selected_equipment_slot = drag.source_slot;
         ui->last_intent.kind = RUNEC_UI_INTENT_EQUIPMENT_SLOT;
         ui->last_intent.primary = drag.source_slot;
         ui->last_intent.position = mouse;
@@ -2651,7 +2820,7 @@ static int handle_primary_click(RuneCUiState *ui,
                                 Vector2 mouse) {
     if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
         return 0;
-    if (handle_context_click(ui, mouse) || handle_tab_click(ui, layout, mouse) ||
+    if (handle_tab_click(ui, layout, mouse) ||
         handle_orb_or_minimap_click(ui, layout, mouse) ||
         handle_active_tab_click(ui, layout, mouse))
         return 1;
@@ -2661,7 +2830,7 @@ static int handle_primary_click(RuneCUiState *ui,
 static int handle_context_menu_open(RuneCUiState *ui,
                                     const RuneCUiLayout *layout,
                                     Vector2 mouse) {
-    if (!IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) ||
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) ||
         !mouse_over_ui(layout, mouse))
         return 0;
     runec_ui_clear_selected_target(ui);
@@ -2690,7 +2859,8 @@ static int handle_context_menu_open(RuneCUiState *ui,
     if (ui->active_tab == RUNEC_UI_TAB_INVENTORY) {
         int slot = ui_inventory_slot_at(layout, mouse);
         if (slot >= 0) {
-            static const char *actions[] = {"Use", "Examine", "Drop"};
+            const char *actions[] = {ui->inventory[slot].action ?
+                ui->inventory[slot].action : "Use", "Examine", "Cancel"};
             static const char *empty_actions[] = {"Cancel"};
             const char *title = ui->inventory[slot].enabled
                 ? ui->inventory[slot].label : "Empty inventory slot";
@@ -2707,10 +2877,15 @@ static int handle_context_menu_open(RuneCUiState *ui,
     if (ui->active_tab == RUNEC_UI_TAB_EQUIPMENT) {
         int slot = ui_equipment_slot_at(layout, mouse);
         if (slot >= 0) {
-            static const char *actions[] = {"Remove", "Examine"};
-            set_context(ui, mouse, g_equipment_names[slot], actions, 2);
-            set_context_source(ui, RUNEC_UI_CONTEXT_EQUIPMENT, slot,
-                               ui->equipment[slot].item_id);
+            static const char *actions[] = {"Remove", "Examine", "Cancel"};
+            static const char *empty_actions[] = {"Cancel"};
+            if (ui->equipment[slot].enabled) {
+                set_context(ui, mouse, ui->equipment[slot].label, actions, 3);
+                set_context_source(ui, RUNEC_UI_CONTEXT_EQUIPMENT, slot,
+                                   ui->equipment[slot].item_id);
+            } else {
+                set_context(ui, mouse, "", empty_actions, 1);
+            }
             return 1;
         }
     }
@@ -2750,6 +2925,18 @@ int runec_ui_handle_input(RuneCUiState *ui, int screen_w, int screen_h) {
     Vector2 mouse = GetMousePosition();
     clear_intent(ui);
     update_tab_press_timers(ui, GetFrameTime());
+
+    if (ui->context_open) {
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            runec_ui_close_context(ui);
+        } else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            handle_context_click(ui, mouse);
+        } else if (!fc_menu_contains(context_layout(ui), (int)mouse.x, (int)mouse.y,
+                                      FC_MENU_DISMISS_MARGIN)) {
+            runec_ui_close_context(ui);
+        }
+        return 1;
+    }
 
     if (handle_selected_target_cancel(ui) ||
         handle_drag_release(ui, &layout, mouse) ||
@@ -3194,9 +3381,6 @@ static void draw_inventory_item(const RuneCUiState *ui, const RuneCUiSlot *slot,
 static void draw_inventory(const RuneCUiState *ui, const RuneCUiLayout *layout) {
     for (int i = 0; i < RUNEC_UI_INV_SLOT_COUNT; i++) {
         Rectangle r = inv_slot_rect(layout, i);
-        if (ui->selected_inventory_slot == i)
-            DrawRectangleLinesEx((Rectangle){r.x - 1, r.y - 1, r.width + 2, r.height + 2},
-                                 2.0f, OSRS_YELLOW);
         if (ui->inventory[i].enabled) {
             draw_inventory_item(ui, &ui->inventory[i], r);
             if (ui->inventory[i].quantity > 1) {
@@ -3235,10 +3419,6 @@ static void draw_equipment(const RuneCUiState *ui, const RuneCUiLayout *layout) 
             }
         } else if (g_worn_icon_names[i]) {
             draw_asset_centered(ui, g_worn_icon_names[i], r, 28, 28, (Color){190, 178, 150, 175});
-        }
-        if (ui->selected_equipment_slot == i) {
-            DrawRectangleLinesEx((Rectangle){r.x - 1, r.y - 1, r.width + 2, r.height + 2},
-                                 2.0f, OSRS_YELLOW);
         }
     }
 
@@ -3459,19 +3639,46 @@ static void draw_side(RuneCUiState *ui, const RuneCUiLayout *layout) {
     }
 }
 
-static void draw_context(const RuneCUiState *ui) {
+void runec_ui_draw_context(const RuneCUiState *ui) {
     if (!ui->context_open)
         return;
-    Rectangle box = {ui->context_pos.x, ui->context_pos.y,
-                     158.0f, 24.0f + ui->context_action_count * 20.0f};
-    DrawRectangleRec(box, (Color){53, 44, 31, 244});
-    DrawRectangleLinesEx(box, 1, (Color){170, 137, 72, 255});
-    draw_text_shadow(ui, ui->context_title, box.x + 5, box.y + 4, 11, OSRS_YELLOW);
+    FcMenuLayout menu = context_layout(ui);
+    Color brown = {93, 84, 71, 255};
+    DrawRectangle(menu.x, menu.y, menu.width, menu.height, brown);
+    DrawRectangle(menu.x + 1, menu.y + 1, menu.width - 2, FC_MENU_HEADER_HEIGHT - 3, BLACK);
+    DrawRectangleLinesEx((Rectangle){menu.x + 1, menu.y + FC_MENU_HEADER_HEIGHT - 1,
+                         menu.width - 2, menu.height - FC_MENU_HEADER_HEIGHT}, 1, BLACK);
+    Font font = fc_osrs_menu_font();
+    DrawTextEx(font, "Choose Option", (Vector2){menu.x + 4, menu.y + 2},
+               FC_OSRS_MENU_FONT_SIZE, 0, brown);
+    Vector2 mouse = GetMousePosition();
+    int hovered = fc_menu_action_at(menu, ui->context_action_count, (int)mouse.x, (int)mouse.y);
+    BeginScissorMode(menu.x, menu.y, menu.width, menu.height);
     for (int i = 0; i < ui->context_action_count; i++) {
-        Rectangle item = {box.x + 4, box.y + 22 + i * 20.0f, box.width - 8, 18};
-        DrawRectangleRec(item, (Color){28, 23, 17, 215});
-        draw_text_shadow(ui, ui->context_actions[i], item.x + 4, item.y + 3, 11, OSRS_ORANGE);
+        float x = menu.x + 4;
+        float y = menu.y + FC_MENU_HEADER_HEIGHT + i * FC_MENU_ROW_HEIGHT + 1;
+        const char *action = ui->context_actions[i];
+        DrawTextEx(font, action, (Vector2){x + 1, y + 1}, FC_OSRS_MENU_FONT_SIZE, 0, BLACK);
+        DrawTextEx(font, action, (Vector2){x, y}, FC_OSRS_MENU_FONT_SIZE, 0,
+                   hovered == i ? OSRS_YELLOW : WHITE);
+        if (context_has_target(ui, action)) {
+            char target[52];
+            snprintf(target, sizeof(target), " %s", ui->context_title);
+            x += MeasureTextEx(font, action, FC_OSRS_MENU_FONT_SIZE, 0).x;
+            DrawTextEx(font, target, (Vector2){x + 1, y + 1}, FC_OSRS_MENU_FONT_SIZE, 0, BLACK);
+            DrawTextEx(font, target, (Vector2){x, y}, FC_OSRS_MENU_FONT_SIZE, 0, ui->context_target_color);
+            if (ui->context_combat_level > 0) {
+                char suffix[32];
+                context_level_suffix(ui, suffix);
+                x += MeasureTextEx(font, target, FC_OSRS_MENU_FONT_SIZE, 0).x;
+                Color color = GetColor((fc_menu_level_color(ui->combat_level,
+                    ui->context_combat_level) << 8) | 0xffu);
+                DrawTextEx(font, suffix, (Vector2){x + 1, y + 1}, FC_OSRS_MENU_FONT_SIZE, 0, BLACK);
+                DrawTextEx(font, suffix, (Vector2){x, y}, FC_OSRS_MENU_FONT_SIZE, 0, color);
+            }
+        }
     }
+    EndScissorMode();
 }
 
 static void draw_selected_target(const RuneCUiState *ui) {
@@ -3509,7 +3716,6 @@ void runec_ui_draw(RuneCUiState *ui, int screen_w, int screen_h) {
     draw_minimap(ui, &layout);
     draw_side(ui, &layout);
     draw_selected_target(ui);
-    draw_context(ui);
 }
 
 Rectangle runec_ui_chat_panel_rect(int screen_w, int screen_h) {

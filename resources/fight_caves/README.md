@@ -6,6 +6,8 @@ Fight Caves uses two independently versioned asset bundles:
   training, evaluation, and the viewer.
 - `viewer` contains the models, animations, terrain, textures, sprites, fonts,
   and minimap used only by the graphical viewer.
+  Version 3 includes composable player equipment/body parts, their visibility
+  map, the corrected Venator ring icon and the bold RuneC context-menu font.
 
 The archives are pinned in `asset_manifest.json` by URL, byte size, and SHA-256.
 Every installed file is also checked by byte size and SHA-256 before it is

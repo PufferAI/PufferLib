@@ -12,6 +12,7 @@
  *   O or D*     — toggle debug overlay       G        — grid  C — collision
  *   4/5         — camera presets             L        — toggle camera lock
  *   Scroll      — zoom                       Right-drag — orbit camera
+ *   Right click — context menu (dragging dismisses it and orbits)
  *
  *   * D only toggles the overlay when not being used for east movement.
  *   Policy replay mode (`--policy-pipe`) also adds 1/2/4/0 playback presets.
@@ -22,8 +23,8 @@
 #include "rlgl.h"
 #include "simulation.h"
 #include "assets.h"
-#include "render.h"
 #include "ui.h"
+#include "render.h"
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -118,7 +119,9 @@ typedef struct {
     ObjectAnimRuntime* object_anim_runtimes;
     int object_anim_runtime_count;
     NpcModelSet* npc_models;
-    NpcModelSet* player_model;
+    FcPlayerAppearance appearance;
+    char item_message[96];
+    float item_message_seconds;
     /* Animation cache (shared by player + all NPCs) */
     AnimCache* anim_cache;
     /* Buffered key inputs (captured every frame, consumed on tick) */
@@ -126,6 +129,10 @@ typedef struct {
     int pending_attack_npc;
     int pending_tile_x, pending_tile_y;
     FcClickFeedback click_feedback;
+    int context_npc_slot, context_npc_spawn_index;
+    int context_tile_x, context_tile_y;
+    Vector2 scene_right_start;
+    int scene_right_tracking, scene_right_dragged;
     int console_tab;              /* controls, player, obs, mask, reward, log */
     int console_wave_dropdown_open;
     int console_scroll[4];        /* player/obs/mask/reward vertical offsets */
@@ -185,26 +192,6 @@ static void set_ui_slot(RuneCUiSlot* slot, uint32_t item_id,
     slot->quantity = quantity;
     snprintf(slot->label, sizeof(slot->label), "%s", label ? label : "Item");
     slot->enabled = 1;
-}
-
-static uint32_t prayer_potion_item_id_for_doses(int doses) {
-    switch (doses) {
-        case 4: return FC_UI_ITEM_PRAYER_POT_4;
-        case 3: return FC_UI_ITEM_PRAYER_POT_3;
-        case 2: return FC_UI_ITEM_PRAYER_POT_2;
-        case 1: return FC_UI_ITEM_PRAYER_POT_1;
-        default: return FC_UI_ITEM_VIAL;
-    }
-}
-
-static const char* prayer_potion_label_for_doses(int doses) {
-    switch (doses) {
-        case 4: return "Prayer potion(4)";
-        case 3: return "Prayer potion(3)";
-        case 2: return "Prayer potion(2)";
-        case 1: return "Prayer potion(1)";
-        default: return "Vial";
-    }
 }
 
 static uint32_t fc_ui_active_prayer_bits(int prayer) {
@@ -277,48 +264,22 @@ static int load_fc_ui_item_icons(ViewerState* v) {
     return ready;
 }
 
+static void sync_item_slots(RuneCUiSlot *slots, const FcItemStack *items, int count) {
+    for (int i = 0; i < count; i++) {
+        memset(&slots[i], 0, sizeof(slots[i]));
+        const FcItemDef *item = fc_item_definition(items[i].item_id);
+        if (!item) continue;
+        set_ui_slot(&slots[i], (uint32_t)item->id, (uint32_t)item->id,
+                    items[i].quantity, item->name);
+        slots[i].action = item->slot == FC_EQUIP_SLOT_WEAPON ? "Wield" :
+            item->slot >= 0 ? "Wear" : item->id == 385 ? "Eat" :
+            item->id == 229 ? "Use" : "Drink";
+    }
+}
+
 static void sync_fc_ui_items(ViewerState* v) {
-    if (!v) return;
-    FcPlayer* p = &v->state.player;
-    for (int i = 0; i < RUNEC_UI_INV_SLOT_COUNT; i++)
-        memset(&v->ui.inventory[i], 0, sizeof(v->ui.inventory[i]));
-
-    int doses = p->prayer_doses_remaining;
-    if (doses < 0) doses = 0;
-    if (doses > FC_MAX_PRAYER_DOSES) doses = FC_MAX_PRAYER_DOSES;
-    int full_pots = doses / 4;
-    int partial = doses % 4;
-    for (int slot = 0; slot < 8; slot++) {
-        int slot_doses = 0;
-        if (slot < full_pots) slot_doses = 4;
-        else if (slot == full_pots && partial > 0) slot_doses = partial;
-        uint32_t item_id = prayer_potion_item_id_for_doses(slot_doses);
-        set_ui_slot(&v->ui.inventory[slot], item_id, item_id, 1,
-                    prayer_potion_label_for_doses(slot_doses));
-    }
-    for (int slot = 8; slot < RUNEC_UI_INV_SLOT_COUNT; slot++) {
-        if (slot - 8 < p->sharks_remaining) {
-            set_ui_slot(&v->ui.inventory[slot], FC_UI_ITEM_SHARK,
-                        FC_UI_ITEM_SHARK, 1, "Shark");
-        }
-    }
-
-    for (int i = 0; i < RUNEC_UI_EQUIP_SLOT_COUNT; i++)
-        memset(&v->ui.equipment[i], 0, sizeof(v->ui.equipment[i]));
-
-    int loadout = v->active_loadout;
-    if (loadout < 0 || loadout >= FC_NUM_LOADOUTS)
-        loadout = FC_ACTIVE_LOADOUT;
-    const FcLoadout* lo = &FC_LOADOUTS[loadout];
-    for (int i = 0; i < lo->equipment_count; i++) {
-        const FcLoadoutEquipmentItem* equip = &lo->equipment[i];
-        if (equip->slot >= 0 && equip->slot < RUNEC_UI_EQUIP_SLOT_COUNT) {
-            uint32_t icon_id = equip->icon_item_id ? equip->icon_item_id : equip->item_id;
-            int quantity = equip->slot == FC_EQUIP_SLOT_AMMO ? p->ammo_count : 1;
-            set_ui_slot(&v->ui.equipment[equip->slot], equip->item_id,
-                        icon_id, quantity, equip->label);
-        }
-    }
+    sync_item_slots(v->ui.inventory, v->state.player.inventory, FC_INVENTORY_SLOTS);
+    sync_item_slots(v->ui.equipment, v->state.player.equipment, FC_EQUIPMENT_SLOTS);
 }
 
 static void sync_fc_ui_status(ViewerState* v) {
@@ -334,16 +295,14 @@ static void sync_fc_ui_status(ViewerState* v) {
     if (v->ui.run_energy < 0) v->ui.run_energy = 0;
     if (v->ui.run_energy > 100) v->ui.run_energy = 100;
     v->ui.run_enabled = p->is_running != 0;
-    v->ui.selected_combat_style = v->combat_style == 2 ? 3 : v->combat_style;
     v->ui.auto_retaliate = 1;
     v->ui.special_attack_energy = 100;
     v->ui.combat_level = 126;
-    int loadout = v->active_loadout;
-    if (loadout < 0 || loadout >= FC_NUM_LOADOUTS)
-        loadout = FC_ACTIVE_LOADOUT;
-    const FcLoadout* lo = &FC_LOADOUTS[loadout];
-    runec_ui_set_combat_weapon_name(&v->ui, lo->weapon_name);
-    runec_ui_set_combat_style_profile(&v->ui, lo->combat_style_profile);
+    const FcItemDef *weapon = fc_item_definition(p->equipment[FC_EQUIP_SLOT_WEAPON].item_id);
+    v->ui.selected_combat_style = weapon ? (v->combat_style == 2 ? 3 : v->combat_style) : 0;
+    runec_ui_set_combat_weapon_name(&v->ui, weapon ? weapon->name : "Unarmed");
+    runec_ui_set_combat_style_profile(&v->ui,
+        weapon ? FC_LOADOUTS[weapon->visual_profile].combat_style_profile : 0);
 
     for (int i = 0; i < RUNEC_UI_SKILL_COUNT; i++) {
         v->ui.skill_current[i] = 1;
@@ -440,31 +399,86 @@ static void queue_player_attack_request(ViewerState* v, int npc_idx,
                                          screen_x, screen_y);
 }
 
+static void show_item_result(ViewerState *v, FcItemResult result) {
+    snprintf(v->item_message, sizeof(v->item_message), "%s", fc_item_result_message(result));
+    v->item_message_seconds = result == FC_ITEM_OK ? 0.0f : 4.0f;
+}
+
+static void use_inventory_slot(ViewerState *v, int slot) {
+    if (v->policy_pipe || slot < 0 || slot >= FC_INVENTORY_SLOTS) return;
+    const FcItemDef *item = fc_item_definition(v->state.player.inventory[slot].item_id);
+    if (!item) return;
+    FcItemResult result;
+    if (item->slot >= 0) {
+        result = fc_equip_item(&v->state, slot);
+        if (result == FC_ITEM_OK) v->pending_attack_npc = v->attack_target = -1;
+    } else {
+        result = fc_select_consumable(&v->state, slot);
+        if (result == FC_ITEM_OK) {
+            if (item->id == 385) v->pending_eat = FC_EAT_SHARK;
+            else v->pending_drink = FC_DRINK_PRAYER_POT;
+        }
+    }
+    show_item_result(v, result);
+}
+
 static void handle_runec_ui_intent(ViewerState* v) {
     if (!v) return;
     RuneCUiIntent* intent = &v->ui.last_intent;
     FcPlayer* p = &v->state.player;
     switch (intent->kind) {
-        case RUNEC_UI_INTENT_INVENTORY_SLOT:
-            if (intent->primary >= 0 && intent->primary < 8) {
-                int full_pots = p->prayer_doses_remaining / 4;
-                int partial = p->prayer_doses_remaining % 4;
-                if (intent->primary < full_pots ||
-                        (intent->primary == full_pots && partial > 0))
-                    v->pending_drink = FC_DRINK_PRAYER_POT;
-            } else if (intent->primary >= 8 && intent->primary < 28) {
-                if (intent->primary - 8 < p->sharks_remaining)
-                    v->pending_eat = FC_EAT_SHARK;
+        case RUNEC_UI_INTENT_WORLD_ACTION: {
+            int slot = v->context_npc_slot;
+            const FcNpc *npc = slot >= 0 && slot < FC_MAX_NPCS ? &v->state.npcs[slot] : NULL;
+            int same_npc = npc && npc->active && !npc->is_dead &&
+                npc->spawn_index == v->context_npc_spawn_index;
+            if (strcmp(intent->text, "Examine") == 0 && same_npc) {
+                snprintf(v->item_message, sizeof(v->item_message), "%s", fc_menu_npc_info(npc->npc_type).name);
+                v->item_message_seconds = 4.0f;
+            } else if (!v->policy_pipe && v->state.terminal == TERMINAL_NONE) {
+                if (strcmp(intent->text, "Attack") == 0 && same_npc)
+                    queue_player_attack_request(v, slot, intent->position.x, intent->position.y);
+                else if (strcmp(intent->text, "Walk here") == 0)
+                    queue_player_tile_request(v, v->context_tile_x, v->context_tile_y,
+                                               intent->position.x, intent->position.y);
             }
             break;
+        }
+        case RUNEC_UI_INTENT_INVENTORY_SLOT:
+            use_inventory_slot(v, intent->primary);
+            break;
         case RUNEC_UI_INTENT_INVENTORY_ACTION:
-            if (strcmp(intent->text, "Use") == 0 || strcmp(intent->text, "Drink") == 0)
-                v->pending_drink = FC_DRINK_PRAYER_POT;
-            else if (strcmp(intent->text, "Eat") == 0)
-                v->pending_eat = FC_EAT_SHARK;
+            if (strcmp(intent->text, "Examine") == 0) {
+                snprintf(v->item_message, sizeof(v->item_message), "%s",
+                         v->ui.inventory[intent->primary].label);
+                v->item_message_seconds = 4.0f;
+            }
+            if (strcmp(intent->text, "Wear") == 0 || strcmp(intent->text, "Wield") == 0 ||
+                strcmp(intent->text, "Eat") == 0 || strcmp(intent->text, "Drink") == 0)
+                use_inventory_slot(v, intent->primary);
+            break;
+        case RUNEC_UI_INTENT_EQUIPMENT_ACTION:
+            if (strcmp(intent->text, "Examine") == 0) {
+                snprintf(v->item_message, sizeof(v->item_message), "%s",
+                         v->ui.equipment[intent->primary].label);
+                v->item_message_seconds = 4.0f;
+            }
+            if (strcmp(intent->text, "Remove") != 0) break;
+            /* fall through */
+        case RUNEC_UI_INTENT_EQUIPMENT_SLOT:
+            if (!v->policy_pipe)
+                show_item_result(v, fc_unequip_item(&v->state, intent->primary));
+            break;
+        case RUNEC_UI_INTENT_INVENTORY_DRAG:
+            if (!v->policy_pipe)
+                show_item_result(v, fc_inventory_swap(&v->state, intent->primary, intent->secondary));
             break;
         case RUNEC_UI_INTENT_PRAYER_SLOT: {
             int action = fc_ui_prayer_action_for_slot(p, intent->primary);
+            /* A context-menu verb is explicit, not a toggle of whatever
+             * prayer happens to be active when the option is selected. */
+            if (intent->secondary == 1 && action == FC_PRAYER_OFF) action = 0;
+            if (intent->secondary == -1 && action != FC_PRAYER_OFF) action = 0;
             if (action) v->pending_prayer = action;
             break;
         }
@@ -595,8 +609,7 @@ static void apply_initial_supplies(ViewerState* v) {
     if (v->initial_prayer_doses < 0) v->initial_prayer_doses = 0;
     if (v->initial_prayer_doses > FC_MAX_PRAYER_DOSES)
         v->initial_prayer_doses = FC_MAX_PRAYER_DOSES;
-    v->state.player.sharks_remaining = v->initial_sharks;
-    v->state.player.prayer_doses_remaining = v->initial_prayer_doses;
+    fc_set_initial_supplies(&v->state, v->initial_sharks, v->initial_prayer_doses);
 }
 
 static void load_reward_params(ViewerState* v) {
@@ -862,7 +875,23 @@ static void print_policy_episode_summary(const ViewerState* v) {
     fprintf(stderr, ",\"env/n\":1.0}\n");
 }
 
+static void sync_player_appearance(ViewerState *v) {
+    int changed = fc_player_appearance_sync(&v->appearance, &v->state.player,
+        FC_LOADOUTS[v->active_loadout].player_model_id);
+    if (changed < 0) {
+        fprintf(stderr, "Cannot compose player appearance from local equipment assets.\n");
+        exit(EXIT_FAILURE);
+    }
+    if (changed && v->actor_animation.player_state) {
+        anim_model_state_free(v->actor_animation.player_state);
+        v->actor_animation.player_state = NULL;
+        /* Keep pose/action clocks: a gear change isn't an animation restart. */
+    }
+}
+
 static void reset_ep(ViewerState* v) {
+    runec_ui_close_context(&v->ui);
+    v->scene_right_tracking = v->scene_right_dragged = 0;
     load_reward_params(v);
     reset_reward_tracking(v);
     v->seed = (uint32_t)GetRandomValue(1, 999999);
@@ -880,6 +909,8 @@ static void reset_ep(ViewerState* v) {
         v->state.player.current_prayer = v->state.player.max_prayer;
     }
     apply_initial_supplies(v);
+    sync_player_appearance(v);
+    v->item_message_seconds = 0.0f;
     fc_reward_runtime_begin_episode(&v->reward_runtime, &v->state);
     fc_fill_render_entities(&v->state, v->entities, &v->entity_count);
     fc_fill_render_events(&v->state, &v->render_events);
@@ -889,7 +920,7 @@ static void reset_ep(ViewerState* v) {
     memset(v->actions, 0, sizeof(v->actions));
     fc_combat_presentation_reset(v->combat_presentation);
     fc_actor_animation_reset(&v->actor_animation, &v->state,
-                             v->player_model, v->active_loadout);
+                             v->appearance.model, v->active_loadout);
     v->pending_prayer = 0;
     v->pending_eat = 0;
     v->pending_drink = 0;
@@ -902,6 +933,7 @@ static void reset_ep(ViewerState* v) {
 
 static void viewer_jump_to_wave(ViewerState* v, int wave) {
     if (!v) return;
+    runec_ui_close_context(&v->ui);
     if (wave < 1) wave = 1;
     if (wave > FC_NUM_WAVES) wave = FC_NUM_WAVES;
 
@@ -922,7 +954,7 @@ static void viewer_jump_to_wave(ViewerState* v, int wave) {
     fc_fill_render_events(&v->state, &v->render_events);
     fc_combat_presentation_reset(v->combat_presentation);
     fc_actor_animation_reset(&v->actor_animation, &v->state,
-                             v->player_model, v->active_loadout);
+                             v->appearance.model, v->active_loadout);
     v->attack_target = -1;
     fc_click_feedback_reset(&v->click_feedback);
     dbg_log_clear();
@@ -957,6 +989,7 @@ static ObjectMesh* load_objects_with_terrain(TerrainMesh* tm) {
 
 /* Forward declaration */
 static float ground_y(ViewerState* v, int tile_x, int tile_y);
+static float ground_y_smooth(ViewerState* v, float tile_x, float tile_y);
 
 /* ======================================================================== */
 /* Human input → action heads                                                */
@@ -981,25 +1014,51 @@ static int raycast_to_tile(ViewerState* v, int* out_x, int* out_y) {
     return 1;
 }
 
-/* Find NPC at clicked tile — checks LIVE state, not render snapshot.
- * Returns NPC array index (0..FC_MAX_NPCS-1) or -1 if no NPC there. */
-static int find_clicked_npc_idx(ViewerState* v, int tile_x, int tile_y) {
+/* Pick what was drawn, including the individual animation and interpolated
+ * position. Core state only decides whether the picked NPC is still targetable. */
+static int find_clicked_npc_idx(ViewerState* v) {
     int best = -1;
-    int best_dist = 999;
-    for (int i = 0; i < FC_MAX_NPCS; i++) {
-        FcNpc* n = &v->state.npcs[i];
+    float best_depth = INFINITY;
+    Vector2 mouse = GetMousePosition();
+    for (int i = 0; i < v->entity_count; i++) {
+        const FcRenderEntity *entity = &v->entities[i];
+        int slot = entity->npc_slot;
+        if (entity->entity_type == ENTITY_PLAYER || slot < 0 || slot >= FC_MAX_NPCS) continue;
+        const FcNpc *n = &v->state.npcs[slot];
         if (!n->active || n->is_dead) continue;
-        /* Check if tile is within the NPC's footprint (or 1 tile adjacent) */
-        if (tile_x >= n->x - 1 && tile_x <= n->x + n->size &&
-            tile_y >= n->y - 1 && tile_y <= n->y + n->size) {
-            /* Prefer the closest NPC center */
-            int cx = n->x + n->size/2;
-            int cy = n->y + n->size/2;
-            int d = abs(tile_x - cx) + abs(tile_y - cy);
-            if (d < best_dist) { best_dist = d; best = i; }
+        FcVisualPose pose = fc_visual_scene_npc_pose(&v->actor_animation.scene, slot);
+        Vector3 position = {pose.x, ground_y_smooth(v, pose.x, pose.y), -pose.y};
+        const NpcModelEntry *model = fc_npc_model_find(v->npc_models,
+            fc_npc_type_to_model_id(entity->npc_type));
+        float depth = -1;
+        if (model) {
+            const AnimModelState *animation = v->actor_animation.npc_states[slot];
+            depth = models_pick_depth(model, animation ? animation->verts : NULL,
+                position, pose.yaw_degrees, v->camera, mouse, GetScreenWidth(), GetScreenHeight());
+        } else {
+            /* Match the existing missing-model cube, not an invisible tile halo. */
+            float s = entity->size * 0.45f, h = 1.0f + entity->size * 0.5f;
+            BoundingBox box = {{position.x - s, position.y, position.z - s},
+                               {position.x + s, position.y + h, position.z + s}};
+            RayCollision hit = GetRayCollisionBox(GetScreenToWorldRay(mouse, v->camera), box);
+            if (hit.hit) depth = hit.distance;
         }
+        if (depth >= 0 && depth < best_depth) { best_depth = depth; best = slot; }
     }
     return best;
+}
+
+static void open_scene_context_menu(ViewerState *v) {
+    int tx = -1, ty = -1;
+    int can_walk = raycast_to_tile(v, &tx, &ty);
+    int slot = find_clicked_npc_idx(v);
+    if (slot < 0 && !can_walk) return;
+    v->context_npc_slot = slot;
+    v->context_npc_spawn_index = slot >= 0 ? v->state.npcs[slot].spawn_index : -1;
+    v->context_tile_x = tx;
+    v->context_tile_y = ty;
+    runec_ui_open_world_context(&v->ui, GetMousePosition(),
+        slot >= 0 ? v->state.npcs[slot].npc_type : 0, can_walk);
 }
 
 /* Called EVERY FRAME to capture clicks (which only fire once at 60fps).
@@ -1007,7 +1066,8 @@ static int find_clicked_npc_idx(ViewerState* v, int tile_x, int tile_y) {
 static void process_human_clicks(ViewerState* v, int ui_capture) {
     FcPlayer* p = &v->state.player;
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        !IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && !IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
         if (ui_capture) return;
         Vector2 mpos = GetMousePosition();
         int tx = -1;
@@ -1015,17 +1075,15 @@ static void process_human_clicks(ViewerState* v, int ui_capture) {
         int rc = raycast_to_tile(v, &tx, &ty);
         fprintf(stderr, "CLICK mouse=(%.0f,%.0f) raycast=%d tile=(%d,%d) player=(%d,%d)",
                 mpos.x, mpos.y, rc, tx, ty, p->x, p->y);
-        if (rc) {
-            int npc_idx = find_clicked_npc_idx(v, tx, ty);
-            if (npc_idx >= 0) {
-                queue_player_attack_request(v, npc_idx, mpos.x, mpos.y);
-                fprintf(stderr, " → ATTACK npc_idx=%d\n", npc_idx);
-            } else {
-                int walkable = v->state.walkable[tx][ty];
-                fprintf(stderr, " walkable=%d", walkable);
-                queue_player_tile_request(v, tx, ty, mpos.x, mpos.y);
-                fprintf(stderr, " → MOVE%s\n", walkable ? "" : "-NEAR");
-            }
+        int npc_idx = find_clicked_npc_idx(v);
+        if (npc_idx >= 0) {
+            queue_player_attack_request(v, npc_idx, mpos.x, mpos.y);
+            fprintf(stderr, " → ATTACK npc_idx=%d\n", npc_idx);
+        } else if (rc) {
+            int walkable = v->state.walkable[tx][ty];
+            fprintf(stderr, " walkable=%d", walkable);
+            queue_player_tile_request(v, tx, ty, mpos.x, mpos.y);
+            fprintf(stderr, " → MOVE%s\n", walkable ? "" : "-NEAR");
         } else {
             fprintf(stderr, " → MISS (raycast failed)\n");
         }
@@ -1448,7 +1506,7 @@ static void draw_scene(ViewerState* v) {
 
             /* Player model or fallback cylinder */
             NpcModelEntry* pm = fc_actor_player_model_entry(
-                v->player_model, v->active_loadout);
+                v->appearance.model, v->active_loadout);
             if (pm && pm->loaded) {
                 Vector3 pos = {ex, gy, ey};
                 float face_angle = pose.face_angle;
@@ -1507,7 +1565,7 @@ static void draw_scene(ViewerState* v) {
         .scene = &v->actor_animation.scene,
         .terrain = v->terrain,
         .anim_cache = v->anim_cache,
-        .player_profile = fc_player_visual_profile(v->active_loadout),
+        .player_profile = fc_player_visual_profile(fc_player_equipment_visual_profile(&v->state.player)),
         .tps = v->tps,
     };
     fc_combat_presentation_draw_world(v->combat_presentation,
@@ -1521,7 +1579,7 @@ static void draw_scene(ViewerState* v) {
         .presentation = combat_context,
         .entities = v->entities,
         .entity_count = v->entity_count,
-        .player_models = v->player_model,
+        .player_models = v->appearance.model,
         .npc_models = v->npc_models,
         .active_loadout = v->active_loadout,
         .ui_assets = &v->ui.assets,
@@ -2123,23 +2181,24 @@ static int process_runec_prayer_click(ViewerState* v) {
     if (!CheckCollisionPointRec(mouse, content))
         return 0;
 
-    if (right_click)
-        return 1;
-
     static const struct {
         int prayer;
         int action;
+        int ui_slot;
     } buttons[] = {
-        {PRAYER_PROTECT_MELEE, FC_PRAYER_MELEE},
-        {PRAYER_PROTECT_RANGE, FC_PRAYER_RANGE},
-        {PRAYER_PROTECT_MAGIC, FC_PRAYER_MAGIC},
+        {PRAYER_PROTECT_MELEE, FC_PRAYER_MELEE, 18},
+        {PRAYER_PROTECT_RANGE, FC_PRAYER_RANGE, 17},
+        {PRAYER_PROTECT_MAGIC, FC_PRAYER_MAGIC, 16},
     };
 
     for (int i = 0; i < (int)(sizeof(buttons) / sizeof(buttons[0])); i++) {
         Rectangle r = runec_prayer_button_rect(content, i);
         if (!CheckCollisionPointRec(mouse, r))
             continue;
-        queue_viewer_prayer_button(v, buttons[i].prayer, buttons[i].action);
+        if (right_click)
+            runec_ui_open_prayer_context(&v->ui, mouse, buttons[i].ui_slot);
+        else
+            queue_viewer_prayer_button(v, buttons[i].prayer, buttons[i].action);
         return 1;
     }
 
@@ -2181,6 +2240,7 @@ int main(int argc, char** argv) {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE|FLAG_MSAA_4X_HINT);
     InitWindow(DEFAULT_WINDOW_W, DEFAULT_WINDOW_H,
                "Fight Caves RL — Playable Viewer");
+    SetExitKey(KEY_NULL); /* Escape first dismisses menus; handled below. */
     if (!IsWindowReady()) {
         fprintf(stderr,
                 "error: viewer window initialization failed; verify the "
@@ -2257,10 +2317,11 @@ int main(int argc, char** argv) {
         if (!v.npc_models) fprintf(stderr, "error: NPC models failed to load\n");
     }
 
-    /* Load player model */
-    {
-        if (fc_asset_exists("fc_player.models"))
-            v.player_model = fc_npc_models_load("fc_player.models", (Texture2D){0});
+    /* Load composable player body and equipment models. */
+    if (!fc_player_appearance_load(&v.appearance)) {
+        fprintf(stderr, "Required player appearance assets are missing or invalid.\n");
+        fc_player_appearance_free(&v.appearance);
+        return 1;
     }
 
     /* Load the animation cache shared by actor and combat presentation. */
@@ -2353,8 +2414,8 @@ int main(int argc, char** argv) {
                             "object animation runtime allocation");
     REQUIRE_VIEWER_RESOURCE(v.npc_models && v.npc_models->loaded,
                             "NPC models");
-    REQUIRE_VIEWER_RESOURCE(v.player_model && v.player_model->loaded,
-                            "player models");
+    REQUIRE_VIEWER_RESOURCE(v.appearance.parts && v.appearance.parts->loaded,
+                            "player equipment and body models");
     REQUIRE_VIEWER_RESOURCE(v.anim_cache, "actor animation data");
     REQUIRE_VIEWER_RESOURCE(
         fc_combat_presentation_ready(v.combat_presentation),
@@ -2411,9 +2472,13 @@ int main(int argc, char** argv) {
             break;
         }
         frame_count++;
+        /* Age the previous click before capturing this frame's input. A newly
+         * clicked cross must start at frame zero, even after a slow frame. */
+        fc_click_feedback_update(&v.click_feedback, GetFrameTime());
 
         /* Global keys (always active) */
         if (IsKeyPressed(KEY_Q)) break;
+        if (IsKeyPressed(KEY_ESCAPE) && !v.ui.context_open) break;
         if (IsKeyPressed(KEY_SPACE)) v.paused = !v.paused;
         if (IsKeyPressed(KEY_RIGHT)) v.step_once = 1;
         if (v.policy_pipe) {
@@ -2468,22 +2533,45 @@ int main(int argc, char** argv) {
         }
 
         sync_fc_ui(&v);
-        ui_capture = process_runec_prayer_click(&v);
-        if (!ui_capture)
-            ui_capture = process_runec_console_input(&v);
-        if (!ui_capture) {
+        if (v.ui.context_open) {
             ui_capture = runec_ui_handle_input(&v.ui, GetScreenWidth(), GetScreenHeight());
             handle_runec_ui_intent(&v);
         } else {
-            v.ui.last_intent.kind = RUNEC_UI_INTENT_NONE;
+            ui_capture = process_runec_prayer_click(&v);
+            if (!ui_capture)
+                ui_capture = process_runec_console_input(&v);
+            if (!ui_capture) {
+                ui_capture = runec_ui_handle_input(&v.ui, GetScreenWidth(), GetScreenHeight());
+                handle_runec_ui_intent(&v);
+            } else {
+                v.ui.last_intent.kind = RUNEC_UI_INTENT_NONE;
+            }
         }
 
-        /* Camera orbit + zoom */
-        if (!ui_capture && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-            Vector2 d = GetMouseDelta();
-            v.cam_yaw += d.x*0.005f; v.cam_pitch -= d.y*0.005f;
-            if (v.cam_pitch < 0.1f) v.cam_pitch = 0.1f;
-            if (v.cam_pitch > 1.4f) v.cam_pitch = 1.4f;
+        /* RuneC: open on right press; a real drag dismisses the menu and
+         * retains the viewer's existing camera gesture. No game action fires. */
+        if (!ui_capture && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+            v.scene_right_tracking = 1;
+            v.scene_right_dragged = 0;
+            v.scene_right_start = GetMousePosition();
+            open_scene_context_menu(&v);
+            ui_capture = 1;
+        }
+        if (v.scene_right_tracking && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+            Vector2 mouse = GetMousePosition();
+            float dx = mouse.x - v.scene_right_start.x;
+            float dy = mouse.y - v.scene_right_start.y;
+            if (dx * dx + dy * dy > 9.0f) v.scene_right_dragged = 1;
+            if (v.scene_right_dragged) {
+                runec_ui_close_context(&v.ui);
+                Vector2 d = GetMouseDelta();
+                v.cam_yaw += d.x*0.005f; v.cam_pitch -= d.y*0.005f;
+                if (v.cam_pitch < 0.1f) v.cam_pitch = 0.1f;
+                if (v.cam_pitch > 1.4f) v.cam_pitch = 1.4f;
+            }
+        }
+        if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
+            v.scene_right_tracking = v.scene_right_dragged = 0;
         }
         float wh = GetMouseWheelMove();
         if (!ui_capture && wh != 0) {
@@ -2547,7 +2635,7 @@ int main(int argc, char** argv) {
             update_reward_breakdown(&v);
             fc_actor_animation_ingest_events(
                 &v.actor_animation, &v.render_events, v.anim_cache,
-                v.active_loadout, v.tps);
+                fc_player_equipment_visual_profile(&v.state.player), v.tps);
 
             /* Debug event log — record events from this tick */
             dbg_log_tick(&v.state);
@@ -2572,7 +2660,7 @@ int main(int argc, char** argv) {
                 .scene = &v.actor_animation.scene,
                 .terrain = v.terrain,
                 .anim_cache = v.anim_cache,
-                .player_profile = fc_player_visual_profile(v.active_loadout),
+                .player_profile = fc_player_visual_profile(fc_player_equipment_visual_profile(&v.state.player)),
                 .tps = v.tps,
             };
             fc_combat_presentation_ingest_tick(v.combat_presentation,
@@ -2613,14 +2701,15 @@ int main(int argc, char** argv) {
         }
 
         float frame_dt = GetFrameTime();
-        fc_click_feedback_update(&v.click_feedback, frame_dt);
+        sync_player_appearance(&v);
+        if (v.item_message_seconds > 0) v.item_message_seconds -= frame_dt;
         FcCombatPresentationContext combat_context = {
             .state = &v.state,
             .events = &v.render_events,
             .scene = &v.actor_animation.scene,
             .terrain = v.terrain,
             .anim_cache = v.anim_cache,
-            .player_profile = fc_player_visual_profile(v.active_loadout),
+            .player_profile = fc_player_visual_profile(fc_player_equipment_visual_profile(&v.state.player)),
             .tps = v.tps,
         };
         unsigned char deferred_deaths[FC_MAX_NPCS];
@@ -2641,7 +2730,7 @@ int main(int argc, char** argv) {
                     v.combat_presentation, i);
         }
         fc_actor_animation_update_models(
-            &v.actor_animation, &v.state, v.player_model, v.npc_models,
+            &v.actor_animation, &v.state, v.appearance.model, v.npc_models,
             v.anim_cache, v.active_loadout, v.tps, frame_dt, deferred_deaths);
         /* Draw */
         BeginDrawing();
@@ -2652,6 +2741,12 @@ int main(int argc, char** argv) {
         draw_runec_side_overrides(&v);
         draw_runec_console(&v);
         draw_click_cross(&v);
+        if (v.item_message_seconds > 0) {
+            DrawRectangle(8, GetScreenHeight() - 34, 490, 26, (Color){20, 16, 12, 240});
+            text_s(v.item_message, 16, GetScreenHeight() - 29, 16, YELLOW);
+        }
+        /* Menus must cover the console and prayer overrides, not sit behind them. */
+        runec_ui_draw_context(&v.ui);
 
         EndDrawing();
     }
@@ -2680,7 +2775,7 @@ cleanup:
         free(v.object_anim_runtimes);
     }
     if (v.anim_cache) anim_cache_free(v.anim_cache);
-    if (v.player_model) fc_npc_models_unload(v.player_model);
+    fc_player_appearance_free(&v.appearance);
     if (v.npc_models) fc_npc_models_unload(v.npc_models);
     if (v.object_anim_models) fc_npc_models_unload(v.object_anim_models);
     fc_animated_atlas_unload(&v.shared_model_atlas);

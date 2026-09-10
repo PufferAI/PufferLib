@@ -934,7 +934,16 @@ def validate_checkpoint_marker(marker: Path, preflight: dict[str, Any]) -> None:
         payload = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ContractError(f"invalid checkpoint contract sidecar: {marker}") from exc
-    if payload.get("contract") != preflight["contract"]:
+    actual = payload.get("contract")
+    expected = preflight["contract"]
+    # v5 only adds manually controlled inventory/equipment to the state hash.
+    # Policy weights do not serialize that state; allow only v4 -> v5 when
+    # every other contract field is identical, just as in the v38 evaluator.
+    if isinstance(actual, dict):
+        actual = dict(actual)
+        if actual.get("state_hash_version") == 4 and expected.get("state_hash_version") == 5:
+            actual["state_hash_version"] = 5
+    if actual != expected:
         raise ContractError(
             f"checkpoint contract does not match compiled Fight Caves: {marker}"
         )

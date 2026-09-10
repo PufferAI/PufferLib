@@ -1,7 +1,7 @@
 {
   "bundles": {
     "core": {
-      "archive": "fight-caves-runtime-assets-v2.tar.gz",
+      "archive": "fight-caves-runtime-assets-v3.tar.gz",
       "files": [
         {
           "path": "runtime/fightcaves.collision",
@@ -22,10 +22,10 @@
       "install_prefix": "runtime",
       "sha256": "8d65e184bb101af15642a1117353d22eed930f3b8e612ace7ee31c313e6123b3",
       "size_bytes": 1397,
-      "url": "https://github.com/jordanbailey00/fc-rl/releases/download/fight-caves-assets-v2/fight-caves-runtime-assets-v2.tar.gz"
+      "url": "https://github.com/jordanbailey00/fc-rl/releases/download/fight-caves-assets-v3/fight-caves-runtime-assets-v3.tar.gz"
     },
     "viewer": {
-      "archive": "fight-caves-viewer-assets-v2.tar.gz",
+      "archive": "fight-caves-viewer-assets-v3.tar.gz",
       "files": [
         {
           "path": "viewer/data/fonts/p11_full.png",
@@ -36,6 +36,11 @@
           "path": "viewer/data/fonts/runescape.ttf",
           "sha256": "7477bbfd998b8e16e8a1e898fd49fb736a6fdfa00e7eb364d4d441f10290f03a",
           "size_bytes": 22500
+        },
+        {
+          "path": "viewer/data/fonts/runescape_bold.ttf",
+          "sha256": "c8b9afefe105a78717fde9692deafbf2361b54bcf9c8019b6d817de94f1c6168",
+          "size_bytes": 22436
         },
         {
           "path": "viewer/data/fonts/runescape_small.ttf",
@@ -198,11 +203,6 @@
           "size_bytes": 356
         },
         {
-          "path": "viewer/data/sprites/items/item_25487.png",
-          "sha256": "737efd24af57fdf658bebd9e181f26dc4b0ff327a896f808b18ff840e4e6e81d",
-          "size_bytes": 1324
-        },
-        {
           "path": "viewer/data/sprites/items/item_2577.png",
           "sha256": "b66101760d14d4663bb4cd2de59b8000b08fe32a9faf71ab8e74b5067a7f4425",
           "size_bytes": 807
@@ -256,6 +256,11 @@
           "path": "viewer/data/sprites/items/item_27614.png",
           "sha256": "e8765f799ff6b6534d273e155e0b24b5dc5717c5b523d79623e3e1a4c4912a5c",
           "size_bytes": 708
+        },
+        {
+          "path": "viewer/data/sprites/items/item_28310.png",
+          "sha256": "737efd24af57fdf658bebd9e181f26dc4b0ff327a896f808b18ff840e4e6e81d",
+          "size_bytes": 1324
         },
         {
           "path": "viewer/data/sprites/items/item_385.png",
@@ -3359,8 +3364,13 @@
         },
         {
           "path": "viewer/fc_player.models",
-          "sha256": "c86451aacacd3b9f715ac1264f09003e83c6803538c5636972d7ba6b3e32cd1f",
-          "size_bytes": 1117473
+          "sha256": "d056dd8db14d53a804bbe5a216f1168816d4a947c862a4db9075b9a3b1196641",
+          "size_bytes": 521341
+        },
+        {
+          "path": "viewer/fc_player.parts",
+          "sha256": "8606aabd0ef16d5e4c803994f63a98885435364536e8bf5d2971edcbf69caa11",
+          "size_bytes": 272
         },
         {
           "path": "viewer/fc_projectiles.models",
@@ -3409,15 +3419,15 @@
         }
       ],
       "install_prefix": "viewer",
-      "sha256": "0871fc747270e94896069f408841be1f69d40befc8a808cf4222df24775c1e0f",
-      "size_bytes": 6442598,
-      "url": "https://github.com/jordanbailey00/fc-rl/releases/download/fight-caves-assets-v2/fight-caves-viewer-assets-v2.tar.gz"
+      "sha256": "7f43e3c1a55b43fc791097f3e25c925250bd939d2adc9aa7438018fced247943",
+      "size_bytes": 6150984,
+      "url": "https://github.com/jordanbailey00/fc-rl/releases/download/fight-caves-assets-v3/fight-caves-viewer-assets-v3.tar.gz"
     }
   },
-  "release_tag": "fight-caves-assets-v2",
+  "release_tag": "fight-caves-assets-v3",
   "schema_version": 1,
   "source": {
     "repository": "https://github.com/jordanbailey00/fc-rl",
-    "revision": "2c5b7641a3ed56f9b1bf8febea59a7f9d2f4a86f"
+    "revision": "73129580cb7f7aaae9955511ea377b77ab853026"
   }
 }

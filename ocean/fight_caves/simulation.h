@@ -39,7 +39,7 @@ typedef enum {
     FC_EQUIP_SLOT_WEAPON = 3,
     FC_EQUIP_SLOT_BODY = 4,
     FC_EQUIP_SLOT_SHIELD = 5,
-    FC_EQUIP_SLOT_AMMO = 6,
+    FC_EQUIP_SLOT_AMMO = 13,
     FC_EQUIP_SLOT_LEGS = 7,
     FC_EQUIP_SLOT_HANDS = 9,
     FC_EQUIP_SLOT_FEET = 10,
@@ -97,7 +97,8 @@ typedef struct {
 typedef enum {
     FC_WEAPON_GENERIC_RANGED = 0,
     FC_WEAPON_TWISTED_BOW = 1,
-    FC_WEAPON_BOW_OF_FAERDHINEN = 2
+    FC_WEAPON_BOW_OF_FAERDHINEN = 2,
+    FC_WEAPON_UNARMED = 3
 } FcWeaponKind;
 
 #define FC_NUM_LOADOUTS FC_LOADOUT_COUNT
@@ -314,6 +315,15 @@ typedef struct {
 /* Player                                                                    */
 /* ======================================================================== */
 
+#define FC_INVENTORY_SLOTS 28
+#define FC_EQUIPMENT_SLOTS 14
+
+typedef struct {
+    int item_id;                 /* 0 denotes an empty slot */
+    int quantity;
+    int charges;                 /* loaded darts remain with the blowpipe */
+} FcItemStack;
+
 typedef struct {
     /* Position */
     int x, y;
@@ -412,6 +422,10 @@ typedef struct {
     int total_damage_taken;
     int total_food_eaten;
     int total_potions_used;
+    FcItemStack inventory[FC_INVENTORY_SLOTS];
+    FcItemStack equipment[FC_EQUIPMENT_SLOTS];
+    int melee_attack_bonus, melee_strength_bonus;
+    int selected_food_slot, selected_potion_slot;
 } FcPlayer;
 
 /* ======================================================================== */
@@ -1259,6 +1273,9 @@ void fc_npc_tz_kek_split(FcState* state, int dead_x, int dead_y);
 
 /* Pathfinding */
 
+/* Attack-route range 0 means cardinal melee contact, not ranged LOS. */
+#define FC_ROUTE_MELEE_RANGE 0
+
 /* ======================================================================== */
 /* Tile queries                                                              */
 /* ======================================================================== */
@@ -1676,9 +1693,9 @@ int fc_is_terminal(const FcState* state);
 /* Determinism                                                               */
 /* ======================================================================== */
 
-/* Version 4 removes redundant compatibility/temporary fields from the
- * complete core-owned fixed-width FcState serialization. */
-#define FC_STATE_HASH_VERSION 4u
+/* Version 5 includes inventory, equipment, selected consumable slots and
+ * unarmed bonuses. Policy observations and action dimensions are unchanged. */
+#define FC_STATE_HASH_VERSION 5u
 
 /*
  * Compute a deterministic hash of the game state.
@@ -1727,6 +1744,40 @@ int fc_rng_int(FcState* state, int max);
 float fc_rng_float(FcState* state);
 
 
+/* Items */
+
+typedef struct {
+    int id;
+    const char *name;
+    int slot;                    /* -1 for inventory-only items */
+    int stackable, two_handed;
+    int ranged_level, defence_level, hitpoints_level;
+    int ranged_attack, ranged_strength;
+    int defence[5];               /* stab, slash, crush, magic, ranged */
+    int prayer, melee_attack, melee_strength;
+    int weapon_kind, speed, range, ammo_kind;
+    int ammo_tier;                /* supported ammunition: 0 standard, 1 dragon */
+    int crystal_piece;
+    int visual_profile;
+} FcItemDef;
+
+typedef enum {
+    FC_ITEM_OK, FC_ITEM_INVALID, FC_ITEM_NO_SPACE, FC_ITEM_REQUIREMENTS,
+    FC_ITEM_BUSY
+} FcItemResult;
+
+const FcItemDef *fc_item_definition(int item_id);
+const char *fc_item_result_message(FcItemResult result);
+/* Immediate inventory transactions between ticks. They do not advance time,
+ * reset cooldowns, roll RNG, or alter already-launched attacks. */
+FcItemResult fc_equip_item(FcState *state, int inventory_slot);
+FcItemResult fc_unequip_item(FcState *state, int equipment_slot);
+FcItemResult fc_inventory_swap(FcState *state, int first, int second);
+/* Select the actual slot consumed by the next canonical food/potion action. */
+FcItemResult fc_select_consumable(FcState *state, int inventory_slot);
+void fc_set_initial_supplies(FcState *state, int sharks, int prayer_doses);
+
+
 /* Action Internal */
 
 /* An already-active run may consume its remaining energy below 1%. Starting
@@ -1740,6 +1791,11 @@ static inline int fc_player_can_run(const FcPlayer* player) {
 int fc_eat_action_valid(const FcState* state, int action);
 int fc_drink_action_valid(const FcState* state, int action);
 
+
+/* Items Internal */
+void fc_items_init(FcPlayer *player, const FcLoadout *loadout);
+void fc_items_consume(FcPlayer *player, int potion);
+void fc_items_spend_ammo(FcPlayer *player);
 
 /* Spawn Internal */
 
@@ -2518,6 +2574,20 @@ static uint32_t fc_hash_player(uint32_t hash, const FcPlayer* player) {
     FC_HASH_I32(player->total_damage_taken);
     FC_HASH_I32(player->total_food_eaten);
     FC_HASH_I32(player->total_potions_used);
+    for (int i = 0; i < FC_INVENTORY_SLOTS; i++) {
+        FC_HASH_I32(player->inventory[i].item_id);
+        FC_HASH_I32(player->inventory[i].quantity);
+        FC_HASH_I32(player->inventory[i].charges);
+    }
+    for (int i = 0; i < FC_EQUIPMENT_SLOTS; i++) {
+        FC_HASH_I32(player->equipment[i].item_id);
+        FC_HASH_I32(player->equipment[i].quantity);
+        FC_HASH_I32(player->equipment[i].charges);
+    }
+    FC_HASH_I32(player->melee_attack_bonus);
+    FC_HASH_I32(player->melee_strength_bonus);
+    FC_HASH_I32(player->selected_food_slot);
+    FC_HASH_I32(player->selected_potion_slot);
     return hash;
 }
 
@@ -2690,6 +2760,387 @@ uint32_t fc_state_hash(const FcState* state) {
 #undef FC_HASH_U32
 #undef FC_HASH_F32
 
+/* Items */
+#include <limits.h>
+#include <string.h>
+
+/* Pinned to the existing FcLoadout balance, including legacy d'hide defence
+ * and Pegasian strength. Equipment switching must not rebalance training.
+ * Only the items supplied by our presets and their consumables are supported. */
+enum { AMMO_NONE, AMMO_ARROW, AMMO_BOLT, AMMO_LOADED_DART };
+static const FcItemDef ITEMS[] = {
+    {.id=1169, .name="Coif", .slot=FC_EQUIP_SLOT_HEAD,
+     .ranged_attack=2, .ranged_strength=0, .defence={4,6,8,4,4}, .prayer=0,
+     .ranged_level=20, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=22109, .name="Ava's assembler", .slot=FC_EQUIP_SLOT_CAPE,
+     .ranged_attack=8, .ranged_strength=2, .defence={1,1,1,8,2}, .prayer=0,
+     .ranged_level=70, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=19547, .name="Necklace of anguish", .slot=FC_EQUIP_SLOT_NECK,
+     .ranged_attack=15, .ranged_strength=5, .defence={0,0,0,0,0}, .prayer=2,
+     .ranged_level=0, .defence_level=0, .hitpoints_level=75, .melee_attack=0, .melee_strength=0},
+    {.id=27235, .name="Masori mask (f)", .slot=FC_EQUIP_SLOT_HEAD,
+     .ranged_attack=12, .ranged_strength=2, .defence={8,10,12,12,9}, .prayer=1,
+     .ranged_level=80, .defence_level=80, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=27238, .name="Masori body (f)", .slot=FC_EQUIP_SLOT_BODY,
+     .ranged_attack=43, .ranged_strength=4, .defence={59,52,64,74,60}, .prayer=1,
+     .ranged_level=80, .defence_level=80, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=27241, .name="Masori chaps (f)", .slot=FC_EQUIP_SLOT_LEGS,
+     .ranged_attack=27, .ranged_strength=2, .defence={35,30,39,46,37}, .prayer=1,
+     .ranged_level=80, .defence_level=80, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=26235, .name="Zaryte vambraces", .slot=FC_EQUIP_SLOT_HANDS,
+     .ranged_attack=18, .ranged_strength=2, .defence={8,8,8,5,8}, .prayer=1,
+     .ranged_level=80, .defence_level=45, .hitpoints_level=0, .melee_attack=-8, .melee_strength=0},
+    {.id=13237, .name="Pegasian boots", .slot=FC_EQUIP_SLOT_FEET,
+     .ranged_attack=12, .ranged_strength=0, .defence={5,5,5,5,5}, .prayer=0,
+     .ranged_level=75, .defence_level=75, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=28310, .name="Venator ring", .slot=FC_EQUIP_SLOT_RING,
+     .ranged_attack=10, .ranged_strength=2, .defence={0,0,0,0,0}, .prayer=0,
+     .ranged_level=0, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=2503, .name="Black d'hide body", .slot=FC_EQUIP_SLOT_BODY,
+     .ranged_attack=30, .ranged_strength=0, .defence={55,47,60,50,55}, .prayer=0,
+     .ranged_level=70, .defence_level=40, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=2497, .name="Black d'hide chaps", .slot=FC_EQUIP_SLOT_LEGS,
+     .ranged_attack=17, .ranged_strength=0, .defence={31,25,33,28,31}, .prayer=0,
+     .ranged_level=70, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=2491, .name="Black d'hide vambraces", .slot=FC_EQUIP_SLOT_HANDS,
+     .ranged_attack=11, .ranged_strength=0, .defence={6,5,7,8,0}, .prayer=0,
+     .ranged_level=70, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=6328, .name="Snakeskin boots", .slot=FC_EQUIP_SLOT_FEET,
+     .ranged_attack=3, .ranged_strength=0, .defence={1,1,2,1,0}, .prayer=0,
+     .ranged_level=30, .defence_level=30, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=2581, .name="Robin hood hat", .slot=FC_EQUIP_SLOT_HEAD,
+     .ranged_attack=8, .ranged_strength=0, .defence={4,6,8,4,4}, .prayer=0,
+     .ranged_level=40, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=10499, .name="Ava's accumulator", .slot=FC_EQUIP_SLOT_CAPE,
+     .ranged_attack=4, .ranged_strength=0, .defence={0,1,0,4,0}, .prayer=0,
+     .ranged_level=50, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=1704, .name="Amulet of glory", .slot=FC_EQUIP_SLOT_NECK,
+     .ranged_attack=10, .ranged_strength=0, .defence={3,3,3,3,3}, .prayer=3,
+     .ranged_level=0, .defence_level=0, .hitpoints_level=0, .melee_attack=10, .melee_strength=6},
+    {.id=12596, .name="Rangers' tunic", .slot=FC_EQUIP_SLOT_BODY,
+     .ranged_attack=15, .ranged_strength=0, .defence={6,9,12,6,6}, .prayer=0,
+     .ranged_level=40, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=12610, .name="Book of law", .slot=FC_EQUIP_SLOT_SHIELD,
+     .ranged_attack=10, .ranged_strength=0, .defence={0,0,0,0,0}, .prayer=5,
+     .ranged_level=0, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=2495, .name="Red d'hide chaps", .slot=FC_EQUIP_SLOT_LEGS,
+     .ranged_attack=14, .ranged_strength=0, .defence={28,22,30,20,28}, .prayer=0,
+     .ranged_level=60, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=11126, .name="Combat bracelet", .slot=FC_EQUIP_SLOT_HANDS,
+     .ranged_attack=7, .ranged_strength=0, .defence={5,5,5,3,5}, .prayer=0,
+     .ranged_level=0, .defence_level=0, .hitpoints_level=0, .melee_attack=7, .melee_strength=6},
+    {.id=2577, .name="Ranger boots", .slot=FC_EQUIP_SLOT_FEET,
+     .ranged_attack=8, .ranged_strength=0, .defence={2,3,4,2,0}, .prayer=0,
+     .ranged_level=40, .defence_level=0, .hitpoints_level=0, .melee_attack=0, .melee_strength=0},
+    {.id=11826, .name="Armadyl helmet", .slot=FC_EQUIP_SLOT_HEAD,
+     .ranged_attack=10, .ranged_strength=0, .defence={6,8,10,10,8}, .prayer=1,
+     .ranged_level=70, .defence_level=70, .hitpoints_level=0, .melee_attack=-5, .melee_strength=0},
+    {.id=11828, .name="Armadyl chestplate", .slot=FC_EQUIP_SLOT_BODY,
+     .ranged_attack=33, .ranged_strength=0, .defence={56,48,61,70,57}, .prayer=1,
+     .ranged_level=70, .defence_level=70, .hitpoints_level=0, .melee_attack=-7, .melee_strength=0},
+    {.id=11830, .name="Armadyl chainskirt", .slot=FC_EQUIP_SLOT_LEGS,
+     .ranged_attack=20, .ranged_strength=0, .defence={32,26,34,40,33}, .prayer=1,
+     .ranged_level=70, .defence_level=70, .hitpoints_level=0, .melee_attack=-6, .melee_strength=0},
+    {.id=7462, .name="Barrows gloves", .slot=FC_EQUIP_SLOT_HANDS,
+     .ranged_attack=12, .ranged_strength=0, .defence={12,12,12,6,12}, .prayer=0,
+     .ranged_level=0, .defence_level=0, .hitpoints_level=0, .melee_attack=12, .melee_strength=12},
+    {.id=23971, .name="Crystal helm", .slot=FC_EQUIP_SLOT_HEAD,
+     .ranged_attack=9, .ranged_strength=0, .defence={12,8,14,10,18}, .prayer=2,
+     .ranged_level=70, .defence_level=70, .hitpoints_level=0, .melee_attack=0, .melee_strength=0, .crystal_piece=FC_CRYSTAL_PIECE_HELM},
+    {.id=23975, .name="Crystal body", .slot=FC_EQUIP_SLOT_BODY,
+     .ranged_attack=31, .ranged_strength=0, .defence={46,38,48,44,68}, .prayer=3,
+     .ranged_level=70, .defence_level=70, .hitpoints_level=0, .melee_attack=0, .melee_strength=0, .crystal_piece=FC_CRYSTAL_PIECE_BODY},
+    {.id=23979, .name="Crystal legs", .slot=FC_EQUIP_SLOT_LEGS,
+     .ranged_attack=18, .ranged_strength=0, .defence={26,21,30,34,38}, .prayer=2,
+     .ranged_level=70, .defence_level=70, .hitpoints_level=0, .melee_attack=0, .melee_strength=0, .crystal_piece=FC_CRYSTAL_PIECE_LEGS},
+    {.id=9185, .name="Rune crossbow", .slot=FC_EQUIP_SLOT_WEAPON,
+     .ranged_attack=90, .ranged_strength=0, .two_handed=0, .ranged_level=61,
+     .weapon_kind=0, .speed=5, .range=7, .ammo_kind=AMMO_BOLT, .visual_profile=0},
+    {.id=20997, .name="Twisted bow", .slot=FC_EQUIP_SLOT_WEAPON,
+     .ranged_attack=70, .ranged_strength=20, .two_handed=1, .ranged_level=85,
+     .weapon_kind=1, .speed=5, .range=10, .ammo_kind=AMMO_ARROW, .ammo_tier=1, .visual_profile=1},
+    {.id=12788, .name="Magic shortbow (i)", .slot=FC_EQUIP_SLOT_WEAPON,
+     .ranged_attack=75, .ranged_strength=0, .two_handed=1, .ranged_level=50,
+     .weapon_kind=0, .speed=3, .range=7, .ammo_kind=AMMO_ARROW, .visual_profile=4},
+    {.id=12926, .name="Toxic blowpipe", .slot=FC_EQUIP_SLOT_WEAPON,
+     .ranged_attack=30, .ranged_strength=20, .two_handed=1, .ranged_level=75,
+     .weapon_kind=0, .speed=2, .range=5, .ammo_kind=AMMO_LOADED_DART, .visual_profile=5},
+    {.id=11785, .name="Armadyl crossbow", .slot=FC_EQUIP_SLOT_WEAPON,
+     .ranged_attack=100, .ranged_strength=0, .two_handed=0, .ranged_level=70,
+     .weapon_kind=0, .speed=5, .range=8, .ammo_kind=AMMO_BOLT, .ammo_tier=1, .visual_profile=6, .prayer=1},
+    {.id=25867, .name="Bow of faerdhinen (c)", .slot=FC_EQUIP_SLOT_WEAPON,
+     .ranged_attack=128, .ranged_strength=106, .two_handed=1, .ranged_level=80,
+     .weapon_kind=2, .speed=4, .range=10, .ammo_kind=AMMO_NONE, .visual_profile=7},
+    {.id=9143, .name="Adamant bolts", .slot=FC_EQUIP_SLOT_AMMO,
+     .stackable=1, .ranged_strength=100, .ammo_kind=AMMO_BOLT},
+    {.id=11212, .name="Dragon arrow", .slot=FC_EQUIP_SLOT_AMMO,
+     .stackable=1, .ranged_strength=60, .ammo_kind=AMMO_ARROW, .ammo_tier=1},
+    {.id=892, .name="Rune arrow", .slot=FC_EQUIP_SLOT_AMMO,
+     .stackable=1, .ranged_strength=49, .ammo_kind=AMMO_ARROW},
+    {.id=21946, .name="Diamond dragon bolts (e)", .slot=FC_EQUIP_SLOT_AMMO,
+     .stackable=1, .ranged_strength=122, .ammo_kind=AMMO_BOLT, .ammo_tier=1},
+    {.id=385, .name="Shark", .slot=-1},
+    {.id=2434, .name="Prayer potion(4)", .slot=-1},
+    {.id=139, .name="Prayer potion(3)", .slot=-1},
+    {.id=141, .name="Prayer potion(2)", .slot=-1},
+    {.id=143, .name="Prayer potion(1)", .slot=-1},
+    {.id=229, .name="Vial", .slot=-1},
+};
+
+const FcItemDef *fc_item_definition(int item_id) {
+    for (unsigned i = 0; i < sizeof(ITEMS) / sizeof(ITEMS[0]); i++)
+        if (ITEMS[i].id == item_id) return &ITEMS[i];
+    return NULL;
+}
+
+static void recalculate_equipment(FcPlayer *p) {
+    p->ranged_attack_bonus = p->ranged_strength_bonus = 0;
+    p->defence_stab = p->defence_slash = p->defence_crush = 0;
+    p->defence_magic = p->defence_ranged = p->prayer_bonus = 0;
+    p->melee_attack_bonus = p->melee_strength_bonus = p->crystal_piece_mask = 0;
+    const FcItemDef *weapon = fc_item_definition(p->equipment[FC_EQUIP_SLOT_WEAPON].item_id);
+    const FcItemDef *ammo = fc_item_definition(p->equipment[FC_EQUIP_SLOT_AMMO].item_id);
+    /* Quiver items may be worn with any weapon, but firing requires both the
+     * correct category and a supported tier (RSMod validateArrows/Bolts). */
+    int usable_ammo = weapon && ammo && weapon->ammo_kind == ammo->ammo_kind &&
+        ammo->ammo_tier <= weapon->ammo_tier;
+    for (int i = 0; i < FC_EQUIPMENT_SLOTS; i++) {
+        const FcItemDef *item = fc_item_definition(p->equipment[i].item_id);
+        if (!item) continue;
+        if (i == FC_EQUIP_SLOT_AMMO && !usable_ammo)
+            continue;
+        p->ranged_attack_bonus += item->ranged_attack;
+        p->ranged_strength_bonus += item->ranged_strength;
+        p->defence_stab += item->defence[0];
+        p->defence_slash += item->defence[1];
+        p->defence_crush += item->defence[2];
+        p->defence_magic += item->defence[3];
+        p->defence_ranged += item->defence[4];
+        p->prayer_bonus += item->prayer;
+        p->melee_attack_bonus += item->melee_attack;
+        p->melee_strength_bonus += item->melee_strength;
+        p->crystal_piece_mask |= item->crystal_piece;
+    }
+    p->weapon_kind = weapon ? weapon->weapon_kind : FC_WEAPON_UNARMED;
+    p->weapon_speed = weapon ? weapon->speed : 4;
+    p->weapon_range = weapon ? weapon->range : 1;
+    p->weapon_uses_ammo = weapon && weapon->ammo_kind != AMMO_NONE;
+    p->ammo_count = 0;
+    if (weapon && weapon->ammo_kind == AMMO_LOADED_DART) {
+        p->ammo_count = p->equipment[FC_EQUIP_SLOT_WEAPON].charges;
+        p->ranged_strength_bonus += 17; /* preset's loaded adamant darts */
+    } else if (usable_ammo) {
+        p->ammo_count = p->equipment[FC_EQUIP_SLOT_AMMO].quantity;
+    }
+}
+
+static int potion_doses(int id) {
+    switch (id) {
+        case 2434: return 4;
+        case 139: return 3;
+        case 141: return 2;
+        case 143: return 1;
+        default: return 0;
+    }
+}
+
+static void reset_supplies(FcPlayer *p, int sharks, int doses) {
+    if (sharks < 0) sharks = 0;
+    if (sharks > FC_MAX_SHARKS) sharks = FC_MAX_SHARKS;
+    if (doses < 0) doses = 0;
+    if (doses > FC_MAX_PRAYER_DOSES) doses = FC_MAX_PRAYER_DOSES;
+    memset(p->inventory, 0, sizeof(p->inventory));
+    p->sharks_remaining = sharks;
+    p->prayer_doses_remaining = doses;
+    const int pots[] = {0, 143, 141, 139, 2434};
+    int slot = 0;
+    while (doses > 0) {
+        int count = doses > 4 ? 4 : doses;
+        p->inventory[slot++] = (FcItemStack){pots[count], 1, 0};
+        doses -= count;
+    }
+    for (int i = 0; i < sharks; i++)
+        p->inventory[slot++] = (FcItemStack){385, 1, 0};
+    p->selected_food_slot = p->selected_potion_slot = -1;
+}
+
+void fc_set_initial_supplies(FcState *state, int sharks, int prayer_doses) {
+    /* Reset-time configuration only, not a gameplay inventory refill API. */
+    if (state && state->tick == 0)
+        reset_supplies(&state->player, sharks, prayer_doses);
+}
+
+void fc_items_init(FcPlayer *p, const FcLoadout *loadout) {
+    memset(p->equipment, 0, sizeof(p->equipment));
+    for (int i = 0; i < loadout->equipment_count; i++) {
+        const FcLoadoutEquipmentItem *item = &loadout->equipment[i];
+        if (item->item_id == 810) continue; /* darts are loaded in the blowpipe */
+        p->equipment[item->slot] = (FcItemStack){
+            (int)item->item_id, item->slot == FC_EQUIP_SLOT_AMMO ? loadout->ammo : 1,
+            item->item_id == 12926 ? loadout->ammo : 0
+        };
+    }
+    recalculate_equipment(p);
+    reset_supplies(p, FC_MAX_SHARKS, FC_MAX_PRAYER_DOSES);
+}
+
+const char *fc_item_result_message(FcItemResult result) {
+    switch (result) {
+        case FC_ITEM_OK: return "";
+        case FC_ITEM_NO_SPACE: return "You don't have enough inventory space.";
+        case FC_ITEM_REQUIREMENTS: return "Your levels are too low to wear this item.";
+        case FC_ITEM_BUSY: return "You can't change equipment right now.";
+        default: return "You can't use that item here.";
+    }
+}
+
+static int free_slot(const FcItemStack inventory[FC_INVENTORY_SLOTS]) {
+    for (int i = 0; i < FC_INVENTORY_SLOTS; i++)
+        if (!inventory[i].item_id) return i;
+    return -1;
+}
+
+static int add_to_inventory(FcItemStack inventory[FC_INVENTORY_SLOTS], FcItemStack item) {
+    if (!item.item_id) return 1;
+    const FcItemDef *def = fc_item_definition(item.item_id);
+    if (!def || item.quantity <= 0) return 0;
+    if (def->stackable) {
+        for (int i = 0; i < FC_INVENTORY_SLOTS; i++) {
+            if (inventory[i].item_id != item.item_id) continue;
+            if (item.quantity > INT_MAX - inventory[i].quantity) return 0;
+            inventory[i].quantity += item.quantity;
+            return 1;
+        }
+    }
+    int index = free_slot(inventory);
+    if (index < 0) return 0;
+    inventory[index] = item;
+    return 1;
+}
+
+static int can_change_items(const FcState *state) {
+    return state && !state->terminal && state->player.current_hp > 0;
+}
+
+FcItemResult fc_equip_item(FcState *state, int index) {
+    if (!can_change_items(state)) return FC_ITEM_BUSY;
+    FcPlayer *p = &state->player;
+    if (index < 0 || index >= FC_INVENTORY_SLOTS) return FC_ITEM_INVALID;
+    FcItemStack incoming = p->inventory[index];
+    const FcItemDef *item = fc_item_definition(incoming.item_id);
+    if (!item || item->slot < 0 || incoming.quantity <= 0 ||
+        (!item->stackable && incoming.quantity != 1)) return FC_ITEM_INVALID;
+    if (p->ranged_level < item->ranged_level || p->defence_level < item->defence_level ||
+        p->max_hp / 10 < item->hitpoints_level) return FC_ITEM_REQUIREMENTS;
+    /* Plan on copies, including both hands. A failed secondary transfer cannot
+     * partially equip an item, remove a shield, or interrupt combat. */
+    FcItemStack inventory[FC_INVENTORY_SLOTS], equipment[FC_EQUIPMENT_SLOTS];
+    memcpy(inventory, p->inventory, sizeof(inventory));
+    memcpy(equipment, p->equipment, sizeof(equipment));
+    FcItemStack *worn = &equipment[item->slot];
+    if (item->stackable && worn->item_id == incoming.item_id) {
+        int amount = INT_MAX - worn->quantity;
+        if (amount > incoming.quantity) amount = incoming.quantity;
+        if (!amount) return FC_ITEM_NO_SPACE;
+        worn->quantity += amount;
+        inventory[index].quantity -= amount;
+        if (!inventory[index].quantity) inventory[index] = (FcItemStack){0};
+    } else {
+        inventory[index] = *worn;
+        *worn = incoming;
+    }
+    const FcItemDef *weapon = fc_item_definition(equipment[FC_EQUIP_SLOT_WEAPON].item_id);
+    int displaced = item->two_handed ? FC_EQUIP_SLOT_SHIELD :
+        item->slot == FC_EQUIP_SLOT_SHIELD && weapon && weapon->two_handed ?
+        FC_EQUIP_SLOT_WEAPON : -1;
+    if (displaced >= 0 && equipment[displaced].item_id) {
+        /* RSMod returns the conflict to the source slot when it wasn't needed
+         * for a primary swap, otherwise to the first free inventory slot. */
+        if (!inventory[index].item_id) inventory[index] = equipment[displaced];
+        else if (!add_to_inventory(inventory, equipment[displaced])) return FC_ITEM_NO_SPACE;
+        equipment[displaced] = (FcItemStack){0};
+    }
+    memcpy(p->inventory, inventory, sizeof(inventory));
+    memcpy(p->equipment, equipment, sizeof(equipment));
+    recalculate_equipment(p);
+    p->attack_target_idx = -1; /* held-item action interrupts interaction */
+    p->approach_target = 0;
+    p->approach_target_x = p->approach_target_y = -1;
+    p->approach_target_size = 0;
+    return FC_ITEM_OK;
+}
+
+FcItemResult fc_unequip_item(FcState *state, int slot) {
+    if (!can_change_items(state)) return FC_ITEM_BUSY;
+    if (slot < 0 || slot >= FC_EQUIPMENT_SLOTS ||
+        !state->player.equipment[slot].item_id) return FC_ITEM_INVALID;
+    FcPlayer *p = &state->player;
+    FcItemStack inventory[FC_INVENTORY_SLOTS];
+    memcpy(inventory, p->inventory, sizeof(inventory));
+    if (!add_to_inventory(inventory, p->equipment[slot])) return FC_ITEM_NO_SPACE;
+    memcpy(p->inventory, inventory, sizeof(inventory));
+    p->equipment[slot] = (FcItemStack){0};
+    recalculate_equipment(p);
+    /* Worn-item Remove does not cancel the existing interaction. */
+    return FC_ITEM_OK;
+}
+
+FcItemResult fc_inventory_swap(FcState *state, int first, int second) {
+    if (!can_change_items(state)) return FC_ITEM_BUSY;
+    if (first < 0 || first >= FC_INVENTORY_SLOTS || second < 0 ||
+        second >= FC_INVENTORY_SLOTS) return FC_ITEM_INVALID;
+    FcItemStack temp = state->player.inventory[first];
+    state->player.inventory[first] = state->player.inventory[second];
+    state->player.inventory[second] = temp;
+    state->player.selected_food_slot = state->player.selected_potion_slot = -1;
+    return FC_ITEM_OK;
+}
+
+FcItemResult fc_select_consumable(FcState *state, int slot) {
+    if (!can_change_items(state)) return FC_ITEM_BUSY;
+    if (slot < 0 || slot >= FC_INVENTORY_SLOTS) return FC_ITEM_INVALID;
+    int id = state->player.inventory[slot].item_id;
+    if (id == 385) state->player.selected_food_slot = slot;
+    else if (potion_doses(id)) state->player.selected_potion_slot = slot;
+    else return FC_ITEM_INVALID;
+    return FC_ITEM_OK;
+}
+
+void fc_items_consume(FcPlayer *p, int potion) {
+    int selected = potion ? p->selected_potion_slot : p->selected_food_slot;
+    for (int n = -1; n < FC_INVENTORY_SLOTS; n++) {
+        int slot = n < 0 ? selected : n;
+        if (slot < 0 || slot >= FC_INVENTORY_SLOTS) continue;
+        FcItemStack *item = &p->inventory[slot];
+        int doses = potion_doses(item->item_id);
+        if (potion && doses) {
+            const int replacement[] = {229, 143, 141, 139};
+            item->item_id = replacement[doses - 1];
+            break;
+        }
+        if (!potion && item->item_id == 385) {
+            *item = (FcItemStack){0};
+            break;
+        }
+    }
+    if (potion) p->prayer_doses_remaining--;
+    else p->sharks_remaining--;
+}
+
+void fc_items_spend_ammo(FcPlayer *p) {
+    p->ammo_count--;
+    FcItemStack *weapon = &p->equipment[FC_EQUIP_SLOT_WEAPON];
+    if (weapon->item_id == 12926) weapon->charges--;
+    else {
+        FcItemStack *ammo = &p->equipment[FC_EQUIP_SLOT_AMMO];
+        if (ammo->quantity > 0 && --ammo->quantity == 0) {
+            *ammo = (FcItemStack){0};
+            recalculate_equipment(p);
+        }
+    }
+}
+
+
 /* Loadouts */
 /*
  * LOADOUT A: Mid-level — Black D'hide + Rune Crossbow
@@ -2806,7 +3257,7 @@ const FcLoadout FC_LOADOUTS[FC_NUM_LOADOUTS] = {
             {FC_EQUIP_SLOT_LEGS,   27241, 0, "Masori chaps (f)"},
             {FC_EQUIP_SLOT_HANDS,  26235, 0, "Zaryte vambraces"},
             {FC_EQUIP_SLOT_FEET,   13237, 0, "Pegasian boots"},
-            {FC_EQUIP_SLOT_RING,   25487, 0, "Venator ring"},
+            {FC_EQUIP_SLOT_RING,   28310, 0, "Venator ring"},
         },
         .model_item_count = 8,
         .model_item_ids = {27235, 22109, 19547, 20997, 27238, 27241, 26235, 13237},
@@ -4359,8 +4810,13 @@ typedef enum {
 static int fc_route_goal_reached(
     FcRouteGoalKind kind, int x, int y,
     int dst_x, int dst_y, int dst_size, int attack_range,
+    const uint8_t walkable[FC_ARENA_WIDTH][FC_ARENA_HEIGHT],
+    const uint8_t movement_flags[FC_ARENA_WIDTH][FC_ARENA_HEIGHT],
     const uint8_t los_flags[FC_ARENA_WIDTH][FC_ARENA_HEIGHT]) {
     if (kind == FC_ROUTE_EXACT) return x == dst_x && y == dst_y;
+    if (attack_range == FC_ROUTE_MELEE_RANGE)
+        return fc_npc_can_melee_player(x, y, dst_x, dst_y, dst_size,
+                                       walkable, movement_flags);
     int distance = fc_area_distance(x, y, dst_x, dst_y, dst_size);
     return distance > 0 && distance <= attack_range &&
            fc_has_los_between_areas(x, y, 1, dst_x, dst_y, dst_size,
@@ -4421,7 +4877,7 @@ static int fc_bfs_route(
     while (qh < qt) {
         int cx = qx[qh], cy = qy[qh]; qh++;
         if (fc_route_goal_reached(goal_kind, cx, cy, dst_x, dst_y, dst_size,
-                                  attack_range, los_flags)) {
+                                  attack_range, walkable, movement_flags, los_flags)) {
             found_x = cx;
             found_y = cy;
             break;
@@ -5265,20 +5721,7 @@ static void apply_loadout_combat_fields(FcPlayer* p,
     p->ranged_level = loadout->ranged_lvl;
     p->prayer_level = loadout->prayer_lvl;
     p->magic_level = loadout->magic_lvl;
-    p->weapon_kind = loadout->weapon_kind;
-    p->weapon_uses_ammo = loadout->weapon_uses_ammo;
-    p->crystal_piece_mask = loadout->crystal_piece_mask;
-    p->weapon_speed = loadout->weapon_speed;
-    p->weapon_range = loadout->weapon_range;
-    p->ranged_attack_bonus = loadout->ranged_atk;
-    p->ranged_strength_bonus = loadout->ranged_str;
-    p->defence_stab = loadout->def_stab;
-    p->defence_slash = loadout->def_slash;
-    p->defence_crush = loadout->def_crush;
-    p->defence_magic = loadout->def_magic;
-    p->defence_ranged = loadout->def_ranged;
-    p->prayer_bonus = loadout->prayer_bonus;
-    p->ammo_count = loadout->ammo;
+    fc_items_init(p, loadout);
 }
 
 static void init_player(FcPlayer* p) {
@@ -5290,8 +5733,6 @@ static void init_player(FcPlayer* p) {
     p->current_prayer = p->max_prayer;
     p->prayer = PRAYER_NONE;
     p->prayer_at_tick_start = PRAYER_NONE;
-    p->sharks_remaining = FC_MAX_SHARKS;
-    p->prayer_doses_remaining = FC_MAX_PRAYER_DOSES;
     p->attack_timer = 0;
     p->food_timer = 0;
     p->potion_timer = 0;
@@ -6197,7 +6638,7 @@ static void apply_player_supplies(FcState* state, int eat_action,
         if (player->current_hp > player->max_hp) {
             player->current_hp = player->max_hp;
         }
-        player->sharks_remaining--;
+        fc_items_consume(player, 0);
         *cooldown_timer = cooldown;
         player->food_eaten_this_tick = 1;
         state->food_used_this_tick = 1;
@@ -6219,11 +6660,12 @@ static void apply_player_supplies(FcState* state, int eat_action,
         if (player->current_prayer > player->max_prayer) {
             player->current_prayer = player->max_prayer;
         }
-        player->prayer_doses_remaining--;
+        fc_items_consume(player, 1);
         player->potion_timer = FC_POTION_COOLDOWN_TICKS;
         player->potion_used_this_tick = 1;
         state->prayer_potion_used_this_tick = 1;
     }
+    player->selected_food_slot = player->selected_potion_slot = -1;
 }
 
 static void prepare_player_interaction(FcState* state, int explicit_move,
@@ -6262,20 +6704,26 @@ static void prepare_player_interaction(FcState* state, int explicit_move,
 
 static void launch_player_attack(FcState* state, FcNpc* target, int distance) {
     FcPlayer* player = &state->player;
-    int att_roll = fc_player_ranged_attack_roll(player, target);
+    int melee = player->weapon_kind == FC_WEAPON_UNARMED;
+    /* Unarmed Punch is accurate/crush (+3 Attack). Fight Caves NPCs all
+     * have zero crush defence bonus, including the ranged-resistant healers. */
+    int att_roll = melee ? (player->attack_level + 11) *
+        (player->melee_attack_bonus + 64) : fc_player_ranged_attack_roll(player, target);
     const FcNpcStats* target_stats = fc_npc_get_stats(target->npc_type);
     int def_roll = fc_npc_def_roll(target_stats->def_level,
-                                   target_stats->ranged_def_bonus);
+                                   melee ? 0 : target_stats->ranged_def_bonus);
     float chance = fc_hit_chance(att_roll, def_roll);
     int hit = fc_rng_float(state) < chance ? 1 : 0;
-    int final_max_hit_hp = fc_player_ranged_final_max_hit_hp(player, target);
+    int final_max_hit_hp = melee ? (320 + (player->strength_level + 8) *
+        (player->melee_strength_bonus + 64)) / 640 :
+        fc_player_ranged_final_max_hit_hp(player, target);
     int damage = hit
         ? fc_roll_player_damage_tenths(state, final_max_hit_hp) : 0;
-    int delay = fc_ranged_hit_delay(distance);
+    int delay = melee ? 1 : fc_ranged_hit_delay(distance);
 
     fc_queue_pending_hit(target->pending_hits, &target->num_pending_hits,
                          FC_MAX_PENDING_HITS, damage, delay,
-                         ATTACK_RANGED, -1, 0);
+                         melee ? ATTACK_MELEE : ATTACK_RANGED, -1, 0);
     state->attack_attempt_this_tick = 1;
     state->render_events.player_attack_fired = 1;
     state->render_events.player_attack_source_x = player->x;
@@ -6291,7 +6739,7 @@ static void launch_player_attack(FcState* state, FcNpc* target, int distance) {
     }
     player->attack_timer = player->weapon_speed;
     if (player->weapon_uses_ammo && player->ammo_count > 0) {
-        player->ammo_count--;
+        fc_items_spend_ammo(player);
     }
     player->hit_landed_this_tick = 1;
 }
@@ -6332,6 +6780,11 @@ static int process_player_target(FcState* state,
         player->x, player->y, 1,
         target->x, target->y, target->size, state->los_flags);
     int target_can_fire = dist > 0 && dist <= weapon_range && has_los;
+    if (player->weapon_kind == FC_WEAPON_UNARMED) {
+        weapon_range = FC_ROUTE_MELEE_RANGE;
+        target_can_fire = fc_npc_can_melee_player(player->x, player->y,
+            target->x, target->y, target->size, state->walkable, state->movement_flags);
+    }
     int target_ready = player->attack_timer <= 0;
 
     record_player_target_held(state, target);
@@ -6361,6 +6814,9 @@ static int process_player_target(FcState* state,
             fc_has_los_between_areas(
                 rx, ry, 1, target->x, target->y, target->size,
                 state->los_flags);
+        if (player->weapon_kind == FC_WEAPON_UNARMED)
+            route_endpoint_can_fire = fc_npc_can_melee_player(rx, ry,
+                target->x, target->y, target->size, state->walkable, state->movement_flags);
     }
 
     if (!target_can_fire && player->approach_target &&

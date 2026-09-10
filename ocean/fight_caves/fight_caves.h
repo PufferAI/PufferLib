@@ -393,8 +393,8 @@ void c_reset(FightCaves* env) {
     if (env->initial_prayer_doses < 0) env->initial_prayer_doses = 0;
     if (env->initial_prayer_doses > FC_MAX_PRAYER_DOSES)
         env->initial_prayer_doses = FC_MAX_PRAYER_DOSES;
-    env->state.player.sharks_remaining = env->initial_sharks;
-    env->state.player.prayer_doses_remaining = env->initial_prayer_doses;
+    fc_set_initial_supplies(&env->state, env->initial_sharks,
+                            env->initial_prayer_doses);
 
     env->ep_length = 0;
     fc_reward_runtime_begin_episode(&env->reward_runtime, &env->state);

@@ -10,12 +10,14 @@ The environment uses flat implementation headers, with no separate `src/`,
 `include/`, or viewer source tree:
 
 - `fight_caves.h`: Puffer lifecycle, observations, rewards and episode logging.
-- `simulation.h`: game state, contracts, combat, routing, waves and loadouts.
+- `simulation.h`: game state, contracts, combat, routing, waves, loadouts and
+  inventory/equipment transactions.
 - `binding.c`: Puffer 4.0 binding, configuration and compiled-contract export.
 - `fight_caves.c`: standalone random-action simulator/benchmark.
 - `viewer.c`: playable and policy-pipe entry point, input and scene lifecycle.
-- `assets.h`: asset readers, models, animations, terrain and animated atlases.
-- `ui.h`: OSRS interfaces, sprites, fonts, minimap and orbs.
+- `assets.h`: asset readers, models, animations, terrain, animated atlases and
+  equipment-based player appearance composition.
+- `ui.h`: OSRS interfaces, sprites, fonts, minimap, orbs and context menus.
 - `render.h`: actor motion, animation selection, combat effects and debug overlays.
 - `tools.py`: asset installation/verification, bundle creation, preflight,
   optional viewer build, playable launch and checkpoint replay.
@@ -79,7 +81,8 @@ Build the CPU Puffer backend and run the environment acceptance tests:
 bash tests/fight_caves.sh test --puffer
 ```
 
-Include the viewer build:
+Include the viewer build and explicit graphical regression tests (using
+`xvfb-run` when available, otherwise an existing display):
 
 ```bash
 bash tests/fight_caves.sh test --all
@@ -104,6 +107,19 @@ camera controls, equipment/prayer/inventory tabs, run-energy and minimap orbs,
 wave/TPS/target controls, god mode, debug information, prayer-window indicators,
 projectiles, impacts, health bars and hitsplats.
 
+In playable mode, click worn equipment to remove it and click equipment in the
+inventory to equip it. The player model and bonuses update together. Inventory
+capacity, two-handed weapon/shield swaps, requirements, ammunition compatibility,
+stack limits, loaded-weapon charges and consumable slots are handled by the core.
+These immediate transactions do not advance a tick or reset attack cooldowns.
+Equipment switching is not a policy action: training keeps the same three heads,
+320 model inputs (286 observations plus 34 mask values), rewards and config.
+
+Right-click items, NPCs or terrain to open the RuneC-style menu. It includes
+NPC combat levels and relative-level colors, uses the bold OSRS menu font, and
+picks NPCs against their animated models. Menu choices invoke existing viewer
+actions; yellow/red click animations and right-drag camera control are retained.
+
 Useful controls include `Space` to pause/resume, `Right Arrow` to step one tick,
 `O` for debug overlays, right-drag to orbit, the mouse wheel to zoom, and
 `Q`/`Escape` to quit.
@@ -122,6 +138,9 @@ and size checks, masking, pause/speed controls and episode summaries. `--ckpt la
 selects the newest compatible checkpoint; `--random` uses random legal actions
 without loading a checkpoint. The existing dedicated policy-pipe evaluator is
 preserved, rather than changing inference or switching to a different renderer.
+The state hash is version 5 for inventory/equipment state. Version-4 checkpoint
+sidecars remain accepted only when every other contract field matches, since
+policy weights do not serialize equipment state.
 
 The viewer defaults to `resources/fight_caves/viewer`; arena maps default to
 `resources/fight_caves/runtime`. Explicit `FC_ASSET_ROOT`, `FC_REPO_ROOT`,

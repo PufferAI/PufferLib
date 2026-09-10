@@ -11,6 +11,7 @@ if(NOT RAYLIB_ROOT)
         set(RAYLIB_ROOT "${PUFFERLIB_ROOT}/raylib-5.5_linux_amd64")
     endif()
 endif()
+
 set(RAYLIB_ROOT "${RAYLIB_ROOT}" CACHE PATH "Raylib distribution root")
 if(NOT EXISTS "${RAYLIB_ROOT}/include/raylib.h" OR
    NOT EXISTS "${RAYLIB_ROOT}/lib/libraylib.a")
@@ -31,3 +32,11 @@ else()
     find_package(X11 REQUIRED)
     target_link_libraries(fc_viewer PRIVATE dl ${X11_LIBRARIES} GL)
 endif()
+
+# Explicit graphical regression target; ordinary viewer builds do not run it.
+add_executable(fc_viewer_tests EXCLUDE_FROM_ALL "${PUFFERLIB_ROOT}/tests/fight_caves.c")
+target_compile_definitions(fc_viewer_tests PRIVATE FC_VIEWER_TEST)
+target_include_directories(fc_viewer_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}" "${RAYLIB_ROOT}/include")
+get_target_property(FC_VIEWER_TEST_LIBRARIES fc_viewer LINK_LIBRARIES)
+target_link_libraries(fc_viewer_tests PRIVATE ${FC_VIEWER_TEST_LIBRARIES})

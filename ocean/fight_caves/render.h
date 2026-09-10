@@ -187,6 +187,7 @@ void fc_actor_animation_update_models(FcActorAnimation *animation,
                                       const unsigned char deferred_deaths[FC_MAX_NPCS]);
 
 const FcPlayerVisualProfile *fc_player_visual_profile(int active_loadout);
+int fc_player_equipment_visual_profile(const FcPlayer *player);
 NpcModelEntry *fc_actor_player_model_entry(NpcModelSet *player_models,
                                            int active_loadout);
 void fc_actor_animation_upload_npc(FcActorAnimation *animation,
@@ -846,9 +847,20 @@ static const uint16_t NPC_ANIM_DEATH[] = {
 };
 
 const FcPlayerVisualProfile *fc_player_visual_profile(int active_loadout) {
+    static const FcPlayerVisualProfile unarmed = {
+        .idle_anim=808, .walk_anim=819, .walk_back_anim=820,
+        .walk_left_anim=822, .walk_right_anim=821, .turn_anim=823,
+        .run_anim=824, .attack_anim=422,
+    };
+    if (active_loadout == -1) return &unarmed;
     if (active_loadout < 0 || active_loadout >= FC_NUM_LOADOUTS)
         active_loadout = FC_ACTIVE_LOADOUT;
     return &PLAYER_VISUALS[active_loadout];
+}
+
+int fc_player_equipment_visual_profile(const FcPlayer *player) {
+    const FcItemDef *weapon = fc_item_definition(player->equipment[FC_EQUIP_SLOT_WEAPON].item_id);
+    return weapon ? weapon->visual_profile : -1;
 }
 
 NpcModelEntry *fc_actor_player_model_entry(NpcModelSet *player_models,
@@ -858,8 +870,6 @@ NpcModelEntry *fc_actor_player_model_entry(NpcModelSet *player_models,
         active_loadout = FC_ACTIVE_LOADOUT;
     uint32_t model_id = FC_LOADOUTS[active_loadout].player_model_id;
     NpcModelEntry *entry = fc_npc_model_find(player_models, model_id);
-    if (!entry && player_models->count > 0)
-        entry = &player_models->entries[0];
     return entry && entry->loaded ? entry : NULL;
 }
 
@@ -1046,7 +1056,8 @@ void fc_actor_animation_reset(FcActorAnimation *animation,
     fc_visual_scene_reset_player(&animation->scene, state->player.x,
                                  state->player.y, 1,
                                  state->player.facing_angle);
-    const FcPlayerVisualProfile *profile = fc_player_visual_profile(active_loadout);
+    const FcPlayerVisualProfile *profile = fc_player_visual_profile(
+        fc_player_equipment_visual_profile(&state->player));
     animation->player_pose_sequence = profile->idle_anim;
     animation->player_pose_frame = 0;
     animation->player_pose_timer = 0.0f;
@@ -1294,10 +1305,11 @@ void fc_actor_animation_update_models(FcActorAnimation *animation,
     float anim_dt = fc_actor_animation_scaled_dt(tps, dt);
     NpcModelEntry *player_entry =
         fc_actor_player_model_entry(player_models, active_loadout);
-    recreate_player_state(animation, player_entry, active_loadout);
+    int visual_profile = fc_player_equipment_visual_profile(&state->player);
+    recreate_player_state(animation, player_entry, visual_profile);
     if (animation->player_state && player_entry) {
         const FcPlayerVisualProfile *profile =
-            fc_player_visual_profile(active_loadout);
+            fc_player_visual_profile(visual_profile);
         FcVisualPose pose = fc_visual_scene_player_pose(&animation->scene);
         uint16_t pose_sequence = player_pose_sequence(profile, pose.locomotion);
         uint16_t action_sequence = player_action_sequence(animation, state);
@@ -2241,6 +2253,7 @@ static void ingest_player_attack(FcCombatPresentation *presentation,
     const FcCombatPresentationContext *context) {
     const FcRenderEvents *events = context->events;
     const FcPlayerVisualProfile *profile = context->player_profile;
+    if (!profile->projectile_travel_spot) return; /* unarmed: no projectile */
     int sx = events->player_attack_source_x;
     int sy = events->player_attack_source_y;
     int tx = events->player_attack_target_x;

@@ -263,6 +263,39 @@ def test_checkpoint_format_rejects_unknown_or_missing_file(tmp_path):
     assert EVAL_CONTRACT.checkpoint_format(checkpoint, 64) is None
     assert EVAL_CONTRACT.checkpoint_format(tmp_path / "missing.bin", 64) is None
 
+
+@pytest.mark.parametrize("saved,current,accepted", [
+    (4, 5, True), (5, 5, True), (5, 4, False), (3, 5, False), (6, 5, False),
+])
+def test_equipment_hash_checkpoint_migration_is_directional(tmp_path, saved, current, accepted):
+    expected = {"state_hash_version": current, "puffer_obs_size": 320,
+                "puffer_action_dims": [17, 9, 8], "reward_version": "unchanged"}
+    actual = dict(expected, state_hash_version=saved)
+    marker = tmp_path / "contract.json"
+    marker.write_text(json.dumps({"contract": actual}))
+    preflight = {"contract": expected}
+    if accepted:
+        EVAL_CONTRACT.validate_checkpoint_marker(marker, preflight)
+    else:
+        with pytest.raises(EVAL_CONTRACT.ContractError, match="does not match"):
+            EVAL_CONTRACT.validate_checkpoint_marker(marker, preflight)
+    assert expected["state_hash_version"] == current
+
+
+@pytest.mark.parametrize("field,value", [
+    ("puffer_obs_size", 319), ("puffer_action_dims", [17, 9, 8, 14]),
+    ("reward_version", "different"), ("unknown_field", 1),
+])
+def test_equipment_hash_migration_does_not_hide_other_contract_changes(tmp_path, field, value):
+    expected = {"state_hash_version": 5, "puffer_obs_size": 320,
+                "puffer_action_dims": [17, 9, 8], "reward_version": "unchanged"}
+    actual = dict(expected, state_hash_version=4)
+    actual[field] = value
+    marker = tmp_path / "contract.json"
+    marker.write_text(json.dumps({"contract": actual}))
+    with pytest.raises(EVAL_CONTRACT.ContractError, match="does not match"):
+        EVAL_CONTRACT.validate_checkpoint_marker(marker, {"contract": expected})
+
 ENV_ROOT = REPO_ROOT / "ocean" / "fight_caves"
 RESOURCE_ROOT = REPO_ROOT / "resources" / "fight_caves"
 
@@ -292,6 +325,15 @@ def test_asset_manifest_is_complete_and_pinned():
         assert len(paths) == len(set(paths))
         assert all(not Path(path).is_absolute() and ".." not in Path(path).parts for path in paths)
         assert all(len(entry["sha256"]) == 64 and entry["size_bytes"] > 0 for entry in bundle["files"])
+
+
+def test_asset_manifest_includes_equipment_parts_and_menu_font():
+    manifest = json.loads((RESOURCE_ROOT / "asset_manifest.json").read_text())
+    files = {entry["path"] for entry in manifest["bundles"]["viewer"]["files"]}
+    assert {"viewer/fc_player.parts", "viewer/fc_player.models",
+            "viewer/data/fonts/runescape_bold.ttf",
+            "viewer/data/sprites/items/item_28310.png"} <= files
+    assert "viewer/data/sprites/items/item_25487.png" not in files
 
 
 def test_fight_caves_sources_do_not_reference_local_development_trees():

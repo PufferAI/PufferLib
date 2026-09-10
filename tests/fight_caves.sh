@@ -37,6 +37,24 @@ fi
 
 if [ "$MODE" = "--all" ]; then
     "$PYTHON" ocean/fight_caves/tools.py build-viewer
+    cmake --build build/fight_caves-viewer --target fc_viewer_tests --parallel
+    if command -v xvfb-run >/dev/null 2>&1; then
+        DISPLAY_PREFIX=(xvfb-run -a)
+    elif [ -n "${DISPLAY:-}" ]; then
+        DISPLAY_PREFIX=()
+    else
+        echo "Viewer tests require xvfb-run or an existing DISPLAY." >&2
+        exit 1
+    fi
+    (
+        cd "$TEST_ROOT"
+        export FC_REPO_ROOT="$REPO_ROOT"
+        export FC_ASSET_ROOT="$REPO_ROOT/resources/fight_caves/viewer"
+        export FC_COLLISION_PATH="$REPO_ROOT/resources/fight_caves/runtime/fightcaves.collision"
+        export FC_MOVEMENT_PATH="$REPO_ROOT/resources/fight_caves/runtime/fightcaves.movement"
+        export FC_LOS_PATH="$REPO_ROOT/resources/fight_caves/runtime/fightcaves.los"
+        "${DISPLAY_PREFIX[@]}" "$REPO_ROOT/build/fight_caves-viewer/fc_viewer_tests"
+    )
 fi
 
 echo "Fight Caves environment tests passed ($MODE)."
