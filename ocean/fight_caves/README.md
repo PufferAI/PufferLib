@@ -22,6 +22,8 @@ The environment uses flat implementation headers, with no separate `src/`,
 - `tools.py`: asset installation/verification, bundle creation, preflight,
   optional viewer build, playable launch and checkpoint replay.
 - `CMakeLists.txt`: optional viewer build using Puffer's pinned Raylib 5.5.
+- `Dockerfile`, `Dockerfile.dockerignore`, `docker-constraints.txt`: optional
+  Ubuntu/CUDA setup with pinned Python dependencies.
 
 Acceptance tests live in the repository's `tests/` directory. The full graphical
 viewer is retained; the flat layout does not substitute a minimal renderer or
@@ -35,6 +37,8 @@ Activate your Python environment first: Puffer's stock `build.sh` invokes
 Native builds require Clang, `ar`, and an OpenMP development runtime. The viewer
 also requires CMake, OpenGL development libraries, and X11 development headers
 on Linux.
+
+For a container setup, see [Docker (Ubuntu / NVIDIA)](#docker-ubuntu--nvidia).
 
 On Ubuntu, the relevant system packages are:
 
@@ -165,3 +169,98 @@ the isolated checkout after a failure for inspection.
 This validates the committed branch, not uncommitted local changes. The
 `checkout` subcommand runs acceptance directly in a fresh checkout without
 installed assets, and `test --core` runs just the asset/contract and C checks.
+
+## Docker (Ubuntu / NVIDIA)
+
+The optional `Dockerfile` provides an Ubuntu 24.04 x86-64 environment with CUDA
+13.0 development libraries, a Python virtual environment, Raylib 5.5, verified
+Fight Caves assets, the compiled viewer, and test dependencies. Core Python
+versions are recorded in `docker-constraints.txt`, including PyTorch 2.9.1 with
+CUDA 13.0 and W&B 0.28.1. This branch uses a W&B helper removed in newer releases.
+
+The host needs Docker, an NVIDIA GPU with a driver compatible with CUDA 13.0,
+and [NVIDIA Container Toolkit configured for Docker](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+The image build needs network access to Ubuntu, NVIDIA, Python package indexes,
+and the GitHub asset/Raylib releases. This branch requires the
+`fight-caves-assets-v3` release pinned in `resources/fight_caves/asset_manifest.json`.
+That release has not been published yet, so a fresh image build currently stops
+at the asset download. The local setup has the same dependency.
+
+Build from the repository root:
+
+```bash
+docker build --platform linux/amd64 \
+  -f ocean/fight_caves/Dockerfile -t fight-caves:local .
+```
+
+The image builds the viewer and runs the core tests without a GPU. The CUDA
+backend is built once inside each new container, where Puffer's default
+`NVCC_ARCH=native` can detect the GPU. No host virtual environment or compiled
+backend is copied into the image.
+
+For training or headless tests, start a container with persistent output volumes:
+
+```bash
+docker run -it --name fight-caves-test --gpus all --shm-size=1g \
+  --mount type=volume,source=fight-caves-checkpoints,target=/workspace/PufferLib/checkpoints \
+  --mount type=volume,source=fight-caves-logs,target=/workspace/PufferLib/logs \
+  fight-caves:local
+```
+
+For desktop play/replay, use this launch command instead. Run it from the host's
+graphical session with `DISPLAY` set and `xauth` installed. X11 or XWayland must
+be available. It shares the display socket and a temporary X authorization file:
+
+```bash
+FC_XAUTH=$(mktemp /tmp/fight-caves-xauth.XXXXXX)
+xauth -f "${XAUTHORITY:-$HOME/.Xauthority}" nlist "$DISPLAY" \
+  | sed 's/^..../ffff/' | xauth -f "$FC_XAUTH" nmerge -
+
+docker run -it --name fight-caves-test --gpus all --shm-size=1g \
+  -e DISPLAY -e XAUTHORITY=/tmp/fight-caves.Xauthority \
+  --mount type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix,readonly \
+  --mount "type=bind,source=$FC_XAUTH,target=/tmp/fight-caves.Xauthority,readonly" \
+  --mount type=volume,source=fight-caves-checkpoints,target=/workspace/PufferLib/checkpoints \
+  --mount type=volume,source=fight-caves-logs,target=/workspace/PufferLib/logs \
+  fight-caves:local
+```
+
+Keep the temporary authorization file while that container is in use. A new
+desktop login may require a fresh authorization file and container. Both launch
+examples use the same container name; choose one. The named volumes preserve
+checkpoints and training logs when a container is replaced.
+
+Inside the container, the working directory is `/workspace/PufferLib` and
+`python` already uses `.venv`. Build the backend and check the environment:
+
+```bash
+python ocean/fight_caves/tools.py preflight --mode cuda
+./build.sh fight_caves
+bash tests/fight_caves.sh test --core
+```
+
+Train with the existing config (750 million timesteps) and W&B logging:
+
+```bash
+wandb login
+python -m pufferlib.pufferl train fight_caves --wandb --wandb-project fight-caves
+```
+
+Launch the playable viewer or replay the newest compatible saved checkpoint:
+
+```bash
+python ocean/fight_caves/tools.py play
+python ocean/fight_caves/tools.py eval --ckpt latest --episodes 1
+```
+
+For a headless viewer check, use:
+
+```bash
+xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 \
+  python ocean/fight_caves/tools.py play --screenshot playable.png
+```
+
+Use `docker exec -it -w /workspace/PufferLib fight-caves-test bash` for another
+shell in the running container, or `docker start -ai fight-caves-test` to resume
+it after exiting. Rebuilding the image incorporates source changes from the
+local checkout; create a new container to use that rebuilt image.
