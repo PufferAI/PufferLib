@@ -134,6 +134,11 @@ elif [ "$ENV" = "nethack" ]; then
     INCLUDES+=(-I./$NLE_DIR/include
                -I./$NLE_DIR/build/_deps/deboost_context-src/include)
     EXTRA_LDFLAGS+=(-L"$NETHACK_LIB_DIR" -lnethack -Wl,-rpath,"$NETHACK_LIB_DIR" -ldl)
+elif [ "$ENV" = "fight_caves" ]; then
+    SRC_DIR="ocean/$ENV"
+    # The standard build also prepares the full viewer for puffer eval.
+    # Verified bundles are reused; no setup command or runtime download.
+    python3 "$SRC_DIR/tools.py" setup --all
 elif [ -d "ocean/$ENV" ]; then
     SRC_DIR="ocean/$ENV"
 else
