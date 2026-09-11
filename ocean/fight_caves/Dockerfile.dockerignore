@@ -1,0 +1,56 @@
+# Paths are relative to the repository root, used as the build context.
+# Include only the code and manifests needed by Puffer and Fight Caves.
+**
+!README.md
+!LICENSE
+!pyproject.toml
+!build.sh
+!pufferlib/
+!pufferlib/**
+!src/
+!src/**
+!vendor/
+!vendor/**
+!config/
+config/*
+!config/default.ini
+!config/fight_caves.ini
+!ocean/
+ocean/*
+!ocean/fight_caves/
+!ocean/fight_caves/**
+# Puffer's shared CUDA encoder unconditionally includes this generated table.
+!ocean/nethack/
+ocean/nethack/*
+!ocean/nethack/glyph_map.h
+!resources/
+resources/*
+!resources/fight_caves/
+resources/fight_caves/*
+!resources/fight_caves/asset_manifest.json
+!resources/fight_caves/ASSET_NOTICE.md
+!resources/fight_caves/README.md
+!tests/
+tests/*
+!tests/fight_caves.sh
+!tests/fight_caves.c
+!tests/test_fight_caves.py
+
+# Never import local binaries, caches, credentials or generated assets.
+**/__pycache__/
+**/*.pyc
+**/*.so
+**/*.o
+**/*.a
+**/*.egg-info/
+**/.git
+**/.env
+**/.env.*
+**/.netrc
+**/.venv/
+**/build/
+**/checkpoints/
+**/logs/
+**/wandb/
+vendor/fast-nle/
+vendor/nle/
