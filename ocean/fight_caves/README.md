@@ -47,8 +47,13 @@ Ordinary training is headless; it does not create a graphical window.
 
 ```bash
 ./build.sh fight_caves --fast
+unset __GLX_VENDOR_LIBRARY_NAME
 ./fight_caves
 ```
+
+The `unset` command removes PufferTank's forced Mesa selection and lets the
+display choose its normal graphics driver. It does not assume a GPU brand.
+Run it in each new container shell before play or replay; it requires no rebuild.
 
 You can play without training a policy first. Press Space to start or pause,
 Right Arrow to advance one tick, O to toggle debug overlays, and Q to quit.
@@ -65,6 +70,7 @@ wave/target/TPS selection, god mode, observations, rewards, and an event log.
 With the same backend and policy architecture used for training:
 
 ```bash
+unset __GLX_VENDOR_LIBRARY_NAME
 puffer eval fight_caves --load-model-path latest
 ```
 
