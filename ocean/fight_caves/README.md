@@ -63,6 +63,16 @@ puffer train fight_caves --wandb --wandb-project fight-caves
 
 Ordinary training is headless; it does not create a graphical window.
 
+Episode analytics are limited to `zero_progress_ticks`, `wave_reached`,
+`wrong_prayer_hits`, `reached_wave_63`, `jad_kill_rate`, `prayer_uptime_range`,
+`prayer_uptime_melee`, `prayer_uptime_magic`, `npc_healing_total`,
+`jad_healing_total`, and `episode_length`. Puffer reports episode averages under
+`env/`, plus its required `env/n` episode count. Prayer uptime is a fraction of
+episode ticks; healing totals count effective HP restored in simulation units.
+Zero-progress ticks exclude both positive progress and healing-driven negative
+progress. Wrong-prayer hits require an active, incorrect protection prayer.
+Generic trainer statistics such as losses and SPS are unchanged.
+
 ## Play manually
 
 ```bash

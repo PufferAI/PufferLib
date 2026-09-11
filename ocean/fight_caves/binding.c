@@ -190,71 +190,15 @@ void my_init(Env* env, Dict* kwargs) {
 }
 
 void my_log(Log* log, Dict* out) {
-    dict_set(out, "episode_length", log->episode_length);
+    dict_set(out, "zero_progress_ticks", log->zero_progress_ticks);
     dict_set(out, "wave_reached", log->wave_reached);
-    dict_set(out, "npcs_slayed", log->npcs_slayed);
-    dict_set(out, "prayer_uptime_melee", log->prayer_uptime_melee);
-    dict_set(out, "prayer_uptime_range", log->prayer_uptime_range);
-    dict_set(out, "prayer_uptime_magic", log->prayer_uptime_magic);
-    dict_set(out, "correct_prayer", log->correct_prayer);
     dict_set(out, "wrong_prayer_hits", log->wrong_prayer_hits);
-    dict_set(out, "no_prayer_hits", log->no_prayer_hits);
-    dict_set(out, "prayer_switches", log->prayer_switches);
-    dict_set(out, "damage_blocked", log->damage_blocked);
-    dict_set(out, "dmg_taken_avg", log->dmg_taken_avg);
-    dict_set(out, "attack_when_ready_rate", log->attack_when_ready_rate);
-    dict_set(out, "tokxil_melee_ticks", log->tokxil_melee_ticks);
-    dict_set(out, "ketzek_melee_ticks", log->ketzek_melee_ticks);
-    dict_set(out, "max_wave_ticks", log->max_wave_ticks);
-    dict_set(out, "max_wave_ticks_wave", log->max_wave_ticks_wave);
     dict_set(out, "reached_wave_63", log->reached_wave_63);
     dict_set(out, "jad_kill_rate", log->jad_kill_rate);
-    dict_set(out, "player_death_rate", log->player_death_rate);
-    dict_set(out, "target_held_ticks", log->target_held_ticks);
-    dict_set(out, "no_target_ticks", log->no_target_ticks);
-    dict_set(out, "target_in_range_los_ticks", log->target_in_range_los_ticks);
-    dict_set(out, "target_out_of_range_or_los_ticks", log->target_out_of_range_or_los_ticks);
-    dict_set(out, "attack_cooldown_wait_ticks", log->attack_cooldown_wait_ticks);
-    dict_set(out, "ready_but_no_attack_ticks", log->ready_but_no_attack_ticks);
-    dict_set(out, "action_move_idle_ticks", log->action_move_idle_ticks);
-    dict_set(out, "action_move_walk_ticks", log->action_move_walk_ticks);
-    dict_set(out, "action_move_run_ticks", log->action_move_run_ticks);
-    dict_set(out, "action_attack_none_ticks", log->action_attack_none_ticks);
-    dict_set(out, "action_attack_target_ticks", log->action_attack_target_ticks);
-    dict_set(out, "action_prayer_noop_ticks", log->action_prayer_noop_ticks);
-    dict_set(out, "action_prayer_cmd_ticks", log->action_prayer_cmd_ticks);
-    dict_set(out, "no_progress_ticks", log->no_progress_ticks);
-    dict_set(out, "required_work_remaining", log->required_work_remaining);
-    dict_set(out, "required_work_start", log->required_work_start);
-    dict_set(out, "cave_progress", log->cave_progress);
-    dict_set(out, "current_wave_progress", log->current_wave_progress);
-    dict_set(out, "progress_delta", log->progress_delta);
-    dict_set(out, "progress_reward", log->progress_reward);
-    dict_set(out, "ticks_since_positive_progress", log->ticks_since_positive_progress);
-    dict_set(out, "positive_progress_ticks", log->positive_progress_ticks);
-    dict_set(out, "zero_progress_ticks", log->zero_progress_ticks);
-    dict_set(out, "negative_progress_ticks", log->negative_progress_ticks);
-    dict_set(out, "gross_damage_dealt", log->gross_damage_dealt);
-    dict_set(out, "net_required_work_removed", log->net_required_work_removed);
-    dict_set(out, "gross_damage_to_net_progress_ratio", log->gross_damage_to_net_progress_ratio);
+    dict_set(out, "prayer_uptime_range", log->prayer_uptime_range);
+    dict_set(out, "prayer_uptime_melee", log->prayer_uptime_melee);
+    dict_set(out, "prayer_uptime_magic", log->prayer_uptime_magic);
     dict_set(out, "npc_healing_total", log->npc_healing_total);
-    dict_set(out, "mejkot_healing_total", log->mejkot_healing_total);
     dict_set(out, "jad_healing_total", log->jad_healing_total);
-    dict_set(out, "preclip_reward", log->preclip_reward);
-    dict_set(out, "postclip_reward", log->postclip_reward);
-    dict_set(out, "positive_clip_count", log->positive_clip_count);
-    dict_set(out, "negative_clip_count", log->negative_clip_count);
-
-    static char npc_dmg_keys[NPC_TYPE_COUNT][48];
-    static int npc_keys_built = 0;
-    if (!npc_keys_built) {
-        for (int i = 1; i < NPC_TYPE_COUNT; i++) {
-            const char* npc_name = fc_episode_npc_metric_name(i);
-            snprintf(npc_dmg_keys[i], 48, "dmg_to_%s", npc_name);
-        }
-        npc_keys_built = 1;
-    }
-    for (int i = 1; i < NPC_TYPE_COUNT; i++) {
-        dict_set(out, npc_dmg_keys[i], log->dmg_to_npc_type[i]);
-    }
+    dict_set(out, "episode_length", log->episode_length);
 }

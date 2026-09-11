@@ -3411,9 +3411,7 @@ int dbg_draw_panel_tabs(const FcState* state,
                  b->total,
                  reward_runtime->ticks_since_attack);
         fc_osrs_draw_text(buf, x, by, 8, dbg_reward_color(b->total)); by += sh;
-        snprintf(buf, sizeof(buf), "threat any:%d melee:%d",
-                 b->threat_ctx.any_threat,
-                 b->threat_ctx.melee_pressure_npcs);
+        snprintf(buf, sizeof(buf), "threat:%d", b->any_threat);
         fc_osrs_draw_text(buf, x, by, 8, DBG_COL_LABEL); by += sh + 2;
 
         {

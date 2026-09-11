@@ -787,97 +787,35 @@ static void toggle_godmode(ViewerState* v) {
 }
 
 static void print_policy_episode_summary(const ViewerState* v) {
-    const FcState* s = &v->state;
     FcEpisodeSummary summary;
-    fc_episode_summary_build(s, s->tick, &summary);
-
+    fc_episode_summary_build(&v->state, &v->reward_runtime, v->state.tick, &summary);
     fprintf(stderr,
         "[policy-pipe] episode_summary "
         "{\"episode\":%d,\"seed\":%u,\"terminal\":\"%s\","
-        "\"env/episode_length\":%d,"
+        "\"env/zero_progress_ticks\":%d,"
         "\"env/wave_reached\":%d,"
-        "\"env/most_npcs_slayed\":%d,"
-        "\"env/prayer_uptime_melee\":%.6f,"
-        "\"env/prayer_uptime_range\":%.6f,"
-        "\"env/prayer_uptime_magic\":%.6f,"
-        "\"env/correct_prayer\":%d,"
         "\"env/wrong_prayer_hits\":%d,"
-        "\"env/no_prayer_hits\":%d,"
-        "\"env/prayer_switches\":%d,"
-        "\"env/damage_blocked\":%d,"
-        "\"env/dmg_taken_avg\":%d,"
-        "\"env/attack_when_ready_rate\":%.6f,"
-        "\"env/tokxil_melee_ticks\":%d,"
-        "\"env/ketzek_melee_ticks\":%d,"
-        "\"env/max_wave_ticks\":%d,"
-        "\"env/max_wave_ticks_wave\":%d,"
         "\"env/reached_wave_63\":%d,"
         "\"env/jad_kill_rate\":%d,"
-        "\"env/target_held_ticks\":%d,"
-        "\"env/no_target_ticks\":%d,"
-        "\"env/target_in_range_los_ticks\":%d,"
-        "\"env/target_out_of_range_or_los_ticks\":%d,"
-        "\"env/attack_cooldown_wait_ticks\":%d,"
-        "\"env/ready_but_no_attack_ticks\":%d,"
-        "\"env/action_move_idle_ticks\":%d,"
-        "\"env/action_move_walk_ticks\":%d,"
-        "\"env/action_move_run_ticks\":%d,"
-        "\"env/action_attack_none_ticks\":%d,"
-        "\"env/action_attack_target_ticks\":%d,"
-        "\"env/action_prayer_noop_ticks\":%d,"
-        "\"env/action_prayer_cmd_ticks\":%d",
-        v->policy_episode_count + 1,
-        v->seed,
-        fc_terminal_name(s->terminal),
-        summary.episode_length,
+        "\"env/prayer_uptime_range\":%.6f,"
+        "\"env/prayer_uptime_melee\":%.6f,"
+        "\"env/prayer_uptime_magic\":%.6f,"
+        "\"env/npc_healing_total\":%.6f,"
+        "\"env/jad_healing_total\":%.6f,"
+        "\"env/episode_length\":%d,"
+        "\"env/n\":1.0}\n",
+        v->policy_episode_count + 1, v->seed, fc_terminal_name(v->state.terminal),
+        summary.zero_progress_ticks,
         summary.wave_reached,
-        summary.npcs_slayed,
-        summary.prayer_uptime_melee,
-        summary.prayer_uptime_range,
-        summary.prayer_uptime_magic,
-        summary.correct_prayer,
         summary.wrong_prayer_hits,
-        summary.no_prayer_hits,
-        summary.prayer_switches,
-        summary.damage_blocked,
-        summary.damage_taken,
-        summary.attack_when_ready_rate,
-        summary.tokxil_melee_ticks,
-        summary.ketzek_melee_ticks,
-        summary.max_wave_ticks,
-        summary.max_wave_ticks_wave,
         summary.reached_wave_63,
-        summary.jad_killed,
-        summary.target_held_ticks,
-        summary.no_target_ticks,
-        summary.target_in_range_los_ticks,
-        summary.target_out_of_range_or_los_ticks,
-        summary.attack_cooldown_wait_ticks,
-        summary.ready_but_no_attack_ticks,
-        summary.action_move_idle_ticks,
-        summary.action_move_walk_ticks,
-        summary.action_move_run_ticks,
-        summary.action_attack_none_ticks,
-        summary.action_attack_target_ticks,
-        summary.action_prayer_noop_ticks,
-        summary.action_prayer_cmd_ticks);
-
-    for (int i = 1; i < NPC_TYPE_COUNT; i++) {
-        const char* npc = fc_episode_npc_metric_name(i);
-        fprintf(stderr,
-            ",\"env/dmg_to_%s\":%d"
-            ",\"env/resolved_hits_to_%s\":%d"
-            ",\"env/damaging_hits_to_%s\":%d"
-            ",\"env/attack_cycles_to_%s\":%d"
-            ",\"env/target_ticks_%s\":%d",
-            npc, summary.damage_to_npc_type[i],
-            npc, summary.resolved_hits_to_npc_type[i],
-            npc, summary.damaging_hits_to_npc_type[i],
-            npc, summary.attack_cycles_to_npc_type[i],
-            npc, summary.target_ticks_by_npc_type[i]);
-    }
-
-    fprintf(stderr, ",\"env/n\":1.0}\n");
+        summary.jad_kill_rate,
+        summary.prayer_uptime_range,
+        summary.prayer_uptime_melee,
+        summary.prayer_uptime_magic,
+        summary.npc_healing_total,
+        summary.jad_healing_total,
+        summary.episode_length);
 }
 
 static void sync_player_appearance(ViewerState *v) {

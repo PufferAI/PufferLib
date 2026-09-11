@@ -82,7 +82,7 @@ static void check_observation(const FcState* state) {
 }
 
 static int core_contract_test(void) {
-    _Static_assert(FC_STATE_HASH_VERSION == 5, "equipment state hash version drifted");
+    _Static_assert(FC_STATE_HASH_VERSION == 6, "analytics state hash version drifted");
     _Static_assert(FC_POLICY_OBS_SIZE == 286, "policy observation contract drifted");
     _Static_assert(FC_PUFFER_OBS_SIZE == 320, "Puffer observation contract drifted");
     _Static_assert(FC_PUFFER_MASK_SIZE == 34, "Puffer mask contract drifted");
@@ -114,7 +114,7 @@ static int core_contract_test(void) {
     if (!fc_is_terminal(&first))
         fail("test trajectory did not exercise a terminal transition");
 
-    if (steps != 483 || fc_state_hash(&first) != 0x5fcadd73u)
+    if (steps != 483 || fc_state_hash(&first) != 0x5c53c26du)
         fail("fixed-seed trajectory changed; review and update the contract fixture intentionally");
 
     printf("core_contract_test: passed (%d steps, hash=%08x)\n",
@@ -143,6 +143,73 @@ static int item_slot(const FcPlayer *p, int id) {
     for (int i = 0; i < FC_INVENTORY_SLOTS; i++)
         if (p->inventory[i].item_id == id) return i;
     return -1;
+}
+
+static int episode_analytics_test(void) {
+    FcState s;
+    FcRewardRuntime runtime;
+    FcRewardParams params = fc_reward_default_params();
+    FcEpisodeSummary summary;
+    reset(&s, 0);
+    memset(s.npcs, 0, sizeof(s.npcs));
+    s.current_wave = 63;
+    int jad = fc_spawn_npc_first_free(&s, NPC_TZTOK_JAD, 10, 10);
+    CHECK(jad >= 0);
+    s.npcs[jad].current_hp -= 100;
+    fc_reward_runtime_begin_episode(&runtime, &s);
+
+    /* Idle, damage, healing, idle: only the two idle ticks count as zero
+     * progress. Healing totals use effective HP restored, capped at max HP. */
+    fc_reward_compute_breakdown(&s, &params, &runtime);
+    s.npcs[jad].current_hp -= 10;
+    fc_reward_compute_breakdown(&s, &params, &runtime);
+    CHECK(apply_npc_heal(&s, &s.npcs[jad], &s.npcs[jad], 200) == 110);
+    fc_reward_compute_breakdown(&s, &params, &runtime);
+    clear_per_tick_flags(&s);
+    fc_reward_compute_breakdown(&s, &params, &runtime);
+    CHECK(runtime.zero_progress_ticks == 2);
+    CHECK(runtime.npc_healing_total == 110 && runtime.jad_healing_total == 110);
+
+    /* No prayer and correct prayer are excluded from wrong-prayer hits,
+     * including when an attack rolls zero damage. */
+    const int prayers[] = {PRAYER_NONE, PRAYER_PROTECT_MAGIC, PRAYER_PROTECT_RANGE};
+    for (int i = 0; i < 3; i++) {
+        CHECK(fc_queue_pending_hit(s.player.pending_hits, &s.player.num_pending_hits,
+            FC_MAX_PENDING_HITS, 0, 1, ATTACK_RANGED, jad, 0));
+        s.player.pending_hits[i].prayer_snapshot = prayers[i];
+    }
+    fc_resolve_player_pending_hits(&s);
+    CHECK(s.ep_wrong_prayer_hits == 1);
+
+    const int actions[FC_NUM_ACTION_HEADS] = {0};
+    for (int prayer = PRAYER_PROTECT_MELEE; prayer <= PRAYER_PROTECT_MAGIC; prayer++) {
+        s.player.prayer = prayer;
+        fc_step(&s, actions);
+    }
+    complete_fight_caves(&s);
+    fc_episode_summary_build(&s, &runtime, 3, &summary);
+    CHECK(summary.wave_reached == 63 && summary.reached_wave_63 == 1);
+    CHECK(summary.jad_kill_rate == 1 && summary.wrong_prayer_hits == 1);
+    CHECK(summary.prayer_uptime_melee == 1.0f / 3.0f);
+    CHECK(summary.prayer_uptime_range == 1.0f / 3.0f);
+    CHECK(summary.prayer_uptime_magic == 1.0f / 3.0f);
+
+    fc_reset(&s, 101);
+    fc_reward_runtime_begin_episode(&runtime, &s);
+    fc_episode_summary_build(&s, &runtime, 0, &summary);
+    CHECK(summary.wave_reached == 1 && summary.episode_length == 0);
+    CHECK(summary.zero_progress_ticks == 0 && summary.wrong_prayer_hits == 0);
+    CHECK(summary.reached_wave_63 == 0 && summary.jad_kill_rate == 0);
+    CHECK(summary.npc_healing_total == 0 && summary.jad_healing_total == 0);
+    CHECK(summary.prayer_uptime_melee == 0 && summary.prayer_uptime_range == 0 &&
+          summary.prayer_uptime_magic == 0);
+    /* Multiple invalid heads still incur one invalid-action penalty. */
+    const int invalid_actions[FC_NUM_ACTION_HEADS] = {999, 999, 999};
+    fc_step(&s, invalid_actions);
+    CHECK(s.invalid_action_this_tick == 1);
+    fc_destroy(&s);
+    puts("episode_analytics_test: progress, healing, prayers, Jad and reset passed");
+    return 0;
 }
 
 static int loadout_totals(void) {
@@ -715,7 +782,7 @@ static int equipment_appearance_test(void) {
 
 int main(void) {
     wave_rotation_test();
-    if (core_contract_test() || equipment_test()) return 1;
+    if (core_contract_test() || equipment_test() || episode_analytics_test()) return 1;
 #ifdef FC_VIEWER_TEST
     if (context_menu_test() || click_feedback_test() || model_picking_test() ||
         equipment_appearance_test()) return 1;

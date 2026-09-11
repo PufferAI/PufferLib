@@ -163,13 +163,6 @@ typedef enum {
     TERMINAL_TICK_CAP      = 3
 } FcTerminalCode;
 
-/* Invalid-action diagnostic classes for Puffer-facing heads 0-2. */
-typedef enum {
-    FC_INVALID_ACTION_MOVE   = 0,
-    FC_INVALID_ACTION_ATTACK = 1,
-    FC_INVALID_ACTION_PRAYER = 2,
-    FC_INVALID_ACTION_CLASS_COUNT = 3
-} FcInvalidActionClass;
 
 /* NPC spawn direction for wave rotations */
 typedef enum {
@@ -372,19 +365,11 @@ typedef struct {
 
     /* Per-tick event flags (cleared each tick, used for obs/reward/hitsplats) */
     int damage_taken_this_tick;
-    int hit_style_this_tick;    /* FcAttackStyle of the last hit that resolved this tick */
-    int hit_source_npc_type;    /* FcNpcType of the NPC that landed the last hit this tick */
-    int hit_locked_prayer_this_tick; /* FcPrayer snapshot used for the last resolved hit */
-    int hit_blocked_this_tick;  /* 1 if the last resolved hit this tick was prayer-blocked */
     int hit_landed_this_tick;
     int food_eaten_this_tick;
     int potion_used_this_tick;
     int prayer_changed_this_tick;
 
-    /* Cumulative stats (for reward/logging) */
-    int total_damage_taken;
-    int total_food_eaten;
-    int total_potions_used;
     FcItemStack inventory[FC_INVENTORY_SLOTS];
     FcItemStack equipment[FC_EQUIPMENT_SLOTS];
     int melee_attack_bonus, melee_strength_bonus;
@@ -578,7 +563,6 @@ typedef struct {
     int current_wave;       /* 1-indexed: 1..63. 0 = not started */
     int rotation_id;        /* 0..14, selected at episode start */
     int npcs_remaining;     /* count of active (alive) NPCs in current wave */
-    int total_npcs_killed;
     int next_spawn_index;   /* monotonic counter for NPC spawn ordering */
 
     /* Tick */
@@ -622,7 +606,6 @@ typedef struct {
     int wrong_danger_prayer;
     int attack_attempt_this_tick;
     int invalid_action_this_tick;
-    int invalid_action_class_this_tick[FC_INVALID_ACTION_CLASS_COUNT];
     int movement_this_tick;
     int idle_this_tick;
     int food_used_this_tick;
@@ -630,7 +613,6 @@ typedef struct {
     int jad_heal_procs_this_tick;   /* number of Yt-HurKot heal procs that restored Jad HP */
     int npc_heal_procs_this_tick;   /* number of NPC heal procs that restored any NPC HP */
     int npc_heal_amount_this_tick;  /* total NPC HP restored this tick */
-    int mejkot_heal_amount_this_tick; /* total HP restored by Yt-MejKot this tick */
     int jad_heal_amount_this_tick;    /* total HP restored to Jad this tick */
 
     /* Derived progression state, maintained by reward/runtime code for obs. */
@@ -644,46 +626,9 @@ typedef struct {
     int ep_ticks_pray_melee;    /* ticks with protect melee active */
     int ep_ticks_pray_range;    /* ticks with protect range active */
     int ep_ticks_pray_magic;    /* ticks with protect magic active */
-    int ep_correct_blocks;      /* hits correctly blocked by matching prayer */
     int ep_wrong_prayer_hits;   /* hits where prayer active but wrong type */
-    int ep_no_prayer_hits;      /* hits where no prayer was active */
-    int ep_damage_blocked;      /* total damage prevented by correct prayer */
-    int ep_prayer_switches;     /* number of prayer changes */
-    int ep_pots_used;           /* prayer pot doses consumed */
-    int ep_pots_wasted;         /* doses consumed when prayer was above 20% */
-    int ep_pot_pre_prayer_sum;  /* prayer points before each potion use */
-    int ep_food_eaten;          /* sharks consumed */
-    int ep_food_pre_hp_sum;     /* HP before each food use */
-    int ep_food_overhealed;     /* sharks that overhealed (wasted HP) */
-    int ep_pots_overrestored;   /* doses that over-restored (wasted prayer) */
-    int ep_tokxil_melee_ticks;  /* ticks with any Tok-Xil at melee distance */
-    int ep_ketzek_melee_ticks;  /* ticks with any Ket-Zek at melee distance */
-    int ep_attack_ready_ticks;  /* ticks where attack cooldown was ready */
-    int ep_attack_attempt_ticks;/* ready ticks where a real attack fired */
-    int ep_invalid_action_classes[FC_INVALID_ACTION_CLASS_COUNT];
-    int ep_damage_to_npc_type[NPC_TYPE_COUNT];       /* player damage by NPC type */
-    int ep_resolved_hits_to_npc_type[NPC_TYPE_COUNT];/* all resolved player hitsplats, including 0s */
-    int ep_damaging_hits_to_npc_type[NPC_TYPE_COUNT];/* resolved player hitsplats with damage > 0 */
-    int ep_attack_cycles_to_npc_type[NPC_TYPE_COUNT];/* actual attack cycles fired by target type */
-    int ep_target_ticks_by_npc_type[NPC_TYPE_COUNT]; /* ticks with active attack target by type */
-    int ep_target_held_ticks;        /* ticks with any active attack target */
-    int ep_no_target_ticks;          /* ticks with NPCs alive and no active attack target */
-    int ep_target_in_range_los_ticks;/* target held, in range, and line of sight available */
-    int ep_target_out_of_range_or_los_ticks; /* target held but cannot currently fire */
-    int ep_attack_cooldown_wait_ticks;       /* target held and fireable, but weapon cooling down */
-    int ep_ready_but_no_attack_ticks;        /* target held/fireable/ready but no attack cycle launched */
-    int ep_action_move_idle_ticks;
-    int ep_action_move_walk_ticks;
-    int ep_action_move_run_ticks;
-    int ep_action_attack_none_ticks;
-    int ep_action_attack_target_ticks;
-    int ep_action_prayer_noop_ticks;
-    int ep_action_prayer_cmd_ticks;
     int ep_reached_wave_63;     /* 1 if episode reached Jad wave */
     int ep_jad_killed;          /* 1 if Jad died at any point this episode */
-    int wave_start_tick;        /* tick when current wave was spawned */
-    int ep_max_wave_ticks;      /* longest single wave duration in ticks */
-    int ep_max_wave_ticks_wave; /* which wave number that was */
 } FcState;
 
 
@@ -1076,64 +1021,6 @@ static const int FC_PUFFER_ACTION_DIMS[FC_PUFFER_NUM_ATNS] = FC_PUFFER_ACT_SIZES
  */
 
 
-/* Episode Summary */
-
-/* Read-only, consumer-neutral episode metrics derived from FcState. Training
- * may aggregate these values and evaluators may serialize them, but neither
- * consumer should independently reproduce their formulas. */
-typedef struct {
-    int episode_length;
-    int wave_reached;
-    int npcs_slayed;
-    float prayer_uptime_melee;
-    float prayer_uptime_range;
-    float prayer_uptime_magic;
-    int correct_prayer;
-    int wrong_prayer_hits;
-    int no_prayer_hits;
-    int prayer_switches;
-    int damage_blocked;
-    int damage_taken;
-    float attack_when_ready_rate;
-    int invalid_move;
-    int invalid_attack;
-    int invalid_prayer;
-    int tokxil_melee_ticks;
-    int ketzek_melee_ticks;
-    int max_wave_ticks;
-    int max_wave_ticks_wave;
-    int reached_wave_63;
-    int jad_killed;
-    int player_died;
-    int damage_to_npc_type[NPC_TYPE_COUNT];
-    int resolved_hits_to_npc_type[NPC_TYPE_COUNT];
-    int damaging_hits_to_npc_type[NPC_TYPE_COUNT];
-    int attack_cycles_to_npc_type[NPC_TYPE_COUNT];
-    int target_ticks_by_npc_type[NPC_TYPE_COUNT];
-    int target_held_ticks;
-    int no_target_ticks;
-    int target_in_range_los_ticks;
-    int target_out_of_range_or_los_ticks;
-    int attack_cooldown_wait_ticks;
-    int ready_but_no_attack_ticks;
-    int action_move_idle_ticks;
-    int action_move_walk_ticks;
-    int action_move_run_ticks;
-    int action_attack_none_ticks;
-    int action_attack_target_ticks;
-    int action_prayer_noop_ticks;
-    int action_prayer_cmd_ticks;
-} FcEpisodeSummary;
-
-/* episode_length is supplied by the consumer because standalone simulation
- * ticks and adapter step counts can intentionally differ in tests/tools. */
-void fc_episode_summary_build(const FcState* state, int episode_length,
-                              FcEpisodeSummary* summary);
-
-/* Stable lowercase suffix shared by training and evaluator metric keys. */
-const char* fc_episode_npc_metric_name(int npc_type);
-
-
 /* Combat */
 
 /* OSRS accuracy formula: returns hit probability in [0,1] */
@@ -1444,21 +1331,30 @@ typedef struct {
     float last_required_work_remaining;
     float last_current_wave_progress;
     float last_cave_progress;
-    float last_progress_delta;
-    float last_progress_reward;
-    float last_net_required_work_removed;
     int ticks_since_positive_progress;
-    int positive_progress_ticks;
     int zero_progress_ticks;
-    int negative_progress_ticks;
+    float npc_healing_total;
+    float jad_healing_total;
 } FcRewardRuntime;
 
+/* Episode analytics shared by training and checkpoint evaluation. */
 typedef struct {
-    int melee_pressure_npcs;
-    int any_threat;
-    int tokxil_melee;
-    int ketzek_melee;
-} FcRewardThreatContext;
+    int zero_progress_ticks;
+    int wave_reached;
+    int wrong_prayer_hits;
+    int reached_wave_63;
+    int jad_kill_rate;
+    float prayer_uptime_range;
+    float prayer_uptime_melee;
+    float prayer_uptime_magic;
+    float npc_healing_total;
+    float jad_healing_total;
+    int episode_length;
+} FcEpisodeSummary;
+
+void fc_episode_summary_build(const FcState* state, const FcRewardRuntime* runtime,
+                              int episode_length, FcEpisodeSummary* summary);
+
 
 typedef struct {
     float raw[FC_REWARD_FEATURES];
@@ -1486,37 +1382,9 @@ typedef struct {
     float tick_penalty;
 
     float total;
-    FcRewardThreatContext threat_ctx;
+    int any_threat;
 } FcRewardBreakdown;
 
-/* One slot per named breakdown field, excluding raw inputs and the total. */
-typedef enum {
-    FC_CH_DAMAGE_DEALT = 0,
-    FC_CH_PROGRESS,
-    FC_CH_DAMAGE_TAKEN,
-    FC_CH_NPC_KILL,
-    FC_CH_WAVE_CLEAR,
-    FC_CH_JAD_KILL,
-    FC_CH_CAVE_COMPLETE,
-    FC_CH_PLAYER_DEATH,
-    FC_CH_CORRECT_JAD_PRAYER,
-    FC_CH_CORRECT_DANGER_PRAYER,
-    FC_CH_PRAYER_LOST,
-    FC_CH_UNNECESSARY_PRAYER,
-    FC_CH_WAVE_STALL,
-    FC_CH_NO_PROGRESS,
-    FC_CH_NO_ATTACK,
-    FC_CH_JAD_HEAL,
-    FC_CH_NPC_HEAL,
-    FC_CH_INVALID_ACTION,
-    FC_CH_TICK_PENALTY,
-    FC_CH_COUNT
-} FcRwdChannel;
-
-extern const char* const FC_CH_NAMES[FC_CH_COUNT];
-
-void fc_reward_breakdown_channels(const FcRewardBreakdown* breakdown,
-                                  float out[FC_CH_COUNT]);
 FcRewardParams fc_reward_default_params(void);
 void fc_reward_runtime_reset(FcRewardRuntime* runtime);
 float fc_reward_player_death_scale(const FcRewardParams* params,
@@ -1637,13 +1505,6 @@ int fc_visible_npc_indices(const FcState* state, int out_indices[FC_VISIBLE_NPCS
  * 1.0 = valid action, 0.0 = invalid. */
 void fc_write_mask(const FcState* state, float* out);
 
-/* Fill out_classes with 0/1 invalid-action diagnostics for Puffer-facing heads
- * 0-2 only: move, attack, prayer. Core consumable/path-target heads stay
- * excluded because the no-supplies policy does not emit them. */
-void fc_action_invalid_classes(const FcState* state,
-                               const int actions[FC_NUM_ACTION_HEADS],
-                               int out_classes[FC_INVALID_ACTION_CLASS_COUNT]);
-
 /* Compute and write reward features for the current tick.
  * out must have room for FC_REWARD_FEATURES floats.
  * These are raw feature values (not weighted). Python applies shaping weights. */
@@ -1656,9 +1517,9 @@ int fc_is_terminal(const FcState* state);
 /* Determinism                                                               */
 /* ======================================================================== */
 
-/* Version 5 includes inventory, equipment, selected consumable slots and
- * unarmed bonuses. Policy observations and action dimensions are unchanged. */
-#define FC_STATE_HASH_VERSION 5u
+/* Version 6 removes retired analytics from the serialized state.
+ * Gameplay, policy observations, actions and rewards are unchanged. */
+#define FC_STATE_HASH_VERSION 6u
 
 /*
  * Compute a deterministic hash of the game state.
@@ -1768,11 +1629,6 @@ int fc_spawn_find_available_footprint(const FcState* state,
                                       int* out_x, int* out_y);
 
 int fc_spawn_npc_first_free(FcState* state, int npc_type, int x, int y);
-
-
-/* Wave Internal */
-
-void fc_wave_record_current_duration(FcState* state);
 
 
 /* Combat */
@@ -2133,12 +1989,7 @@ void fc_resolve_player_pending_hits(FcState* state) {
             if (p->current_hp < 0) p->current_hp = 0;
 
             p->damage_taken_this_tick += final_damage;
-            p->hit_style_this_tick = h->attack_style;
-            p->hit_source_npc_type = state->npcs[h->source_npc_idx].npc_type;
-            p->hit_locked_prayer_this_tick = locked_prayer;
-            p->hit_blocked_this_tick = blocked;
             state->damage_taken_this_tick += final_damage;
-            p->total_damage_taken += final_damage;
             p->hit_landed_this_tick = 1;
             record_render_hit(state, ENTITY_PLAYER, -1,
                               h->source_npc_idx, h->attack_style,
@@ -2191,17 +2042,8 @@ void fc_resolve_player_pending_hits(FcState* state) {
                 else state->wrong_danger_prayer = 1;
             }
 
-            /* Episode-level hit analytics */
-            if (locked_prayer != PRAYER_NONE) {
-                if (blocked) {
-                    state->ep_correct_blocks++;
-                    state->ep_damage_blocked += h->damage;
-                } else {
-                    state->ep_wrong_prayer_hits++;
-                }
-            } else {
-                state->ep_no_prayer_hits++;
-            }
+            if (locked_prayer != PRAYER_NONE && !blocked)
+                state->ep_wrong_prayer_hits++;
 
             h->active = 0;  /* consumed */
         } else {
@@ -2231,7 +2073,6 @@ static void complete_fight_caves(FcState* state) {
     }
     state->wave_just_cleared = 1;
     state->terminal = TERMINAL_CAVE_COMPLETE;
-    fc_wave_record_current_duration(state);
 }
 
 static void resolve_npc_death(FcState* state, FcNpc* npc) {
@@ -2246,7 +2087,6 @@ static void resolve_npc_death(FcState* state, FcNpc* npc) {
         npc->is_respawned_jad_healer) {
         state->respawned_jad_healers_killed_this_tick++;
     }
-    state->total_npcs_killed++;
 
     if (npc->npc_type == NPC_TZTOK_JAD) {
         complete_fight_caves(state);
@@ -2277,13 +2117,7 @@ void fc_resolve_npc_pending_hits(FcState* state, int npc_idx) {
 
             npc->damage_taken_this_tick += h->damage;
             state->damage_dealt_this_tick += h->damage;
-            if (npc->npc_type > NPC_NONE && npc->npc_type < NPC_TYPE_COUNT) {
-                state->ep_resolved_hits_to_npc_type[npc->npc_type]++;
-                state->ep_damage_to_npc_type[npc->npc_type] += h->damage;
-                if (h->damage > 0) {
-                    state->ep_damaging_hits_to_npc_type[npc->npc_type]++;
-                }
-            }
+
             if (h->damage > 0) {
                 state->hits_landed_this_tick++;
             }
@@ -2320,15 +2154,17 @@ void fc_resolve_npc_pending_hits(FcState* state, int npc_idx) {
 /* Episode Summary */
 #include <string.h>
 
-void fc_episode_summary_build(const FcState* state, int episode_length,
-                              FcEpisodeSummary* summary) {
-    if (!summary) return;
+void fc_episode_summary_build(const FcState* state, const FcRewardRuntime* runtime,
+                              int episode_length, FcEpisodeSummary* summary) {
     memset(summary, 0, sizeof(*summary));
-    if (!state) return;
-
     summary->episode_length = episode_length;
     summary->wave_reached = state->current_wave;
-    summary->npcs_slayed = state->total_npcs_killed;
+    summary->wrong_prayer_hits = state->ep_wrong_prayer_hits;
+    summary->reached_wave_63 = state->ep_reached_wave_63;
+    summary->jad_kill_rate = state->ep_jad_killed;
+    summary->zero_progress_ticks = runtime->zero_progress_ticks;
+    summary->npc_healing_total = runtime->npc_healing_total;
+    summary->jad_healing_total = runtime->jad_healing_total;
     if (episode_length > 0) {
         summary->prayer_uptime_melee =
             (float)state->ep_ticks_pray_melee / (float)episode_length;
@@ -2336,79 +2172,6 @@ void fc_episode_summary_build(const FcState* state, int episode_length,
             (float)state->ep_ticks_pray_range / (float)episode_length;
         summary->prayer_uptime_magic =
             (float)state->ep_ticks_pray_magic / (float)episode_length;
-    }
-    summary->correct_prayer = state->ep_correct_blocks;
-    summary->wrong_prayer_hits = state->ep_wrong_prayer_hits;
-    summary->no_prayer_hits = state->ep_no_prayer_hits;
-    summary->prayer_switches = state->ep_prayer_switches;
-    summary->damage_blocked = state->ep_damage_blocked;
-    summary->damage_taken = state->player.total_damage_taken;
-    if (state->ep_attack_ready_ticks > 0) {
-        summary->attack_when_ready_rate =
-            (float)state->ep_attack_attempt_ticks /
-            (float)state->ep_attack_ready_ticks;
-    }
-    summary->invalid_move =
-        state->ep_invalid_action_classes[FC_INVALID_ACTION_MOVE];
-    summary->invalid_attack =
-        state->ep_invalid_action_classes[FC_INVALID_ACTION_ATTACK];
-    summary->invalid_prayer =
-        state->ep_invalid_action_classes[FC_INVALID_ACTION_PRAYER];
-    summary->tokxil_melee_ticks = state->ep_tokxil_melee_ticks;
-    summary->ketzek_melee_ticks = state->ep_ketzek_melee_ticks;
-    summary->max_wave_ticks = state->ep_max_wave_ticks;
-    summary->max_wave_ticks_wave = state->ep_max_wave_ticks_wave;
-    summary->reached_wave_63 = state->ep_reached_wave_63;
-    summary->jad_killed = state->ep_jad_killed;
-    summary->player_died = state->terminal == TERMINAL_PLAYER_DEATH;
-
-    memcpy(summary->damage_to_npc_type, state->ep_damage_to_npc_type,
-           sizeof(summary->damage_to_npc_type));
-    memcpy(summary->resolved_hits_to_npc_type,
-           state->ep_resolved_hits_to_npc_type,
-           sizeof(summary->resolved_hits_to_npc_type));
-    memcpy(summary->damaging_hits_to_npc_type,
-           state->ep_damaging_hits_to_npc_type,
-           sizeof(summary->damaging_hits_to_npc_type));
-    memcpy(summary->attack_cycles_to_npc_type,
-           state->ep_attack_cycles_to_npc_type,
-           sizeof(summary->attack_cycles_to_npc_type));
-    memcpy(summary->target_ticks_by_npc_type,
-           state->ep_target_ticks_by_npc_type,
-           sizeof(summary->target_ticks_by_npc_type));
-
-    summary->target_held_ticks = state->ep_target_held_ticks;
-    summary->no_target_ticks = state->ep_no_target_ticks;
-    summary->target_in_range_los_ticks =
-        state->ep_target_in_range_los_ticks;
-    summary->target_out_of_range_or_los_ticks =
-        state->ep_target_out_of_range_or_los_ticks;
-    summary->attack_cooldown_wait_ticks =
-        state->ep_attack_cooldown_wait_ticks;
-    summary->ready_but_no_attack_ticks =
-        state->ep_ready_but_no_attack_ticks;
-    summary->action_move_idle_ticks = state->ep_action_move_idle_ticks;
-    summary->action_move_walk_ticks = state->ep_action_move_walk_ticks;
-    summary->action_move_run_ticks = state->ep_action_move_run_ticks;
-    summary->action_attack_none_ticks = state->ep_action_attack_none_ticks;
-    summary->action_attack_target_ticks =
-        state->ep_action_attack_target_ticks;
-    summary->action_prayer_noop_ticks = state->ep_action_prayer_noop_ticks;
-    summary->action_prayer_cmd_ticks = state->ep_action_prayer_cmd_ticks;
-}
-
-const char* fc_episode_npc_metric_name(int npc_type) {
-    switch (npc_type) {
-        case NPC_NONE:      return "none";
-        case NPC_TZ_KIH:    return "tz_kih";
-        case NPC_TZ_KEK:    return "tz_kek";
-        case NPC_TZ_KEK_SM: return "tz_kek_sm";
-        case NPC_TOK_XIL:   return "tok_xil";
-        case NPC_YT_MEJKOT: return "yt_mejkot";
-        case NPC_KET_ZEK:   return "ket_zek";
-        case NPC_TZTOK_JAD: return "tztok_jad";
-        case NPC_YT_HURKOT: return "yt_hurkot";
-        default:            return "unknown";
     }
 }
 
@@ -2418,7 +2181,7 @@ const char* fc_episode_npc_metric_name(int npc_type) {
 #include <string.h>
 
 /*
- * Version 2 serializes every FcState field explicitly in the documented order
+ * The state hash serializes every FcState field explicitly in the documented order
  * below, including whole-tile, directional movement, and projectile collision
  * maps. Signed integers and floats are represented by 32 bits, then fed
  * least-significant byte first. Arena bytes are fed directly. This order is
@@ -2526,17 +2289,10 @@ static uint32_t fc_hash_player(uint32_t hash, const FcPlayer* player) {
     }
     FC_HASH_I32(player->num_pending_hits);
     FC_HASH_I32(player->damage_taken_this_tick);
-    FC_HASH_I32(player->hit_style_this_tick);
-    FC_HASH_I32(player->hit_source_npc_type);
-    FC_HASH_I32(player->hit_locked_prayer_this_tick);
-    FC_HASH_I32(player->hit_blocked_this_tick);
     FC_HASH_I32(player->hit_landed_this_tick);
     FC_HASH_I32(player->food_eaten_this_tick);
     FC_HASH_I32(player->potion_used_this_tick);
     FC_HASH_I32(player->prayer_changed_this_tick);
-    FC_HASH_I32(player->total_damage_taken);
-    FC_HASH_I32(player->total_food_eaten);
-    FC_HASH_I32(player->total_potions_used);
     for (int i = 0; i < FC_INVENTORY_SLOTS; i++) {
         FC_HASH_I32(player->inventory[i].item_id);
         FC_HASH_I32(player->inventory[i].quantity);
@@ -2602,7 +2358,6 @@ uint32_t fc_state_hash(const FcState* state) {
     FC_HASH_I32(state->current_wave);
     FC_HASH_I32(state->rotation_id);
     FC_HASH_I32(state->npcs_remaining);
-    FC_HASH_I32(state->total_npcs_killed);
     FC_HASH_I32(state->next_spawn_index);
     FC_HASH_I32(state->tick);
     FC_HASH_I32(state->terminal);
@@ -2644,9 +2399,6 @@ uint32_t fc_state_hash(const FcState* state) {
     FC_HASH_I32(state->wrong_danger_prayer);
     FC_HASH_I32(state->attack_attempt_this_tick);
     FC_HASH_I32(state->invalid_action_this_tick);
-    for (int i = 0; i < FC_INVALID_ACTION_CLASS_COUNT; ++i) {
-        FC_HASH_I32(state->invalid_action_class_this_tick[i]);
-    }
     FC_HASH_I32(state->movement_this_tick);
     FC_HASH_I32(state->idle_this_tick);
     FC_HASH_I32(state->food_used_this_tick);
@@ -2654,7 +2406,6 @@ uint32_t fc_state_hash(const FcState* state) {
     FC_HASH_I32(state->jad_heal_procs_this_tick);
     FC_HASH_I32(state->npc_heal_procs_this_tick);
     FC_HASH_I32(state->npc_heal_amount_this_tick);
-    FC_HASH_I32(state->mejkot_heal_amount_this_tick);
     FC_HASH_I32(state->jad_heal_amount_this_tick);
 
     FC_HASH_F32(state->progress_required_work_start);
@@ -2666,50 +2417,9 @@ uint32_t fc_state_hash(const FcState* state) {
     FC_HASH_I32(state->ep_ticks_pray_melee);
     FC_HASH_I32(state->ep_ticks_pray_range);
     FC_HASH_I32(state->ep_ticks_pray_magic);
-    FC_HASH_I32(state->ep_correct_blocks);
     FC_HASH_I32(state->ep_wrong_prayer_hits);
-    FC_HASH_I32(state->ep_no_prayer_hits);
-    FC_HASH_I32(state->ep_damage_blocked);
-    FC_HASH_I32(state->ep_prayer_switches);
-    FC_HASH_I32(state->ep_pots_used);
-    FC_HASH_I32(state->ep_pots_wasted);
-    FC_HASH_I32(state->ep_pot_pre_prayer_sum);
-    FC_HASH_I32(state->ep_food_eaten);
-    FC_HASH_I32(state->ep_food_pre_hp_sum);
-    FC_HASH_I32(state->ep_food_overhealed);
-    FC_HASH_I32(state->ep_pots_overrestored);
-    FC_HASH_I32(state->ep_tokxil_melee_ticks);
-    FC_HASH_I32(state->ep_ketzek_melee_ticks);
-    FC_HASH_I32(state->ep_attack_ready_ticks);
-    FC_HASH_I32(state->ep_attack_attempt_ticks);
-    for (int i = 0; i < FC_INVALID_ACTION_CLASS_COUNT; ++i) {
-        FC_HASH_I32(state->ep_invalid_action_classes[i]);
-    }
-    for (int i = 0; i < NPC_TYPE_COUNT; ++i) {
-        FC_HASH_I32(state->ep_damage_to_npc_type[i]);
-        FC_HASH_I32(state->ep_resolved_hits_to_npc_type[i]);
-        FC_HASH_I32(state->ep_damaging_hits_to_npc_type[i]);
-        FC_HASH_I32(state->ep_attack_cycles_to_npc_type[i]);
-        FC_HASH_I32(state->ep_target_ticks_by_npc_type[i]);
-    }
-    FC_HASH_I32(state->ep_target_held_ticks);
-    FC_HASH_I32(state->ep_no_target_ticks);
-    FC_HASH_I32(state->ep_target_in_range_los_ticks);
-    FC_HASH_I32(state->ep_target_out_of_range_or_los_ticks);
-    FC_HASH_I32(state->ep_attack_cooldown_wait_ticks);
-    FC_HASH_I32(state->ep_ready_but_no_attack_ticks);
-    FC_HASH_I32(state->ep_action_move_idle_ticks);
-    FC_HASH_I32(state->ep_action_move_walk_ticks);
-    FC_HASH_I32(state->ep_action_move_run_ticks);
-    FC_HASH_I32(state->ep_action_attack_none_ticks);
-    FC_HASH_I32(state->ep_action_attack_target_ticks);
-    FC_HASH_I32(state->ep_action_prayer_noop_ticks);
-    FC_HASH_I32(state->ep_action_prayer_cmd_ticks);
     FC_HASH_I32(state->ep_reached_wave_63);
     FC_HASH_I32(state->ep_jad_killed);
-    FC_HASH_I32(state->wave_start_tick);
-    FC_HASH_I32(state->ep_max_wave_ticks);
-    FC_HASH_I32(state->ep_max_wave_ticks_wave);
     return hash;
 }
 
@@ -3890,9 +3600,7 @@ static int apply_npc_heal(FcState* state, FcNpc* source, FcNpc* target,
 
     state->npc_heal_procs_this_tick++;
     state->npc_heal_amount_this_tick += amount;
-    if (source->npc_type == NPC_YT_MEJKOT) {
-        state->mejkot_heal_amount_this_tick += amount;
-    }
+
     if (target->npc_type == NPC_TZTOK_JAD) {
         state->jad_heal_amount_this_tick += amount;
     }
@@ -4897,39 +4605,6 @@ int fc_prayer_potion_restore(int prayer_level) {
 /* Reward */
 #include <string.h>
 
-const char* const FC_CH_NAMES[FC_CH_COUNT] = {
-    "damage_dealt", "progress", "damage_taken", "npc_kill", "wave_clear",
-    "jad_kill", "cave_complete", "player_death", "correct_jad_prayer",
-    "correct_danger_prayer", "prayer_lost", "unnecessary_prayer", "wave_stall",
-    "no_progress", "no_attack", "jad_heal", "npc_heal", "invalid_action",
-    "tick_penalty"
-};
-
-/* Populate a contiguous array view of the breakdown channels for iteration.
- * Order matches FcRwdChannel enum above. */
-void fc_reward_breakdown_channels(const FcRewardBreakdown* b,
-                                  float out[FC_CH_COUNT]) {
-    out[FC_CH_DAMAGE_DEALT]             = b->damage_dealt;
-    out[FC_CH_PROGRESS]                 = b->progress;
-    out[FC_CH_DAMAGE_TAKEN]             = b->damage_taken;
-    out[FC_CH_NPC_KILL]                 = b->npc_kill;
-    out[FC_CH_WAVE_CLEAR]               = b->wave_clear;
-    out[FC_CH_JAD_KILL]                 = b->jad_kill;
-    out[FC_CH_CAVE_COMPLETE]            = b->cave_complete;
-    out[FC_CH_PLAYER_DEATH]             = b->player_death;
-    out[FC_CH_CORRECT_JAD_PRAYER]       = b->correct_jad_prayer;
-    out[FC_CH_CORRECT_DANGER_PRAYER]    = b->correct_danger_prayer;
-    out[FC_CH_PRAYER_LOST]              = b->prayer_lost;
-    out[FC_CH_UNNECESSARY_PRAYER]       = b->unnecessary_prayer;
-    out[FC_CH_WAVE_STALL]               = b->wave_stall;
-    out[FC_CH_NO_PROGRESS]              = b->no_progress;
-    out[FC_CH_NO_ATTACK]                = b->no_attack;
-    out[FC_CH_JAD_HEAL]                 = b->jad_heal;
-    out[FC_CH_NPC_HEAL]                 = b->npc_heal;
-    out[FC_CH_INVALID_ACTION]           = b->invalid_action;
-    out[FC_CH_TICK_PENALTY]             = b->tick_penalty;
-}
-
 FcRewardParams fc_reward_default_params(void) {
     FcRewardParams params;
     memset(&params, 0, sizeof(params));
@@ -5073,36 +4748,17 @@ void fc_reward_runtime_begin_episode(
     fc_reward_sync_progress_state(state, runtime);
 }
 
-static FcRewardThreatContext reward_collect_threat_context(
-        const FcState* state) {
-    FcRewardThreatContext ctx;
+static int reward_has_threat(const FcState* state) {
     const FcPlayer* p = &state->player;
-
-    memset(&ctx, 0, sizeof(ctx));
-
     for (int i = 0; i < FC_MAX_NPCS; i++) {
         const FcNpc* n = &state->npcs[i];
-        if (!n->active || n->is_dead) continue;
-
-        int dist = fc_distance_to_npc(p->x, p->y, n);
-        if (dist <= 1) {
-            ctx.melee_pressure_npcs++;
-            if (n->npc_type == NPC_TOK_XIL) ctx.tokxil_melee = 1;
-            if (n->npc_type == NPC_KET_ZEK) ctx.ketzek_melee = 1;
-        }
-
-        if (dist <= n->attack_range) {
-            ctx.any_threat = 1;
-        }
+        if (n->active && !n->is_dead &&
+            fc_distance_to_npc(p->x, p->y, n) <= n->attack_range) return 1;
     }
-
     for (int i = 0; i < p->num_pending_hits; i++) {
-        const FcPendingHit* ph = &p->pending_hits[i];
-        if (!ph->active) continue;
-        ctx.any_threat = 1;
+        if (p->pending_hits[i].active) return 1;
     }
-
-    return ctx;
+    return 0;
 }
 
 FcRewardBreakdown fc_reward_compute_breakdown(
@@ -5113,7 +4769,7 @@ FcRewardBreakdown fc_reward_compute_breakdown(
 
     memset(&out, 0, sizeof(out));
     fc_write_reward_features(state, out.raw);
-    out.threat_ctx = reward_collect_threat_context(state);
+    out.any_threat = reward_has_threat(state);
     prayer_reward_idle =
         (runtime->ticks_since_attack >= 1 && out.raw[FC_RWD_ATTACK_ATTEMPT] <= 0.0f);
 
@@ -5128,7 +4784,7 @@ FcRewardBreakdown fc_reward_compute_breakdown(
             ((start_work > 0.0f) ? start_work : 0.0f);
 
         /* Scalar reward uses raw net required-work removed. The cave-progress
-         * delta stays normalized for observations/logs, while this channel pays
+         * delta stays normalized for observations, while this channel pays
          * for actual HP/work removed and goes negative when healing restores
          * work. The optional negative multiplier makes restored work more costly
          * without changing positive progress. Multiplying by the wave's start
@@ -5143,20 +4799,12 @@ FcRewardBreakdown fc_reward_compute_breakdown(
         runtime->last_required_work_remaining = work_remaining;
         runtime->last_current_wave_progress = wave_progress;
         runtime->last_cave_progress = cave_progress;
-        runtime->last_progress_delta = progress_delta;
-        runtime->last_progress_reward = out.progress;
-        runtime->last_net_required_work_removed = net_work_removed;
 
         if (net_work_removed > 0.0001f) {
             runtime->ticks_since_positive_progress = 0;
-            runtime->positive_progress_ticks++;
         } else {
             runtime->ticks_since_positive_progress++;
-            if (net_work_removed < -0.0001f) {
-                runtime->negative_progress_ticks++;
-            } else {
-                runtime->zero_progress_ticks++;
-            }
+            if (net_work_removed >= -0.0001f) runtime->zero_progress_ticks++;
         }
 
         if (params->shape_no_progress_start_1 > 0 &&
@@ -5207,7 +4855,7 @@ FcRewardBreakdown fc_reward_compute_breakdown(
             out.raw[FC_RWD_CORRECT_DANGER_PRAY] * params->w_correct_danger_prayer;
     }
     out.prayer_lost = out.raw[FC_RWD_PRAYER_LOST] * params->w_prayer_lost;
-    if (p->prayer != PRAYER_NONE && !out.threat_ctx.any_threat) {
+    if (p->prayer != PRAYER_NONE && !out.any_threat) {
         out.unnecessary_prayer = params->shape_unnecessary_prayer_penalty;
     }
 
@@ -5300,6 +4948,8 @@ FcRewardBreakdown fc_reward_compute_breakdown(
         out.invalid_action +
         out.tick_penalty;
 
+    runtime->npc_healing_total += (float)state->npc_heal_amount_this_tick;
+    runtime->jad_healing_total += (float)state->jad_heal_amount_this_tick;
     return out;
 }
 
@@ -5629,7 +5279,6 @@ void fc_reset(FcState* state, uint32_t seed) {
     /* Spawn wave 1 NPCs */
     state->current_wave = 1;
     state->next_spawn_index = 0;
-    state->wave_start_tick = 0;
     fc_wave_spawn(state, 1);
 }
 
@@ -6124,16 +5773,6 @@ void fc_write_reward_features(const FcState* state, float* out) {
     out[FC_RWD_PRAYER_LOST]         = (float)state->prayer_lost_this_tick / 10.0f;
 }
 
-void fc_action_invalid_classes(const FcState* state,
-                               const int actions[FC_NUM_ACTION_HEADS],
-                               int out_classes[FC_INVALID_ACTION_CLASS_COUNT]) {
-    /* Keep this aligned with the Puffer-facing policy mask surface:
-     * move, attack, and prayer only. Consumable and path-target heads remain
-     * canonical core actions, but are not emitted by the no-supplies policy. */
-    out_classes[FC_INVALID_ACTION_MOVE] = !move_action_valid(state, actions[0]);
-    out_classes[FC_INVALID_ACTION_ATTACK] = !attack_action_valid(state, actions[1]);
-    out_classes[FC_INVALID_ACTION_PRAYER] = !prayer_action_valid(actions[2]);
-}
 
 void fc_write_mask(const FcState* state, float* out) {
     /* Set all to valid, then mask invalid */
@@ -6277,9 +5916,6 @@ static void clear_per_tick_flags(FcState* state) {
     state->wrong_danger_prayer = 0;
     state->attack_attempt_this_tick = 0;
     state->invalid_action_this_tick = 0;
-    for (int i = 0; i < FC_INVALID_ACTION_CLASS_COUNT; i++) {
-        state->invalid_action_class_this_tick[i] = 0;
-    }
     state->movement_this_tick = 0;
     state->idle_this_tick = 0;
     state->food_used_this_tick = 0;
@@ -6287,15 +5923,10 @@ static void clear_per_tick_flags(FcState* state) {
     state->jad_heal_procs_this_tick = 0;
     state->npc_heal_procs_this_tick = 0;
     state->npc_heal_amount_this_tick = 0;
-    state->mejkot_heal_amount_this_tick = 0;
     state->jad_heal_amount_this_tick = 0;
 
     FcPlayer* p = &state->player;
     p->damage_taken_this_tick = 0;
-    p->hit_style_this_tick = 0;
-    p->hit_source_npc_type = 0;
-    p->hit_locked_prayer_this_tick = 0;
-    p->hit_blocked_this_tick = 0;
     p->hit_landed_this_tick = 0;
     p->food_eaten_this_tick = 0;
     p->potion_used_this_tick = 0;
@@ -6343,44 +5974,6 @@ static int npc_slot_to_index(const FcState* state, int slot) {
 /* Process player actions                                                    */
 /* ======================================================================== */
 
-static void record_player_action_selection(
-    FcState* state, const int actions[FC_NUM_ACTION_HEADS]) {
-    int act_move = actions[0];
-    int act_attack = actions[1];
-    int act_prayer = actions[2];
-    int invalid_classes[FC_INVALID_ACTION_CLASS_COUNT];
-
-    if (state->npcs_remaining > 0) {
-        if (act_move == FC_MOVE_IDLE) {
-            state->ep_action_move_idle_ticks++;
-        } else if (act_move >= FC_MOVE_WALK_N && act_move < FC_MOVE_RUN_N) {
-            state->ep_action_move_walk_ticks++;
-        } else if (act_move >= FC_MOVE_RUN_N && act_move < FC_MOVE_DIM) {
-            state->ep_action_move_run_ticks++;
-        }
-
-        if (act_attack == FC_ATTACK_NONE) {
-            state->ep_action_attack_none_ticks++;
-        } else {
-            state->ep_action_attack_target_ticks++;
-        }
-
-        if (act_prayer == 0) {
-            state->ep_action_prayer_noop_ticks++;
-        } else {
-            state->ep_action_prayer_cmd_ticks++;
-        }
-    }
-
-    fc_action_invalid_classes(state, actions, invalid_classes);
-    for (int i = 0; i < FC_INVALID_ACTION_CLASS_COUNT; i++) {
-        state->invalid_action_class_this_tick[i] = invalid_classes[i];
-        if (invalid_classes[i]) {
-            state->invalid_action_this_tick = 1;
-            state->ep_invalid_action_classes[i]++;
-        }
-    }
-}
 
 static void apply_player_prayer_action(
     FcState* state, int action, FcPrayerTransition* transition) {
@@ -6413,12 +6006,6 @@ static void apply_player_supplies(FcState* state, int eat_action,
             ? &player->food_timer : &player->combo_timer;
         int cooldown = eat_action == FC_EAT_SHARK
             ? FC_FOOD_COOLDOWN_TICKS : FC_COMBO_EAT_TICKS;
-        int pre_eat_hp = player->current_hp;
-        state->ep_food_pre_hp_sum += pre_eat_hp;
-        int hp_missing = player->max_hp - player->current_hp;
-        if (heal > hp_missing) state->ep_food_overhealed++;
-        state->ep_food_eaten++;
-        player->total_food_eaten++;
         player->current_hp += heal;
         if (player->current_hp > player->max_hp) {
             player->current_hp = player->max_hp;
@@ -6431,17 +6018,8 @@ static void apply_player_supplies(FcState* state, int eat_action,
 
     if (drink_action == FC_DRINK_PRAYER_POT &&
         fc_drink_action_valid(state, drink_action)) {
-        int pre_drink_prayer = player->current_prayer;
-        state->ep_pot_pre_prayer_sum += pre_drink_prayer;
-        int prayer_missing = player->max_prayer - player->current_prayer;
-        state->ep_pots_used++;
-        if (player->current_prayer > player->max_prayer / 5) {
-            state->ep_pots_wasted++;
-        }
-        player->total_potions_used++;
         int restore = fc_prayer_potion_restore(
             FC_LOADOUTS[FC_ACTIVE_LOADOUT].prayer_lvl);
-        if (restore > prayer_missing) state->ep_pots_overrestored++;
         player->current_prayer += restore;
         if (player->current_prayer > player->max_prayer) {
             player->current_prayer = player->max_prayer;
@@ -6520,9 +6098,7 @@ static void launch_player_attack(FcState* state, FcNpc* target, int distance) {
     state->render_events.player_attack_target_y = target->y;
     state->render_events.player_attack_target_size = target->size;
     state->render_events.player_attack_hit_delay_ticks = delay;
-    if (target->npc_type > NPC_NONE && target->npc_type < NPC_TYPE_COUNT) {
-        state->ep_attack_cycles_to_npc_type[target->npc_type]++;
-    }
+
     player->attack_timer = player->weapon_speed;
     if (player->weapon_uses_ammo && player->ammo_count > 0) {
         fc_items_spend_ammo(player);
@@ -6530,24 +6106,17 @@ static void launch_player_attack(FcState* state, FcNpc* target, int distance) {
     player->hit_landed_this_tick = 1;
 }
 
-static void record_player_target_held(FcState* state, const FcNpc* target) {
-    if (target->npc_type > NPC_NONE && target->npc_type < NPC_TYPE_COUNT) {
-        state->ep_target_ticks_by_npc_type[target->npc_type]++;
-    }
-    state->ep_target_held_ticks++;
-}
 
-static int process_player_target(FcState* state,
-                                 int explicit_directional_move,
-                                 int explicit_tile_move) {
+static void process_player_target(FcState* state,
+                                  int explicit_directional_move,
+                                  int explicit_tile_move) {
     FcPlayer* player = &state->player;
-    int metrics_recorded = 0;
 
     /* Like Void CombatMovement: approach until the current target is in range,
      * then attack on cooldown and remain stationary for this tick. */
     if (player->attack_target_idx < 0 ||
         (player->weapon_uses_ammo && player->ammo_count <= 0)) {
-        return metrics_recorded;
+        return;
     }
 
     FcNpc* target = &state->npcs[player->attack_target_idx];
@@ -6557,7 +6126,7 @@ static int process_player_target(FcState* state,
         player->approach_target_x = -1;
         player->approach_target_y = -1;
         player->approach_target_size = 0;
-        return metrics_recorded;
+        return;
     }
 
     int dist = fc_distance_to_npc(player->x, player->y, target);
@@ -6572,17 +6141,6 @@ static int process_player_target(FcState* state,
             target->x, target->y, target->size, state->walkable, state->movement_flags);
     }
     int target_ready = player->attack_timer <= 0;
-
-    record_player_target_held(state, target);
-    metrics_recorded = 1;
-    if (target_can_fire) {
-        state->ep_target_in_range_los_ticks++;
-        if (!target_ready) {
-            state->ep_attack_cooldown_wait_ticks++;
-        }
-    } else {
-        state->ep_target_out_of_range_or_los_ticks++;
-    }
 
     int route_endpoint_can_fire = 0;
     int target_moved =
@@ -6630,12 +6188,6 @@ static int process_player_target(FcState* state,
     if (target_can_fire && target_ready) {
         launch_player_attack(state, target, dist);
     }
-
-    if (target_can_fire && target_ready &&
-        !state->attack_attempt_this_tick) {
-        state->ep_ready_but_no_attack_ticks++;
-    }
-    return metrics_recorded;
 }
 
 static int process_player_movement(FcState* state, int move_action,
@@ -6754,36 +6306,11 @@ static void update_player_run_energy(FcPlayer* player, int moved_steps) {
     }
 }
 
-static void record_player_action_outcome(FcState* state, int was_attack_ready,
-                                         int target_metrics_recorded) {
-    FcPlayer* player = &state->player;
-
-    if (state->npcs_remaining > 0 && !target_metrics_recorded) {
-        if (player->attack_target_idx >= 0) {
-            FcNpc* target = &state->npcs[player->attack_target_idx];
-            if (target->active && !target->is_dead) {
-                record_player_target_held(state, target);
-            } else {
-                state->ep_no_target_ticks++;
-            }
-        } else {
-            state->ep_no_target_ticks++;
-        }
-    }
-
-    if (was_attack_ready) {
-        state->ep_attack_ready_ticks++;
-        if (state->attack_attempt_this_tick) {
-            state->ep_attack_attempt_ticks++;
-        }
-    }
-}
 
 static void process_player_actions(FcState* state,
                                    const int actions[FC_NUM_ACTION_HEADS],
                                    FcPrayerTransition* prayer_transition) {
     FcPlayer* p = &state->player;
-    int was_attack_ready = (p->attack_timer <= 0 && state->npcs_remaining > 0);
 
     int act_move     = actions[0];
     int act_attack   = actions[1];
@@ -6797,8 +6324,10 @@ static void process_player_actions(FcState* state,
     int explicit_move = explicit_directional_move || explicit_tile_move;
     int explicit_attack = (act_attack > FC_ATTACK_NONE);
     int requested_attack_idx = -1;
-    int target_metrics_recorded = 0;
-    record_player_action_selection(state, actions);
+    /* Invalid-action reward is binary across the three policy heads. */
+    state->invalid_action_this_tick =
+        !move_action_valid(state, act_move) ||
+        !attack_action_valid(state, act_attack) || !prayer_action_valid(act_prayer);
 
     /* Resolve attack slots against the pre-action NPC slot ordering. The action
      * was chosen from the previous observation, so movement later in this tick
@@ -6814,15 +6343,13 @@ static void process_player_actions(FcState* state,
     prepare_player_interaction(state, explicit_move, explicit_attack,
                                requested_attack_idx);
 
-    target_metrics_recorded = process_player_target(
+    process_player_target(
         state, explicit_directional_move, explicit_tile_move);
 
     int moved_steps = process_player_movement(
         state, act_move, act_target_x, act_target_y,
         explicit_move, explicit_attack);
     update_player_run_energy(p, moved_steps);
-    record_player_action_outcome(state, was_attack_ready,
-                                 target_metrics_recorded);
 }
 
 /* ======================================================================== */
@@ -7031,8 +6558,6 @@ void fc_tick(FcState* state, const int actions[FC_NUM_ACTION_HEADS]) {
         state->ep_ticks_pray_range++;
     if (state->player.prayer_at_tick_start == PRAYER_PROTECT_MAGIC)
         state->ep_ticks_pray_magic++;
-    if (state->player.prayer_changed_this_tick)
-        state->ep_prayer_switches++;
     if (state->current_wave >= 63)
         state->ep_reached_wave_63 = 1;
 
@@ -7374,13 +6899,6 @@ void fc_wave_spawn(FcState* state, int wave_num) {
 /* Wave advancement                                                          */
 /* ======================================================================== */
 
-void fc_wave_record_current_duration(FcState* state) {
-    int wave_ticks = state->tick - state->wave_start_tick;
-    if (wave_ticks > state->ep_max_wave_ticks) {
-        state->ep_max_wave_ticks = wave_ticks;
-        state->ep_max_wave_ticks_wave = state->current_wave;
-    }
-}
 
 int fc_wave_check_advance(FcState* state) {
     /* Don't advance if wave hasn't started or NPCs still alive */
@@ -7390,7 +6908,6 @@ int fc_wave_check_advance(FcState* state) {
 
     state->wave_just_cleared = 1;
 
-    fc_wave_record_current_duration(state);
 
     /* Check if all waves complete */
     if (state->current_wave >= FC_NUM_WAVES) {
@@ -7402,7 +6919,6 @@ int fc_wave_check_advance(FcState* state) {
     state->current_wave++;
     state->jad_healers_spawned = 0;
     state->jad_healer_spawn_generations = 0;
-    state->wave_start_tick = state->tick;
     fc_wave_spawn(state, state->current_wave);
 
     return 1;

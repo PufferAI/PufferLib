@@ -229,8 +229,9 @@ def test_checkpoint_format_rejects_unknown_or_missing_file(tmp_path):
 
 @pytest.mark.parametrize("saved,current,accepted", [
     (4, 5, True), (5, 5, True), (5, 4, False), (3, 5, False), (6, 5, False),
+    (4, 6, True), (5, 6, True), (6, 6, True), (3, 6, False), (7, 6, False),
 ])
-def test_equipment_hash_checkpoint_migration_is_directional(tmp_path, saved, current, accepted):
+def test_state_hash_checkpoint_migration_is_directional(tmp_path, saved, current, accepted):
     expected = {"state_hash_version": current, "puffer_obs_size": 320,
                 "puffer_action_dims": [17, 9, 8], "reward_version": "unchanged"}
     actual = dict(expected, state_hash_version=saved)
@@ -249,10 +250,11 @@ def test_equipment_hash_checkpoint_migration_is_directional(tmp_path, saved, cur
     ("puffer_obs_size", 319), ("puffer_action_dims", [17, 9, 8, 14]),
     ("reward_version", "different"), ("unknown_field", 1),
 ])
-def test_equipment_hash_migration_does_not_hide_other_contract_changes(tmp_path, field, value):
-    expected = {"state_hash_version": 5, "puffer_obs_size": 320,
+@pytest.mark.parametrize("saved,current", [(4, 5), (4, 6), (5, 6)])
+def test_state_hash_migration_does_not_hide_other_contract_changes(tmp_path, saved, current, field, value):
+    expected = {"state_hash_version": current, "puffer_obs_size": 320,
                 "puffer_action_dims": [17, 9, 8], "reward_version": "unchanged"}
-    actual = dict(expected, state_hash_version=4)
+    actual = dict(expected, state_hash_version=saved)
     actual[field] = value
     marker = tmp_path / "contract.json"
     marker.write_text(json.dumps({"contract": actual}))
@@ -403,6 +405,21 @@ def puffer_main() -> int:
                 break
         if terminal_count == 0:
             fail("no terminal/autoreset boundary was observed")
+        metrics = vec.log()
+        expected_metrics = {
+            "zero_progress_ticks", "wave_reached", "wrong_prayer_hits",
+            "reached_wave_63", "jad_kill_rate", "prayer_uptime_range",
+            "prayer_uptime_melee", "prayer_uptime_magic", "npc_healing_total",
+            "jad_healing_total", "episode_length", "n",
+        }
+        if set(metrics) != expected_metrics:
+            fail(f"unexpected episode metrics: {set(metrics) ^ expected_metrics}")
+        if metrics["n"] != terminal_count or metrics["episode_length"] <= 0:
+            fail("completed episode metrics were lost during autoreset")
+        if not all(np.isfinite(value) for value in metrics.values()):
+            fail("episode metrics contain non-finite values")
+        if vec.log():
+            fail("episode metrics were not drained after logging")
     finally:
         vec.close()
 
