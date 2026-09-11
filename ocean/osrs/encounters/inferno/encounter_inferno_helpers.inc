@@ -828,7 +828,7 @@ typedef struct InfRouteBakeHeader {
     uint64_t revision_base;
 } InfRouteBakeHeader;
 
-_Static_assert(sizeof(InfRouteBakeHeader) == 64,
+static_assert(sizeof(InfRouteBakeHeader) == 64,
     "inferno route bake header must stay 64 bytes");
 
 static const char INF_ROUTE_BAKE_MAGIC[8] = {

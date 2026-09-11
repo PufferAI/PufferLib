@@ -19,7 +19,6 @@ set -e
 #   ./build.sh constellation         # Sweep dashboard -> ./seethestars
 #   ./build.sh cache_data            # Sweep log cache -> ./cache_data
 #   ./build.sh trailer               # 5.0 trailer -> ./resources/trailer/trailer (also exports diagrams)
-#   ./build.sh all                   # Build all envs native and native float32
 #
 # Env is compiled in. Run: ./puffer train|eval|match|sweep [--section.key=value ...]
 
@@ -99,6 +98,7 @@ fi
 CLANG_WARN=(
     -Wall
     -Wno-narrowing
+    -Wno-unreachable-code
     -ferror-limit=3
     -Werror=incompatible-pointer-types
     -Werror=return-type
@@ -370,7 +370,7 @@ elif [ "$MODE" = "web" ]; then
     emcc \
         -o "build/web/$ENV/game.html" \
         src/puffercpu.c $EXTRA_SRC \
-        -O3 -Wall -Wno-narrowing \
+        -O3 -Wall -Wno-narrowing -Wno-unreachable-code \
         "${LINK_ARCHIVES[@]}" \
         -I. -Isrc -I$SRC_DIR -Ivendor "${INCLUDES[@]}" \
         -L. -L./$RAYLIB_NAME/lib \
@@ -466,8 +466,15 @@ ENV_COMPILE_FLAGS=(-DENV_HEADER=\"$ENV_HEADER\")
 
 MODE=${MODE:-native}
 
-# Allow double→int/float in brace-init (host -Wno-narrowing + nvcc #2361).
-NVCC_NARROW=(-Xcompiler=-Wno-narrowing --diag-suppress=2361)
+# Brace-init narrowing (host -Wno-narrowing + nvcc #2361) and unreachable
+# code in env headers (clang -Wunreachable-code, nvcc #111/#128).
+NVCC_NARROW=(
+    -Xcompiler=-Wno-narrowing
+    -Xcompiler=-Wno-unreachable-code
+    --diag-suppress=2361
+    --diag-suppress=111
+    --diag-suppress=128
+)
 
 if [ "$MODE" = "native" ]; then
     if [ -n "$OUT" ]; then
@@ -486,6 +493,8 @@ if [ "$MODE" = "native" ]; then
             OSRS_RENDER_OBJECT="build/osrs_puffer_render.o"
             ENV_COMPILE_FLAGS+=(-DOSRS_PUFFER_RENDER)
             $CC $LINK_OPT "${CLANG_WARN[@]}" "${SIMD_FLAGS[@]}" -std=c11 \
+                -Wno-unused-function \
+                -D_POSIX_C_SOURCE=200809L \
                 -I. -Isrc -I$SRC_DIR -Ivendor \
                 "${INCLUDES[@]}" \
                 -DPLATFORM_DESKTOP \
@@ -493,7 +502,7 @@ if [ "$MODE" = "native" ]; then
                 -o "$OSRS_RENDER_OBJECT"
             ;;
     esac
-    echo "Compiling native train/eval binary ($ARCH) -> $TRAIN_BIN..."
+    echo "Compiling $ENV_HEADER -> $TRAIN_BIN..."
     $NVCC $NVCC_OPT -arch=$ARCH -std=c++17 \
         -I. -Isrc -I$SRC_DIR -Ivendor \
         "${INCLUDES[@]}" \
@@ -514,13 +523,13 @@ if [ "$MODE" = "native" ]; then
         -L$CUDA_HOME/lib64 $NCCL_LFLAG \
         "${EXTRA_LDFLAGS[@]}" \
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand \
-        -lm -lpthread $OMP_LIB "${STANDALONE_LDFLAGS[@]}" \
+        -lm -Xlinker=-lpthread $OMP_LIB "${STANDALONE_LDFLAGS[@]}" \
         -o "$TRAIN_BIN"
     echo "Built: ./$TRAIN_BIN"
 
 elif [ "$MODE" = "profile" ]; then
     PROFILE_BIN="build/profile_${ENV}"
-    echo "Compiling profile binary ($ARCH) -> $PROFILE_BIN..."
+    echo "Compiling $ENV_HEADER -> $PROFILE_BIN..."
     $NVCC $NVCC_OPT -arch=$ARCH -std=c++17 \
         -I. -Isrc -I$SRC_DIR -Ivendor \
         "${INCLUDES[@]}" \
@@ -537,7 +546,7 @@ elif [ "$MODE" = "profile" ]; then
         "$RAYLIB_A" \
         -L$CUDA_HOME/lib64 \
         -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand \
-        -lGL -lm -lpthread $OMP_LIB \
+        -lGL -lm -Xlinker=-lpthread $OMP_LIB \
         -o "$PROFILE_BIN"
     echo "Built: ./$PROFILE_BIN"
 fi

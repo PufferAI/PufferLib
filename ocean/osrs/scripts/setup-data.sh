@@ -53,11 +53,8 @@ if [ "${OSRS_ASSET_SETUP_FORCE:-0}" != "1" ]; then
         echo "setup-osrs-data: loose assets satisfy ${archive_name}"
         exit 0
     fi
-    echo "setup-osrs-data: missing required loose assets"
-    while IFS=$'\t' read -r group_name asset_path; do
-        [ -n "${asset_path}" ] || continue
-        echo "setup-osrs-data: missing ${group_name}: ${asset_path}"
-    done < "${MISSING_TSV}"
+    missing_count=$(grep -c $'\t' "${MISSING_TSV}" || true)
+    echo "setup-osrs-data: missing ${missing_count} required loose assets; installing ${archive_name}"
 fi
 
 archive_path="${DOWNLOAD_DIR}/${archive_name}"
