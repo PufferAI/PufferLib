@@ -1735,6 +1735,9 @@ void pufferl_load_policy(PuffeRL* pufferl, int i, const char* path) {
     Policy* pol = &pufferl->policies[i];
     puf_load_weights_into(pol->master_weights, pol->param,
         pufferl->default_stream, path);
+    if (i == 0 && pufferl->hypers.async) {
+        puf_copy(&pufferl->actor_param, &pol->param, pufferl->default_stream);
+    }
     cudaDeviceSynchronize();
 }
 
@@ -2959,6 +2962,13 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
     }
 
     PuffeRL* pufferl = create_pufferl(ini, ctx);
+    char load_path_buf[4096];
+    const char* load_path = puf_checkpoint_path_key(
+        ini, "load_model_path", load_path_buf, sizeof(load_path_buf));
+    if (load_path) {
+        pufferl_load_policy(pufferl, 0, load_path);
+    }
+
     Selfplay selfplay = {0};
     if (use_selfplay) {
         char initial_checkpoint[4096];
