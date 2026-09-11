@@ -146,26 +146,89 @@ static int item_slot(const FcPlayer *p, int id) {
 }
 
 static int loadout_totals(void) {
-    /* All existing presets, not only the compiled training preset. This is
-     * the real reset helper, not a duplicated test stat calculator. */
+    /* Pre-cleanup preset totals, independent of the item definitions. */
+    static const FcPlayer expected[FC_NUM_LOADOUTS] = {
+        { /* Preset 0 */
+            .ranged_attack_bonus = 153, .ranged_strength_bonus = 100, .defence_stab = 97,
+            .defence_slash = 84, .defence_crush = 110, .defence_magic = 91,
+            .defence_ranged = 90, .prayer_bonus = 0, .weapon_kind = 0,
+            .weapon_speed = 5, .weapon_range = 7, .weapon_uses_ammo = 1,
+            .crystal_piece_mask = 0, .ammo_count = 50000,
+        },
+        { /* Preset 1 */
+            .ranged_attack_bonus = 215, .ranged_strength_bonus = 99, .defence_stab = 116,
+            .defence_slash = 106, .defence_crush = 129, .defence_magic = 150,
+            .defence_ranged = 121, .prayer_bonus = 6, .weapon_kind = 1,
+            .weapon_speed = 5, .weapon_range = 10, .weapon_uses_ammo = 1,
+            .crystal_piece_mask = 0, .ammo_count = 50000,
+        },
+        { /* Preset 2 */
+            .ranged_attack_bonus = 166, .ranged_strength_bonus = 100, .defence_stab = 48,
+            .defence_slash = 49, .defence_crush = 62, .defence_magic = 42,
+            .defence_ranged = 46, .prayer_bonus = 8, .weapon_kind = 0,
+            .weapon_speed = 5, .weapon_range = 7, .weapon_uses_ammo = 1,
+            .crystal_piece_mask = 0, .ammo_count = 50000,
+        },
+        { /* Preset 3 */
+            .ranged_attack_bonus = 166, .ranged_strength_bonus = 100, .defence_stab = 48,
+            .defence_slash = 49, .defence_crush = 62, .defence_magic = 42,
+            .defence_ranged = 46, .prayer_bonus = 8, .weapon_kind = 0,
+            .weapon_speed = 5, .weapon_range = 7, .weapon_uses_ammo = 1,
+            .crystal_piece_mask = 0, .ammo_count = 50000,
+        },
+        { /* Preset 4 */
+            .ranged_attack_bonus = 141, .ranged_strength_bonus = 49, .defence_stab = 48,
+            .defence_slash = 49, .defence_crush = 62, .defence_magic = 42,
+            .defence_ranged = 46, .prayer_bonus = 3, .weapon_kind = 0,
+            .weapon_speed = 3, .weapon_range = 7, .weapon_uses_ammo = 1,
+            .crystal_piece_mask = 0, .ammo_count = 50000,
+        },
+        { /* Preset 5 */
+            .ranged_attack_bonus = 101, .ranged_strength_bonus = 42, .defence_stab = 45,
+            .defence_slash = 46, .defence_crush = 59, .defence_magic = 39,
+            .defence_ranged = 43, .prayer_bonus = 2, .weapon_kind = 0,
+            .weapon_speed = 2, .weapon_range = 5, .weapon_uses_ammo = 1,
+            .crystal_piece_mask = 0, .ammo_count = 50000,
+        },
+        { /* Preset 6 */
+            .ranged_attack_bonus = 220, .ranged_strength_bonus = 129, .defence_stab = 112,
+            .defence_slash = 100, .defence_crush = 123, .defence_magic = 139,
+            .defence_ranged = 117, .prayer_bonus = 11, .weapon_kind = 0,
+            .weapon_speed = 5, .weapon_range = 8, .weapon_uses_ammo = 1,
+            .crystal_piece_mask = 0, .ammo_count = 50000,
+        },
+        { /* Preset 7 */
+            .ranged_attack_bonus = 233, .ranged_strength_bonus = 113, .defence_stab = 102,
+            .defence_slash = 85, .defence_crush = 110, .defence_magic = 107,
+            .defence_ranged = 143, .prayer_bonus = 9, .weapon_kind = 2,
+            .weapon_speed = 4, .weapon_range = 10, .weapon_uses_ammo = 0,
+            .crystal_piece_mask = 7, .ammo_count = 0,
+        },
+        { /* Preset 8 */
+            .ranged_attack_bonus = 205, .ranged_strength_bonus = 97, .defence_stab = 116,
+            .defence_slash = 106, .defence_crush = 129, .defence_magic = 150,
+            .defence_ranged = 121, .prayer_bonus = 6, .weapon_kind = 1,
+            .weapon_speed = 5, .weapon_range = 10, .weapon_uses_ammo = 1,
+            .crystal_piece_mask = 0, .ammo_count = 50000,
+        },
+    };
     for (int i = 0; i < FC_NUM_LOADOUTS; i++) {
         FcPlayer p = {0};
-        const FcLoadout *l = &FC_LOADOUTS[i];
-        fc_items_init(&p, l);
-        CHECK(p.ranged_attack_bonus == l->ranged_atk);
-        CHECK(p.ranged_strength_bonus == l->ranged_str);
-        CHECK(p.defence_stab == l->def_stab);
-        CHECK(p.defence_slash == l->def_slash);
-        CHECK(p.defence_crush == l->def_crush);
-        CHECK(p.defence_magic == l->def_magic);
-        CHECK(p.defence_ranged == l->def_ranged);
-        CHECK(p.prayer_bonus == l->prayer_bonus);
-        CHECK(p.weapon_kind == l->weapon_kind);
-        CHECK(p.weapon_speed == l->weapon_speed);
-        CHECK(p.weapon_range == l->weapon_range);
-        CHECK(p.weapon_uses_ammo == l->weapon_uses_ammo);
-        CHECK(p.crystal_piece_mask == l->crystal_piece_mask);
-        CHECK(p.ammo_count == l->ammo);
+        fc_items_init(&p, &FC_LOADOUTS[i]);
+        CHECK(p.ranged_attack_bonus == expected[i].ranged_attack_bonus);
+        CHECK(p.ranged_strength_bonus == expected[i].ranged_strength_bonus);
+        CHECK(p.defence_stab == expected[i].defence_stab);
+        CHECK(p.defence_slash == expected[i].defence_slash);
+        CHECK(p.defence_crush == expected[i].defence_crush);
+        CHECK(p.defence_magic == expected[i].defence_magic);
+        CHECK(p.defence_ranged == expected[i].defence_ranged);
+        CHECK(p.prayer_bonus == expected[i].prayer_bonus);
+        CHECK(p.weapon_kind == expected[i].weapon_kind);
+        CHECK(p.weapon_speed == expected[i].weapon_speed);
+        CHECK(p.weapon_range == expected[i].weapon_range);
+        CHECK(p.weapon_uses_ammo == expected[i].weapon_uses_ammo);
+        CHECK(p.crystal_piece_mask == expected[i].crystal_piece_mask);
+        CHECK(p.ammo_count == expected[i].ammo_count);
     }
     return 0;
 }

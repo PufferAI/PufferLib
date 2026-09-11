@@ -261,10 +261,7 @@ static int load_fc_ui_item_icons(ViewerState* v) {
     for (int li = 0; li < FC_NUM_LOADOUTS; li++) {
         const FcLoadout* lo = &FC_LOADOUTS[li];
         for (int ei = 0; ei < lo->equipment_count; ei++) {
-            uint32_t icon_id = lo->equipment[ei].icon_item_id
-                ? lo->equipment[ei].icon_item_id
-                : lo->equipment[ei].item_id;
-            ready &= load_ui_item_icon(&v->ui, icon_id);
+            ready &= load_ui_item_icon(&v->ui, (uint32_t)lo->equipment[ei]);
         }
     }
     return ready;
