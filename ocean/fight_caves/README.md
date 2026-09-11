@@ -31,10 +31,12 @@ access. In the playable viewer's startup output, check the `Renderer` line:
 the viewer is using the GPU.
 
 Inside PufferTank's interactive shell, use its already-activated Python
-environment. Clone the fork's merged Fight Caves branch:
+environment. Until this PR is merged, clone its source branch below. After
+merging, use `--branch 4.0.5` instead; the base branch has no Fight Caves code
+before the merge.
 
 ```bash
-git clone --branch 4.0.4 https://github.com/jordanbailey00/PufferLib.git PufferLib-fight-caves
+git clone --branch fight-caves-4.0.5 https://github.com/jordanbailey00/PufferLib.git PufferLib-fight-caves
 cd PufferLib-fight-caves
 uv pip install --no-deps -e .
 ```
