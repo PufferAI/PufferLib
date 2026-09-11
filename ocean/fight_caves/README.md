@@ -12,11 +12,29 @@ Fight Caves does not have its own Docker image or Python/CUDA dependency stack.
 For play and replay, start PufferTank with the display forwarding described by
 Puffer; a headless container can train, but cannot show an interactive window.
 
-Inside PufferTank's interactive shell, use its already-activated Python
-environment. While this PR is under review, clone its source branch:
+> **Important: a very laggy viewer may be rendering on the CPU, even when a GPU is available.**
+> PufferTank 4.0 forces the Mesa GLX driver in its shell startup. On some systems
+> this selects software rendering (`llvmpipe`) instead of the available GPU.
+> **Before play or replay, run the command below in each new container shell.**
+> Removing this override is the first fix to try and resolved the problem in
+> our PufferTank test. No rebuild or extra package installation is required.
 
 ```bash
-git clone --branch fight-caves-puffertank-4.0 https://github.com/jordanbailey00/PufferLib.git PufferLib-fight-caves
+unset __GLX_VENDOR_LIBRARY_NAME
+```
+
+This restores automatic graphics-driver selection; it does not force NVIDIA or
+any particular GPU. Mesa can also render on GPUs, so it is not inherently a CPU
+renderer. The command cannot fix missing GPU drivers or container graphics
+access. In the playable viewer's startup output, check the `Renderer` line:
+`llvmpipe` means CPU rendering. Working CUDA training alone does not prove that
+the viewer is using the GPU.
+
+Inside PufferTank's interactive shell, use its already-activated Python
+environment. Clone the fork's merged Fight Caves branch:
+
+```bash
+git clone --branch 4.0.4 https://github.com/jordanbailey00/PufferLib.git PufferLib-fight-caves
 cd PufferLib-fight-caves
 uv pip install --no-deps -e .
 ```
