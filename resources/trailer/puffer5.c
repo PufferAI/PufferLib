@@ -226,8 +226,10 @@ static void draw_faster(Trailer *tr, float local, float alpha) {
     if (pol_a > 0.01f)
         draw_clip(&tr->breakout, local - train_end, left, alpha * pol_a);
     DrawRectangleRounded(right, 0.02f, 8, calpha((Color){6, 18, 20, 255}, alpha * 0.90f));
+    // Glow curves stay neon under linear alpha; square it so the plot dies
+    // in the first part of the beat fade, before the puffer.
     plot_scale_draw_box(tr->ui, tr->mono, &tr->mark,
-        clampf(local / 7.4f, 0, 1), alpha, right);
+        clampf(local / 7.4f, 0, 1), alpha * alpha, right);
 }
 
 // 2x3 grid. Cell 0 is title; clips fill the other five.
@@ -658,9 +660,15 @@ static void draw_trailer(Trailer *tr) {
         case SC_ARCH:
             arch_draw(tr->arch, a);
             break;
-        case SC_FASTER:
-            draw_faster(tr, local, a);
+        case SC_FASTER: {
+            // Keep END's start time (audio). Kill this graphic by then so
+            // the neon plot is gone before the punched-out puffer fades in.
+            float fa = a;
+            if (i + 1 < N_BEATS && BEATS[i + 1].kind == SC_END)
+                fa *= clampf((tr->beat_start[i + 1] - tr->t) / XFADE, 0, 1);
+            draw_faster(tr, local, fa);
             break;
+        }
         case SC_RESULTS:
             draw_results(tr, local, a);
             break;

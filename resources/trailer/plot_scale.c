@@ -115,9 +115,22 @@ static void format_sps(char *buf, size_t n, float v) {
 
 static void draw_glow_spline(Vector2 *pts, int n, Color color) {
     if (n < 2) return;
-    DrawSplineLinear(pts, n, 12.0f, Fade(color, 0.10f));
-    DrawSplineLinear(pts, n, 6.0f, Fade(color, 0.22f));
-    DrawSplineLinear(pts, n, 2.6f, color);
+    float a = color.a / 255.0f;
+    if (a <= 0.001f) return;
+    // Stacked glow passes stay neon if we only drop alpha — dim RGB too.
+    float k = a * a;
+    Color c = {
+        (unsigned char)(color.r * k),
+        (unsigned char)(color.g * k),
+        (unsigned char)(color.b * k),
+        255
+    };
+    if (a > 0.65f) {
+        float g = (a - 0.65f) / 0.35f;
+        DrawSplineLinear(pts, n, 12.0f, Fade(c, 0.10f * g));
+        DrawSplineLinear(pts, n, 6.0f, Fade(c, 0.22f * g));
+    }
+    DrawSplineLinear(pts, n, 2.6f, c);
 }
 
 static void plot_gl(Glyph *g, int n, Shader *shader, float time) {
@@ -152,6 +165,7 @@ static void plot_gl(Glyph *g, int n, Shader *shader, float time) {
     glUseProgram(0);
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);
+    rlSetBlendFactors(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_MAX);
     rlSetBlendMode(RL_BLEND_ALPHA);
 }
 
@@ -321,13 +335,26 @@ void plot_scale_draw_box(Font title, Font body, Shader *star, float reveal, floa
     text_c(body, "Parameters", cx, box.y + box.height - 28.0f, compact ? 18.0f : 22.0f,
            ca(PUFF_WHITE, alpha));
 
-    int n_marks = 0;
-    Glyph shown[N_PTS * 2];
-    for (int i = 0; i < N_PTS; i++) {
-        if (glyphs[i].x <= xa + 8) shown[n_marks++] = glyphs[i];
+    // Additive marks (*5 in the shader) never look faded — drop them first.
+    if (alpha > 0.75f) {
+        float mk = (alpha - 0.75f) / 0.25f;
+        mk *= mk;
+        int n_marks = 0;
+        Glyph shown[N_PTS * 2];
+        for (int i = 0; i < N_PTS; i++) {
+            if (glyphs[i].x <= xa + 8) {
+                Glyph g = glyphs[i];
+                g.r *= mk; g.g *= mk; g.b *= mk; g.a *= mk;
+                shown[n_marks++] = g;
+            }
+        }
+        for (int i = 0; i < N_PTS; i++) {
+            if (glyphs[N_PTS + i].x <= xa + 8) {
+                Glyph g = glyphs[N_PTS + i];
+                g.r *= mk; g.g *= mk; g.b *= mk; g.a *= mk;
+                shown[n_marks++] = g;
+            }
+        }
+        if (n_marks > 0) plot_gl(shown, n_marks, star, 1.570796f);
     }
-    for (int i = 0; i < N_PTS; i++) {
-        if (glyphs[N_PTS + i].x <= xa + 8) shown[n_marks++] = glyphs[N_PTS + i];
-    }
-    if (n_marks > 0) plot_gl(shown, n_marks, star, 1.570796f);
 }

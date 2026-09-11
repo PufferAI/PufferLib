@@ -1032,25 +1032,10 @@ static void draw_packets(Viz *v, float a) {
 
 // ─── chrome ───────────────────────────────────────────────────────────────────
 static void draw_header(Viz *v, float a) {
-    const char *title = "PufferLib 5.0";
-    const char *sub = "Five Levels of Parallelism";
-    const char *tag = "Peak 63M steps/second/RTX5090";
-    const char *levels = "1 Environments    2 Rollouts    3 Training    4 Model    5 Multi-GPU";
-    float title_gap = 6.0f;
-    float block_h = FONT_TITLE + title_gap + FONT_MID;
-    float ty = (HEADER_H - block_h) * 0.5f;
-    float tx = MARGIN_X + LOGO_S + 14.0f;
-    if (v->logo.id) {
-        Rectangle src = {0, 0, (float)v->logo.width * 0.5f, (float)v->logo.height};
-        Rectangle dst = {MARGIN_X, (HEADER_H - LOGO_S) * 0.5f, LOGO_S, LOGO_S};
-        DrawTexturePro(v->logo, src, dst, (Vector2){0, 0}, 0, calpha(C_WHITE, a));
-    }
-    text(v->ui, title, tx, ty, FONT_TITLE, calpha(C_WHITE, a));
-    text(v->ui, sub, tx, ty + FONT_TITLE + title_gap, FONT_MID, calpha(C_WHITE, a));
-    text_r(v->mono, tag, SCREEN_W - MARGIN_X, (HEADER_H - FONT_HEAD) * 0.5f, FONT_HEAD, calpha(C_CYAN, a));
-    float left = tx + fmaxf(tw(v->ui, title, FONT_TITLE), tw(v->ui, sub, FONT_MID)) + 32;
-    float right = SCREEN_W - MARGIN_X - tw(v->mono, tag, FONT_HEAD) - 32;
-    text_c(v->ui, levels, 0.5f * (left + right), (HEADER_H - FONT_HEAD) * 0.5f, FONT_HEAD, calpha(C_WHITE, a));
+    const float sz = 64.0f; // match puffer5 scene headers (FONT_CARD)
+    text_c(v->ui, "Five Levels of Parallelism",
+           SCREEN_W * 0.5f, (HEADER_H - sz) * 0.5f,
+           sz, calpha(C_WHITE, a));
 }
 
 static void draw_footer(Viz *v, float a) {
