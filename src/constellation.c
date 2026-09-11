@@ -654,7 +654,6 @@ PlotArgs DEFAULT_PLOT_ARGS = {
     .z_label = "Train/Learning Rate",
 };
 
-
 Table* dataset_table(Dataset *data, char *env) {
     for (int i = 0; i < data->n; i++) {
         if (strcmp(data->tables[i].name, env) == 0) {
