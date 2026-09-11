@@ -1228,6 +1228,55 @@ static void env_start(PuffeRL* p) {
     }
 }
 
+// A historical policy update starts a new match for every environment using
+// that policy. Workers are waiting between rollouts while this runs.
+static void pufferl_reset_policy_envs(PuffeRL* p, int policy_idx) {
+    assert(PUF_BACKEND == PUF_CPU);
+    VecEnv* vec = p->vec;
+    int apb = vec->agents_per_buf;
+
+    for (int i = 0; i < vec->size; i++) {
+        Env* env = &vec->envs[i];
+        if (env->tag != policy_idx) {
+            continue;
+        }
+
+        puf_reset(env);
+        env->boundary_reached = 0;
+        for (int a = 0; a < env->num_agents; a++) {
+            Agent* agent = &env->agents[a];
+            int physical = (int)(agent->rewards - vec->rewards);
+            int buf = physical / apb;
+            int in_buf = physical % apb;
+            int agent_policy = 0;
+            while (agent_policy + 1 < vec->num_policies
+                    && in_buf >= vec->policy_layout[agent_policy + 1]) {
+                agent_policy++;
+            }
+
+            Policy* policy = &p->policies[agent_policy];
+            Prec* state = &policy->buffer_states[buf];
+            int policy_agents = (int)state->shape[1];
+            int hidden_size = (int)state->shape[2];
+            int local = in_buf - vec->policy_layout[agent_policy];
+            for (int layer = 0; layer < state->shape[0]; layer++) {
+                precision_t* state_agent = state->data
+                    + ((long)layer * policy_agents + local) * hidden_size;
+                cudaMemsetAsync(state_agent, 0,
+                    hidden_size * sizeof(precision_t), p->default_stream);
+            }
+
+            *agent->rewards = 0.0f;
+            *agent->terminals = 1.0f;
+        }
+    }
+
+    for (int buf = 0; buf < vec->buffers; buf++) {
+        cpu_upload(p, buf * apb, apb, p->default_stream);
+    }
+    cudaDeviceSynchronize();
+}
+
 static void rollout_start(PuffeRL* p) {
     if (PUF_BACKEND == PUF_GPU) {
         cudaStream_t stream = p->streams[0];
@@ -3064,6 +3113,7 @@ TrainResult run_train(Ini* ini, TrainContext* ctx) {
                 if (step - hist->opp_started_step >= selfplay.opp_timeout_steps) {
                     pufferl_load_policy(pufferl, hist->policy_idx,
                         selfplay_sample(&selfplay));
+                    pufferl_reset_policy_envs(pufferl, hist->policy_idx);
                     hist->opp_started_step = step;
                 }
             }
