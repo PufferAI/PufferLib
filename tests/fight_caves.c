@@ -13,6 +13,52 @@ static void fail(const char* message) {
     exit(EXIT_FAILURE);
 }
 
+static void wave_rotation_test(void) {
+    /* FNV-1a fingerprints captured from the expanded table before factoring.
+     * Each wave covers all 15 rotations and all six slots, including padding. */
+    static const uint32_t expected[FC_NUM_WAVES] = {
+        0x94a6ae61u, 0xb43e53bdu, 0x5ae991d9u, 0xb87f83cdu,
+        0x7ae7bc55u, 0xc2eb4881u, 0x6f091049u, 0x2c80a9b9u,
+        0xff5bb385u, 0x0460e561u, 0x3fd38821u, 0x70d9d565u,
+        0x3033fbb1u, 0x39ff4ee5u, 0xfb88abe1u, 0x42db8009u,
+        0xcd6d9305u, 0x75d5d409u, 0xecd94691u, 0xe481f925u,
+        0x047e78e1u, 0xbcec175du, 0x28ee1f11u, 0xe225e405u,
+        0xee2ea345u, 0x6e841145u, 0x12b64e1du, 0xf7a76349u,
+        0xf41e3f01u, 0xf9d9e13du, 0x94a6ae61u, 0x7b92c141u,
+        0xe6d41269u, 0xb87f83cdu, 0x4efe59e1u, 0xd0ef2aa9u,
+        0x7cf6df61u, 0x2c80a9b9u, 0xf9ba9da9u, 0xffa136e9u,
+        0x3fd38821u, 0x179231cdu, 0x45be2b59u, 0x1c645eddu,
+        0x1ea54635u, 0x42db8009u, 0x538afaf1u, 0x8c6cad2du,
+        0xecd94691u, 0x0cf73279u, 0xa339fc69u, 0xfeddd769u,
+        0x28ee1f11u, 0x67f6d72du, 0x1b3ebe39u, 0x6e841145u,
+        0xbc40ffe9u, 0x66ac8f75u, 0xf9552f4du, 0x3de75731u,
+        0x4a20ae1du, 0xb43e53bdu, 0x5ae991d9u,
+    };
+    for (int wave = 1; wave <= FC_NUM_WAVES; wave++) {
+        uint32_t hash = 2166136261u;
+        for (int rotation = 0; rotation < FC_NUM_ROTATIONS; rotation++) {
+            for (int slot = 0; slot < FC_MAX_SPAWNS_PER_WAVE; slot++) {
+                int direction = fc_wave_spawn_dir(wave, rotation, slot);
+                if (direction < SPAWN_SOUTH || direction > SPAWN_CENTER)
+                    fail("wave spawn direction is out of range");
+                hash = (hash ^ (uint32_t)direction) * 16777619u;
+            }
+        }
+        if (hash != expected[wave - 1]) {
+            fprintf(stderr, "wave_rotation_test: wave %d changed\n", wave);
+            fail("wave rotation fixture mismatch");
+        }
+    }
+    if (fc_wave_spawn_dir(0, 0, 0) != SPAWN_CENTER ||
+        fc_wave_spawn_dir(FC_NUM_WAVES + 1, 0, 0) != SPAWN_CENTER ||
+        fc_wave_spawn_dir(1, -1, 0) != SPAWN_CENTER ||
+        fc_wave_spawn_dir(1, FC_NUM_ROTATIONS, 0) != SPAWN_CENTER ||
+        fc_wave_spawn_dir(1, 0, -1) != SPAWN_CENTER ||
+        fc_wave_spawn_dir(1, 0, FC_MAX_SPAWNS_PER_WAVE) != SPAWN_CENTER)
+        fail("invalid wave lookup fallback changed");
+    puts("wave_rotation_test: all waves, rotations, slots and invalid inputs passed");
+}
+
 static void check_observation(const FcState* state) {
     float obs[FC_TOTAL_OBS];
     float mask[FC_ACTION_MASK_SIZE];
@@ -605,6 +651,7 @@ static int equipment_appearance_test(void) {
 #endif
 
 int main(void) {
+    wave_rotation_test();
     if (core_contract_test() || equipment_test()) return 1;
 #ifdef FC_VIEWER_TEST
     if (context_menu_test() || click_feedback_test() || model_picking_test() ||
