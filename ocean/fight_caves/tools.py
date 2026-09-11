@@ -666,7 +666,7 @@ def run_preflight(mode: str) -> int:
     return 0
 
 
-# Optional viewer build; the shared Puffer build.sh remains unmodified.
+# Compatibility entry point; standard build.sh owns assets and compilation.
 
 def build_viewer_main() -> int:
     """Compatibility alias; the standard standalone build owns dependencies."""
