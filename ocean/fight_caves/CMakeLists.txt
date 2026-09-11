@@ -1,0 +1,48 @@
+cmake_minimum_required(VERSION 3.20)
+project(fight_caves_viewer C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+get_filename_component(PUFFERLIB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+
+if(NOT RAYLIB_ROOT)
+    if(APPLE)
+        set(RAYLIB_ROOT "${PUFFERLIB_ROOT}/raylib-5.5_macos")
+    else()
+        set(RAYLIB_ROOT "${PUFFERLIB_ROOT}/raylib-5.5_linux_amd64")
+    endif()
+endif()
+
+set(RAYLIB_ROOT "${RAYLIB_ROOT}" CACHE PATH "Raylib distribution root")
+if(NOT EXISTS "${RAYLIB_ROOT}/include/raylib.h" OR
+   NOT EXISTS "${RAYLIB_ROOT}/lib/libraylib.a")
+    message(FATAL_ERROR "Raylib unavailable at ${RAYLIB_ROOT}. Run ./build.sh fight_caves --fast")
+endif()
+
+add_executable(fc_viewer viewer.c)
+target_include_directories(fc_viewer PRIVATE "${RAYLIB_ROOT}/include")
+target_link_libraries(fc_viewer PRIVATE "${RAYLIB_ROOT}/lib/libraylib.a" m pthread)
+set(FC_ACTIVE_LOADOUT "" CACHE STRING "Optional Fight Caves active loadout override")
+if(FC_ACTIVE_LOADOUT)
+    target_compile_definitions(fc_viewer PRIVATE FC_ACTIVE_LOADOUT=${FC_ACTIVE_LOADOUT})
+endif()
+if(APPLE)
+    target_link_libraries(fc_viewer PRIVATE
+        "-framework Cocoa" "-framework IOKit" "-framework CoreVideo" "-framework OpenGL")
+else()
+    find_package(X11 REQUIRED)
+    target_link_libraries(fc_viewer PRIVATE dl ${X11_LIBRARIES} GL)
+endif()
+
+# Explicit graphical regression target; ordinary viewer builds do not run it.
+add_executable(fc_viewer_tests EXCLUDE_FROM_ALL "${PUFFERLIB_ROOT}/tests/fight_caves.c")
+target_compile_definitions(fc_viewer_tests PRIVATE FC_VIEWER_TEST)
+target_include_directories(fc_viewer_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}" "${RAYLIB_ROOT}/include")
+get_target_property(FC_VIEWER_TEST_LIBRARIES fc_viewer LINK_LIBRARIES)
+target_link_libraries(fc_viewer_tests PRIVATE ${FC_VIEWER_TEST_LIBRARIES})
+
+add_executable(fc_integration_tests EXCLUDE_FROM_ALL
+    "${PUFFERLIB_ROOT}/tests/fight_caves_integration.c")
+target_include_directories(fc_integration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}" "${RAYLIB_ROOT}/include")
+target_link_libraries(fc_integration_tests PRIVATE ${FC_VIEWER_TEST_LIBRARIES})
