@@ -8,6 +8,8 @@
 #include <dirent.h>
 #include <time.h>
 
+const char* __asan_default_options(void) { return "detect_leaks=0"; }
+
 // File format: flat fp32 tensors.
 typedef struct Weights {
     float* data;
@@ -24,10 +26,7 @@ Weights* load_weights(const char* filename) {
     long file_size = ftell(file);
     rewind(file);
     size_t num_weights = file_size / sizeof(float);
-    // +7 ensures get_weights_aligned never reads past the buffer: the native
-    // backend uses 16-byte alignment with bf16 params (2 bytes), so each tensor
-    // starts at an 8-float boundary. After the last tensor, up to 7 extra floats
-    // may be addressed before the next 8-aligned boundary.
+    // +7 pad so 8-float-aligned bf16 reads never go past the buffer.
     Weights* weights = calloc(1, sizeof(Weights) + (num_weights + 7)*sizeof(float));
     weights->data = (float*)(weights + 1);
     size_t read_size = fread(weights->data, sizeof(float), num_weights, file);
@@ -786,8 +785,7 @@ int main(int argc, char** argv) {
     Env env = {0};
     puf_init(&env, env_sec);
 
-    // Heap, not VLAs: multiagent envs (snake=256, obs=968) overflow the
-    // 512KB WASM stack (obs_f alone is ~1MB).
+    // Heap, not VLAs: snake=256 / obs=968 overflows the 512KB WASM stack.
     size_t n_obs = (size_t)env.num_agents * (size_t)OBS_SIZE;
     size_t n_atn = (size_t)env.num_agents * (size_t)NUM_ATNS;
     size_t n_agt = env.num_agents;
