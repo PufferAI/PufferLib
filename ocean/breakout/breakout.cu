@@ -693,8 +693,9 @@ void puf_bind_stream(cudaStream_t stream) {
     g_gpu.stream = stream;
 }
 
-// Same signatures as CPU. GPU path uses batch base; puf_init is unused (create fills).
-void puf_init(Env* env, Dict* kwargs) {
+// Same signatures as CPU. GPU path uses batch base; create fills state.
+void puf_init(Env* env, Dict*) {
+    env->num_agents = 1;
 }
 
 void puf_reset(Env* env) {

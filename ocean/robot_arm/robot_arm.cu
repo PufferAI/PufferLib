@@ -83,7 +83,8 @@ void puf_bind_stream(cudaStream_t stream) {
     g_gpu.stream = stream;
 }
 
-void puf_init(Env*, Dict*) {
+void puf_init(Env* env, Dict*) {
+    env->num_agents = 1;
 }
 
 void puf_reset(Env*) {

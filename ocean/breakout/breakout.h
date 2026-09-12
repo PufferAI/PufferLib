@@ -3,7 +3,6 @@
 #include <assert.h>
 #include <unistd.h>
 #include <limits.h>
-#include <string.h>
 #include "raylib.h"
 // Native bf16 train (pufferl defines from_float + precision_t before including
 // this header): store obs as precision_t so env→rollout is a D2D copy. Standalone
@@ -189,7 +188,9 @@ void compute_observations(Breakout* env) {
     obs[7] = env->score / 864.0f;
     obs[8] = env->num_balls / 5.0f;
     obs[9] = env->paddle_width / (2.0f * HALF_PADDLE_WIDTH);
-    memcpy(obs + 10, env->brick_states, sizeof(float) * env->num_bricks);
+    for (int i = 0; i < env->num_bricks; i++) {
+        obs[10 + i] = env->brick_states[i];
+    }
 }
 
 // Collision of a stationary vertical line segment (xw,yw) to (xw,yw+hw)

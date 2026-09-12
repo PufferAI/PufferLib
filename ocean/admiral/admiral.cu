@@ -776,8 +776,8 @@ Env* puf_vec_create(int total_agents, Dict* env_kwargs,
     curriculum.mastered_level = config.curriculum_level - 1;
     cudaMemcpyToSymbol(d_curriculum, &curriculum, sizeof(curriculum));
 
-    Env* host_envs = (Env*)calloc((size_t)total_agents, sizeof(Env));
     int num_games = total_agents / N_TEAMS;
+    Env* host_envs = (Env*)calloc((size_t)num_games, sizeof(Env));
     for (int game = 0; game < num_games; game++) {
         Env* env = &host_envs[game];
         env->env_id = game;
@@ -793,9 +793,9 @@ Env* puf_vec_create(int total_agents, Dict* env_kwargs,
     }
 
     Env* envs = NULL;
-    cudaMalloc((void**)&envs, (size_t)total_agents * sizeof(Env));
+    cudaMalloc((void**)&envs, (size_t)num_games * sizeof(Env));
     cudaMemcpy(envs, host_envs,
-        (size_t)total_agents * sizeof(Env), cudaMemcpyHostToDevice);
+        (size_t)num_games * sizeof(Env), cudaMemcpyHostToDevice);
     free(host_envs);
     g_gpu.total_agents = total_agents;
     g_gpu.observations = observations;
@@ -810,7 +810,8 @@ void puf_bind_stream(cudaStream_t stream) {
     g_gpu.stream = stream;
 }
 
-void puf_init(Env*, Dict*) {
+void puf_init(Env* env, Dict*) {
+    env->num_agents = N_TEAMS;
 }
 
 void puf_reset(Env* envs) {
@@ -835,7 +836,9 @@ void puf_close(Env* envs) {
         CloseWindow();
         gpu_render_initialized = false;
     }
-    cudaFree(envs);
+    if (g_gpu.total_agents) {
+        cudaFree(envs);
+    }
     g_gpu = {};
 }
 

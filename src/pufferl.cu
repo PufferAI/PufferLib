@@ -938,11 +938,11 @@ __host__ __device__ static inline void log_accum(float* acc, Log* log, int clear
 }
 
 __global__ void log_reduce(Env* envs,
-        float* out, int num_envs, int clear) {
+        float* out, int total_agents, int clear) {
     extern __shared__ float sh[];
     int tid = threadIdx.x;
     float local[LOG_NF] = {};
-    for (int i = tid; i < num_envs; i += blockDim.x) {
+    for (int i = tid; i < total_agents / envs->num_agents; i += blockDim.x) {
         log_accum(local, &envs[i].log, clear);
     }
     for (int j = 0; j < LOG_NF; j++) {
@@ -954,7 +954,7 @@ __global__ void log_reduce(Env* envs,
 static void env_log_sum(VecEnv* vec, Log* out, int clear) {
     if (PUF_BACKEND == PUF_GPU) {
         log_reduce<<<1, 256, LOG_NF * 256 * sizeof(float)>>>(
-            vec->envs, vec->log_scratch, vec->size, clear);
+            vec->envs, vec->log_scratch, vec->total_agents, clear);
         cudaMemcpy(out, vec->log_scratch, sizeof(Log), cudaMemcpyDeviceToHost);
         return;
     }
@@ -974,7 +974,6 @@ static Env* puf_vec_create(int, Dict*, obs_t*, float*, float*, float*) {
 static void env_setup(PuffeRL* p, VecEnv* vec, Dict* vk, Dict* ek) {
     if (PUF_BACKEND == PUF_GPU) {
         assert(vec->buffers == 1 && "GPU env: num_buffers must be 1");
-        vec->size = vec->total_agents;
         vec->envs = puf_vec_create(vec->total_agents, ek,
             p->env.obs.data, p->env.actions.data,
             p->env.rewards.data, p->env.terminals.data);
