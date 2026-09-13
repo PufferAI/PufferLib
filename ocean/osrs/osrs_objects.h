@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include "rlgl.h"
 #include "osrs_assets.h"
+#include "osrs_asset_raylib.h"
 #include "osrs_binary_io.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +13,6 @@
 
 #define OBJS_MAGIC 0x4F424A53
 #define OBJ2_MAGIC 0x4F424A32
-#define ATLS_MAGIC 0x41544C53
 
 typedef struct {
     Model model;
@@ -26,40 +26,12 @@ typedef struct {
 } ObjectMesh;
 
 static Texture2D objects_load_atlas(const char* atlas_path) {
-    Texture2D tex = { 0 };
-    FILE* f = osrs_asset_fopen(atlas_path, "rb");
-    if (!f) {
-        fprintf(stderr, "objects_load_atlas: could not open %s\n", atlas_path);
-        abort();
-    }
-
-    uint32_t magic, width, height;
-    osrs_read_exact(f, &magic, 4, 1, atlas_path, "magic");
-    if (magic != ATLS_MAGIC) {
-        fprintf(stderr, "objects_load_atlas: bad magic %08x (expected ATLS)\n", magic);
-        abort();
-    }
-    osrs_read_exact(f, &width, 4, 1, atlas_path, "width");
-    osrs_read_exact(f, &height, 4, 1, atlas_path, "height");
-
-    size_t pixel_count = (size_t)width * height;
-    unsigned char* pixels = (unsigned char*)osrs_calloc_or_abort(
-        pixel_count, 4, "object atlas pixels");
-    osrs_read_exact(f, pixels, 4, pixel_count, atlas_path, "pixels");
-    fclose(f);
-
-    Image img = {
-        .data = pixels,
-        .width = (int)width,
-        .height = (int)height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
-    tex = LoadTextureFromImage(img);
-    SetTextureFilter(tex, TEXTURE_FILTER_POINT);
-    free(pixels);
-
-    fprintf(stderr, "objects_load_atlas: loaded %ux%u atlas texture\n", width, height);
+    Image img = osrs_asset_load_atlas_image(atlas_path);
+    Texture2D tex = LoadTextureFromImage(img);
+    if (tex.id > 0) SetTextureFilter(tex, TEXTURE_FILTER_POINT);
+    fprintf(stderr, "objects_load_atlas: loaded %dx%d atlas texture\n",
+        img.width, img.height);
+    UnloadImage(img);
     return tex;
 }
 

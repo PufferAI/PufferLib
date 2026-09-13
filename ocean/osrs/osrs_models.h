@@ -9,6 +9,7 @@
 #error "raylib.h not found"
 #endif
 #include "osrs_assets.h"
+#include "osrs_asset_raylib.h"
 #include "osrs_binary_io.h"
 #include "osrs_types.h"
 #include "osrs_items.h"
@@ -20,7 +21,6 @@
 #include <string.h>
 
 #define MDL4_MAGIC 0x4D444C34
-#define ATLS_MAGIC 0x41544C53
 #define TANM_MAGIC 0x4D4E4154
 #define TANM_VERSION 1
 #define MODEL_CACHE_DENSE_INDEX_LIMIT 0x100000u
@@ -235,47 +235,26 @@ static Texture2D model_cache_load_atlas(ModelCache* cache, const char* model_pat
     if (!model_cache_companion_path(atlas_path, sizeof(atlas_path), model_path, ".atlas")) {
         return (Texture2D){0};
     }
+    if (!osrs_asset_exists(atlas_path)) return (Texture2D){0};
 
-    FILE* f = osrs_asset_fopen(atlas_path, "rb");
-    if (!f) return (Texture2D){0};
-
-    uint32_t magic, width, height;
-    osrs_read_exact(f, &magic, 4, 1, atlas_path, "atlas magic");
-    osrs_read_exact(f, &width, 4, 1, atlas_path, "atlas width");
-    osrs_read_exact(f, &height, 4, 1, atlas_path, "atlas height");
-    if (magic != ATLS_MAGIC || width == 0 || height == 0) {
-        fprintf(stderr, "model_cache_load: bad atlas %s\n", atlas_path);
-        abort();
-    }
-
-    size_t pixel_count = (size_t)width * (size_t)height * 4;
-    unsigned char* pixels = (unsigned char*)osrs_malloc_or_abort(
-        pixel_count, "model atlas pixels");
-    osrs_read_exact(f, pixels, 1, pixel_count, atlas_path, "atlas pixels");
-    fclose(f);
-
-    Image image = {
-        .data = pixels,
-        .width = (int)width,
-        .height = (int)height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
+    Image image = osrs_asset_load_atlas_image(atlas_path);
     Texture2D texture = LoadTextureFromImage(image);
     if (texture.id > 0) SetTextureFilter(texture, TEXTURE_FILTER_POINT);
     if (texture.id > 0 && cache) {
-        cache->atlas_width = (int)width;
-        cache->atlas_height = (int)height;
+        size_t pixel_count = (size_t)image.width * (size_t)image.height * 4;
+        cache->atlas_width = image.width;
+        cache->atlas_height = image.height;
         cache->atlas_base_pixels = (unsigned char*)osrs_malloc_or_abort(
             pixel_count, "model atlas base pixels");
         cache->atlas_pixels = (unsigned char*)osrs_malloc_or_abort(
             pixel_count, "model atlas working pixels");
-        memcpy(cache->atlas_base_pixels, pixels, pixel_count);
-        memcpy(cache->atlas_pixels, pixels, pixel_count);
+        memcpy(cache->atlas_base_pixels, image.data, pixel_count);
+        memcpy(cache->atlas_pixels, image.data, pixel_count);
         model_cache_load_texture_anims(cache, model_path);
     }
-    free(pixels);
-    fprintf(stderr, "model_cache_load: loaded atlas %ux%u from %s\n", width, height, atlas_path);
+    fprintf(stderr, "model_cache_load: loaded atlas %dx%d from %s\n",
+        image.width, image.height, atlas_path);
+    UnloadImage(image);
     return texture;
 }
 
