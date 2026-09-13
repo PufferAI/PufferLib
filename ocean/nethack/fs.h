@@ -109,8 +109,7 @@ static void nethack_rm_vardir(const char* dir) {
 
 // options rc
 
-// one rc per process: AUTOPICKUP_EXCEPTION is a config-file-only directive, so
-// the options string becomes "@<this file>"; written atomically (tmp + rename),
+// one rc per process (the options string becomes "@<this file>"); written atomically (tmp + rename),
 // concurrent env inits write identical content
 // content-addressed rc: distinct options content never shares a file
 static const char* nethack_rc_path_opts(char* buf, size_t bufsz, const char* options) {
@@ -123,7 +122,6 @@ static const char* nethack_rc_path_opts(char* buf, size_t bufsz, const char* opt
         FILE* f = fopen(tmp, "w");
         if (f) {
             fprintf(f, "OPTIONS=%s\n", options);
-            fprintf(f, "AUTOPICKUP_EXCEPTION=\">corpse\"\n");
             fclose(f);
             rename(tmp, buf);
         }
@@ -141,9 +139,6 @@ static const char* nethack_rc_path(const char* default_options) {
         FILE* f = fopen(tmp, "w");
         if (f) {
             fprintf(f, "OPTIONS=%s\n", default_options);
-            // corpses are never AUTO-picked: acquiring one is a deliberate
-            // PICKUP, and eating carried corpses stays policy-learnable
-            fprintf(f, "AUTOPICKUP_EXCEPTION=\">corpse\"\n");
             fclose(f);
             rename(tmp, p);
         }

@@ -224,7 +224,7 @@ static inline int nethack_letter_bit(int c) {
 #define NETHACK_OPTIONS_TAIL \
     "autopickup,color,disclose:+i +a +v +g +c +o," \
     "mention_walls,nobones,nocmdassist,nolegacy,nosparkle," \
-    "pickup_burden:unencumbered," \
+    "pickup_burden:unencumbered,pickup_types:$?!/," \
     "runmode:teleport,showexp,showscore,time,"
 
 // !status_updates skips the status renderer + recalc_mapseen (~25% of engine)
