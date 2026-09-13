@@ -98,6 +98,11 @@ struct Env {
     int stall_ctr; // consecutive same-turn steps
     int n_spells;
 
+    // action masks: handless-form belief, zero-time refusal memory
+    int cant_hold; long cant_hold_t;
+    int prev_dir;
+    int zt_n, zt_verb[32], zt_slot[32], zt_dir[32], zt_cnt[32]; long zt_x, zt_y, zt_d, zt_t;
+
     // reward-delta trackers
     int prev_action;
     int enh_ready;
@@ -213,7 +218,30 @@ void init(Nethack* env) {
 // masking
 
 
+#define NETHACK_CANT_HOLD_TURNS 100
+static void nethack_track_cant_hold(Nethack* env) { // handless polymorph: the engine refuses WIELD/THROW/WEAR/ENGRAVE for free
+    if (env->cant_hold && env->blstats[NLE_BL_TIME] - env->cant_hold_t > NETHACK_CANT_HOLD_TURNS) env->cant_hold = 0;
+    const char* m = (const char*) env->message;
+    if (!m || !*m) return;
+    if (strstr(m, "can't even hold anything") || strstr(m, "Don't be ridiculous") || strstr(m, "can't throw or shoot without hands")
+        || strstr(m, "Don't even bother") || strstr(m, "can't wear any armor in your current form")) { env->cant_hold = 1; env->cant_hold_t = env->blstats[NLE_BL_TIME]; }
+    else if (strstr(m, "You return to ") || strstr(m, "You turn into ") || strstr(m, "You break out of your cocoon")) env->cant_hold = 0;
+}
+static int nethack_zt_world_same(const Nethack* env) {
+    return env->blstats[NLE_BL_X] == env->zt_x && env->blstats[NLE_BL_Y] == env->zt_y
+        && env->blstats[NLE_BL_DEPTH] == env->zt_d && env->blstats[NLE_BL_TIME] == env->zt_t;
+}
+// zero-time mask (NH_ZT_MASK=1, stock evals): an action refused for free twice in the same world stays masked until the world changes
+static int nethack_zt_mask_on(void) { static int v = -1; if (v < 0) { const char* e = getenv("NH_ZT_MASK"); v = e && atoi(e) != 0; } return v; }
+static int nethack_zt_blocked(const Nethack* env, int verb, int slot) {
+    if (!nethack_zt_mask_on() || !env->zt_n || !nethack_zt_world_same(env)) return 0;
+    for (int k = 0; k < env->zt_n; k++) if (env->zt_verb[k] == verb && env->zt_slot[k] == slot && env->zt_cnt[k] >= 2) return 1;
+    return 0;
+}
 static int nethack_slot_usable(const Nethack* env, const Verb* verb, int i) {
+    if (env->cant_hold && (verb == &NETHACK_VERBS[NETHACK_ACT_WIELD] || verb == &NETHACK_VERBS[NETHACK_ACT_THROW]
+                           || verb == &NETHACK_VERBS[NETHACK_ACT_WEAR])) return 0;
+    if (nethack_zt_blocked(env, (int)(verb - NETHACK_VERBS), i)) return 0;
     if (!(verb->item_classes & (1u << env->inv_oclasses[i]))) return 0;
     // APPLY on a container (box/bag) is a silent zero-turn no-op: the macro
     // drives no put-in/take-out menus, so it is an absorbing spam loop, not a
@@ -293,6 +321,7 @@ static int nethack_ray_target(Nethack* env, int dx, int dy) {
 }
 
 static void nethack_compute_mask(Nethack* env) {
+    nethack_track_cant_hold(env);
     unsigned char* mask = env->action_mask;
     memset(mask, 1, NETHACK_NUM_ACTIONS);
     if (env->mask_search20 != 0.0f) mask[NETHACK_ACT_SEARCH20] = 0;
@@ -339,6 +368,7 @@ static void nethack_compute_mask(Nethack* env) {
     int tg = terrain - 2359;
     if (tg == 31 || tg == 32 || tg == 34 || tg == 39 || tg == 40 || tg == 41)
         mask[NETHACK_ACT_ELBERETH] = 0;
+    if (env->cant_hold) mask[NETHACK_ACT_ELBERETH] = 0;
     if ((env->blstats[NLE_BL_CONDITION] & 0x400L) || (env->internal[6] & 4))
         mask[NETHACK_ACT_ELBERETH] = 0;
 
@@ -359,7 +389,7 @@ static void nethack_compute_mask(Nethack* env) {
     // CAST zero-turn refusal mirror (engine predicate: stun, chant, freehand,
     // too-weak, hunger): a free refusal never advances the clock, so the
     // blocking condition can never expire -- self-sealing wedge
-    if (!castable || env->internal[7] <= 10 || nle_cast_blocked(env->ctx))
+    if (!castable || env->blstats[NLE_BL_HUNGER] >= 3 || nle_cast_blocked(env->ctx)) // public hunger band, not the exact counter
         mask[NETHACK_ACT_CAST] = 0;
     // shop goods we can't pay for: picking them up incurs a bill the agent
     // has no way to settle, so gate on affordability (price is quoted to the
@@ -423,6 +453,27 @@ static void nethack_compute_mask(Nethack* env) {
     if (!legal_dirs) memset(dirs, 1, NETHACK_NUM_DIRS);
     for (int h = 1; h < NETHACK_DIR_HEADS; h++)
         memcpy(dirs + h * NETHACK_NUM_DIRS, dirs, NETHACK_NUM_DIRS);
+
+    // zero-time memory: directional verbs lose the refused direction, headless verbs switch off
+    if (nethack_zt_mask_on() && env->zt_n && nethack_zt_world_same(env)) {
+        for (int k = 0; k < env->zt_n; k++) {
+            int v = env->zt_verb[k];
+            if (env->zt_cnt[k] < 2 || NETHACK_VERBS[v].head >= 0) continue;
+            int dh = nethack_dir_head(v);
+            int same_verb = 0;
+            for (int j = 0; j < env->zt_n; j++) same_verb += (env->zt_verb[j] == v && env->zt_cnt[j] >= 2);
+            if (dh >= 0 && env->zt_dir[k] >= 0 && same_verb < 3) {
+                unsigned char* row = dirs + dh * NETHACK_NUM_DIRS;
+                row[env->zt_dir[k]] = 0;
+                int left = 0;
+                for (int d = 0; d < NETHACK_NUM_DIRS; d++) left += row[d];
+                if (!left) { mask[v] = 0; row[0] = 1; } // keep one legal head entry
+            } else mask[v] = 0;
+        }
+        int any = 0;
+        for (int v = 0; v < NETHACK_NUM_ACTIONS; v++) any += mask[v];
+        if (!any) mask[NETHACK_ACT_SEARCH] = 1;
+    }
 
     // MOVE-head refinements: peaceful-adjacent and diagonal-door moves are void
     unsigned char keep[NETHACK_NUM_DIRS];
@@ -789,6 +840,8 @@ static void nethack_do_reset(Nethack* env) {
     env->disc0 = nle_discoveries(env->ctx);
     env->engid_tested = 0;
     env->enh_ready = 0;
+    env->cant_hold = 0; env->cant_hold_t = 0;
+    env->zt_n = 0; env->prev_dir = -1;
     memset(&env->stats, 0, sizeof(env->stats));
     memset(env->obj_mem, 0, sizeof(env->obj_mem));
     env->terr_floor = 0xFFFFFFFFu;
@@ -1099,12 +1152,24 @@ void puf_step(Nethack* env) {
     int dirkey = NETHACK_DIR_KEYS[dh >= 0 ? (int)env->agents[0].actions[13 + dh] : 0];
 
     long time_before = env->blstats[NLE_BL_TIME];
+    long hx0 = env->blstats[NLE_BL_X], hy0 = env->blstats[NLE_BL_Y], hd0 = env->blstats[NLE_BL_DEPTH];
     int bad_pick = 0;
     nethack_execute(env, verb, slot, dirkey, &bad_pick);
 
     env->prev_action = verb;
+    env->prev_dir = dh >= 0 ? (int)env->agents[0].actions[13 + dh] : -1;
+    nethack_track_cant_hold(env); // before prompt handling blanks the message
     nethack_handle_prompts(env);
     if (!env->obs.done) nle_obs_refresh(env->ctx, &env->obs);
+    // zero-time memory: no clock, no move = refused, whatever the message said
+    if (!env->obs.done && env->blstats[NLE_BL_TIME] == time_before && env->blstats[NLE_BL_X] == hx0
+        && env->blstats[NLE_BL_Y] == hy0 && env->blstats[NLE_BL_DEPTH] == hd0) {
+        if (!env->zt_n || !nethack_zt_world_same(env)) { env->zt_n = 0; env->zt_x = hx0; env->zt_y = hy0; env->zt_d = hd0; env->zt_t = time_before; }
+        int dup = 0;
+        for (int k = 0; k < env->zt_n; k++)
+            if (env->zt_verb[k] == verb && env->zt_slot[k] == slot && env->zt_dir[k] == env->prev_dir) { dup = 1; env->zt_cnt[k]++; }
+        if (!dup && env->zt_n < 32) { env->zt_verb[env->zt_n] = verb; env->zt_slot[env->zt_n] = slot; env->zt_dir[env->zt_n] = env->prev_dir; env->zt_cnt[env->zt_n] = 1; env->zt_n++; }
+    } else env->zt_n = 0;
     nethack_auto_enhance(env);
 
     if (bad_pick) env->stats.illegal_actions++;
