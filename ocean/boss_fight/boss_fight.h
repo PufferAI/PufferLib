@@ -614,7 +614,7 @@ void puf_render(BossFight* env) {
     }
 
     Color boss_color = env->boss_hp <= 0 ? RED : BOSS_COLOR;
-    DrawCircleGradient(boss_sx, boss_sy, radius_to_screen(BOSS_SIZE) * 1.25f,
+    DrawCircleGradient((Vector2){boss_sx, boss_sy}, radius_to_screen(BOSS_SIZE) * 1.25f,
         Fade(BOSS_COLOR, 0.10f), Fade(BOSS_COLOR, 0.0f));
     DrawCircle(boss_sx + 4, boss_sy + 5, radius_to_screen(BOSS_SIZE),
         Fade(BLACK, 0.22f));
