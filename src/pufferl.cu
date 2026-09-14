@@ -2004,7 +2004,7 @@ PuffeRL* create_pufferl(Ini* ini, TrainContext* ctx) {
         }
         pol->param = {
             .data = (precision_t*)pol->params_alloc.mem,
-            .shape = {pol->params_alloc.total_elems},
+            .shape = {pol->params_alloc.total_bytes / (long)sizeof(precision_t)},
         };
     }
     if (hypers.async) {
@@ -2013,11 +2013,14 @@ PuffeRL* create_pufferl(Ini* ini, TrainContext* ctx) {
     alloc_create(grads);
     alloc_create(acts);
 
-    pufferl->grad = {.data = (precision_t*)grads->mem, .shape = {grads->total_elems}};
+    pufferl->grad = {
+        .data = (precision_t*)grads->mem,
+        .shape = {grads->total_bytes / (long)sizeof(precision_t)},
+    };
     if (hypers.async) {
         pufferl->actor_param = {
             .data = (precision_t*)pufferl->weight_alloc.mem,
-            .shape = {pufferl->weight_alloc.total_elems},
+            .shape = {pufferl->weight_alloc.total_bytes / (long)sizeof(precision_t)},
         };
     }
 

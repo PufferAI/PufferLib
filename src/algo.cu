@@ -1122,7 +1122,7 @@ void muon_init(Muon* m, Allocator* param_alloc, double momentum, Allocator* allo
     cudaMalloc((void**)&m->grad_norm, sizeof(float));
     cudaMalloc((void**)&m->ns_norm, sizeof(float));
     cudaMalloc((void**)&m->norm_partials, 256 * sizeof(float));
-    m->mb = {.shape = {param_alloc->total_elems}};
+    m->mb = {.shape = {param_alloc->total_bytes / (long)sizeof(precision_t)}};
     alloc_register(alloc, &m->mb);
     long max_M = 0, max_N = 0;
     for (int _i = 0; _i < param_alloc->num_regs; _i++) {
@@ -1155,12 +1155,13 @@ void muon_step(Muon* m, Float weights, Prec grads,
 
     // Per-param NS into workspace; write scaled update back into flat grads.
     // 1D params already hold their update in-place (scale 1).
-    long offset = 0;
     for (int _i = 0; _i < m->param_alloc->num_regs; _i++) {
         AllocEntry& e = m->param_alloc->regs[_i];
+        // Params and grads have the same aligned layout, including padding.
+        long offset = ((char*)*e.data_ptr - (char*)m->param_alloc->mem)
+            / sizeof(precision_t);
         precision_t* gc_ptr = grads.data + offset;
         long ne = numel(e.shape);
-        offset += ne;
         if (ndim(e.shape) < 2) {
             continue;
         }
