@@ -81,13 +81,17 @@ fi
 # Linux/mac
 PLATFORM="$(uname -s)"
 if [ "$PLATFORM" = "Linux" ]; then
-    RAYLIB_NAME='raylib-5.5_linux_amd64'
+    LINUX_ARCH=amd64
+    if [ "$(uname -m)" = "aarch64" ]; then
+        LINUX_ARCH=arm64
+    fi
+    RAYLIB_NAME="raylib-6.0_linux_$LINUX_ARCH"
     OMP_FLAGS=(-fopenmp)
     OMP_LIB=-lomp5
     SANITIZE_FLAGS=(-fsanitize=address,undefined,bounds,pointer-overflow -fno-omit-frame-pointer)
-    STANDALONE_LDFLAGS=(-lGL)
+    STANDALONE_LDFLAGS=(-lGL -lX11)
 else
-    RAYLIB_NAME='raylib-5.5_macos'
+    RAYLIB_NAME='raylib-6.0_macos'
     OMP_PREFIX="$(brew --prefix libomp)"
     OMP_FLAGS=(-Xclang -fopenmp -I"$OMP_PREFIX/include" -L"$OMP_PREFIX/lib" -lomp)
     OMP_LIB=-lomp
@@ -117,15 +121,16 @@ download() {
     esac
 }
 
-RAYLIB_URL="https://github.com/raysan5/raylib/releases/download/5.5"
+RAYLIB_URL="https://github.com/raysan5/raylib/releases/download/6.0"
 if [ "$MODE" = "web" ]; then
-    RAYLIB_NAME='raylib-5.5_webassembly'
+    RAYLIB_NAME='raylib-6.0_webassembly'
     download "$RAYLIB_NAME" "$RAYLIB_URL/$RAYLIB_NAME.zip"
+    RAYLIB_A="$RAYLIB_NAME/lib/libraylib.web.a"
 else
     download "$RAYLIB_NAME" "$RAYLIB_URL/$RAYLIB_NAME.tar.gz"
+    RAYLIB_A="$RAYLIB_NAME/lib/libraylib.a"
 fi
 
-RAYLIB_A="$RAYLIB_NAME/lib/libraylib.a"
 INCLUDES=(-I./$RAYLIB_NAME/include -I./src -I./vendor)
 LINK_ARCHIVES=("$RAYLIB_A")
 EXTRA_SRC=""
@@ -168,11 +173,29 @@ elif [ "$ENV" = "trailer" ]; then
 elif [ "$ENV" = "impulse_wars" ]; then
     SRC_DIR="ocean/$ENV"
     if [ "$MODE" = "web" ]; then BOX2D_NAME='box2d-web'
-    elif [ "$PLATFORM" = "Linux" ]; then BOX2D_NAME='box2d-linux-amd64'
+    elif [ "$PLATFORM" = "Linux" ]; then BOX2D_NAME="box2d-linux-$LINUX_ARCH"
     else BOX2D_NAME='box2d-macos-arm64'
     fi
     BOX2D_URL="https://github.com/capnspacehook/box2d/releases/latest/download"
-    download "$BOX2D_NAME" "$BOX2D_URL/$BOX2D_NAME.tar.gz"
+    if [ "$BOX2D_NAME" = "box2d-linux-arm64" ] && [ ! -d "$BOX2D_NAME" ]; then
+        # no arm64 release yet (capnspacehook/box2d#3), same flags as its release.yml
+        git clone --depth 1 --branch df25d747 \
+            https://github.com/capnspacehook/box2d.git "$BOX2D_NAME"
+        cmake -S "$BOX2D_NAME" -B "$BOX2D_NAME/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBOX2D_DISABLE_SIMD=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBOX2D_SAMPLES=OFF \
+            -DBOX2D_VALIDATE=OFF \
+            -DBOX2D_UNIT_TESTS=OFF \
+            -DCMAKE_C_FLAGS="-DB2_MAX_WORLDS=65534"
+        cmake --build "$BOX2D_NAME/build" -j$(nproc)
+        cp "$BOX2D_NAME/build/src/libbox2d.a" "$BOX2D_NAME/"
+    else
+        download "$BOX2D_NAME" "$BOX2D_URL/$BOX2D_NAME.tar.gz"
+    fi
     INCLUDES+=(-I./$BOX2D_NAME/include -I./$BOX2D_NAME/src -I./ocean/impulse_wars -I./vendor/collections-c)
     LINK_ARCHIVES+=("./$BOX2D_NAME/libbox2d.a")
     # C++ trainer only: game is C (void*/compound literals), not C++17.
@@ -228,16 +251,17 @@ SRC_FILE=${SRC_FILE:-$SRC_DIR/$ENV.c}
 if [ "$(uname -m)" = "x86_64" ]; then
     SIMD_FLAGS=(-mavx2 -mfma)
 else
-    SIMD_FLAGS=()
+    # char is unsigned on aarch64 linux, envs assume signed (nmmo3 -1 fills)
+    SIMD_FLAGS=(-fsigned-char)
 fi
 if [ -n "$DEBUG" ] || [ "$MODE" = "local" ]; then
     CLANG_OPT=(-g -O0 "${CLANG_WARN[@]}" "${SANITIZE_FLAGS[@]}" "${SIMD_FLAGS[@]}")
-    NVCC_OPT="-O0 -g"
+    NVCC_OPT="-O0 -g -Xcompiler=-fsigned-char"
     LINK_OPT="-g"
 else
 # No -DNDEBUG: keep assert() active (train/sweep fail-fast with messages).
     CLANG_OPT=(-O2 "${CLANG_WARN[@]}" "${SIMD_FLAGS[@]}")
-    NVCC_OPT="-O2 --threads 0"
+    NVCC_OPT="-O2 --threads 0 -Xcompiler=-fsigned-char"
     LINK_OPT="-O2"
 fi
 # Dashboard / cache / trailer: compile SRC_FILE only (not puffercpu / CUDA / obs_t).
@@ -428,7 +452,7 @@ NCCL_LFLAG=""
 for dir in /usr/include /usr/local/cuda/include; do
     if [ -f "$dir/nccl.h" ]; then NCCL_IFLAG="-I$dir"; break; fi
 done
-for dir in /usr/lib/x86_64-linux-gnu /usr/local/cuda/lib64; do
+for dir in /usr/lib/$(uname -m)-linux-gnu /usr/local/cuda/lib64; do
     if [ -f "$dir/libnccl.so" ] || [ -f "$dir/libnccl.so.2" ]; then NCCL_LFLAG="-L$dir"; break; fi
 done
 if [ -z "$NCCL_IFLAG" ]; then
@@ -546,7 +570,7 @@ elif [ "$MODE" = "profile" ]; then
         "$RAYLIB_A" \
         -L$CUDA_HOME/lib64 \
         -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand \
-        -lGL -lm -Xlinker=-lpthread $OMP_LIB \
+        -lGL -lX11 -lm -Xlinker=-lpthread $OMP_LIB \
         -o "$PROFILE_BIN"
     echo "Built: ./$PROFILE_BIN"
 fi

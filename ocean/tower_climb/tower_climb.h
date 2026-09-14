@@ -1493,7 +1493,7 @@ static void update_animation(Client* client, AnimationState newState) {
     // Handle negative startFrame (counting from end)
     int startFrame = config->startFrame;
     if (startFrame < 0) {
-        startFrame = client->animations[config->animationIndex].frameCount + startFrame;
+        startFrame = client->animations[config->animationIndex].keyframeCount + startFrame;
     }
     client->animFrameCounter = startFrame;
     UpdateModelAnimation(client->robot, client->animations[config->animationIndex], startFrame);
@@ -1533,7 +1533,7 @@ static void process_animation_frame(Client* client, TowerClimb* env) {
     }
     int maxFrames = config->maxFrames;
     if (maxFrames < 0) {
-        maxFrames = client->animations[config->animationIndex].frameCount
+        maxFrames = client->animations[config->animationIndex].keyframeCount
             + maxFrames;
     }
     if (maxFrames > 0 && client->animFrameCounter >= maxFrames) {
