@@ -76,40 +76,58 @@ struct Network {
     int hidden, num_layers, horizon;
 };
 
-thread_local cublasHandle_t g_cublas_handle = NULL;
-thread_local void* g_cublas_workspace = NULL;
 // Side-stream dW (mm_tn) overlaps dX (mm_nn) on main during linear bwd.
-thread_local cublasHandle_t g_cublas_dw_handle = NULL;
 thread_local cudaEvent_t g_main_ready = NULL;
-thread_local void* g_cublas_dw_workspace = NULL;
 thread_local cudaStream_t g_dw_stream = NULL;
 thread_local cudaEvent_t g_dw_done = NULL;
 
-static void cublas_init_one(cublasHandle_t* handle, void** workspace) {
-    const size_t ws_bytes = 32 * 1024 * 1024;
-    cublasCreate(handle);
-    cudaMalloc(workspace, ws_bytes);
-    cublasSetWorkspace(*handle, *workspace, ws_bytes);
-    cublasSetMathMode(*handle, CUBLAS_DEFAULT_MATH);
+// One handle + workspace per stream, bound once: cublasSetStream resets the workspace.
+struct CublasStream {
+    cudaStream_t stream;
+    cublasHandle_t handle;
+    void* workspace;
+};
+constexpr int CUBLAS_MAX_STREAMS = 8;
+thread_local CublasStream g_cublas_streams[CUBLAS_MAX_STREAMS];
+thread_local int g_num_cublas_streams = 0;
+
+// Call on the thread that uses the stream, before graph capture.
+void cublas_init_stream(cudaStream_t stream) {
+    assert(g_num_cublas_streams < CUBLAS_MAX_STREAMS);
+    const size_t ws_bytes = 4 * 1024 * 1024;
+    CublasStream* cs = &g_cublas_streams[g_num_cublas_streams++];
+    cs->stream = stream;
+    cublasCreate(&cs->handle);
+    cudaMalloc(&cs->workspace, ws_bytes);
+    cublasSetStream(cs->handle, stream);
+    cublasSetWorkspace(cs->handle, cs->workspace, ws_bytes);
+    cublasSetMathMode(cs->handle, CUBLAS_DEFAULT_MATH);
+}
+
+static cublasHandle_t cublas_handle(cudaStream_t stream) {
+    int i = 0;
+    while (i < g_num_cublas_streams && g_cublas_streams[i].stream != stream) i++;
+    assert(i < g_num_cublas_streams);
+    return g_cublas_streams[i].handle;
 }
 
 void cublas_init_handle() {
-    cublas_init_one(&g_cublas_handle, &g_cublas_workspace);
-    cublas_init_one(&g_cublas_dw_handle, &g_cublas_dw_workspace);
+    // Train then eval: two trainers per thread, each with new streams.
+    g_num_cublas_streams = 0;
+    cublas_init_stream(0);
     cudaStreamCreateWithFlags(&g_dw_stream, cudaStreamNonBlocking);
+    cublas_init_stream(g_dw_stream);
     cudaEventCreateWithFlags(&g_dw_done, cudaEventDisableTiming);
     cudaEventCreateWithFlags(&g_main_ready, cudaEventDisableTiming);
 }
 
 // Dense row-major GEMM: C = alpha * op_a(A) @ op_b(B) + beta * C
-static void cublasGemmExDense(cublasHandle_t handle,
-        cublasOperation_t op_a, cublasOperation_t op_b,
+static void cublasGemmExDense(cublasOperation_t op_a, cublasOperation_t op_b,
         int M, int N, int K, void* A, void* B, void* C,
         cudaStream_t stream, float alpha = 1.0f, float beta = 0.0f) {
     int lda = (op_a == CUBLAS_OP_N) ? K : M;
     int ldb = (op_b == CUBLAS_OP_N) ? N : K;
-    cublasSetStream(handle, stream);
-    cublasGemmEx(handle, op_b, op_a, N, M, K, &alpha,
+    cublasGemmEx(cublas_handle(stream), op_b, op_a, N, M, K, &alpha,
         B, CUBLAS_PRECISION, ldb, A, CUBLAS_PRECISION, lda, &beta,
         C, CUBLAS_PRECISION, N, CUBLAS_COMPUTE, CUBLAS_GEMM_DEFAULT);
 }
@@ -120,18 +138,17 @@ void puf_mm(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
     int M = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
     int K = a->shape[ndim(a->shape)-1];
     int N = b->shape[ndim(b->shape)-2];
-    cublasGemmExDense(g_cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T, M, N, K,
+    cublasGemmExDense(CUBLAS_OP_N, CUBLAS_OP_T, M, N, K,
         a->data, b->data, out->data, stream, alpha, beta);
 }
 
 // out(M,N) = alpha * a(...,M)^T @ b(...,N) + beta * out: leading dims folded into K
 void puf_mm_tn(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
-        float alpha = 1.0f, float beta = 0.0f,
-        cublasHandle_t handle = g_cublas_handle) {
+        float alpha = 1.0f, float beta = 0.0f) {
     int M = a->shape[ndim(a->shape)-1];
     int K = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
     int N = b->shape[ndim(b->shape)-1];
-    cublasGemmExDense(handle, CUBLAS_OP_T, CUBLAS_OP_N, M, N, K,
+    cublasGemmExDense(CUBLAS_OP_T, CUBLAS_OP_N, M, N, K,
         a->data, b->data, out->data, stream, alpha, beta);
 }
 
@@ -141,7 +158,7 @@ void puf_mm_nn(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
     int M = batch_size(a->shape) * a->shape[ndim(a->shape)-2];
     int K = a->shape[ndim(a->shape)-1];
     int N = b->shape[ndim(b->shape)-1];
-    cublasGemmExDense(g_cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K,
+    cublasGemmExDense(CUBLAS_OP_N, CUBLAS_OP_N, M, N, K,
         a->data, b->data, out->data, stream, alpha, beta);
 }
 
@@ -150,7 +167,7 @@ void puf_mm_nn(Prec* a, Prec* b, Prec* out, cudaStream_t stream,
 void puf_mm_tn_async_after(Prec* a, Prec* b, Prec* out, cudaStream_t main_stream) {
     cudaEventRecord(g_main_ready, main_stream);
     cudaStreamWaitEvent(g_dw_stream, g_main_ready, 0);
-    puf_mm_tn(a, b, out, g_dw_stream, 1.0f, 0.0f, g_cublas_dw_handle);
+    puf_mm_tn(a, b, out, g_dw_stream);
 }
 
 void puf_dw_join(cudaStream_t consumer) {

@@ -955,7 +955,7 @@ MinimalEncoderProfile* create_minimalenc(int B, int H) {
 }
 
 void run_flat_encoder(MinimalEncoderProfile* p) {
-    cublasGemmExDense(g_cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T,
+    cublasGemmExDense(CUBLAS_OP_N, CUBLAS_OP_T,
         p->B, p->H, ME_OBS_SIZE,
         p->obs.data, p->flat_w.data, p->flat_out.data, 0);
 }
@@ -1059,7 +1059,7 @@ void run_materialize_points(MinimalEncoderProfile* p) {
 }
 
 void run_cublas_projection(MinimalEncoderProfile* p) {
-    cublasGemmExDense(g_cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T,
+    cublasGemmExDense(CUBLAS_OP_N, CUBLAS_OP_T,
         p->B * ME_NUM_POINTS, ME_ENTITY_HIDDEN, ME_ENTITY_IN,
         p->point_input.data, p->me_w.input_w.data,
         p->cublas_entity_hidden.data, 0);
@@ -1068,7 +1068,7 @@ void run_cublas_projection(MinimalEncoderProfile* p) {
 }
 
 void run_cublas_output_gemm(MinimalEncoderProfile* p) {
-    cublasGemmExDense(g_cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T,
+    cublasGemmExDense(CUBLAS_OP_N, CUBLAS_OP_T,
         p->B * ME_NUM_POINTS, p->H, ME_ENTITY_HIDDEN,
         p->cublas_entity_hidden.data, p->me_w.output_w.data,
         p->point_logits.data, 0);
