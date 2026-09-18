@@ -81,7 +81,7 @@ thread_local cudaEvent_t g_main_ready = NULL;
 thread_local cudaStream_t g_dw_stream = NULL;
 thread_local cudaEvent_t g_dw_done = NULL;
 
-// One handle + workspace per stream, bound once: cublasSetStream resets the workspace.
+// Concurrent streams need separate scratch buffers.
 struct CublasStream {
     cudaStream_t stream;
     cublasHandle_t handle;
@@ -91,7 +91,7 @@ constexpr int CUBLAS_MAX_STREAMS = 8;
 thread_local CublasStream g_cublas_streams[CUBLAS_MAX_STREAMS];
 thread_local int g_num_cublas_streams = 0;
 
-// Call on the thread that uses the stream, before graph capture.
+// Initialize on the calling thread before capturing any GEMMs on this stream.
 void cublas_init_stream(cudaStream_t stream) {
     assert(g_num_cublas_streams < CUBLAS_MAX_STREAMS);
     const size_t ws_bytes = 4 * 1024 * 1024;
@@ -99,6 +99,7 @@ void cublas_init_stream(cudaStream_t stream) {
     cs->stream = stream;
     cublasCreate(&cs->handle);
     cudaMalloc(&cs->workspace, ws_bytes);
+    // Set the stream first: cublasSetStream resets the workspace.
     cublasSetStream(cs->handle, stream);
     cublasSetWorkspace(cs->handle, cs->workspace, ws_bytes);
     cublasSetMathMode(cs->handle, CUBLAS_DEFAULT_MATH);
@@ -112,7 +113,7 @@ static cublasHandle_t cublas_handle(cudaStream_t stream) {
 }
 
 void cublas_init_handle() {
-    // Train then eval: two trainers per thread, each with new streams.
+    // Evaluation creates another trainer on this thread with new streams.
     g_num_cublas_streams = 0;
     cublas_init_stream(0);
     cudaStreamCreateWithFlags(&g_dw_stream, cudaStreamNonBlocking);

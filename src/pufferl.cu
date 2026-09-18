@@ -2074,7 +2074,7 @@ PuffeRL* create_pufferl(Ini* ini, TrainContext* ctx) {
             assert(cudaStreamCreate(&pufferl->streams[i]) == cudaSuccess);
         }
     }
-    // GPU rollouts run on this thread. CPU workers init their own stream.
+    // CPU rollout workers register their streams in vec_thread_main.
     if (PUF_BACKEND == PUF_GPU) {
         cublas_init_stream(pufferl->streams[0]);
     }
