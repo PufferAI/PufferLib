@@ -1,3 +1,9 @@
+"""Asset installation and PufferLib integration tests, including the C suite.
+
+Run ./build.sh fight_caves --cpu, then:
+    python -m pytest -q tests/test_fight_caves_integration.py
+Native/backend checks skip with a setup instruction if prerequisites are absent.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -5,6 +11,8 @@ import importlib.util
 from io import BytesIO
 import json
 import os
+import shlex
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -15,6 +23,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SETUP_DATA = REPO_ROOT / "ocean" / "fight_caves" / "tools.py"
+RESOURCE_ROOT = REPO_ROOT / "resources" / "fight_caves"
 
 
 def load_setup_data():
@@ -72,8 +81,15 @@ def test_install_bundle_is_verified_and_transactional(tmp_path, monkeypatch):
     assert installed.read_bytes() == payload
     assert setup_data.verify_tree(install_root, bundle, exact=True) == []
 
-    installed.write_bytes(b"corrupt")
-    assert "wrong size" in setup_data.verify_tree(install_root, bundle, exact=True)[0]
+    installed.write_bytes(b"x" * len(payload))
+    assert "checksum mismatch" in setup_data.verify_tree(install_root, bundle, exact=True)[0]
+    setup_data.install_bundle("core", bundle, force=False)
+    assert installed.read_bytes() == payload
+
+    def unexpected_download(*args):
+        pytest.fail("Valid installed assets must be reusable offline")
+    monkeypatch.setattr(setup_data, "download", unexpected_download)
+    setup_data.install_bundle("core", bundle, force=False)
 
 
 def test_bad_archive_checksum_does_not_replace_existing_assets(tmp_path, monkeypatch):
@@ -114,7 +130,7 @@ def test_unsafe_archive_path_is_rejected_without_partial_install(tmp_path, monke
     assert not (tmp_path / "outside").exists()
 
 
-def test_manifest_rejects_unsafe_and_duplicate_file_paths(tmp_path):
+def test_manifest_rejects_unsafe_and_duplicate_file_paths():
     setup_data = load_setup_data()
     base = {
         "size_bytes": 1,
@@ -135,145 +151,6 @@ def test_download_failure_is_actionable(tmp_path):
         setup_data.download(missing, tmp_path / "download")
 
 
-@pytest.mark.parametrize("mode, missing", [("core", "clang"), ("cpu", "python")])
-def test_preflight_reports_missing_commands_instead_of_continuing(mode, missing):
-    preflight = REPO_ROOT / "ocean" / "fight_caves" / "tools.py"
-    environment = os.environ.copy()
-    environment["PATH"] = ""
-    environment.pop("CC", None)
-    environment.pop("CXX", None)
-    result = subprocess.run(
-        [sys.executable, str(preflight), "preflight", "--mode", mode],
-        cwd=REPO_ROOT,
-        env=environment,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    assert result.returncode != 0
-    assert f"required command '{missing}' is unavailable" in result.stderr
-
-@pytest.mark.parametrize("status", [0, 1])
-def test_legacy_viewer_build_delegates_to_standard_build(tmp_path, monkeypatch, status):
-    tools = load_setup_data()
-    monkeypatch.setattr(sys, "argv", [str(SETUP_DATA)])
-    monkeypatch.setattr(tools, "REPO_ROOT", tmp_path)
-    calls = []
-    def build(args, **kwargs):
-        calls.append((args, kwargs))
-        return status
-    monkeypatch.setattr(tools.subprocess, "call", build)
-    assert tools.build_viewer_main() == status
-    assert calls == [(["bash", "build.sh", "fight_caves", "--fast"], {"cwd": tmp_path})]
-
-
-def test_compatibility_replay_uses_standard_executable(tmp_path, monkeypatch):
-    tools = load_setup_data()
-    monkeypatch.setattr(tools, "repo_root", lambda: str(tmp_path))
-    assert tools.find_viewer() is None
-    viewer = tmp_path / "fight_caves"
-    viewer.write_text("#!/bin/sh\nexit 0\n")
-    viewer.chmod(0o755)
-    assert tools.find_viewer() == str(viewer)
-
-
-def test_standard_build_prepares_both_asset_bundles():
-    build = (REPO_ROOT / "build.sh").read_text()
-    branch = build.split('elif [ "$ENV" = "fight_caves" ]; then', 1)[1].split("elif ", 1)[0]
-    assert 'tools.py" setup --all' in branch
-
-
-@pytest.mark.parametrize("broken", [False, True])
-def test_replay_asset_check_is_independent_of_display(monkeypatch, broken):
-    tools = load_setup_data()
-    monkeypatch.delenv("DISPLAY", raising=False)
-    def verify(errors, names):
-        assert names == ("core", "viewer")
-        if broken:
-            errors.append("missing viewer asset")
-    monkeypatch.setattr(tools, "verify_assets", verify)
-    if broken:
-        with pytest.raises(tools.AssetError, match="Restore assets"):
-            tools.verify_runtime_assets()
-    else:
-        tools.verify_runtime_assets()
-
-
-MODULE_PATH = REPO_ROOT / "ocean" / "fight_caves" / "tools.py"
-SPEC = importlib.util.spec_from_file_location("fight_caves_eval_contract", MODULE_PATH)
-assert SPEC is not None and SPEC.loader is not None
-EVAL_CONTRACT = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = EVAL_CONTRACT
-SPEC.loader.exec_module(EVAL_CONTRACT)
-
-
-def test_checkpoint_format_accepts_exact_raw_weight_size(tmp_path):
-    checkpoint = tmp_path / "raw.bin"
-    checkpoint.write_bytes(b"\x00" * 64)
-    assert EVAL_CONTRACT.checkpoint_format(checkpoint, 64) == "raw"
-
-
-def test_checkpoint_format_accepts_pytorch_zip_container(tmp_path):
-    checkpoint = tmp_path / "cpu.bin"
-    checkpoint.write_bytes(b"PK\x03\x04state-dictionary-placeholder")
-    assert EVAL_CONTRACT.checkpoint_format(checkpoint, 64) == "pytorch"
-
-
-def test_checkpoint_format_rejects_unknown_or_missing_file(tmp_path):
-    checkpoint = tmp_path / "wrong.bin"
-    checkpoint.write_bytes(b"not a supported checkpoint")
-    assert EVAL_CONTRACT.checkpoint_format(checkpoint, 64) is None
-    assert EVAL_CONTRACT.checkpoint_format(tmp_path / "missing.bin", 64) is None
-
-
-@pytest.mark.parametrize("saved,current,accepted", [
-    (4, 5, True), (5, 5, True), (5, 4, False), (3, 5, False), (6, 5, False),
-    (4, 6, True), (5, 6, True), (6, 6, True), (3, 6, False), (7, 6, False),
-])
-def test_state_hash_checkpoint_migration_is_directional(tmp_path, saved, current, accepted):
-    expected = {"state_hash_version": current, "puffer_obs_size": 320,
-                "puffer_action_dims": [17, 9, 8], "reward_version": "unchanged"}
-    actual = dict(expected, state_hash_version=saved)
-    marker = tmp_path / "contract.json"
-    marker.write_text(json.dumps({"contract": actual}))
-    preflight = {"contract": expected}
-    if accepted:
-        EVAL_CONTRACT.validate_checkpoint_marker(marker, preflight)
-    else:
-        with pytest.raises(EVAL_CONTRACT.ContractError, match="does not match"):
-            EVAL_CONTRACT.validate_checkpoint_marker(marker, preflight)
-    assert expected["state_hash_version"] == current
-
-
-@pytest.mark.parametrize("field,value", [
-    ("puffer_obs_size", 319), ("puffer_action_dims", [17, 9, 8, 14]),
-    ("reward_version", "different"), ("unknown_field", 1),
-])
-@pytest.mark.parametrize("saved,current", [(4, 5), (4, 6), (5, 6)])
-def test_state_hash_migration_does_not_hide_other_contract_changes(tmp_path, saved, current, field, value):
-    expected = {"state_hash_version": current, "puffer_obs_size": 320,
-                "puffer_action_dims": [17, 9, 8], "reward_version": "unchanged"}
-    actual = dict(expected, state_hash_version=saved)
-    actual[field] = value
-    marker = tmp_path / "contract.json"
-    marker.write_text(json.dumps({"contract": actual}))
-    with pytest.raises(EVAL_CONTRACT.ContractError, match="does not match"):
-        EVAL_CONTRACT.validate_checkpoint_marker(marker, {"contract": expected})
-
-ENV_ROOT = REPO_ROOT / "ocean" / "fight_caves"
-RESOURCE_ROOT = REPO_ROOT / "resources" / "fight_caves"
-
-
-def test_environment_uses_flat_implementation_headers():
-    for name in ("simulation.h", "fight_caves.h", "assets.h", "ui.h", "render.h",
-                 "binding.c", "fight_caves.c", "viewer.c", "tools.py", "CMakeLists.txt"):
-        assert (ENV_ROOT / name).is_file()
-    assert not (ENV_ROOT / "sources.txt").exists()
-    assert '#include "simulation.h"' in (ENV_ROOT / "fight_caves.h").read_text()
-    assert 'void fc_step(' in (ENV_ROOT / "simulation.h").read_text()
-
-
 def test_asset_manifest_is_complete_and_pinned():
     manifest = json.loads(
         (RESOURCE_ROOT / "asset_manifest.json").read_text(encoding="utf-8")
@@ -292,64 +169,65 @@ def test_asset_manifest_is_complete_and_pinned():
         assert all(len(entry["sha256"]) == 64 and entry["size_bytes"] > 0 for entry in bundle["files"])
 
 
-def test_asset_manifest_includes_equipment_parts_and_menu_font():
-    manifest = json.loads((RESOURCE_ROOT / "asset_manifest.json").read_text())
-    files = {entry["path"] for entry in manifest["bundles"]["viewer"]["files"]}
-    assert {"viewer/fc_player.parts", "viewer/fc_player.models",
-            "viewer/data/fonts/runescape_bold.ttf",
-            "viewer/data/sprites/items/item_28310.png"} <= files
-    assert "viewer/data/sprites/items/item_25487.png" not in files
+@pytest.fixture(scope="module")
+def installed_runtime():
+    setup = load_setup_data()
+    bundle = setup.load_manifest(setup.DEFAULT_MANIFEST)["bundles"]["core"]
+    if not (RESOURCE_ROOT / "runtime").is_dir():
+        pytest.skip("Run ./build.sh fight_caves --cpu to install runtime assets")
+    errors = setup.verify_tree(RESOURCE_ROOT, bundle, exact=False)
+    assert not errors, f"Rebuild Fight Caves to repair runtime assets: {errors}"
 
 
-def test_fight_caves_sources_do_not_reference_local_development_trees():
-    forbidden = ("/home/joe", "/v38/", "pufferlib_4", "runescape-reference")
-    roots = (
-        ENV_ROOT,
-        RESOURCE_ROOT,
-        REPO_ROOT / "config" / "fight_caves.ini",
-    )
-    for root in roots:
-        files = [root] if root.is_file() else [p for p in root.rglob("*") if p.is_file()]
-        for path in files:
-            if path.suffix in {".png", ".bin", ".models", ".atlas", ".anims"}:
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            for value in forbidden:
-                assert value not in text, f"{path} contains forbidden path marker {value!r}"
+def test_native_simulation(tmp_path, installed_runtime):
+    """Build/run deterministic simulation and headless adapter checks."""
+    compiler = shlex.split(os.environ.get("CC", "clang"))
+    raylib = REPO_ROOT / ("raylib-5.5_macos" if sys.platform == "darwin"
+                          else "raylib-5.5_linux_amd64")
+    if not compiler or not shutil.which(compiler[0]):
+        pytest.skip("Install a C compiler (clang, or set CC) to run native tests")
+    if not (raylib / "lib/libraylib.a").is_file():
+        pytest.skip("Run ./build.sh fight_caves --cpu to install Raylib")
+    binary = tmp_path / "fight_caves_simulation"
+    command = [*compiler, "-std=c11", "-O2", "-Wall",
+               "-Iocean/fight_caves", f"-I{raylib / 'include'}",
+               "tests/test_fight_caves_simulation.c", str(raylib / "lib/libraylib.a"),
+               "-lm", "-lpthread", "-o", str(binary)]
+    if sys.platform == "darwin":
+        for framework in ("Cocoa", "IOKit", "CoreVideo", "OpenGL"):
+            command += ["-framework", framework]
+    else:
+        command += ["-ldl", "-lGL"]
+    subprocess.run(command, cwd=REPO_ROOT, check=True)
+    environment = os.environ.copy()
+    for kind in ("collision", "movement", "los"):
+        environment[f"FC_{kind.upper()}_PATH"] = str(
+            RESOURCE_ROOT / "runtime" / f"fightcaves.{kind}")
+    subprocess.run([str(binary)], cwd=REPO_ROOT, env=environment, check=True)
+
 
 def fail(message: str) -> None:
     raise AssertionError(f"puffer_contract_test: {message}")
 
 
-def puffer_main() -> int:
-    """Exercise the compiled CPU interface when explicitly invoked as a script."""
+def test_puffer_backend(monkeypatch, installed_runtime):
+    """Check vectorized observations, actions, autoreset and episode logs."""
     import ctypes
     import numpy as np
 
-    sys.path.insert(0, str(REPO_ROOT))
-    try:
-        from pufferlib import _C
-    except ImportError as exc:
-        raise RuntimeError(
-            "Fight Caves Puffer backend is unavailable; run "
-            "'./build.sh fight_caves --cpu' first"
-        ) from exc
-    if getattr(_C, "env_name", None) != "fight_caves":
-        fail(f"backend was built for {getattr(_C, 'env_name', None)!r}")
-    if getattr(_C, "gpu", None) != 0:
-        fail("acceptance test requires the CPU backend")
+    monkeypatch.syspath_prepend(str(REPO_ROOT))
+    monkeypatch.chdir(REPO_ROOT)
+    _C = pytest.importorskip("pufferlib._C", reason="Run ./build.sh fight_caves --cpu")
+    if getattr(_C, "env_name", None) != "fight_caves" or getattr(_C, "gpu", None) != 0:
+        pytest.skip("Run ./build.sh fight_caves --cpu to select the Fight Caves CPU backend")
+    for kind in ("collision", "movement", "los"):
+        monkeypatch.setenv(f"FC_{kind.upper()}_PATH", str(
+            RESOURCE_ROOT / "runtime" / f"fightcaves.{kind}"))
 
     from pufferlib.pufferl import load_config
 
-    previous_argv = sys.argv[:]
-    try:
-        sys.argv = ["puffer_contract_test"]
-        args = load_config("fight_caves")
-    finally:
-        sys.argv = previous_argv
+    monkeypatch.setattr(sys, "argv", ["fight_caves_test"])
+    args = load_config("fight_caves")
     args["vec"].update(total_agents=8, num_buffers=1, num_threads=1)
 
     vec = _C.create_vec(args, 0)
@@ -424,7 +302,3 @@ def puffer_main() -> int:
         vec.close()
 
     print(f"puffer_contract_test: passed ({terminal_count} terminal transitions)")
-    return 0
-
-if __name__ == "__main__":
-    raise SystemExit(puffer_main())

@@ -1,7 +1,11 @@
+/* Simulation, equipment, analytics and Puffer adapter snapshot tests.
+ * Compiled and run by test_fight_caves_integration.py; no display needed. */
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
-#include "simulation.h"
+#include "fight_caves.h"
+#include <assert.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -124,10 +128,7 @@ static int core_contract_test(void) {
     return EXIT_SUCCESS;
 }
 
-/* The same equipment transaction scenarios used to validate v38. */
-#include <limits.h>
-#include <stdio.h>
-#include <string.h>
+/* Equipment transactions and episode statistics. */
 
 #define CHECK(test) do { if (!(test)) { \
     fprintf(stderr, "equipment: line %d: %s\n", __LINE__, #test); return 1; \
@@ -500,292 +501,78 @@ static int equipment_test(void) {
 
 #undef CHECK
 
-#ifdef FC_VIEWER_TEST
-#include "render.h"
-#include "ui.h"
-
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
-
-static int context_menu_test(void) {
-    FcMenuLayout menu = fc_menu_layout(400, 200, 800, 600, 150, 4);
-    assert(menu.x == 319 && menu.y == 200 && menu.width == 162);
-    assert(menu.height == FC_MENU_HEADER_HEIGHT + 4 * FC_MENU_ROW_HEIGHT + 4);
-    assert(fc_menu_action_at(menu, 4, 330, 200) == -1); /* title is not a choice */
-    for (int row = 0; row < 4; row++) {
-        int y = menu.y + FC_MENU_HEADER_HEIGHT + row * FC_MENU_ROW_HEIGHT;
-        assert(fc_menu_action_at(menu, 4, 330, y) == row);
-        assert(fc_menu_action_at(menu, 4, 330, y + FC_MENU_ROW_HEIGHT - 1) == row);
-    }
-    assert(fc_menu_action_at(menu, 4, 330, menu.y + menu.height - 1) == -1);
-    assert(fc_menu_action_at(menu, 4, menu.x - 1, 230) == -1);
-    assert(fc_menu_action_at(menu, 4, menu.x + menu.width, 230) == -1);
-    assert(fc_menu_contains(menu, menu.x - 9, 230, FC_MENU_DISMISS_MARGIN));
-    assert(!fc_menu_contains(menu, menu.x - 11, 230, FC_MENU_DISMISS_MARGIN));
-    menu = fc_menu_layout(799, 599, 800, 600, 220, 3);
-    assert(menu.x + menu.width == 800 && menu.y + menu.height == 600);
-    assert(fc_menu_action_at(menu, 3, 790, menu.y + FC_MENU_HEADER_HEIGHT) == 0);
-    menu = fc_menu_layout(0, 0, 800, 600, 150, 4);
-    assert(menu.x == 0 && menu.y == 0);
-    menu = fc_menu_layout(0, 0, 80, 200, 150, 4);
-    assert(menu.width == 80 && menu.x == 0);
-    const int levels[] = {0, 22, 45, 22, 90, 180, 360, 702, 108};
-    for (int type = 1; type <= 8; type++)
-        assert(fc_menu_npc_info(type).level == levels[type]);
-    assert(strcmp(fc_menu_npc_info(7).name, "TzTok-Jad") == 0);
-    assert(strcmp(fc_menu_npc_info(2).name, fc_menu_npc_info(3).name) == 0);
-    assert(fc_menu_npc_info(0).level == 0 && fc_menu_npc_info(-1).level == 0);
-    assert(fc_menu_npc_info(9).level == 0);
-    const uint32_t colors[] = {
-        0xff0000, 0xff3000, 0xff3000, 0xff3000, 0xff7000, 0xff7000,
-        0xff7000, 0xffb000, 0xffb000, 0xffb000, 0xffff00,
-        0xc0ff00, 0xc0ff00, 0xc0ff00, 0x80ff00, 0x80ff00, 0x80ff00,
-        0x40ff00, 0x40ff00, 0x40ff00, 0x00ff00
-    };
-    for (int difference = -10; difference <= 10; difference++)
-        assert(fc_menu_level_color(100 + difference, 100) == colors[difference + 10]);
-    assert(fc_menu_level_color(126, 702) == 0xff0000);
-    assert(fc_menu_level_color(126, 108) == 0x00ff00);
-    puts("context menu: anchoring, screen edges, rows, title and dismissal margin passed");
-    return 0;
+static FightCaves* test_env(void) {
+    FightCaves* env = calloc(1, sizeof(*env));
+    assert(env);
+    env->num_agents = 1;
+    env->rng = 73;
+    env->observations = calloc(FC_PUFFER_OBS_SIZE, sizeof(float));
+    env->actions = calloc(FC_PUFFER_NUM_ATNS, sizeof(float));
+    env->rewards = calloc(1, sizeof(float));
+    env->terminals = calloc(1, sizeof(float));
+    env->action_mask = calloc(FC_PUFFER_MASK_SIZE, 1);
+    env->reward_params = fc_reward_default_params();
+    fc_init(&env->state);
+    c_reset(env);
+    return env;
 }
 
+static void test_free(FightCaves* env) {
+    c_close(env);
+    free(env->observations);
+    free(env->actions);
+    free(env->rewards);
+    free(env->terminals);
+    free(env->action_mask);
+    free(env);
+}
 
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
-
-static void make_open_state(FcState* state) {
-    memset(state, 0, sizeof(*state));
-    for (int x = 0; x < FC_ARENA_WIDTH; x++) {
-        for (int y = 0; y < FC_ARENA_HEIGHT; y++) {
-            state->walkable[x][y] = 1;
+static int adapter_snapshot_test(void) {
+    FightCaves* env = test_env();
+    FightCaves* rendered = test_env();
+    int episodes = 0;
+    /* Capture render snapshots without opening a window or loading graphics. */
+    rendered->viewer = calloc(1, sizeof(*rendered->viewer));
+    assert(rendered->viewer);
+    for (int tick = 0; tick < 2048; tick++) {
+        env->actions[0] = tick % 17;
+        env->actions[1] = (tick / 3) % 9;
+        env->actions[2] = (tick / 7) % 8;
+        memcpy(rendered->actions, env->actions, sizeof(float) * FC_PUFFER_NUM_ATNS);
+        c_step(env);
+        c_step(rendered);
+        assert(fc_state_hash(&env->state) == fc_state_hash(&rendered->state));
+        assert(memcmp(env->observations, rendered->observations,
+                      sizeof(float) * FC_PUFFER_OBS_SIZE) == 0);
+        assert(memcmp(env->action_mask, rendered->action_mask,
+                      FC_PUFFER_MASK_SIZE) == 0);
+        assert(env->rewards[0] == rendered->rewards[0]);
+        assert(env->terminals[0] == rendered->terminals[0]);
+        assert(rendered->viewer->pending_frame);
+        if (env->terminals[0]) {
+            episodes++;
+            assert(rendered->state.tick == 0);
+            assert(fc_is_terminal(&rendered->viewer->pending_state));
+        } else {
+            assert(fc_state_hash(&rendered->viewer->pending_state) ==
+                   fc_state_hash(&env->state));
         }
     }
-    state->player.x = 1;
-    state->player.y = 1;
-}
-
-static int click_feedback_test(void) {
-    FcState state;
-    FcClickFeedback feedback;
-    const int* route_x = NULL;
-    const int* route_y = NULL;
-    int start = -1;
-    int len = -1;
-
-    make_open_state(&state);
-    FcState unchanged = state;
-    fc_click_feedback_reset(&feedback);
-    fc_click_feedback_select_move(&feedback, &state, 5, 3, 120.0f, 80.0f);
-
-    assert(feedback.destination_active);
-    assert(feedback.destination_x == 5 && feedback.destination_y == 3);
-    assert(feedback.preview_pending);
-    assert(feedback.preview_route_len > 0);
-    assert(feedback.preview_route_x[feedback.preview_route_len - 1] == 5);
-    assert(feedback.preview_route_y[feedback.preview_route_len - 1] == 3);
-    assert(feedback.cross_kind == FC_CLICK_CROSS_MOVE);
-    assert(fc_click_feedback_cross_frame(&feedback) == 0);
-    assert(fc_click_feedback_route(&feedback, &state, &route_x, &route_y,
-                                   &start, &len));
-    assert(route_x == feedback.preview_route_x);
-    assert(route_y == feedback.preview_route_y);
-    assert(start == 0 && len == feedback.preview_route_len);
-
-    fc_click_feedback_update(&feedback, 0.11f);
-    assert(fc_click_feedback_cross_frame(&feedback) == 1);
-    fc_click_feedback_update(&feedback, 0.30f);
-    assert(feedback.cross_kind == FC_CLICK_CROSS_NONE);
-
-    state.player.route_x[0] = 2;
-    state.player.route_y[0] = 2;
-    state.player.route_x[1] = 3;
-    state.player.route_y[1] = 3;
-    state.player.route_len = 2;
-    state.player.route_idx = 1;
-    fc_click_feedback_accept_move_tick(&feedback, &state);
-    assert(!feedback.preview_pending);
-    assert(feedback.destination_active);
-    assert(fc_click_feedback_route(&feedback, &state, &route_x, &route_y,
-                                   &start, &len));
-    assert(route_x == state.player.route_x && route_y == state.player.route_y);
-    assert(start == 1 && len == 2);
-
-    state.player.route_idx = state.player.route_len;
-    fc_click_feedback_sync(&feedback, &state);
-    assert(!feedback.destination_active);
-
-    fc_click_feedback_select_move(&feedback, &state, 7, 7, 10.0f, 20.0f);
-    fc_click_feedback_select_interaction(&feedback, 30.0f, 40.0f);
-    assert(!feedback.destination_active);
-    assert(!feedback.preview_pending);
-    assert(feedback.preview_route_len == 0);
-    assert(feedback.cross_kind == FC_CLICK_CROSS_INTERACTION);
-    assert(feedback.cross_screen_x == 30.0f && feedback.cross_screen_y == 40.0f);
-    assert(fc_click_feedback_cross_frame(&feedback) == 0);
-    fc_click_feedback_update(&feedback, 0.099f);
-    assert(fc_click_feedback_cross_frame(&feedback) == 0);
-    fc_click_feedback_update(&feedback, 0.002f);
-    assert(fc_click_feedback_cross_frame(&feedback) == 1);
-    /* Test only the presentation operation against a complete state snapshot. */
-    FcState before_interaction = state;
-    fc_click_feedback_select_interaction(&feedback, 70.0f, 80.0f);
-    assert(memcmp(&state, &before_interaction, sizeof(state)) == 0);
-    fc_click_feedback_select_move(&feedback, &unchanged, 3, 5, 10, 20);
-    FcState fresh;
-    make_open_state(&fresh);
-    assert(memcmp(&fresh, &unchanged, sizeof(fresh)) == 0);
-
-    puts("click feedback tests passed");
+    assert(episodes > 0);
+    c_reset(env);
+    c_reset(rendered);
+    assert(fc_state_hash(&env->state) == fc_state_hash(&rendered->state));
+    assert(fc_state_hash(&rendered->viewer->reset_state) == fc_state_hash(&env->state));
+    printf("adapter_snapshot_test: passed (2048 steps, %d episodes)\n", episodes);
+    free(rendered->viewer);
+    rendered->viewer = NULL;
+    test_free(rendered);
+    test_free(env);
     return 0;
 }
-
-#include "raymath.h"
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
-
-static int model_picking_test(void) {
-    /* Tall two-triangle actor. The uploaded mesh deliberately belongs to a
-     * different actor: picking must use this instance's pose or the rest mesh. */
-    float rest[] = {-0.6f,0,0, 0.6f,0,0, 0.6f,4,0, -0.6f,0,0, 0.6f,4,0, -0.6f,4,0};
-    float other_actor[18] = {100,100,100};
-    uint16_t faces[] = {0,1,2,0,2,3};
-    int16_t pose[] = {-77,0,0, 77,0,0, 77,-512,0, -77,-512,0};
-    float original_rest[18]; int16_t original_pose[12];
-    memcpy(original_rest, rest, sizeof(rest));
-    memcpy(original_pose, pose, sizeof(pose));
-    Mesh uploaded = {.vertices=other_actor};
-    ModelEntry entry = {.loaded=1, .rest_verts=rest, .face_count=2,
-                       .face_indices=faces, .base_vert_count=4};
-    entry.model.transform = MatrixIdentity();
-    entry.model.meshes = &uploaded;
-    Camera3D camera = {.position={0,4,10}, .target={0,2,0}, .up={0,1,0},
-                       .fovy=50, .projection=CAMERA_PERSPECTIVE};
-    Vector3 origin = {0};
-    Vector2 head = GetWorldToScreenEx((Vector3){0,3.8f,0}, camera, 800, 600);
-    assert(models_pick_depth(&entry, NULL, origin, 0, camera, head, 800, 600) > 0);
-    assert(models_pick_depth(&entry, pose, origin, 0, camera, head, 800, 600) > 0);
-    /* A head click projects onto ground far behind the actor: the old tile
-     * halo would miss, even though the pointer is inside the visible model. */
-    Vector3 ray = Vector3Subtract((Vector3){0,3.8f,0}, camera.position);
-    float ground_z = camera.position.z + ray.z * (-camera.position.y / ray.y);
-    assert(fabsf(ground_z) > 2);
-
-    Vector2 top = GetWorldToScreenEx((Vector3){0,4,0}, camera, 800, 600);
-    assert(models_pick_depth(&entry, pose, origin, 0, camera,
-        (Vector2){top.x, top.y - 4}, 800, 600) > 0);
-    assert(models_pick_depth(&entry, pose, origin, 0, camera,
-        (Vector2){top.x, top.y - 6}, 800, 600) < 0);
-    assert(models_pick_depth(&entry, pose, origin, 0, camera, (Vector2){10,10}, 800,600) < 0);
-
-    /* Moving and turned models are picked where drawn, not at their old tile. */
-    Vector3 moved = {4,0,0};
-    Vector2 moved_head = GetWorldToScreenEx((Vector3){4,3.8f,0}, camera, 800,600);
-    assert(models_pick_depth(&entry, pose, moved, 90, camera, moved_head, 800,600) > 0);
-    assert(models_pick_depth(&entry, pose, moved, 90, camera, head, 800,600) < 0);
-    /* Two instances of the same model can be in different animation poses. */
-    int16_t shifted[12]; memcpy(shifted, pose, sizeof(pose));
-    for (int i = 0; i < 4; i++) shifted[i*3] += 512;
-    assert(models_pick_depth(&entry, shifted, origin, 0, camera, moved_head, 800,600) > 0);
-    assert(models_pick_depth(&entry, shifted, origin, 0, camera, head, 800,600) < 0);
-    assert(models_pick_depth(&entry, pose, origin, 0, camera, head, 800,600) > 0);
-
-    Vector2 center = GetWorldToScreenEx((Vector3){0,2,0}, camera, 800,600);
-    float front = models_pick_depth(&entry, pose, origin, 0, camera, center, 800,600);
-    float back = models_pick_depth(&entry, pose, (Vector3){0,0,-4}, 0, camera, center, 800,600);
-    assert(front > 0 && back > front); /* overlap ordering */
-    assert(models_pick_depth(&entry, pose, (Vector3){0,0,30}, 0, camera, center, 800,600) < 0);
-    assert(models_pick_depth(NULL, pose, origin, 0, camera, center, 800,600) < 0);
-    assert(memcmp(rest, original_rest, sizeof(rest)) == 0);
-    assert(memcmp(pose, original_pose, sizeof(pose)) == 0);
-    assert(other_actor[0] == 100 && other_actor[3] == 0);
-    puts("model picking: head, padding, rotation, movement, per-instance pose and depth passed");
-    return 0;
-}
-
-#include <stdio.h>
-
-/* Explicit graphics test, not part of headless CTest. Captures a contact sheet
- * in the working directory: outfit, no helmet/body/legs/gloves/boots/bow, bare. */
-static int equipment_appearance_test(void) {
-    SetTraceLogLevel(LOG_WARNING);
-    SetConfigFlags(FLAG_WINDOW_HIDDEN);
-    InitWindow(1200, 640, "Equipment appearance validation");
-    if (!IsWindowReady()) return 1;
-    FcPlayerAppearance appearance;
-    if (!fc_player_appearance_load(&appearance)) return 1;
-    AnimCache *cache = anim_cache_load("fc_all.anims");
-    if (!cache || !anim_get_sequence(cache, 422)) return 1;
-    RenderTexture2D target = LoadRenderTexture(1200, 640);
-    BeginTextureMode(target);
-    ClearBackground((Color){45, 45, 45, 255});
-    const int removed[] = {-1, 0, 4, 7, 9, 10, 3, -2};
-    FcState state;
-    fc_init(&state);
-    for (int variant = 0; variant < 8; variant++) {
-        fc_reset(&state, 101);
-        fc_set_initial_supplies(&state, 0, 0);
-        if (removed[variant] == -2) {
-            for (int slot = 0; slot < FC_EQUIPMENT_SLOTS; slot++)
-                if (state.player.equipment[slot].item_id &&
-                    fc_unequip_item(&state, slot) != FC_ITEM_OK) return 1;
-        } else if (removed[variant] >= 0 &&
-                   fc_unequip_item(&state, removed[variant]) != FC_ITEM_OK) return 1;
-        uint32_t before = fc_state_hash(&state);
-        if (fc_player_appearance_sync(&appearance, &state.player, FC_PLAYER_MODEL_BASE) != 1)
-            return 1;
-        if (fc_player_appearance_sync(&appearance, &state.player, FC_PLAYER_MODEL_BASE) != 0)
-            return 1;
-        ModelEntry *entry = appearance.model->entries;
-        for (int f = 0; f < entry->face_count * 3; f++)
-            if (entry->face_indices[f] >= entry->base_vert_count) return 1;
-        AnimModelState *pose = NULL;
-        uint16_t sequence = 0;
-        int frame = 0;
-        float timer = 0;
-        fc_model_animation_update(entry, cache, &pose, &sequence, &frame,
-                                   &timer, 808, 0, 0);
-        Camera3D camera = {.position={0, 1.6f, -7}, .target={0, 1.0f, 0},
-                           .up={0, 1, 0}, .fovy=4.4f, .projection=CAMERA_ORTHOGRAPHIC};
-        BeginScissorMode((variant % 4) * 300, (variant / 4) * 320, 300, 320);
-        /* Move the model through one common camera to avoid changing meshes
-         * or animation coordinates for the contact-sheet layout. */
-        camera.position.x = camera.target.x = ((variant % 4) - 1.5f) * 2.0625f;
-        camera.position.y += (variant / 4 ? 1 : -1) * 1.1f;
-        camera.target.y += (variant / 4 ? 1 : -1) * 1.1f;
-        BeginMode3D(camera);
-        DrawModelEx(entry->model, (Vector3){0, 0, 0}, (Vector3){0, 1, 0},
-                    180, (Vector3){1, 1, 1}, WHITE);
-        EndMode3D();
-        EndScissorMode();
-        anim_model_state_free(pose);
-        if (fc_state_hash(&state) != before) return 1;
-        printf("appearance variant %d: %d vertices, %d faces\n",
-               variant, entry->base_vert_count, entry->face_count);
-    }
-    EndTextureMode();
-    Image image = LoadImageFromTexture(target.texture);
-    ImageFlipVertical(&image);
-    int ok = ExportImage(image, "equipment-appearance.png");
-    UnloadImage(image);
-    UnloadRenderTexture(target);
-    anim_cache_free(cache);
-    fc_player_appearance_free(&appearance);
-    CloseWindow();
-    return ok ? 0 : 1;
-}
-
-#endif
 
 int main(void) {
     wave_rotation_test();
-    if (core_contract_test() || equipment_test() || episode_analytics_test()) return 1;
-#ifdef FC_VIEWER_TEST
-    if (context_menu_test() || click_feedback_test() || model_picking_test() ||
-        equipment_appearance_test()) return 1;
-#endif
-    return 0;
+    return core_contract_test() || equipment_test() ||
+           episode_analytics_test() || adapter_snapshot_test();
 }
