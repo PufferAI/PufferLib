@@ -1,0 +1,3433 @@
+{
+  "bundles": {
+    "core": {
+      "archive": "fight-caves-runtime-assets-v3.tar.gz",
+      "files": [
+        {
+          "path": "runtime/fightcaves.collision",
+          "sha256": "f1db791e4864fb4555138a59bbf3d0974d6113242fdd376ca6871ceb4ea3cc32",
+          "size_bytes": 4096
+        },
+        {
+          "path": "runtime/fightcaves.los",
+          "sha256": "918493183142c5cc8f11b871a7d2a2b9ba13bdb2a1847b0f9664416d6c1e85ff",
+          "size_bytes": 4096
+        },
+        {
+          "path": "runtime/fightcaves.movement",
+          "sha256": "c1420936d0cd4b9539f7b91a1733232ecea17f2623e90dda9bb7121192d7db42",
+          "size_bytes": 4096
+        }
+      ],
+      "install_prefix": "runtime",
+      "sha256": "8d65e184bb101af15642a1117353d22eed930f3b8e612ace7ee31c313e6123b3",
+      "size_bytes": 1397,
+      "url": "https://github.com/jordanbailey00/fc-rl/releases/download/fight-caves-assets-v3/fight-caves-runtime-assets-v3.tar.gz"
+    },
+    "viewer": {
+      "archive": "fight-caves-viewer-assets-v3.tar.gz",
+      "files": [
+        {
+          "path": "viewer/data/fonts/p11_full.png",
+          "sha256": "1d059f2a5bb5c97cd9148e44bccaedb0e5ce2548bda57b645892499043c71a49",
+          "size_bytes": 4679
+        },
+        {
+          "path": "viewer/data/fonts/runescape.ttf",
+          "sha256": "7477bbfd998b8e16e8a1e898fd49fb736a6fdfa00e7eb364d4d441f10290f03a",
+          "size_bytes": 22500
+        },
+        {
+          "path": "viewer/data/fonts/runescape_bold.ttf",
+          "sha256": "c8b9afefe105a78717fde9692deafbf2361b54bcf9c8019b6d817de94f1c6168",
+          "size_bytes": 22436
+        },
+        {
+          "path": "viewer/data/fonts/runescape_small.ttf",
+          "sha256": "fe43104752ad819d5b037bb544a194f7dc8fdf1c2dfe7f4cdf20a4f98896ed8a",
+          "size_bytes": 19900
+        },
+        {
+          "path": "viewer/data/sprites/items/item_10499.png",
+          "sha256": "e6d9df67483eff738a8e02ed59f2320e0ad997e15818ebce559e8b68f5115df1",
+          "size_bytes": 880
+        },
+        {
+          "path": "viewer/data/sprites/items/item_11126.png",
+          "sha256": "11023cb73224552663f2cc9513086a5885704cd708eb04ff302f162632a2a573",
+          "size_bytes": 996
+        },
+        {
+          "path": "viewer/data/sprites/items/item_11212.png",
+          "sha256": "4da05e584bbc1913da06d2a08b14d914085b255180b0f5dd9535f4cceda0bda3",
+          "size_bytes": 260
+        },
+        {
+          "path": "viewer/data/sprites/items/item_1169.png",
+          "sha256": "118543e3043d39d4ddc13398e3c39cdb7b38aecdd887fed557dccc2c6920d6ab",
+          "size_bytes": 580
+        },
+        {
+          "path": "viewer/data/sprites/items/item_11785.png",
+          "sha256": "d6f906c69c2773df93993fefbb94b031d1c528a125cbc6c067a297a778bacc23",
+          "size_bytes": 647
+        },
+        {
+          "path": "viewer/data/sprites/items/item_11826.png",
+          "sha256": "9610037d6ae1103fab55655ca56f2e82d86ae7845b04526244452697d2e3d631",
+          "size_bytes": 821
+        },
+        {
+          "path": "viewer/data/sprites/items/item_11828.png",
+          "sha256": "e4675bc01af16e4941e70122f79139ef5ff34fd472522c634c5b4ed963825f1f",
+          "size_bytes": 1054
+        },
+        {
+          "path": "viewer/data/sprites/items/item_11830.png",
+          "sha256": "f6ea43c79f54b5494773ede94fabd0d86d668022a025f87486a08015c0743543",
+          "size_bytes": 738
+        },
+        {
+          "path": "viewer/data/sprites/items/item_12596.png",
+          "sha256": "69d6b7ef2ff772e42b1ee28ae9ce56f2ee6e58c5f937ff203e70bdc723aee4d9",
+          "size_bytes": 1120
+        },
+        {
+          "path": "viewer/data/sprites/items/item_12610.png",
+          "sha256": "2ee2c650032a60deea3c01b5996e0e3f85740b009ec8bd581e1154444d0c0f33",
+          "size_bytes": 814
+        },
+        {
+          "path": "viewer/data/sprites/items/item_12788.png",
+          "sha256": "f284415426323a321b6b2687807db66ad2448a0d7c0a8e794757d24a9ba791dc",
+          "size_bytes": 410
+        },
+        {
+          "path": "viewer/data/sprites/items/item_12926.png",
+          "sha256": "b03bfce20a003d4c74ba49f3af75780b565ac2b65b22ed391c7307f9738b8962",
+          "size_bytes": 749
+        },
+        {
+          "path": "viewer/data/sprites/items/item_13237.png",
+          "sha256": "aba5eef2dbab9a296f4235fab8cd363eae9a0decec489d89eaa91a012bc806ce",
+          "size_bytes": 822
+        },
+        {
+          "path": "viewer/data/sprites/items/item_139.png",
+          "sha256": "30ca3c63da07bd39e7390b46a1425808898b34607474a5b163c20f49247ae6cc",
+          "size_bytes": 827
+        },
+        {
+          "path": "viewer/data/sprites/items/item_141.png",
+          "sha256": "4993ef7beafddafe34362e6ce00d83d6eb559e2ac94aedd6d56e86b639b9e52d",
+          "size_bytes": 904
+        },
+        {
+          "path": "viewer/data/sprites/items/item_143.png",
+          "sha256": "5f1ca89a7449bfc8b1d917c339297a953f802ced9ef3062d4cf1dd012d92999a",
+          "size_bytes": 795
+        },
+        {
+          "path": "viewer/data/sprites/items/item_1704.png",
+          "sha256": "4fad7a768f47b941b2c00524030eee256744155d6959abe0d2f9f6bd403f5bd5",
+          "size_bytes": 499
+        },
+        {
+          "path": "viewer/data/sprites/items/item_19547.png",
+          "sha256": "0e29a17f1d8bab1012348fad4eeda761333dbe7cfca3e4f08fd0a7440385d3f5",
+          "size_bytes": 520
+        },
+        {
+          "path": "viewer/data/sprites/items/item_20997.png",
+          "sha256": "4cb543e526fa6bffcf2e36752d05d5c2362643066b03ed7bc91d578affcce8fd",
+          "size_bytes": 603
+        },
+        {
+          "path": "viewer/data/sprites/items/item_21902.png",
+          "sha256": "2581586ef0b7154dfe862b5a145d4a03f29b338d80ef9a7337fef2a22415cbfd",
+          "size_bytes": 791
+        },
+        {
+          "path": "viewer/data/sprites/items/item_21946.png",
+          "sha256": "9c4b05da3ae50dd7a0b77b3748e9f321f9eb42b41ddfd064138f621038e7383c",
+          "size_bytes": 497
+        },
+        {
+          "path": "viewer/data/sprites/items/item_22109.png",
+          "sha256": "d736c54971fc6733bbf3180a3fc3df3c3c9fc64db88aad7d8d0ebdda3f9ccfed",
+          "size_bytes": 1080
+        },
+        {
+          "path": "viewer/data/sprites/items/item_229.png",
+          "sha256": "ecb3d9a3efc21b86dd706b5e180851d054f4ddd36254516d450c323a7b47ff7b",
+          "size_bytes": 832
+        },
+        {
+          "path": "viewer/data/sprites/items/item_23971.png",
+          "sha256": "fa5367463b5370b507383f0abbdd9283adecee19ee20ba9dcc354a2cfd4fc1b1",
+          "size_bytes": 853
+        },
+        {
+          "path": "viewer/data/sprites/items/item_23975.png",
+          "sha256": "d049832c203b5570471405b36f6b41e284480084828a5be7e1741b23e7b3563f",
+          "size_bytes": 1089
+        },
+        {
+          "path": "viewer/data/sprites/items/item_23979.png",
+          "sha256": "34039fc0b48e58eb8ab10c785cad581b0403382864142d2dfb20df1376ffa527",
+          "size_bytes": 626
+        },
+        {
+          "path": "viewer/data/sprites/items/item_2434.png",
+          "sha256": "1ce9b08635f6ae78f0e27c8c909c0b567c1adaec073405679c3ca7eb41fc6d79",
+          "size_bytes": 827
+        },
+        {
+          "path": "viewer/data/sprites/items/item_2491.png",
+          "sha256": "a713c2c93ce579c401119a63dc1e8f3baad9e5eb3be194186d6cd16055621309",
+          "size_bytes": 310
+        },
+        {
+          "path": "viewer/data/sprites/items/item_2495.png",
+          "sha256": "ff7051ad83ec8cd8a18268eff75ff6a4f62a125005bc596a0fda3d57d5196c17",
+          "size_bytes": 1079
+        },
+        {
+          "path": "viewer/data/sprites/items/item_2497.png",
+          "sha256": "7d32964ded6799730f21558dc065d414b94d14caaf87c1c4b6991ee8f63f21f4",
+          "size_bytes": 312
+        },
+        {
+          "path": "viewer/data/sprites/items/item_2503.png",
+          "sha256": "d02e085d21a8c7395af888f84803ccadd01eb32751a3477979725ccad12f14d0",
+          "size_bytes": 356
+        },
+        {
+          "path": "viewer/data/sprites/items/item_2577.png",
+          "sha256": "b66101760d14d4663bb4cd2de59b8000b08fe32a9faf71ab8e74b5067a7f4425",
+          "size_bytes": 807
+        },
+        {
+          "path": "viewer/data/sprites/items/item_2581.png",
+          "sha256": "a68b4dfba58069399a67309b49c108d1df0d0f2f8a3844463da31e6119952b01",
+          "size_bytes": 747
+        },
+        {
+          "path": "viewer/data/sprites/items/item_25867.png",
+          "sha256": "75e444d9e3616b07e242a8fad5b6c2276675ff89af24194d86e70df8ff11a440",
+          "size_bytes": 477
+        },
+        {
+          "path": "viewer/data/sprites/items/item_26235.png",
+          "sha256": "5b7a06c111428df15b2e104a946a27403be626863acdf889331773d614aed42f",
+          "size_bytes": 652
+        },
+        {
+          "path": "viewer/data/sprites/items/item_27226.png",
+          "sha256": "160c42595c63758c6e0baf8be1334fc49f1952114d9d9b5e6ccbe20a4cafc724",
+          "size_bytes": 586
+        },
+        {
+          "path": "viewer/data/sprites/items/item_27229.png",
+          "sha256": "f523d610f8e8f75968909260fe0c2997454a419252ff1f44ee9c695f302b87a6",
+          "size_bytes": 1098
+        },
+        {
+          "path": "viewer/data/sprites/items/item_27232.png",
+          "sha256": "c1656091d430c87c82f2bf45dedcfbc52d660b6206b13a91a0fe50654b01e2d2",
+          "size_bytes": 579
+        },
+        {
+          "path": "viewer/data/sprites/items/item_27235.png",
+          "sha256": "122aa40122cc1a9f104e74fcde1cb16643daac169987310c30ba9c9c785d25e8",
+          "size_bytes": 978
+        },
+        {
+          "path": "viewer/data/sprites/items/item_27238.png",
+          "sha256": "79d31197dba977c9ad0b1af21516ab0f667aa3be74f5972082dbaa654ee5b575",
+          "size_bytes": 1161
+        },
+        {
+          "path": "viewer/data/sprites/items/item_27241.png",
+          "sha256": "dfd1a6c43d54a3e741db5174acfc0423d59822a984ea994478fb4333b432bb1b",
+          "size_bytes": 658
+        },
+        {
+          "path": "viewer/data/sprites/items/item_27614.png",
+          "sha256": "e8765f799ff6b6534d273e155e0b24b5dc5717c5b523d79623e3e1a4c4912a5c",
+          "size_bytes": 708
+        },
+        {
+          "path": "viewer/data/sprites/items/item_28310.png",
+          "sha256": "737efd24af57fdf658bebd9e181f26dc4b0ff327a896f808b18ff840e4e6e81d",
+          "size_bytes": 1324
+        },
+        {
+          "path": "viewer/data/sprites/items/item_385.png",
+          "sha256": "a73db2538fab30a4900330bec9503f42435ccacb5def2974ea62100ab401ca19",
+          "size_bytes": 1012
+        },
+        {
+          "path": "viewer/data/sprites/items/item_6328.png",
+          "sha256": "f1479c84c1d60e255e56c0d172782428c96b103fe4e41f21ce74d4a170a510dd",
+          "size_bytes": 571
+        },
+        {
+          "path": "viewer/data/sprites/items/item_7462.png",
+          "sha256": "94c6e56b26b7a75e70cc2695b5b59c33f9c07d4fc2a5b7c91efab8155bfc6e95",
+          "size_bytes": 711
+        },
+        {
+          "path": "viewer/data/sprites/items/item_810.png",
+          "sha256": "740af957022cda1493511e4938b1af8182c55d4a86cf5a82e6797f2e7168fad5",
+          "size_bytes": 553
+        },
+        {
+          "path": "viewer/data/sprites/items/item_892.png",
+          "sha256": "f47a0c8dc5e61e7216b9c13d8c6d37459d74f9268fc208202167c26f01a9c616",
+          "size_bytes": 247
+        },
+        {
+          "path": "viewer/data/sprites/items/item_9143.png",
+          "sha256": "29b55c03aef2f8e36e6aeb0ab12bd58e70bfd0a7d6856aadd60e2de1a9637bfe",
+          "size_bytes": 266
+        },
+        {
+          "path": "viewer/data/sprites/items/item_9185.png",
+          "sha256": "a96b0bdd427ee4d7ee116d36b1f22929565ad0fd97a18424dd20b6e7e284e589",
+          "size_bytes": 721
+        },
+        {
+          "path": "viewer/data/sprites/ui/2420.png",
+          "sha256": "2c587b227b8276f3adaff1354cb0008b706cdf91464896b8e63691b151289c1f",
+          "size_bytes": 743
+        },
+        {
+          "path": "viewer/data/sprites/ui/299_0.png",
+          "sha256": "72c11f419fe5a83e2f442e8582b3fbcb5fff6079fd179cbea558ec41bf7cd2ea",
+          "size_bytes": 157
+        },
+        {
+          "path": "viewer/data/sprites/ui/299_1.png",
+          "sha256": "a74ce00dab36d9daec1636c59c4e1f72b66e24940b25b02da50b22cac2f07930",
+          "size_bytes": 185
+        },
+        {
+          "path": "viewer/data/sprites/ui/299_2.png",
+          "sha256": "8fe9960a096a2e25f30b5ce2b88e6d8f884e5838bc3b1cf73805408415a56ba5",
+          "size_bytes": 174
+        },
+        {
+          "path": "viewer/data/sprites/ui/299_3.png",
+          "sha256": "3d7ee84fcd059cdf84b702912b16f2bea1143334e246ae004cd862f0e0a88491",
+          "size_bytes": 145
+        },
+        {
+          "path": "viewer/data/sprites/ui/299_4.png",
+          "sha256": "cd17e745555884512814964509de0743c4939e8ecf4050fea6198fa54ac84db8",
+          "size_bytes": 158
+        },
+        {
+          "path": "viewer/data/sprites/ui/299_5.png",
+          "sha256": "30168eacec24ae23e00095789932b2416ad189fe23ff4a1b3c3909ed20e8a0e3",
+          "size_bytes": 183
+        },
+        {
+          "path": "viewer/data/sprites/ui/299_6.png",
+          "sha256": "862630c1da209a3d69ac9af1e5bbe32941608d5efef392646c193ed2263d03be",
+          "size_bytes": 173
+        },
+        {
+          "path": "viewer/data/sprites/ui/299_7.png",
+          "sha256": "453275728a4847c029a386ab23480a44b721975360ccd576d65d272bf10aac94",
+          "size_bytes": 145
+        },
+        {
+          "path": "viewer/data/sprites/ui/border_map_compass.png",
+          "sha256": "96f572e5aed547e69e90b39d075923ac0f8a379ad1d4eaed996c61d44530dfe1",
+          "size_bytes": 4815
+        },
+        {
+          "path": "viewer/data/sprites/ui/chat_tab_button_0.png",
+          "sha256": "9d8c16bccd7d4df410ccd03e8a405765c8eef6e7c0c7a429602a28bffd3ca7fa",
+          "size_bytes": 1400
+        },
+        {
+          "path": "viewer/data/sprites/ui/chat_tab_button_1.png",
+          "sha256": "77c2d6c49e97015e473a857a4c502829927fb28f33b5038b493cd1259ef8e371",
+          "size_bytes": 1536
+        },
+        {
+          "path": "viewer/data/sprites/ui/chat_tab_button_2.png",
+          "sha256": "4da5cbc2240d5875ef6c8b33a84d6712125f432215324d70dab181e628174a83",
+          "size_bytes": 984
+        },
+        {
+          "path": "viewer/data/sprites/ui/chat_tab_button_3.png",
+          "sha256": "23b310850d0179ea549849b64be4696df3b10d250e7a54fe8daeb2ca6dd754cd",
+          "size_bytes": 1130
+        },
+        {
+          "path": "viewer/data/sprites/ui/chat_tab_button_4.png",
+          "sha256": "b522a1515e8752eb1674dcbde282b1008daf57f2ff8aeb2dc0a462b7dbb8a096",
+          "size_bytes": 1307
+        },
+        {
+          "path": "viewer/data/sprites/ui/chat_tab_button_5.png",
+          "sha256": "b281f6e24194177aa257b921d5b6364dbac422d9aff195bffcfd26fddf2c8f9f",
+          "size_bytes": 758
+        },
+        {
+          "path": "viewer/data/sprites/ui/chatbox_bg.png",
+          "sha256": "12a70acc7598da901f4c4380837b981c15cd288107ce7e9638711c579bc78e68",
+          "size_bytes": 55875
+        },
+        {
+          "path": "viewer/data/sprites/ui/combat_shield.png",
+          "sha256": "7493416b58b2dbd715005980ea9a71cc3cbaf80335394039e9db792a0ee8ad02",
+          "size_bytes": 1115
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_0.png",
+          "sha256": "c984266abe004fe2a0d6a7f73e991576501b1157db503c1f2d01a41610ded30b",
+          "size_bytes": 2346
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_1.png",
+          "sha256": "875d766ef65282607866bf3c2ca15f5e6d96d841dead00bd0de69192cb63ea45",
+          "size_bytes": 2159
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_2.png",
+          "sha256": "ded3d6a3d5b6c9ffbd9a4ec6a43bbec6d895cbddb3652056b58da73b05ca146a",
+          "size_bytes": 1627
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_3.png",
+          "sha256": "7637dad3975e96c06daeba850479ad0cc03bbf058cfdb506c9d22047ee460101",
+          "size_bytes": 1519
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_large_0.png",
+          "sha256": "2d7e668ed91cc3e094bc1aeb9a94b58eca27b85dec1f22b4639e8e92f2444a28",
+          "size_bytes": 2570
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_large_1.png",
+          "sha256": "70216118aba2ffe59be18cf814c51d19d6831f67f7ebdbcbec2e5428566178a2",
+          "size_bytes": 2655
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_special_attack.png",
+          "sha256": "c878505831b5f37c7b7d994ca2c26be03e8ee4df05bb08e787a978313fdeb68e",
+          "size_bytes": 2114
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_very_large_0.png",
+          "sha256": "6e5b595b381a29c042bc1eed058c28845c965000e22e39f0e4c3508fdb427a7b",
+          "size_bytes": 4208
+        },
+        {
+          "path": "viewer/data/sprites/ui/combatboxes_very_large_1.png",
+          "sha256": "160cc88ed92383dae7ae0a35aa8e1f86c201c653c9aacd1e199ce7985fdcdbd6",
+          "size_bytes": 4178
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_0.png",
+          "sha256": "d8eab0f9105aa1d1b7318f582a4796608ef5155dcfa39096af5d49bb38134b47",
+          "size_bytes": 627
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_1.png",
+          "sha256": "ab8da0735f8a2cf893ce3b93097dc894b4ed43a1f4aadeb5dd3c65d52dcca6be",
+          "size_bytes": 489
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_10.png",
+          "sha256": "d0886cd8f9db4f099ea8c7e5409791903d5cce3274299c6b6d2ede9cbc3ac39f",
+          "size_bytes": 367
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_11.png",
+          "sha256": "1df562ea17909ac422c53cb482f79ae7946d84585d5a4d63e9c135e03d6e9b99",
+          "size_bytes": 355
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_12.png",
+          "sha256": "584ae5d9c95464dc8e4a341221585475fc0298b2facdd1c4b61ddd01fd4d800c",
+          "size_bytes": 368
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_13.png",
+          "sha256": "e4f04015838f0bf9695bf716dcdc23b6a136768a4cd49e25d65a6ae79794ef34",
+          "size_bytes": 182
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_14.png",
+          "sha256": "ee23fe71b824160f7eeeef83e3219e768d16d64e2eb0ead0652f624d846e5f5e",
+          "size_bytes": 278
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_15.png",
+          "sha256": "11fbeab34656eecd6992ecfc0788e05d9e08ebbc04a1d43f3519f4e4d1eb3262",
+          "size_bytes": 434
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_16.png",
+          "sha256": "f1557bd9d98f976d805a91bee8d08d2a6a023dba887e7b4a2e1d1f23413f0281",
+          "size_bytes": 436
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_17.png",
+          "sha256": "1e90d4725e957dcff84d60085cbf2725727949db5e78e8adc49c32e437dd2739",
+          "size_bytes": 442
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_18.png",
+          "sha256": "a3f82e534dde1e28d7ee3c7aa9d7e9f2a0a7a430b19aaf979f894d7823363c39",
+          "size_bytes": 462
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_19.png",
+          "sha256": "fad6baad2c356d4af3921e0de15b5cf6df82ce62f7f62e248084050e475dace4",
+          "size_bytes": 437
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_2.png",
+          "sha256": "bece9dd1cc4e43768e44855c04657102594faef6293e849b8128eeb4eec219c9",
+          "size_bytes": 478
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_3.png",
+          "sha256": "c6bb9a972d5ffcfb7b07bf19461072a93c62da7c8ba7884663925694b75753ac",
+          "size_bytes": 474
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_4.png",
+          "sha256": "f7845bb02720c6ae39f1b94a0cd03a3bb633f5a29eaae018e67ed1eaa09c1156",
+          "size_bytes": 326
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_5.png",
+          "sha256": "a1d666aaace8927049f8023df92556766a8fa440108db950e42b5de14fa361b6",
+          "size_bytes": 485
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_6.png",
+          "sha256": "68622a5cfa80a83663569f42e39ea0aff9830ece790611dd37604dc81a22b7d8",
+          "size_bytes": 491
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_7.png",
+          "sha256": "4c62b9b8107e3db548ed9a4cb96b226d77227f23dd39ff87aee0136f5d3abac0",
+          "size_bytes": 485
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_8.png",
+          "sha256": "1e23733d668cb8f0676ab4aa3c3b56f98598348f1d694a7f9ae907cb3a686850",
+          "size_bytes": 568
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons2_9.png",
+          "sha256": "b1cec1a22d542dad6240248bcd8b09a33309d1ca7193aba0c19393178c02bf80",
+          "size_bytes": 443
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_0.png",
+          "sha256": "7302296e50110e3cb3b3b4ba310a5cee67a37a4762c894a4cf31bb5adf8a89c8",
+          "size_bytes": 473
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_1.png",
+          "sha256": "9669f7952d8ce212f163c8744c46a573503bc8cb9f5ed7a44757a8f4092e5432",
+          "size_bytes": 417
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_10.png",
+          "sha256": "dfd1d6acb4f3d857a432ba4b3f3b59593222d18b0207178bac0e0212a42322be",
+          "size_bytes": 435
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_11.png",
+          "sha256": "39b785831c41189cce2b4a8e21496fbb35ef6bc74c18955f16c196f8f5691ced",
+          "size_bytes": 266
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_12.png",
+          "sha256": "e3b3f0da727efd829aec1c4c165edd60730d23ac7fb73ce54b282bead37e156a",
+          "size_bytes": 307
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_13.png",
+          "sha256": "5ae5d0eeb65da334a98bae6ebc59c1aeaedcb9d3827dc7965b83fd7f72995038",
+          "size_bytes": 267
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_14.png",
+          "sha256": "bb48207f30dba4134516ca66c70dc6febf6ebe319e735db191de5ef828e796fc",
+          "size_bytes": 279
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_15.png",
+          "sha256": "786c10d23dabf8ddd763032c7f4a48a2f113f6e3a06dc120745bdd6dd2d448e8",
+          "size_bytes": 731
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_16.png",
+          "sha256": "9498034041ff1deba154760084512dbf18cc8d3031ed427bab42149325f355b8",
+          "size_bytes": 596
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_17.png",
+          "sha256": "9bb99af10d6702f18a70820977e217cefd3f50e33c901b28955faa40c145429f",
+          "size_bytes": 644
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_18.png",
+          "sha256": "390313861ce72ff97f9a8d39e920658167213190fb2a29458718b85951cd5d43",
+          "size_bytes": 556
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_19.png",
+          "sha256": "f43e3ac28d4d8a6607b94a0f206b9f6a2b230941f22a549bbeffbcc4df499866",
+          "size_bytes": 83
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_2.png",
+          "sha256": "c625e0002c65b5a0aa426504c728680bda2f5ffb9ac775b6dddfeaee4df01c9c",
+          "size_bytes": 403
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_3.png",
+          "sha256": "328068871a93da1325f4bcb92df40defeac25c0cabd50ebe970b4b955a2b223c",
+          "size_bytes": 396
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_4.png",
+          "sha256": "4820d3cbba0c21e85c56dcbd290b0154d2df7b9c2ef2402e7152e4b89cb1cc80",
+          "size_bytes": 274
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_5.png",
+          "sha256": "10c6e17fdfc15ba2902cbd1a3387e7b68c36857665497828f643afa49f5365f2",
+          "size_bytes": 310
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_6.png",
+          "sha256": "f7b274aa70d318f8111a4533710f090c6baef7125a0f159f2dc700881e32f50a",
+          "size_bytes": 303
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_7.png",
+          "sha256": "1e82fbd51bc1bcda82ff4436b6b3f5d03ed5acab75e76b9fedadea98e1361bb5",
+          "size_bytes": 359
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_8.png",
+          "sha256": "d27d415de033ffdf774bdd2f87b2bfecadb9a39ed22d815b9f2f4c6fd8c23a58",
+          "size_bytes": 815
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons3_9.png",
+          "sha256": "83f5eadc7e529b68b2c6090e190d85d8b3b6f45b56a58df7ce4caf156855f76b",
+          "size_bytes": 796
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_0.png",
+          "sha256": "56f9a06c28377120e0f6486c497f2899818af98ae4a74901d06c00476e34519d",
+          "size_bytes": 553
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_1.png",
+          "sha256": "f6996e7ab96080fb8ece54c516bdf8bbae7f7f1275968f9c54b1af478980ccac",
+          "size_bytes": 463
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_10.png",
+          "sha256": "a88933c0aa07948cb918662899c223d652ae5fdce379150518f51c917d48ce0a",
+          "size_bytes": 352
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_11.png",
+          "sha256": "03fa55a78532b552e60ffc4a28690b8ff9d42ee9eb997774d2c0972ca1330f0d",
+          "size_bytes": 314
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_12.png",
+          "sha256": "71afeeace2b57cccec1bb490e600623645345b68830bbb07ce4a0999b5377a79",
+          "size_bytes": 354
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_13.png",
+          "sha256": "2180badf8eb4e2a2853cc793efbc3fd7767a6e3a9af4e7487a35b0008e9f9052",
+          "size_bytes": 332
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_14.png",
+          "sha256": "2e63817d70d3c6372d9a89d528bc013b3e4b5e8258917cb5bfc5007ff32a8d71",
+          "size_bytes": 391
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_15.png",
+          "sha256": "651950a48134cbe0047340628117e3e201f5872d7f1636721e04d424fc5c4a22",
+          "size_bytes": 334
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_16.png",
+          "sha256": "13a5f360d74ec08108416cca7a6ee676fadca12e9f087520ff68ef1f7bf0c009",
+          "size_bytes": 496
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_17.png",
+          "sha256": "67dae7c1350e692c4e9c048ef5ead96a4dcdb13ea27df9c1014d8df74b030e20",
+          "size_bytes": 282
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_18.png",
+          "sha256": "7ae8ca2fd19c9c2f46cb2048c4a1bd273dd55431be024c786dced43b27ad1dff",
+          "size_bytes": 273
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_19.png",
+          "sha256": "a04d077fff404017944a693537ebde0c2b0e1b01afbd5ca78503817f93809c32",
+          "size_bytes": 232
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_2.png",
+          "sha256": "acc6d86ffc83d0f25ad9bd41b8e2299d90e33aaa4817ab5b030bea506b8bfbbb",
+          "size_bytes": 454
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_3.png",
+          "sha256": "8f842d133c5e945d0e9f191a6923ac49a9e0550d723a186b0aeac47d03149fe3",
+          "size_bytes": 452
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_4.png",
+          "sha256": "053386cbeed8805624272b06a9d19dcc97d6209a8748fedfaa09fb5894d832e5",
+          "size_bytes": 432
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_5.png",
+          "sha256": "1801e3da89f221f23f3881397651ae4789ac3cc2fd61b6fed4b807feb6a73af1",
+          "size_bytes": 360
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_6.png",
+          "sha256": "1a0b4024f7e7fb245dcd0868ce6641c9588730069ba34bdbd30a84e7436bf4ff",
+          "size_bytes": 251
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_7.png",
+          "sha256": "a5f6089624d0a29655c033e5d98ebf58382cb977130962750ca813ba6e11119e",
+          "size_bytes": 291
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_8.png",
+          "sha256": "cc6373a5e975705a17e444681165ab75cab7a0e6edd9b3f3dfff195822966735",
+          "size_bytes": 225
+        },
+        {
+          "path": "viewer/data/sprites/ui/combaticons_9.png",
+          "sha256": "12694601176ff8d1eebd0578576371b231ab674f9ccecc58f72792caa002e6c3",
+          "size_bytes": 242
+        },
+        {
+          "path": "viewer/data/sprites/ui/compass.png",
+          "sha256": "f66713c4aeada87ad8721ab734387863a4348c95a7f80b2a1b788ad90e490472",
+          "size_bytes": 2186
+        },
+        {
+          "path": "viewer/data/sprites/ui/compass_outline.png",
+          "sha256": "c8ddd63aca630c9832d026053947170e8ab6a11619fb30efd84b1c692f4c02bd",
+          "size_bytes": 943
+        },
+        {
+          "path": "viewer/data/sprites/ui/cross_0.png",
+          "sha256": "72c11f419fe5a83e2f442e8582b3fbcb5fff6079fd179cbea558ec41bf7cd2ea",
+          "size_bytes": 157
+        },
+        {
+          "path": "viewer/data/sprites/ui/cross_1.png",
+          "sha256": "a74ce00dab36d9daec1636c59c4e1f72b66e24940b25b02da50b22cac2f07930",
+          "size_bytes": 185
+        },
+        {
+          "path": "viewer/data/sprites/ui/cross_2.png",
+          "sha256": "8fe9960a096a2e25f30b5ce2b88e6d8f884e5838bc3b1cf73805408415a56ba5",
+          "size_bytes": 174
+        },
+        {
+          "path": "viewer/data/sprites/ui/cross_3.png",
+          "sha256": "3d7ee84fcd059cdf84b702912b16f2bea1143334e246ae004cd862f0e0a88491",
+          "size_bytes": 145
+        },
+        {
+          "path": "viewer/data/sprites/ui/cross_4.png",
+          "sha256": "cd17e745555884512814964509de0743c4939e8ecf4050fea6198fa54ac84db8",
+          "size_bytes": 158
+        },
+        {
+          "path": "viewer/data/sprites/ui/cross_5.png",
+          "sha256": "30168eacec24ae23e00095789932b2416ad189fe23ff4a1b3c3909ed20e8a0e3",
+          "size_bytes": 183
+        },
+        {
+          "path": "viewer/data/sprites/ui/cross_6.png",
+          "sha256": "862630c1da209a3d69ac9af1e5bbe32941608d5efef392646c193ed2263d03be",
+          "size_bytes": 173
+        },
+        {
+          "path": "viewer/data/sprites/ui/cross_7.png",
+          "sha256": "453275728a4847c029a386ab23480a44b721975360ccd576d65d272bf10aac94",
+          "size_bytes": 145
+        },
+        {
+          "path": "viewer/data/sprites/ui/fixed_compass_mask.png",
+          "sha256": "73465476e997c2d8e11b672da5618ca40e1b80c4906a5839ea747d814b2b7998",
+          "size_bytes": 213
+        },
+        {
+          "path": "viewer/data/sprites/ui/fixed_map_clickmask.png",
+          "sha256": "57da7782bd2d840e15730e41d53926ec6e30da97ddd224a6e04a4b3ed52b51c9",
+          "size_bytes": 490
+        },
+        {
+          "path": "viewer/data/sprites/ui/fixed_map_mask.png",
+          "sha256": "682beca802075ef78a1e040fae76b248afbd5064776f468370dc01f7873d517e",
+          "size_bytes": 1066
+        },
+        {
+          "path": "viewer/data/sprites/ui/fixed_minimap_cover.png",
+          "sha256": "aafdcfe6835997cf2632c24be4fb0a3030274cbf60638b978f3525edb94219ed",
+          "size_bytes": 12474
+        },
+        {
+          "path": "viewer/data/sprites/ui/healthbar_empty_30.png",
+          "sha256": "9ebb6a98f5873acf92b922e0579db3c8425e85de2e6c7f984d8c16f287a4ebbf",
+          "size_bytes": 81
+        },
+        {
+          "path": "viewer/data/sprites/ui/healthbar_full_30.png",
+          "sha256": "0fcc41392687f4efa9f977341735f70b41b55a421426b8647503a66d99bf144b",
+          "size_bytes": 81
+        },
+        {
+          "path": "viewer/data/sprites/ui/hitsplat_damage.png",
+          "sha256": "30f58fc57cfc944bd0f7a35b82efaf69ec93e80d1d6c82a32ac9491ae2886aa8",
+          "size_bytes": 382
+        },
+        {
+          "path": "viewer/data/sprites/ui/hitsplat_heal.png",
+          "sha256": "b76034de81d0c5436ed20d312be9b3125066f69743d1618dffbc10f11e07cb8d",
+          "size_bytes": 301
+        },
+        {
+          "path": "viewer/data/sprites/ui/hitsplat_prayer_drain.png",
+          "sha256": "bca5b24a817214e4addb74ae3bb16480d1f6691ad342f92d4754f0fd526f6c42",
+          "size_bytes": 230
+        },
+        {
+          "path": "viewer/data/sprites/ui/hitsplat_zero.png",
+          "sha256": "5ff955546e478e26f916b5a4b6712809f16d6b1c308bccfcfbf5781e70e49a6d",
+          "size_bytes": 413
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_0.png",
+          "sha256": "fddc7f0ef1de6fd5ced7f58dcb70bbc8b90749616a3f54db44c1b83bf5c00f7a",
+          "size_bytes": 187
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_1.png",
+          "sha256": "bec9f9f257804583ccfcd1be4c672f29e1e642bfeee20596f279ffd9fb98dbf1",
+          "size_bytes": 288
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_10.png",
+          "sha256": "f28d2da3e9b02020d5ff4e72b17fc0ae2d0e9d0751a9ec8dfb4df1bfb37a6c72",
+          "size_bytes": 273
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_11.png",
+          "sha256": "c79106549222d90ab83dc06cc82b6c10e8d8145465b8b208e615a0eda6b449c8",
+          "size_bytes": 270
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_12.png",
+          "sha256": "4e7ce7a2f0cd13a22535a28ef82c81c046e9a38807d4d4a68dd1fc4e9e82d377",
+          "size_bytes": 328
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_13.png",
+          "sha256": "576f869f53935621abcf170ff67db918a900ef0a7e4a23eaaa1bf143ccd94e66",
+          "size_bytes": 217
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_14.png",
+          "sha256": "75af688f87184d7ae3492262467d89f91ae8f3c6bc0ae6fdea18c0aa583e2a2b",
+          "size_bytes": 261
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_15.png",
+          "sha256": "a9deff351f519a8c9199d5f553c99a96c59df73a3df367697fc130ad5e8fec34",
+          "size_bytes": 321
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_16.png",
+          "sha256": "ffe95bb26ea19ce60a77ad9d3fcd8ec3b95ad2f53e2b49aa10abd35abc69c9f2",
+          "size_bytes": 243
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_17.png",
+          "sha256": "3b5ddb9a72b55b23e3b5ee16b2807775293f3f4acaa2c375f13deef3e969d988",
+          "size_bytes": 275
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_18.png",
+          "sha256": "f25565f0d20db04c6b918ac59b8ccc37a5071970744b24818af6d8f594f64645",
+          "size_bytes": 334
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_19.png",
+          "sha256": "3a773b8cdd7c12efcbbc8dabea996c22ce50edb313a77dc215996e986088c87b",
+          "size_bytes": 308
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_2.png",
+          "sha256": "8d49aea3f34ccde410eff8bf41bd8fe31784926e7821fcbbd47e72da03921c7d",
+          "size_bytes": 167
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_20.png",
+          "sha256": "29d36a29b26fa214c3077a0fc2aa43184c64a63f90ea0e2fb6da066a5361572b",
+          "size_bytes": 237
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_21.png",
+          "sha256": "697921eb9c532d5a7398824dcc7d1439d618f47ab6bf689ef70b7fda2ae5141a",
+          "size_bytes": 377
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_22.png",
+          "sha256": "b36870871442a713e49302f60c0fcb38d0468b2f31e335e915a9d1d4b1997c5e",
+          "size_bytes": 335
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_23.png",
+          "sha256": "3a7432c3980708023884befb738b5e8538a01288d12e95b08757b1a5ba4f37cf",
+          "size_bytes": 240
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_24.png",
+          "sha256": "7731c8f1284b685293b58683d92f57388d0b567642cd39e64d6f9c23e42f6789",
+          "size_bytes": 231
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_25.png",
+          "sha256": "a1b05361aa1f9b9de81711cf014ee770c0d53182f2474ce1bc1f6090217bcf31",
+          "size_bytes": 237
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_26.png",
+          "sha256": "19d685a8175336528336f1aac60269f1a00ace49213adf3241250283c9dbc9e8",
+          "size_bytes": 258
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_27.png",
+          "sha256": "bdc7931d726e178212042b162d5930033735c63d91a686f277c16655f8835156",
+          "size_bytes": 277
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_28.png",
+          "sha256": "3a55fd164daa05cda77f0e7794c2a2b3b7a9d75788fd50b691870422bc0235b1",
+          "size_bytes": 231
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_29.png",
+          "sha256": "9a8f846e7d93976e352e183d570f94fa5fcbb75f0daa975df7b2c91423edc226",
+          "size_bytes": 235
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_3.png",
+          "sha256": "dc40b570911281afb3c2d65f744e106ae82c41851842cf1c5e038eb552ac91c7",
+          "size_bytes": 237
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_30.png",
+          "sha256": "69156a839a91196c8d484409a4cc0e72899d5b3b80c17bfd693a91ad35275540",
+          "size_bytes": 254
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_31.png",
+          "sha256": "7b790cb553851b3aa86f3c86e5009b682cd9cf1540358e79ce8a0ccc08b0b6c1",
+          "size_bytes": 286
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_32.png",
+          "sha256": "d2a43f520127dbcdf2e521ba479df1d30e554261c45484edb310961290b272fa",
+          "size_bytes": 257
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_33.png",
+          "sha256": "45a46f2840b26ed2c150c0242f21aa5f357999e548cd9ae0093d7d8a1089cd61",
+          "size_bytes": 279
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_34.png",
+          "sha256": "75eb1fb1a986a37862fc95294af43776179a067e3eb1919e1b438425a1078749",
+          "size_bytes": 244
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_35.png",
+          "sha256": "538a50d3e6ec55729fc34e71c989de3b4b77e8101408c2ba357106f8b5566ac7",
+          "size_bytes": 236
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_36.png",
+          "sha256": "874c57bd90629071e9b5fa1ccd3e619a03fc1ceec0030c58d3c32bbcccc7d932",
+          "size_bytes": 281
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_37.png",
+          "sha256": "5714ea07bb3ca2710ec00fc3785f89a76652239015237a761a2dd57f8005e45b",
+          "size_bytes": 283
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_38.png",
+          "sha256": "cf1f3260cf9619d9f74d43537bd11222e31f3b77e6efe35fa0b0a8c8c9e5e1eb",
+          "size_bytes": 242
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_39.png",
+          "sha256": "52316f04547d8e8ec70229a9ca56bda4303d36a1095a8271720f983c85b58f2e",
+          "size_bytes": 332
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_4.png",
+          "sha256": "33ede854073985eace2f8a8abd78a436500d5e8756aca99e7dff954d5876ac87",
+          "size_bytes": 166
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_40.png",
+          "sha256": "237031e1ab13d356f31f67b29eba8b919d74e4042191fd52c928717ace0821a4",
+          "size_bytes": 343
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_41.png",
+          "sha256": "60d2e6d46e22e2572394406fa70df828a986b31dd6f1c0eeedfd84e1276c1c7c",
+          "size_bytes": 258
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_42.png",
+          "sha256": "9556f2965eb10930bb3aa8d9e1570cef447ccbc8b642f8e7e8b84c7acd90de7e",
+          "size_bytes": 263
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_43.png",
+          "sha256": "a2cb3f07ae5ae981d8da86bd188f72b6b145cc53774f83835bdb9165f8e53bb4",
+          "size_bytes": 232
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_44.png",
+          "sha256": "bcca1347499ea788f188db93fbfb369e22aabaa50261697f922438902c4f56b2",
+          "size_bytes": 269
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_45.png",
+          "sha256": "f3bbc6852633acb3463be680d69d711652b71f8ec33261905fc42cd889f14516",
+          "size_bytes": 221
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_46.png",
+          "sha256": "13cbeaea49145d0c78d05fe6db6ce5bacb1d66ff839c4cf07cf423391027ed64",
+          "size_bytes": 281
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_47.png",
+          "sha256": "0a272d4d5627c0c3d91ce808c774259efa0d6975b4f60d7cfa8df6aa2fa915b7",
+          "size_bytes": 262
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_48.png",
+          "sha256": "e45cb78038d1c2bdee3eb6c20e9ba2fbbb2a279d4b632c071cb96a1146db12e4",
+          "size_bytes": 313
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_49.png",
+          "sha256": "9d4fdb2d9c35cfa8cf8235b556bc19a3380bdaa2a1fec464d248c868597f661b",
+          "size_bytes": 308
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_5.png",
+          "sha256": "0e6cdd6441e224db61e41d629c3da8a31e54694611104dddd0eeea239e84170e",
+          "size_bytes": 278
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_6.png",
+          "sha256": "fa431e80677c176fa6417839fb3c29627086ba22ada6a338a39aa71c255570e4",
+          "size_bytes": 185
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_7.png",
+          "sha256": "710b96ecbc54086f9f40a07d620d578ab43be66a9dbd18c77c3fcbbe50c41440",
+          "size_bytes": 322
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_8.png",
+          "sha256": "ab8347e52b534ff972fa5712b0700b04b56bf2eec3a5cb1e54d2fd3049ec4606",
+          "size_bytes": 261
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicoff_9.png",
+          "sha256": "7751928c5cbbef673ada0913f98474097dacc93eb4590b454a2d0ebc9232c2cf",
+          "size_bytes": 255
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_0.png",
+          "sha256": "9b4e61e85ec53a897389e524b6f6a5e2df7b9278253d1024f9af635d03de065d",
+          "size_bytes": 194
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_1.png",
+          "sha256": "f5fde5672baef4ce31f604416eb637f2cbc7489927e9ff91c785366523bf5d94",
+          "size_bytes": 278
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_10.png",
+          "sha256": "14694d1abcccd470f4b86e933232116e3dc4e4bcf2ba4dd91307b1fd21b2397d",
+          "size_bytes": 327
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_11.png",
+          "sha256": "0f317a31dd417ed9b0148f1328a8641909905ac550df7f8a9b9e3c00d940afd1",
+          "size_bytes": 309
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_12.png",
+          "sha256": "af1adb242ddb9442af9acbd8ad350c2773585ccbd450f3d53d2a5107e24c36d4",
+          "size_bytes": 398
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_13.png",
+          "sha256": "d7e167dce35cdd6678abb2f1aaa0a28cd61ba92ba108c66566608c1fb5ecd988",
+          "size_bytes": 239
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_14.png",
+          "sha256": "ff9ef39dbeda3886f510e44901095e90636e9baee8d3e26a36263447dcdab16a",
+          "size_bytes": 295
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_15.png",
+          "sha256": "e9e103ba11f012b690799ec3abf686560690d911b702780b9830a41918490886",
+          "size_bytes": 388
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_16.png",
+          "sha256": "97c66f968e5316f2a001e8bf5aa0ace0622c8e19ac160887f88f0c2cce665442",
+          "size_bytes": 248
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_17.png",
+          "sha256": "2d26e736ea9c82f2313220f1466a60053670b1d9dce6b1bd5ed4f9054f3b0485",
+          "size_bytes": 319
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_18.png",
+          "sha256": "41785a9094dcd6808fc5f7f85e954dc96bcaa795c951b321fad5ae7389601f84",
+          "size_bytes": 389
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_19.png",
+          "sha256": "7f0d9ceb3f826bd89bd44881db8079983ec2b15fe09d2704be66f03960c8b992",
+          "size_bytes": 356
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_2.png",
+          "sha256": "d75047eeb3112078537ca486bf242467a459d7dd796bba2c3534a02b477aeff8",
+          "size_bytes": 193
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_20.png",
+          "sha256": "a99954f851ab33231cd2a826627e7af0f902e6ade2a1e21546604de1db412e71",
+          "size_bytes": 236
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_21.png",
+          "sha256": "7c9eee366138efa99387c7aa160120c5a9a2c45f1ad0cf93d2d8f3651d78b49f",
+          "size_bytes": 478
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_22.png",
+          "sha256": "9175ec0038a8f57281fac3fddd89ca2acaaa5ca33b3ac1657c6f387e699413df",
+          "size_bytes": 400
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_23.png",
+          "sha256": "ccdd613395044dd2c0f07c62cbe963be6e5f9607bf93fb84be165f97a2aa0657",
+          "size_bytes": 236
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_24.png",
+          "sha256": "0963b44d876f3cfb904484c1d24e60ed6ee4c813da4e1f8e7b150b57d6b8e2b5",
+          "size_bytes": 245
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_25.png",
+          "sha256": "28b2c9d67e3362ab9d18c15414db5ddd5def46af1e8afe2f9cd415e96e583e36",
+          "size_bytes": 235
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_26.png",
+          "sha256": "af34808c948ee8e25de8498cace3dc1564a993657a3d167ce0fe2efa8e895b31",
+          "size_bytes": 306
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_27.png",
+          "sha256": "b9d14c82fac6860044a21f0c60f32fb19fd0688b0aac8a6910692cfe857e5399",
+          "size_bytes": 329
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_28.png",
+          "sha256": "dea6843a5269e660dc900924cf37f9aa7cd6419969496388a21a4ac2a9f1fd45",
+          "size_bytes": 229
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_29.png",
+          "sha256": "db374287d863cb2448ec7a93e96ce5d59eafa6e32d4db2e6c742dbe15b0f4a56",
+          "size_bytes": 234
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_3.png",
+          "sha256": "19f74ae3b910e3b35b4b8cd69801423d9fb8baff14414fc81aa5c21146734952",
+          "size_bytes": 251
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_30.png",
+          "sha256": "916acdceefc906308749e24bb36c4925556e4b52e4bcecf9124aff47a9228e15",
+          "size_bytes": 317
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_31.png",
+          "sha256": "9b1cd30a5c5a45f215e016bbe6d7461e5fe3f27f2a7e455c9612e83e9c30764f",
+          "size_bytes": 275
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_32.png",
+          "sha256": "02c1986f4c891b736f3879623b6239f77b8ed9f9329d2f539a986e8449e88bd4",
+          "size_bytes": 363
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_33.png",
+          "sha256": "e8230c847df824afe7ae9a467241006f52c28348e752e413612163dfbe54e079",
+          "size_bytes": 270
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_34.png",
+          "sha256": "202f245b32b427f4ddcf4b4f13bd19a21ef402d744ed5aedfbf462df92f43d85",
+          "size_bytes": 325
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_35.png",
+          "sha256": "841f07aafa4fcb2e892d659ccb74f0b49e7d05ec57890de4447b11786d49edc6",
+          "size_bytes": 252
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_36.png",
+          "sha256": "3ad112dbb56c9a476308c217df441ecd58e2dfa1a7f6a70efe85533343686b2d",
+          "size_bytes": 273
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_37.png",
+          "sha256": "a68155eae68932578e994a84cf578df30b8b2253db3a307fb55e38c47092d373",
+          "size_bytes": 271
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_38.png",
+          "sha256": "29f6ce88ff8bce9481953b9fd93779e56d39a0a501be84a37db97914c023f5d5",
+          "size_bytes": 204
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_39.png",
+          "sha256": "c5f379652c3d2ae946713edeadf5d1281c5bc68bb4f72d35be1c9772b06656cb",
+          "size_bytes": 403
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_4.png",
+          "sha256": "41303dd41f1ab246d6428bc03e718d1bca3fedbfd2433aebc09ea7cb50f99988",
+          "size_bytes": 190
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_40.png",
+          "sha256": "a23bcdedf679449f6f8b2b69aa5e378261a34364f04535d8d28cb093e0094dff",
+          "size_bytes": 407
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_41.png",
+          "sha256": "7495831437a7ac4d641b23ecb2f5c4d6fcbff7afbc181b5f25d9c6b4f38a152f",
+          "size_bytes": 211
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_42.png",
+          "sha256": "a0bfcd78d8216b0da35b21484824279a11049472e9712a5ce316c7043578fe40",
+          "size_bytes": 238
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_43.png",
+          "sha256": "49a2b0f3d3e877fbf5a350268535053daf9ed72997130ddfabfc345f72c1e481",
+          "size_bytes": 221
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_44.png",
+          "sha256": "5526e4164ad892c84cc50e0fb1901eb7ae587243ff6e6c8256ccbe9cf97e86fc",
+          "size_bytes": 270
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_45.png",
+          "sha256": "9f2a41ae6824b39ea26f1db62a642375aa621a0841def82b7589f5a3bbd3b517",
+          "size_bytes": 216
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_46.png",
+          "sha256": "94d0e3acfbacf0cd2aba41979e6cb09052822e9f094b19d90a2efabdd1e3a73c",
+          "size_bytes": 278
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_47.png",
+          "sha256": "328053ed1f057f554f904d986b8df437b0658f00cef47a66920c3277542a5d38",
+          "size_bytes": 338
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_48.png",
+          "sha256": "ea7d2e15850e1f4cf24f03e36c273f9bf911d3a7edf757d27a0797a80a971c80",
+          "size_bytes": 370
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_49.png",
+          "sha256": "28fd3fe6ca5ca67d2a5911f7c3cff5dac8d63c53e2104199864959e8faecb01a",
+          "size_bytes": 320
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_5.png",
+          "sha256": "4e4b3ff74db6a2086fcc0c9a139ab7b3701e33b3486e94253ab0f619d0920e7d",
+          "size_bytes": 280
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_6.png",
+          "sha256": "0bb5a534f52efb27e370e27c45ed7856398ebe23c23965de4f414ba291cc257a",
+          "size_bytes": 204
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_7.png",
+          "sha256": "14363e40812e643d49f42ee92fe397f94e1fa175f32ac77a5e5feffd1fac65e2",
+          "size_bytes": 316
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_8.png",
+          "sha256": "f58689cdaf71974cafc70b747e16c116b5b58a13ce1e518ef551ac671c80f154",
+          "size_bytes": 304
+        },
+        {
+          "path": "viewer/data/sprites/ui/magicon_9.png",
+          "sha256": "6c7617cecdee814716a1fc8c5e6be37e133bb14af7c90d1b6a3719b0458bd874",
+          "size_bytes": 278
+        },
+        {
+          "path": "viewer/data/sprites/ui/main_stones_bottom.png",
+          "sha256": "e37e1bea523ad7edee350240a77cc2742a24e2452e3d5220ad1b3db8f1ff0e47",
+          "size_bytes": 8402
+        },
+        {
+          "path": "viewer/data/sprites/ui/mini_bottom.png",
+          "sha256": "e80183c57be911373e536166c91715ceed113cbc97d2ffa2326805e4408605c6",
+          "size_bytes": 2020
+        },
+        {
+          "path": "viewer/data/sprites/ui/mini_left.png",
+          "sha256": "1b901abd71f1f17747a07e93dcece163f4e8515f6d507922c23e722c3658d1fb",
+          "size_bytes": 3982
+        },
+        {
+          "path": "viewer/data/sprites/ui/mini_right.png",
+          "sha256": "afbca7c5011217388846f7a182d29ed4baeb9d36ff45cd99cba88e4aab46e1d0",
+          "size_bytes": 6281
+        },
+        {
+          "path": "viewer/data/sprites/ui/mini_topright.png",
+          "sha256": "40aa9afd64f8bfa395dad5c40432f8f9de125544bca67048616130ce6c45c2b0",
+          "size_bytes": 249
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_0.png",
+          "sha256": "d198e78818b53f82a5398c0cd6817f8321f2f9ef7d962f1b48c1e7e98d6e8145",
+          "size_bytes": 1722
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_1.png",
+          "sha256": "05409167537388f06586b3205712a78305fd09778eb4b250a11eee4457361a01",
+          "size_bytes": 1088
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_10.png",
+          "sha256": "6029883234577351094059d8544ff63f9c4950ea5c8ebfd2905f9e6c48c9b140",
+          "size_bytes": 283
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_11.png",
+          "sha256": "42283604e77843cff56004f0d5ffc9af097caa26a60379b5417080ef5de7d15e",
+          "size_bytes": 385
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_12.png",
+          "sha256": "07c243b1046dad393647d562d642016bf05b43e254eb3a3d34eed5fd7c467117",
+          "size_bytes": 1286
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_13.png",
+          "sha256": "33ab6ba9f50a0f019088da473ee49da7647e61e960eb4daaa62cb99b7a8130ae",
+          "size_bytes": 241
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_14.png",
+          "sha256": "5a09e011e9ffd18a5aaad4d135aaab978f72f41d8cf57c4bf460f2690104c425",
+          "size_bytes": 235
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_2.png",
+          "sha256": "ea0d7f9ee983d3c4e734a7b7a21d4548f1babfe5022ad981058fa05e36024ac5",
+          "size_bytes": 376
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_3.png",
+          "sha256": "91026272b4f94d30f973d65cb4f88d6f87b30cdc3211b896e44a4e1e11c70222",
+          "size_bytes": 293
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_4.png",
+          "sha256": "c95370b3d95763793585874cdffdcfe4dd9ac2a29f30647e2ccc59475416e7e9",
+          "size_bytes": 1280
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_5.png",
+          "sha256": "a494b0ac6036f2e3f3231384608a339132d1973e8c3d535d0ca7999b9fb2f94c",
+          "size_bytes": 1361
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_6.png",
+          "sha256": "7784e267ee896d5b0b438c999d35d1ddf8dd9e11697cbb8f63a1c46ccc0acb85",
+          "size_bytes": 1284
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_7.png",
+          "sha256": "08b35936c432e7a4d1c81f0ac6ee22d4fff65e3c4af510973c22e1d338898cc4",
+          "size_bytes": 1282
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_8.png",
+          "sha256": "8e451c6bb964bef5338432b6caf9917a88291cd7348b7fc10a59c5e9dda6d84c",
+          "size_bytes": 1207
+        },
+        {
+          "path": "viewer/data/sprites/ui/miscgraphics_9.png",
+          "sha256": "f58b2be51ae615412018ef40de01078e63c5bf5dfa50fdadfc44fa4d9102eddf",
+          "size_bytes": 1607
+        },
+        {
+          "path": "viewer/data/sprites/ui/options_icons_16.png",
+          "sha256": "f779b2d1f12a8750addc7d913128d02851f5e8687aa474e029077f6ce1349170",
+          "size_bytes": 927
+        },
+        {
+          "path": "viewer/data/sprites/ui/options_icons_18.png",
+          "sha256": "2e1e81faf7d9dd07bb7ca42ab50de0333b34291c0744d71f9659751179653138",
+          "size_bytes": 1496
+        },
+        {
+          "path": "viewer/data/sprites/ui/options_icons_28.png",
+          "sha256": "d35d4465457120c9d74348a3adb54cabca7cf03a54fa263f58fb3ebbd1f94a85",
+          "size_bytes": 1033
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_0.png",
+          "sha256": "baad664a40f98e308a96a5771383e3e0d23054d99a597aa56d8f2bea22b66a7a",
+          "size_bytes": 261
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_1.png",
+          "sha256": "ef4f1ed5a0a6879fc18ccbebee05084bd1637da5e9429ab167634088d2fea02a",
+          "size_bytes": 411
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_10.png",
+          "sha256": "52a8d1f201796988d75815fcc49777a93e8b7c2822ea495cdea218eaf7c39712",
+          "size_bytes": 546
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_11.png",
+          "sha256": "dc2db685a7b6c11f8f3b065c4118d458613db06ef26336a50b9e3f63256cc7d5",
+          "size_bytes": 732
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_12.png",
+          "sha256": "15b1d7b8a2babfe3ec25c36873b7803d1dc2f4e02c1caf62d81eb901adebb959",
+          "size_bytes": 354
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_13.png",
+          "sha256": "a6a79dc68f62570463a1e9a7b5ad026c17c68d70a8b9121d0496b002cec6fe4a",
+          "size_bytes": 503
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_14.png",
+          "sha256": "f408b7c473dc345b02c881320d4c48828097e80660502977de24f9a9eb866247",
+          "size_bytes": 476
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_2.png",
+          "sha256": "0da6c93d07d74677528d78127a9482f95dd2e746ca7fa7a338a937b3224a301c",
+          "size_bytes": 364
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_3.png",
+          "sha256": "fd6afd283c02aa982da3b1f298a9c69ea719faf2389f1dbc39fd9a8a6321f96b",
+          "size_bytes": 466
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_4.png",
+          "sha256": "fda5b12c7a280fa34e97453bf73ce3b804d3541e473b79950b10d9e8901f7300",
+          "size_bytes": 471
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_5.png",
+          "sha256": "e2b9c5cf89afe65feb78b0c6a597bb17f77e489bd76b0adff13b7099cdbbba40",
+          "size_bytes": 739
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_6.png",
+          "sha256": "f6921f19229190001213b551b639852c6f449620a218f34ab5c2973c8b10e7f3",
+          "size_bytes": 525
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_7.png",
+          "sha256": "0517240ba2075740b3c7762cf73f860bca756f90d5f3c2dcc51da3260f145ce1",
+          "size_bytes": 606
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_8.png",
+          "sha256": "2691ef80ffac509387610235ef65a0fbe04ab3055cb7fcf645aacefe47880020",
+          "size_bytes": 392
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_filler_9.png",
+          "sha256": "3c6f00c553c8bccf6814a0059c65fd7befadf28973588a2ea3d60ab7ede2a0a8",
+          "size_bytes": 632
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_frame_0.png",
+          "sha256": "894c738e424d6a812a00223620d514642bef04acf4d65ecc442425b0be91499e",
+          "size_bytes": 632
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_frame_1.png",
+          "sha256": "3a1ed95f7c2ed0f547db5a79cc5baec6de155825e5667740e7ec679a01304d55",
+          "size_bytes": 769
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_frame_2.png",
+          "sha256": "fb1b14eb9b29958b3ec64065e3d982ed43c154edacfd799ac065c97b0c0e2f31",
+          "size_bytes": 779
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_0.png",
+          "sha256": "9af0ff528f5907171c4e75262984c6700eadc5c492b01f9ffa90e9301801cf8c",
+          "size_bytes": 308
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_1.png",
+          "sha256": "1f2ad09a1ce17bfb0a59434330c00669e0211a3e35f7e6212c24438ccc3dcf95",
+          "size_bytes": 325
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_10.png",
+          "sha256": "3ff663c0a89508f22ad88dae0d0d08e7a7386d2f03ac1191db13f7d5b1615be1",
+          "size_bytes": 392
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_11.png",
+          "sha256": "3eb0266d7e1244024dc3d829a8ab4f51a7b781ce7b87711327c97607c1a608b4",
+          "size_bytes": 581
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_12.png",
+          "sha256": "c1e0301835af9ff4749945bde1760ee8473e89d02b980c544c3070e953fc08ae",
+          "size_bytes": 491
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_13.png",
+          "sha256": "9383c34deedd024c2db7c35fbc54821cb8035cf26de226d1b7a1cd19be3673fd",
+          "size_bytes": 1202
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_14.png",
+          "sha256": "b68b99151da3e80c0b8104cb7129a1cb2fd6af8f99b8b47ca9f05741dea986c0",
+          "size_bytes": 498
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_15.png",
+          "sha256": "68d68993b7bd13fa1a0d3b7a1e5e1b0d5dfc2cc334793a1d54d08a3431e52d2f",
+          "size_bytes": 1207
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_2.png",
+          "sha256": "b7de703a835009b12df5749cc17b6453527e34b19a9001b3945ec822f7a52713",
+          "size_bytes": 431
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_3.png",
+          "sha256": "baf5f794dc656bc61de24a0e82163a0feafe79db2ecf3a4e961c4e48202049cf",
+          "size_bytes": 387
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_4.png",
+          "sha256": "ed011a19445d400d2a20a8949785a841e2a8dd9fc80bcdc580f8e64bfbf3554c",
+          "size_bytes": 335
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_5.png",
+          "sha256": "ed67bcf8fb0cfd307df36cdfe99c47a432364d880804de3fdba839904eaeb592",
+          "size_bytes": 389
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_6.png",
+          "sha256": "f349f0bb28de4683401244b3b07fd85171a6169c7c8984d4861d1f6f3d0c9b68",
+          "size_bytes": 426
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_7.png",
+          "sha256": "103c1f098fbd69f03bc1cc96abc74fcda8de03195cd358abb5b198b55557abb1",
+          "size_bytes": 770
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_8.png",
+          "sha256": "4edb01167b1368a84de89d4e1130d38221f86b025fa61385edf813396d25ccf0",
+          "size_bytes": 386
+        },
+        {
+          "path": "viewer/data/sprites/ui/orb_icon_9.png",
+          "sha256": "80d5c1076be07c2c505e62a51fecede6dc853a1e758777d3ee5333763fdf77e7",
+          "size_bytes": 381
+        },
+        {
+          "path": "viewer/data/sprites/ui/osrs_stretch_mapsurround.png",
+          "sha256": "a7caf2600645fa1379cf5419e7ddbb236b7498f2c84177dac5ccb3894f5f3a26",
+          "size_bytes": 4267
+        },
+        {
+          "path": "viewer/data/sprites/ui/osrs_stretch_side_columns_0.png",
+          "sha256": "7f47d29e67b25748c34490f2838d5a96c9c9024831de6072e2e48a738cc9ea5c",
+          "size_bytes": 2949
+        },
+        {
+          "path": "viewer/data/sprites/ui/osrs_stretch_side_columns_1.png",
+          "sha256": "7ceddcefec5251c82c5ba505141a478262a11a4b95f20c379920c3e6b886a4c4",
+          "size_bytes": 2876
+        },
+        {
+          "path": "viewer/data/sprites/ui/osrs_stretch_side_topbottom_0.png",
+          "sha256": "7f251f366329f83c0f8227a6800b3639ddc34c782464b6d99a87ffe61d7b7c1f",
+          "size_bytes": 3967
+        },
+        {
+          "path": "viewer/data/sprites/ui/osrs_stretch_side_topbottom_1.png",
+          "sha256": "f351f8f281765e6aad5c178e4084beaf770b682afc3c39beec4e785aa581350b",
+          "size_bytes": 4261
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_0.png",
+          "sha256": "69cd0b7d6c59fe4466a383496d5bb3c38e290f98f67a89905251b14166b2e305",
+          "size_bytes": 353
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_1.png",
+          "sha256": "394260a46adf9b075c75318e07fcad1f5cabcfc90959a7f9dd7d035a189c61aa",
+          "size_bytes": 501
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_10.png",
+          "sha256": "abf9762f3dd1d90d178404b7177222a3c83894878162cea19eb1ab7892df5bd2",
+          "size_bytes": 544
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_11.png",
+          "sha256": "e0770b0293ce36da7ac5d8638d7877336838af405bb73f298a2f3e510358448f",
+          "size_bytes": 487
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_12.png",
+          "sha256": "4ee841e02ac7a5574e9cd7b0198c02da582260771888efb7185279dbd81d78d6",
+          "size_bytes": 369
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_13.png",
+          "sha256": "28e0d9f1728951e9a8b4c3de97980857fa0007447c27fad01d198157c09e35bf",
+          "size_bytes": 328
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_14.png",
+          "sha256": "b5e261f01b8e249dd80a0374ce50de10a3f5c7ea0873d14a84d6e19435dedbc8",
+          "size_bytes": 422
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_15.png",
+          "sha256": "e9fca9753667c7cd5e3b403f0781372f3f6b67df72a5d6256ede70b395b0ce00",
+          "size_bytes": 379
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_16.png",
+          "sha256": "975b530bf62bdb0c17445685479fe26d6685a8fa16dc0f00459c8cc8692e9f7c",
+          "size_bytes": 385
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_17.png",
+          "sha256": "6e9eac32fead3235f6e43d5ed97126c87aeec3c12a5227401c53259caed0269d",
+          "size_bytes": 400
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_18.png",
+          "sha256": "bc7fc5a78c2e0d33924000e110dec846a93691dc04367f9610095b7fd21513e8",
+          "size_bytes": 494
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_19.png",
+          "sha256": "43264854387585172a5b4bb48af1018e2f1f4ef8d578c6ef4549fc92368a1bbd",
+          "size_bytes": 454
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_2.png",
+          "sha256": "55461a8c8db4da420aeca4b7ec9830ebb148226a183d44a1c23517c46f1dbc0b",
+          "size_bytes": 454
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_20.png",
+          "sha256": "0931ac74eba15781096c2ebbe0c9144b0950c7322fd4cebc25cb3d69bac2060d",
+          "size_bytes": 522
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_21.png",
+          "sha256": "03a2c63543594de0e60fc7c89e7df1af865036b000d49a28001f7f1b3dded321",
+          "size_bytes": 486
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_22.png",
+          "sha256": "e6132cc2899903144c31d9777bf0a16abf5c4e9b55c6ae84b629143dc99a4984",
+          "size_bytes": 515
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_23.png",
+          "sha256": "0d84cc47adb7eafccaf9482489a1e3caee97279b5aaa60ebaf391f9961995c87",
+          "size_bytes": 505
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_24.png",
+          "sha256": "5ce38dc2d3ea2810e84fb490f56fe2cabc1ca916c346de935868b3ea2f1b2737",
+          "size_bytes": 812
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_3.png",
+          "sha256": "1f754bfaea9fbef5f4070f9c8bca05b79ef006a1f8635588471e9ca9f6a6cd0c",
+          "size_bytes": 387
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_4.png",
+          "sha256": "bffcf0465ad3a74d951cc4a10788c3dc9b54701334eaf2eb79e7be0cf4202eb8",
+          "size_bytes": 539
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_5.png",
+          "sha256": "f5af474ba32a7f90afcb1ab1af5a2f85c97b906b2f2b58912cea51b412d393ed",
+          "size_bytes": 479
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_6.png",
+          "sha256": "fb653f5958247dce3cf7745c3492819b2026fbe66a2ca016d9ffe3155b33e10f",
+          "size_bytes": 343
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_7.png",
+          "sha256": "d533aca9e4e21b241bb1bba8c1938669560dbdcbc69885c714d1d4899d7d822e",
+          "size_bytes": 372
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_8.png",
+          "sha256": "fdeca3521e53cbd77a1b9b9326d2dd681bc5efa7822dfe7567b5b381c9e29cb1",
+          "size_bytes": 716
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeroff_9.png",
+          "sha256": "569306ff124737cbbdfa89a3a361a9baa2a1bcf3bcc99e55c17a7ef38eb4745c",
+          "size_bytes": 386
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_0.png",
+          "sha256": "09f3ad646d136918c8b40e22c445d60fa2666331f6d3111e197b0669adffce40",
+          "size_bytes": 358
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_1.png",
+          "sha256": "6a0968fe460b2fe39cd71edd2b8d545b7779f4a2ff7656cdb7af1cb94f33bfc0",
+          "size_bytes": 540
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_10.png",
+          "sha256": "196281783110fd8c8711c6415c856d75837abd2dc462ce0d5f126e5e0173d966",
+          "size_bytes": 566
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_11.png",
+          "sha256": "4c4539f555b4af6b3e21379dae27163cb174c52c85d4da4052602eaca78cae1a",
+          "size_bytes": 544
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_12.png",
+          "sha256": "c4b4b633a52fdb09813d43efc82e695f044f611c1099d95c1af3cd0c592001cd",
+          "size_bytes": 398
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_13.png",
+          "sha256": "c9077e14c57d237024e38f3d6bd785d0e2fdba81a3c555461563e60b82a9c8b4",
+          "size_bytes": 335
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_14.png",
+          "sha256": "d660d21611c228b4ea9ac0f7bd4c8c1aeeb47c71966f3f252fd06edb820de957",
+          "size_bytes": 457
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_15.png",
+          "sha256": "71adf5bbcf4b23b6349931b9f508dc946d697a532ea23aecb1f342aadab5c3c8",
+          "size_bytes": 397
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_16.png",
+          "sha256": "146d01aef73880730ce684b220bf02c22fc6cbdd689b00362854c0c830060387",
+          "size_bytes": 390
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_17.png",
+          "sha256": "8c35a8cf63b438a93e22bf8edc1f7275a053dd5617831e85a487731f4f8a3200",
+          "size_bytes": 413
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_18.png",
+          "sha256": "80eccc2746efd4a27d922d74177ff1e176902157b8bd8e3b940fc78ed3b1cd3a",
+          "size_bytes": 556
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_19.png",
+          "sha256": "b5a59d85d5aea913c7126b0e5cf5b60215d1d535536b6504a3c0e74de1f81c01",
+          "size_bytes": 512
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_2.png",
+          "sha256": "505b40e417f176e6e6b9250b2912e7e51a4f500692f680a31e4093208255887f",
+          "size_bytes": 513
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_20.png",
+          "sha256": "7893e3e80101a3ed6eaeae272096bc576add90b224c8efc5ee44cb5c456ed981",
+          "size_bytes": 508
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_21.png",
+          "sha256": "08d22b3de8553035033f46bf96ee521b902e9b97f4e690ceb70c830862220ad0",
+          "size_bytes": 525
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_22.png",
+          "sha256": "2cade658668dd0b96be0194e81ab7d41a888757a4f905c2c2490a029244aae93",
+          "size_bytes": 577
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_23.png",
+          "sha256": "55dee13e170abb4f20010076e2ba1ba17b31d298c3b3b58e9b3f100018f940b0",
+          "size_bytes": 554
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_24.png",
+          "sha256": "f3a72cec7d389ea528df0663d64aeef88f260f166697f0cdc8461ef47d8d988c",
+          "size_bytes": 1013
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_3.png",
+          "sha256": "1ff3c8e3869243e2b78793fbc5cb9f1910865a72f059996f9b3a9fad132fea88",
+          "size_bytes": 383
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_4.png",
+          "sha256": "7f038de9ae018ff726fcef62a005c3e554ab2144974f92d327f51fc2b6a7d98e",
+          "size_bytes": 574
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_5.png",
+          "sha256": "82d44823b260cda8fc4643045dd8bce0eca0521ecd6b910b6fde61c8a5f044e0",
+          "size_bytes": 543
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_6.png",
+          "sha256": "0e5d136f478062a06711e784ae736ff9564afe4dd4cfa0f829fd9f68994d9cf6",
+          "size_bytes": 356
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_7.png",
+          "sha256": "d4f10fc5562d47396bfaaedd1e9eb041b15d51f760a5e3e97b7cdefd4192b08e",
+          "size_bytes": 390
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_8.png",
+          "sha256": "896740c3725c485cc9f276b7f147b7f3a0298e9d5cdb7eb871dac30a9b1fafaf",
+          "size_bytes": 1077
+        },
+        {
+          "path": "viewer/data/sprites/ui/prayeron_9.png",
+          "sha256": "129cb1fa599aa1fc4d3cb6f3ee67c82f395d1322dfcba60dc92b59fc9d3d8ce4",
+          "size_bytes": 394
+        },
+        {
+          "path": "viewer/data/sprites/ui/resize_compass_mask.png",
+          "sha256": "27098511eae0c06aee9948e5ba910e00c8bd8d90475a09156a44acd14ad29b7b",
+          "size_bytes": 236
+        },
+        {
+          "path": "viewer/data/sprites/ui/resize_map_mask.png",
+          "sha256": "1ac01df702eb612f7c7d6dc2e28040103a820c4cfa5abb00c2a332bd9defac76",
+          "size_bytes": 979
+        },
+        {
+          "path": "viewer/data/sprites/ui/ring_30.png",
+          "sha256": "7b6ff1ce81d77d9bd9c4e3ad9748703f3764f40ce7060ba66b9e7fab68e88b14",
+          "size_bytes": 369
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_background.png",
+          "sha256": "6c4a24862de9220ff07d09ae467f9218c45bccd3e91752eb83ead4fd62207bac",
+          "size_bytes": 36249
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_background_bottom.png",
+          "sha256": "3ed2ed614ad44773fb2fd9f3a2928d4ed280bac97235ae9df4798cbcca4788bf",
+          "size_bytes": 4888
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_background_left1.png",
+          "sha256": "5c33c080d554714b02dc258f5464cc6aec98a9be7d07046ba6f07b3e66bc95bc",
+          "size_bytes": 3687
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_background_left2.png",
+          "sha256": "63af41aad07ad03570dbe08afc9f5ef876f9d11b6b1bbe508e5c48429fd036df",
+          "size_bytes": 2627
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_background_right.png",
+          "sha256": "4782e25f9561b9906403758a410e32659e2639cba2cf65ac80de9020a8664a5d",
+          "size_bytes": 4701
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_background_top.png",
+          "sha256": "30c1ec0136ac426bff10d0b21fbb9eac5078daba84649b8863736bdef3262f77",
+          "size_bytes": 5304
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_clan.png",
+          "sha256": "f338d8d954fc76da1938a49fa39b7a7952af2af4fffcffcd39e2deb8268793c1",
+          "size_bytes": 952
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_combat.png",
+          "sha256": "c8467c31f4298320c867fb2556866ff33f356ddcdd208a6f44b4aaf11e62a55e",
+          "size_bytes": 697
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_emotes.png",
+          "sha256": "54d2e4b8007c01feca8de2b8f50188e02577898f42b315527927110e225b8af2",
+          "size_bytes": 635
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_equipment.png",
+          "sha256": "b63e9f4f4e535466f12368679f7d21cfb0ed7b43f7abb5f21f4fbf6bc3c99ad1",
+          "size_bytes": 744
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_friends.png",
+          "sha256": "82e02a8bcd30be71caedd63ca0eed7fc29b48b3c77f082377f17865bed228478",
+          "size_bytes": 585
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_grouping.png",
+          "sha256": "51a1cdfcd9a4cf8c8a77381dff93f9531e2184cd32f3073a234b8eb1cb366dd6",
+          "size_bytes": 888
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_inventory.png",
+          "sha256": "74bf82e04daf5250664c810ffb6947b922362fa50c9043ea54adedfbf6f72753",
+          "size_bytes": 821
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_logout.png",
+          "sha256": "79e99130dae8d98993dd7a985c39b9d215c5ea9044e3e1097baac193f942cb05",
+          "size_bytes": 711
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_logout_modern.png",
+          "sha256": "7b4cb0de859b8d55da27cecc3578729e6cec44da2d5b34a02a5404d9b2ce5bc1",
+          "size_bytes": 1177
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_magic.png",
+          "sha256": "911e4e87b15d0b20a3a18f801abc26a9c503e374b688229114806a7f79a89313",
+          "size_bytes": 822
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_music.png",
+          "sha256": "39b3b64ed53541307642ce38b4d16fbedf0682eb8c913a17befaeab297b71669",
+          "size_bytes": 598
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_options.png",
+          "sha256": "1657d009fe382c462d57cfb31dc5f52261632fbb4954aa0a1371f51a5977ab2f",
+          "size_bytes": 408
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_prayer.png",
+          "sha256": "6c34ced587f671fdc5de850e4db74551beeee3728e3eed559ab9a31a537e520a",
+          "size_bytes": 431
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_quests.png",
+          "sha256": "dc4416db3a052add30222a8fb4f430ab63e2da29daa04c4b4123b87f5cd58517",
+          "size_bytes": 666
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icon_stats.png",
+          "sha256": "a1fe5f71558b2b3b98394ea117a31c1b35c78943fde53ff66a00a167eefb0e14",
+          "size_bytes": 472
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_0.png",
+          "sha256": "c8467c31f4298320c867fb2556866ff33f356ddcdd208a6f44b4aaf11e62a55e",
+          "size_bytes": 697
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_1.png",
+          "sha256": "a1fe5f71558b2b3b98394ea117a31c1b35c78943fde53ff66a00a167eefb0e14",
+          "size_bytes": 472
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_10.png",
+          "sha256": "79e99130dae8d98993dd7a985c39b9d215c5ea9044e3e1097baac193f942cb05",
+          "size_bytes": 711
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_11.png",
+          "sha256": "1657d009fe382c462d57cfb31dc5f52261632fbb4954aa0a1371f51a5977ab2f",
+          "size_bytes": 408
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_12.png",
+          "sha256": "54d2e4b8007c01feca8de2b8f50188e02577898f42b315527927110e225b8af2",
+          "size_bytes": 635
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_13.png",
+          "sha256": "39b3b64ed53541307642ce38b4d16fbedf0682eb8c913a17befaeab297b71669",
+          "size_bytes": 598
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_2.png",
+          "sha256": "dc4416db3a052add30222a8fb4f430ab63e2da29daa04c4b4123b87f5cd58517",
+          "size_bytes": 666
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_22.png",
+          "sha256": "51a1cdfcd9a4cf8c8a77381dff93f9531e2184cd32f3073a234b8eb1cb366dd6",
+          "size_bytes": 888
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_3.png",
+          "sha256": "74bf82e04daf5250664c810ffb6947b922362fa50c9043ea54adedfbf6f72753",
+          "size_bytes": 821
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_39.png",
+          "sha256": "7b4cb0de859b8d55da27cecc3578729e6cec44da2d5b34a02a5404d9b2ce5bc1",
+          "size_bytes": 1177
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_4.png",
+          "sha256": "b63e9f4f4e535466f12368679f7d21cfb0ed7b43f7abb5f21f4fbf6bc3c99ad1",
+          "size_bytes": 744
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_5.png",
+          "sha256": "6c34ced587f671fdc5de850e4db74551beeee3728e3eed559ab9a31a537e520a",
+          "size_bytes": 431
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_6.png",
+          "sha256": "911e4e87b15d0b20a3a18f801abc26a9c503e374b688229114806a7f79a89313",
+          "size_bytes": 822
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_7.png",
+          "sha256": "f338d8d954fc76da1938a49fa39b7a7952af2af4fffcffcd39e2deb8268793c1",
+          "size_bytes": 952
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_icons_8.png",
+          "sha256": "82e02a8bcd30be71caedd63ca0eed7fc29b48b3c77f082377f17865bed228478",
+          "size_bytes": 585
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_stone_highlights_0.png",
+          "sha256": "b12ce736955190f3a46bd79c02c889c1c8ed8659e8d824786852ba7f980e9f07",
+          "size_bytes": 1045
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_stone_highlights_1.png",
+          "sha256": "2eb269e5f0f62c5100343c7f1f7324ffe3bc9cea4748f8ae50975c99d29aadb5",
+          "size_bytes": 1048
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_stone_highlights_2.png",
+          "sha256": "7f4c71b089f431c6d1754bcaa41fa361eeb829e1d9c790f1aa18ea9cddcbb683",
+          "size_bytes": 961
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_stone_highlights_3.png",
+          "sha256": "794044fa55ca113ff9a535fd2a77afc169e7c9b90519e65a4015e8f265d42d49",
+          "size_bytes": 1029
+        },
+        {
+          "path": "viewer/data/sprites/ui/side_stone_highlights_4.png",
+          "sha256": "360da99806c1cce369579e1677d8722676268461e69b17a17058c207dc75e0c8",
+          "size_bytes": 1039
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_0.png",
+          "sha256": "c8467c31f4298320c867fb2556866ff33f356ddcdd208a6f44b4aaf11e62a55e",
+          "size_bytes": 697
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_1.png",
+          "sha256": "a1fe5f71558b2b3b98394ea117a31c1b35c78943fde53ff66a00a167eefb0e14",
+          "size_bytes": 472
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_10.png",
+          "sha256": "79e99130dae8d98993dd7a985c39b9d215c5ea9044e3e1097baac193f942cb05",
+          "size_bytes": 711
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_11.png",
+          "sha256": "1657d009fe382c462d57cfb31dc5f52261632fbb4954aa0a1371f51a5977ab2f",
+          "size_bytes": 408
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_12.png",
+          "sha256": "54d2e4b8007c01feca8de2b8f50188e02577898f42b315527927110e225b8af2",
+          "size_bytes": 635
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_13.png",
+          "sha256": "39b3b64ed53541307642ce38b4d16fbedf0682eb8c913a17befaeab297b71669",
+          "size_bytes": 598
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_14.png",
+          "sha256": "77d1e08927c6611ebc0ccd9ed49038a56dba0ec06145b4c2aa4e90e4fa374dcd",
+          "size_bytes": 1043
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_15.png",
+          "sha256": "3888d9148e1532c44ec3f917132680fc095b9c0ce3da334ff7509fb964255da5",
+          "size_bytes": 733
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_16.png",
+          "sha256": "9fb1835915d8505c5642d9debb9bf9fdc1940b857a2f2999cdbdfe68caabdabc",
+          "size_bytes": 742
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_2.png",
+          "sha256": "dc4416db3a052add30222a8fb4f430ab63e2da29daa04c4b4123b87f5cd58517",
+          "size_bytes": 666
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_3.png",
+          "sha256": "74bf82e04daf5250664c810ffb6947b922362fa50c9043ea54adedfbf6f72753",
+          "size_bytes": 821
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_4.png",
+          "sha256": "b63e9f4f4e535466f12368679f7d21cfb0ed7b43f7abb5f21f4fbf6bc3c99ad1",
+          "size_bytes": 744
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_5.png",
+          "sha256": "6c34ced587f671fdc5de850e4db74551beeee3728e3eed559ab9a31a537e520a",
+          "size_bytes": 431
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_6.png",
+          "sha256": "911e4e87b15d0b20a3a18f801abc26a9c503e374b688229114806a7f79a89313",
+          "size_bytes": 822
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_7.png",
+          "sha256": "f338d8d954fc76da1938a49fa39b7a7952af2af4fffcffcd39e2deb8268793c1",
+          "size_bytes": 952
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_8.png",
+          "sha256": "82e02a8bcd30be71caedd63ca0eed7fc29b48b3c77f082377f17865bed228478",
+          "size_bytes": 585
+        },
+        {
+          "path": "viewer/data/sprites/ui/sideicons_interface_9.png",
+          "sha256": "b2c39107506d325964a88e0dcfe70f564f9a4278cd42810019514868d2017f33",
+          "size_bytes": 595
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_0.png",
+          "sha256": "c5744d2a231c429eac580a6c68e906f1e50a2dd6bca67238ad5ebda4d49d6dcf",
+          "size_bytes": 316
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_1.png",
+          "sha256": "7cbc9737c2223c0c4ad7a3ddda2a1a86c56a05e39c16fb55d2ebf0162f07f59b",
+          "size_bytes": 289
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_10.png",
+          "sha256": "35c74779d5c0e6267b540b48738450bdb1f0b3accf42c32bda47f88132cafcb4",
+          "size_bytes": 343
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_11.png",
+          "sha256": "e5ce5c9c1efaa1664a9003200a6a1b89efae1c8f6a277b59474e0b3a1bbabe89",
+          "size_bytes": 311
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_12.png",
+          "sha256": "bfa9f25356ea830830d69cade09f7b4f7d388910b772884f2b131e89bfa0d573",
+          "size_bytes": 328
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_13.png",
+          "sha256": "d1a278f3299f09b15d0d683850b63dc05a3fdeec8bf92f19dae05eb5596ab7f7",
+          "size_bytes": 328
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_14.png",
+          "sha256": "a8b4e9c0e14a787c712746f910c177d125f6535e0b55fe2cce8c9eba0740c8b2",
+          "size_bytes": 426
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_15.png",
+          "sha256": "9fd77fa16ebd32380c77350860ba974b03980b0414662fdd8f8f1c407e1a21fb",
+          "size_bytes": 335
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_16.png",
+          "sha256": "c86bcea10e3d4b9b67c1d03cf2655d4eac7578c2fc2aef917df2c24bbd962761",
+          "size_bytes": 357
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_17.png",
+          "sha256": "060f605c4b2f3625afeec6fa329752e7d3a1e6b45065e0320aa9d9ad5f53eef6",
+          "size_bytes": 367
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_18.png",
+          "sha256": "d2ccdb1d9b1cb90de4680b4156d3b7108ff9cac678821f970f66890ff5f41edd",
+          "size_bytes": 457
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_19.png",
+          "sha256": "751fae2bac26cb6ccff86f6dcf2e0ef327b77f4e221163540c24d6678978e98d",
+          "size_bytes": 561
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_2.png",
+          "sha256": "4efb1014e9a113cfe770f4f1b928a66f3470ea31f86e9068a6a5716a664eb812",
+          "size_bytes": 245
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_20.png",
+          "sha256": "21867a26c58e07e32db691630eb9ed75cea7edf2c39464db89ea1a246a559ef7",
+          "size_bytes": 564
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_21.png",
+          "sha256": "7532f9b905e2cc267267ead6cccb3760e6d510348e02f6fae8b2fbc21a291972",
+          "size_bytes": 449
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_22.png",
+          "sha256": "5148539e73a4d7132cc31f31f988e1d14c5e93695524d32b48b92a623b22df72",
+          "size_bytes": 769
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_23.png",
+          "sha256": "4457a743916609923d167304265deeb4ae65862df37593eb9b2e5bd4559b550f",
+          "size_bytes": 448
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_3.png",
+          "sha256": "3b704c00f19af0be4c759e32fe9ed75336a2573f15926e9f064b4df3d4214c44",
+          "size_bytes": 440
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_4.png",
+          "sha256": "b7add8ec27d340178c2058727736e2b7da3d0b7eb43eac543c719ca0fabc19e5",
+          "size_bytes": 297
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_5.png",
+          "sha256": "5ce20c6dacda82c798d7642b10bece741df6360e93ae3171f8a8513925d4bc5f",
+          "size_bytes": 391
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_6.png",
+          "sha256": "f6aa3007628d249d427d25eb6713ea5ce055dc17195efbfda8fd76a927278b67",
+          "size_bytes": 304
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_7.png",
+          "sha256": "65e79b2e4e86e0e04c3e90d2f23f7542791fc1e4831fab8a94000489603c11a0",
+          "size_bytes": 221
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_8.png",
+          "sha256": "353908d824f0885451e02130840a45618343260af31475265675617ab77d5b15",
+          "size_bytes": 283
+        },
+        {
+          "path": "viewer/data/sprites/ui/skill_icon_9.png",
+          "sha256": "68dcdd85e8d0291a68d31865ea4a31366919e487b873208437ac450951036247",
+          "size_bytes": 167
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_0.png",
+          "sha256": "53097c9b978fcd5faab60da885bc2baf07d5d2d477ddc596124c258572de8853",
+          "size_bytes": 291
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_1.png",
+          "sha256": "c540f9ea3a2847f6d055f569512345a7a17d5a9bbab8b987dfc57ea678c311ba",
+          "size_bytes": 295
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_10.png",
+          "sha256": "0286e950f6bd89a0b586fcd9c7886b8b2bcd6fa9e79c2f101033da3d2b4399e2",
+          "size_bytes": 439
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_11.png",
+          "sha256": "296bb98540742bd2d2f224051f28e4a73e49a0a7b873840ef898cc7ab24e7843",
+          "size_bytes": 448
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_12.png",
+          "sha256": "c06adde5fe4482f94fc5f5acf5a92ca10ac4223640a7d5ec6f467c543426acce",
+          "size_bytes": 433
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_13.png",
+          "sha256": "dce846376076fd0baee71f1ab0546ee0826d2110139002cc8982edb13b23a7fb",
+          "size_bytes": 433
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_14.png",
+          "sha256": "88d5dfa6c51886ea1ea3bd6036feec205de7829b8d6090a1852fd8237390b24b",
+          "size_bytes": 427
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_15.png",
+          "sha256": "c70c8437451113d1ab3e502493e8cd7ccfdddc72925b330838739fb824e5680a",
+          "size_bytes": 426
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_16.png",
+          "sha256": "b4fd68d23f0b4523edcec09a08f94a39c0fcd1ca49a1cd480ae372d826ba45cf",
+          "size_bytes": 514
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_17.png",
+          "sha256": "5747a5c5860f8ce6160c8e7455735d67e0765130968a7de5ecd53dea8821db8b",
+          "size_bytes": 516
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_18.png",
+          "sha256": "b7f4625a980ca5a84057fd371ba8a86568875dae7b1c56fd7289acf7149bc711",
+          "size_bytes": 500
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_19.png",
+          "sha256": "44b8fd9642e45d21a086550b372cd8e266b0eec050439581dfdf0bc264b80d37",
+          "size_bytes": 512
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_2.png",
+          "sha256": "9b88548ae841ade4c8cbaf1dac431b172074c8e97c280684450edd41a520e82c",
+          "size_bytes": 243
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_20.png",
+          "sha256": "5a8833e735eebfbcbac8544bf6a56fabb63731e3fecbc51d115d749a2f35a0fd",
+          "size_bytes": 537
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_21.png",
+          "sha256": "1f815300b789d6810d000bef41a5b351bfbda62a07719371322f827c482000cb",
+          "size_bytes": 497
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_22.png",
+          "sha256": "3d0920ea62dc035ecee8e551a6764077567c1535e93534fca0f6a073ecb4be66",
+          "size_bytes": 513
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_23.png",
+          "sha256": "fdcf2eafa455228d3581cc9b0792769b85187e1beab9791e8c9990a9b5624f39",
+          "size_bytes": 510
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_24.png",
+          "sha256": "e708f518015ca13f32bf3c6ea977798b8f143b8756506961afde0c7672d414d5",
+          "size_bytes": 530
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_25.png",
+          "sha256": "66ac27d7648242918893ff9c7459f5a0e692b6ac802fc63322c9750c0c46ee0d",
+          "size_bytes": 536
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_26.png",
+          "sha256": "8cfb68e23d23afc0155990fcd97a0aaf86a14a39dcbb1979cc9a29daaed71b51",
+          "size_bytes": 512
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_27.png",
+          "sha256": "d9f3f187ff48f1ea2af91328899bd5b9cbb3a1dd1607a7e4f08527b070eff079",
+          "size_bytes": 498
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_28.png",
+          "sha256": "39f038ec2c0b4635d014151969421394199f104c536a6a23d4b28a2187a18392",
+          "size_bytes": 588
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_29.png",
+          "sha256": "a3ee11d4674da4dd0bae5b90684c133bf40bc37933a955fc5664d9c714925c35",
+          "size_bytes": 527
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_3.png",
+          "sha256": "45ff94b9026e5f1e4554c5e68dc0941056aeb0ce68094fe0e7a904c0c20fd23f",
+          "size_bytes": 298
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_30.png",
+          "sha256": "dffb0e946f4b04a3b2bcd427b0e014aa43f548683e7551674ad2bdac750ee0ea",
+          "size_bytes": 592
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_31.png",
+          "sha256": "f7f9d8cc771a14830030ec2c7f1ad74c0bbdfe6dd50107c1b54a3bdfab672e99",
+          "size_bytes": 593
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_32.png",
+          "sha256": "9e6d8b4e498b0f097d7624ec5927d02c94cc8073eca9165e78951a9d4f679b4b",
+          "size_bytes": 600
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_33.png",
+          "sha256": "96c376934622b109ff145af050be9bad17faad62cd2c0f5f98a7792469a1a4db",
+          "size_bytes": 383
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_34.png",
+          "sha256": "35c4baf955799e5836cf57acdd2da551effef5d31b894299626739e4b362c7e9",
+          "size_bytes": 360
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_35.png",
+          "sha256": "69b83a5c5b5349e2f0ff4db8beda723f11b59d4c4d9233c9320ab40b95053a86",
+          "size_bytes": 369
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_36.png",
+          "sha256": "b06be46db938227740028b5a9d7c66f01156a289b63e043e9c72017827674b96",
+          "size_bytes": 370
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_37.png",
+          "sha256": "c91ae669ca917d128d79981f4b989f37237349b660534d7c58672196aca64ace",
+          "size_bytes": 390
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_38.png",
+          "sha256": "72b70e2a564277c8818c4dd495e36be01817fb33ab9abbad313607f21594ffa4",
+          "size_bytes": 345
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_39.png",
+          "sha256": "85ed27a2cc6d47af86c4665b21e29d4708c3ae1dddc22fa62df3b868484b421d",
+          "size_bytes": 377
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_4.png",
+          "sha256": "9e3ee4f120136c323fb7ca688fd0fcc3e1d2f438f0f12713589a6e2d6ce58281",
+          "size_bytes": 386
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_40.png",
+          "sha256": "2f0a28c5900acf97b1b5c78fa915d244afc01170c8df61128a1f4653f262d36e",
+          "size_bytes": 326
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_41.png",
+          "sha256": "bd6bdf523e8e76bc674dfe7ff06e4c597881fa32fb3e32672b325e47dcb62f48",
+          "size_bytes": 459
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_42.png",
+          "sha256": "74033fe83d90f803ae6e6f647a9dc540fc270141628f2c503c53e41461f285b4",
+          "size_bytes": 367
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_43.png",
+          "sha256": "1ef26cfaf98a5e44a6c7b23453bef8242d94ee8a4c20eb82ca15af5e3e46b5b9",
+          "size_bytes": 484
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_44.png",
+          "sha256": "13891ee2e86b0d29850e8646040a48c9c69d752125a7c200efcbb9651765ed30",
+          "size_bytes": 465
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_45.png",
+          "sha256": "a2f6d4580edf21d711eb5805fbb579dd1afbac520c37f1f713a59628bf6fc5f9",
+          "size_bytes": 512
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_46.png",
+          "sha256": "da2c2e77a7ded6927836a85240b70d1bf5db625685f792945232bd113c293db4",
+          "size_bytes": 382
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_47.png",
+          "sha256": "0c11a490d71b1710e9ac27aafbef6f13f2ca937ed9364a891c84f9eb3f7d79dc",
+          "size_bytes": 479
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_48.png",
+          "sha256": "4a9a9d02ae9e13600e5223297cf1d428280f40d5ab3c500deca64154557558f9",
+          "size_bytes": 423
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_49.png",
+          "sha256": "61cbe61031ef8b4932266700d082ad2a337762c9cd5bd38b4a2f758d6897f321",
+          "size_bytes": 382
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_5.png",
+          "sha256": "afb5d70ce53abd6f9f2092548c289574fe6637f2fcd05e225e0679fd8b67e0f5",
+          "size_bytes": 429
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_50.png",
+          "sha256": "a16736e9f115d04a94fd82ed42dae2fd1f0b8a13153e8f4b7c077601729726af",
+          "size_bytes": 481
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_51.png",
+          "sha256": "044cf313da813fe4c4f7ab8ab7ca9712a0c3f913b629159705e3ae258bbd5578",
+          "size_bytes": 425
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_52.png",
+          "sha256": "f0e48f81897b336ec0cd9a25c7bcf154fb89b186bc57725799ad4a8b28ed6a25",
+          "size_bytes": 439
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_53.png",
+          "sha256": "23fb546a17747e7934a7e49d594b9502ab4af5351a3e6bae8a6e37dac1b2d2d4",
+          "size_bytes": 358
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_54.png",
+          "sha256": "7732936370a79144de5bba70c1f21d803a9d2279151efd764c8b04d485800701",
+          "size_bytes": 431
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_55.png",
+          "sha256": "3595cfdc50609cee739f982d54f881ab68c3a15899ed2e15ef55b49d41feabce",
+          "size_bytes": 396
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_56.png",
+          "sha256": "87fd5d3cb158354bbf45a12c28fdcece2aa1b704ed43c5ad2cdab50d11e475a6",
+          "size_bytes": 379
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_57.png",
+          "sha256": "ed2fdd751c929c77eeffb03d1c06c0ccd9eacf070709f7fb0b81078acac1e4e4",
+          "size_bytes": 380
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_58.png",
+          "sha256": "1aacd04251c4404364af80ce07a1f3310b35c4d2229b9b7d72d525139315209f",
+          "size_bytes": 376
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_59.png",
+          "sha256": "a92f235500114debf3953c02b803f383fbe51b74c0fc237d4a3e955adfd4d97c",
+          "size_bytes": 376
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_6.png",
+          "sha256": "f3e9283e6171a3159d6c9b02ccc4884d589ff4402e74c0f2927b1d8aa6c0f9c9",
+          "size_bytes": 388
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_60.png",
+          "sha256": "29bb6f32fd55a747bcd0efeacd7a8d111dbe6e2ca6c5e7e6e435f6701eb6c1b2",
+          "size_bytes": 540
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_61.png",
+          "sha256": "5b2420d6b6fde05484901b747c4b1feed32c3bea260683bb73c025adcdaebae6",
+          "size_bytes": 393
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_62.png",
+          "sha256": "602cbbf8b885f5b61bb861bd81b5a2e3000c8f29abf095c5e93b93c59b9e6b9a",
+          "size_bytes": 365
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_63.png",
+          "sha256": "f1f2dc7aa70c3e71e02817a02d51d25b37c5d03a6bf9dc1f60e480c85b6901b5",
+          "size_bytes": 384
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_64.png",
+          "sha256": "f142b045c905db32bb3713e7aee42751663428e6560f6f11b3f8386d47fc7638",
+          "size_bytes": 374
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_65.png",
+          "sha256": "e5a1e76b8eac5c504804e2e01769d398aaaf0609eb83da3ace88a21e44282d03",
+          "size_bytes": 602
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_66.png",
+          "sha256": "91c59747b7168308767d373d23bfd61febee603f2410d7513c062afa7fd3829e",
+          "size_bytes": 404
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_67.png",
+          "sha256": "6aa737c1bfd30a4f3760681558af3729c66cf919b22d0c0d0e2bd27b99be3f11",
+          "size_bytes": 677
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_68.png",
+          "sha256": "54bfd3e56af13b61654373085c99fe1aa38f9c3646f6f599aa5ccabca45a58ba",
+          "size_bytes": 618
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_69.png",
+          "sha256": "c2b5dfbc85ac862f84f075c55d195571486ec4325be737c1adcffdf7a3c62a0c",
+          "size_bytes": 608
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_7.png",
+          "sha256": "7fd92d702f4efbffc5209aa49e103300e754751b0b66856d6dcd87e5275d2a2b",
+          "size_bytes": 414
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_70.png",
+          "sha256": "a27b319b7d7dbc10d72cbf51031dcfb70768c7bf9d65faa36f0cc3a21ff6c95a",
+          "size_bytes": 502
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_71.png",
+          "sha256": "210cf22b5f211beed2df7cc10584fc32e470c75e5502acd0a83936303dc469c2",
+          "size_bytes": 331
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_72.png",
+          "sha256": "7635494f11ff057e47a8ea7b8b5ab62f9404251ed646c84f752cf57c175b0d3d",
+          "size_bytes": 570
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_73.png",
+          "sha256": "85fd6ac5207f6025b0477ee8b3d6a7ff3e862520a5c28676fdf8211f475dbb29",
+          "size_bytes": 578
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_74.png",
+          "sha256": "970639432683416a2203e2f8eff7334d8074c9fa539881a45df23d6771cdf875",
+          "size_bytes": 551
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_75.png",
+          "sha256": "5a9e9912d33ade1f1ebd890f5a637ae5028235dc9ff9eb7ca3c9b81ca24cfca2",
+          "size_bytes": 349
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_76.png",
+          "sha256": "19496d7c253ca2df9db3096784ccfcd65f27d050e84ee30592bac0383d802f21",
+          "size_bytes": 510
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_77.png",
+          "sha256": "5003bed590151e17e884e1e150a5a5bcc33c8c212f099843df6c604aafd18dfe",
+          "size_bytes": 593
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_78.png",
+          "sha256": "e1c6b567415edcebcb1a3b0a03308d274877aa0bebff6e83b22c171c53961607",
+          "size_bytes": 568
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_79.png",
+          "sha256": "eb707f8b2138b54b9540b6c158f43db9caa2652849d76552e9f2d9a3a5031919",
+          "size_bytes": 535
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_8.png",
+          "sha256": "e52a57cec8201f8136d0e38fded608993643894c4ea6908e99e8e19f5dd71fe6",
+          "size_bytes": 459
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_off_9.png",
+          "sha256": "fad24a203e134b7b6f00c0c486138a767af3b0e3f7014b8b0e648d1d283071ac",
+          "size_bytes": 460
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_0.png",
+          "sha256": "fb8f310aa6ade09222a6806adb65fb5047cb850e902090c55447d1d97f20a6da",
+          "size_bytes": 300
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_1.png",
+          "sha256": "13ddb6d8e958be0a026c6f1dbefc995734a7adb810228395b2c6a9bc55d87606",
+          "size_bytes": 295
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_10.png",
+          "sha256": "2c2718c058de4db675512839a0fd56aacc575b72fce3bad67b0af6aa6e9421a6",
+          "size_bytes": 452
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_11.png",
+          "sha256": "cea3977e166f35565fc22b7a63f2bac2f899240356fec42e4b7deaef03083446",
+          "size_bytes": 464
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_12.png",
+          "sha256": "209b1641182e63feb350c75d2dc62f9b81ee5b60777d9cc52b6c4ceaaeac9626",
+          "size_bytes": 455
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_13.png",
+          "sha256": "6c088f4bf08f5d5832d162802aad11a6cfb6ca4377ab8e7c5788a1c7dbaa549a",
+          "size_bytes": 461
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_14.png",
+          "sha256": "be3127e435265aa0c3675ca768c1196863e2b16391d6c43b1e3b8e67f8452af0",
+          "size_bytes": 454
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_15.png",
+          "sha256": "fc1e0e0b2c9dcceb6db6cdd71564206caa388b77f28cf0df441ef5eee4ce539d",
+          "size_bytes": 450
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_16.png",
+          "sha256": "09e51f405d9272d20fcc4dc2fd2500a2be6a64c7b10b5450f420420ae80ef642",
+          "size_bytes": 543
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_17.png",
+          "sha256": "87092329bcd52d36e0397f888c67305e064bc12e6ab1be26579f97a8b9d34bcd",
+          "size_bytes": 523
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_18.png",
+          "sha256": "b84ed934c4fb4b7a8123980ccdbe382990f9712a9843bdd3d4a3a021a2e93cc6",
+          "size_bytes": 529
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_19.png",
+          "sha256": "7fd50f458a0363371cb8d85367bc6104091d6d7c40a7acd7b5be33667b1494fc",
+          "size_bytes": 524
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_2.png",
+          "sha256": "53ebc757bd36530a7d38ca91ac9f95439334ee77824f573c94975018b092ce7a",
+          "size_bytes": 310
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_20.png",
+          "sha256": "825dd0734b82576353480f864e0b30242c2ea1431785e3c135e1e03db946a965",
+          "size_bytes": 566
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_21.png",
+          "sha256": "635e46090a6bc39b0193374938b1e6ec254cb03d41742d24a66738a87ae19145",
+          "size_bytes": 529
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_22.png",
+          "sha256": "f805e52fcdb7eab43570112a9f4c414b3d1c9fbe0b512744bf6133a8a2ea65ab",
+          "size_bytes": 537
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_23.png",
+          "sha256": "af41d95d9713089d69f986ad4deef6368916425e66bb4896367ff0134d2e6e7a",
+          "size_bytes": 552
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_24.png",
+          "sha256": "cbcad3e854a53ad3a506f38265200fdc47eabc3edf642347a5c35b711ef9a232",
+          "size_bytes": 543
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_25.png",
+          "sha256": "2ed65bd94e30802fab8ca0240323d1f5defd15b91f106a04a0cf7540ef8a90c3",
+          "size_bytes": 560
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_26.png",
+          "sha256": "8326554ffdabe59af725eaa2f5aa6d437551d0730c2cb1bfd440d523c40c5a61",
+          "size_bytes": 550
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_27.png",
+          "sha256": "277ae6f89113e6d203736f97c8eecf0c769d80188dac3960ad601ef058d4b84c",
+          "size_bytes": 525
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_28.png",
+          "sha256": "187c07e1deae507f9827a9eacca09561e3733e6a28861845e0538f481044aeed",
+          "size_bytes": 637
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_29.png",
+          "sha256": "6d8fdd4e45536dd6655bc2eedc4fd06527701ed8de6ea8dbf8e41391f8920265",
+          "size_bytes": 562
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_3.png",
+          "sha256": "b95779a6c622431e074e404842ef0e7de1d15bb9453a0ade7444bbc5e5f344bf",
+          "size_bytes": 267
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_30.png",
+          "sha256": "59e6ebdc5512e841f74c12bed5209e00eafa4142bdc656dd72e9d78f583d3583",
+          "size_bytes": 694
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_31.png",
+          "sha256": "0afb72e1d5020cb4d5fdb7edab33859536017b1d7a88f68fab46b5ea7fc1cc96",
+          "size_bytes": 699
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_32.png",
+          "sha256": "b8ac93818d5a7574979c5ce6ea88db26fd02755f9a2c097a53b315d1a639a9e9",
+          "size_bytes": 700
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_33.png",
+          "sha256": "ef3dccd683f5b27bba725acc47855ac4a4badf0808a8cac23c4d8df7d030a4e9",
+          "size_bytes": 401
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_34.png",
+          "sha256": "768c9c87360faf4425293b9132620bedbc68deae6229f44b42eee85af36e5f4f",
+          "size_bytes": 395
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_35.png",
+          "sha256": "286c2180ff7b3a5ff4f5f831406addab08ca14f035a4d8a18f79b9f1c083a23d",
+          "size_bytes": 400
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_36.png",
+          "sha256": "fde921e4c3a7cba633edcfbb74f15fe491047794c1ac60c05211b1beae65b5f7",
+          "size_bytes": 370
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_37.png",
+          "sha256": "1953de5ef8c863f42bac73c0120661db190c85ff9a22d78c70575adee0a6dfbe",
+          "size_bytes": 402
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_38.png",
+          "sha256": "3c4bc18e62d7dff80afe63e4096b0a34b2b8f8fdf2fe02ed13aa8be47b36bfc6",
+          "size_bytes": 398
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_39.png",
+          "sha256": "42d851864edd21795b344b47d32642eb248116b968d3456fd6f40bba089f0bc8",
+          "size_bytes": 395
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_4.png",
+          "sha256": "d1067237dc566421f03c2f4d34ef04ffad5f071192b0a3216ab1a46414b22317",
+          "size_bytes": 459
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_40.png",
+          "sha256": "e07707fc1118ee3d0445481d3b4cfcecd4ef9d6fb7c8a9a78638d1441f8c0a0b",
+          "size_bytes": 340
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_41.png",
+          "sha256": "bcdd15f5a4ccbf676068b0253a7f6d03c621bb8f19619ec11746dc2a9f65fc60",
+          "size_bytes": 464
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_42.png",
+          "sha256": "89ae83fae444e97f4ebc72e9fdda6ec9c2ba36fd7d2bc6ad74a284eab779e4b7",
+          "size_bytes": 366
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_43.png",
+          "sha256": "3d2510544d95e2f8007d2e7a26267578b81c58174ee53ad11fed2b225db9ffa9",
+          "size_bytes": 477
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_44.png",
+          "sha256": "64c370f25fce05d4b505886e3d331e4a0694126f1a202ca57e8c04a8d0536170",
+          "size_bytes": 561
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_45.png",
+          "sha256": "e68a2c225ad0009f85f5914477c0e0ed6832f1f102221af7143c0197cac5469c",
+          "size_bytes": 534
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_46.png",
+          "sha256": "4ffe0ef81446767a02dc8692bae86bf0b4fcfe49917cf2f49317d0680419411b",
+          "size_bytes": 387
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_47.png",
+          "sha256": "75276a7f56a8f362624b057b3a994bec1a7551daf6cf5992cfe4a15375db1501",
+          "size_bytes": 525
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_48.png",
+          "sha256": "1ca0bdc1423f2115d9f52c6a3e070b4e7807cfd61516591ea447d33110c459c8",
+          "size_bytes": 487
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_49.png",
+          "sha256": "d274b9f2fd54f6b8d34aef4d7675b142810f909b6d30541d7ae51a5f0207c662",
+          "size_bytes": 435
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_5.png",
+          "sha256": "48f2aead1005ed7dd3794942c03bfb860f4220f9c9d55e100a5aa1f43f9a30e4",
+          "size_bytes": 414
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_50.png",
+          "sha256": "1cb6b95a61e19751b2f7afabfdce4085f7f17d65195a03e9a2812c877fa8c90f",
+          "size_bytes": 484
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_51.png",
+          "sha256": "d0a7ad18dd947b0fb91fc3bb7d2dc1b1235f65759a778f02e664e57950b996e0",
+          "size_bytes": 428
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_52.png",
+          "sha256": "f5f6939513555d128cf1c03a99b7a8bde30b1d2b94dee23d97e6e31e49c110c2",
+          "size_bytes": 463
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_53.png",
+          "sha256": "243fbecc4f99e3117b98dd10c4433ecf7432ceb27cfed0f96be1aadaaae5f4f8",
+          "size_bytes": 355
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_54.png",
+          "sha256": "f2e746310859ad830f632e105fa39300767f954a2b7c35ccceb687bb24a61ff9",
+          "size_bytes": 429
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_55.png",
+          "sha256": "425676ab47fb5b5541385141e87d508c2cf061a341a69576c8034d0a5ce9cd29",
+          "size_bytes": 393
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_56.png",
+          "sha256": "abe81353afb9b455078dc727c880a125598ea5959f1a0f4c98eaf8097ff3f70e",
+          "size_bytes": 379
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_57.png",
+          "sha256": "e888ea3b1ab9f52bef373deff2fe4d95656baeb2c8ce50fc66ca406e6a9363d9",
+          "size_bytes": 375
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_58.png",
+          "sha256": "e178a5306e7fa0373f863e2c38aef8d32072e06db2c2c82edce69cea7373ce3e",
+          "size_bytes": 379
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_59.png",
+          "sha256": "e38b4196732692415f1b0305372e8d5e3ab3614c8277f053abfee955beb84fbc",
+          "size_bytes": 380
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_6.png",
+          "sha256": "2782e107ff535d54dbb36c635a93732857dcbf73b9edb11c715b60d0b22d473e",
+          "size_bytes": 491
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_60.png",
+          "sha256": "8ab009bacec88a9989749ac77bcf9bd2b02fbf787bb6ac6976ba3c882d8ff864",
+          "size_bytes": 580
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_61.png",
+          "sha256": "fd6f2d487857245c236f5cbace3145a542f42ad86b06bc46825a2a807261b7e8",
+          "size_bytes": 467
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_62.png",
+          "sha256": "0e7e6ba719bdf5bfbbc6435206aaf284b1ec4e0f4923730ba1b7cf18da48bc30",
+          "size_bytes": 470
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_63.png",
+          "sha256": "29a3e247e2acf20fc40d9316fad90464f03f31af95b34e6fb0b8764c735715cf",
+          "size_bytes": 422
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_64.png",
+          "sha256": "c6f9c78591451328dab528e8ea13ee5a81f6eef04bfc34591898616daa4f7f61",
+          "size_bytes": 419
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_65.png",
+          "sha256": "49b601578a4b386fcced2cec1d05c9eb54a46e97b24ee4add3e089fcd32ad0cd",
+          "size_bytes": 675
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_66.png",
+          "sha256": "2bd621d4df81e3a946bef9e67c727f6d3d4ef9584a30cccf52f857e0d18a2bb2",
+          "size_bytes": 387
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_67.png",
+          "sha256": "7dab63cb996dd096369da71a6eff1e3b57cc1ab6af26071093be7431a0165a2d",
+          "size_bytes": 963
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_68.png",
+          "sha256": "beac1f70a0f655b19391b10bef5a55aae9decc55a409126b7e0d0e1d192e2404",
+          "size_bytes": 672
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_69.png",
+          "sha256": "c91f42b3e8040a0a8d6418f8ad1c39782d5d45b509a24d0ccc63de5338bb3a2b",
+          "size_bytes": 846
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_7.png",
+          "sha256": "4009e05188fb193c3e8e20e4f43ea0e6b35c304dc1b793da8f848d5cf9e39ebb",
+          "size_bytes": 513
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_70.png",
+          "sha256": "bedb00c1660eef14a9950b3768f0ce82303c82cbe2467856edfedfdda799a961",
+          "size_bytes": 541
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_71.png",
+          "sha256": "23f1ad690ec820b570bd7a8974c0d8342c34644b3d417ae3af8f8c82c9d2c0eb",
+          "size_bytes": 355
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_72.png",
+          "sha256": "e265c8a29759c43ffad930aefe015760ca39d9ed63513d52d181621a070e1522",
+          "size_bytes": 608
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_73.png",
+          "sha256": "762e9d7669d5f51d50e396ec098f49f87ad98112b07707eeb96a6c9459077885",
+          "size_bytes": 612
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_74.png",
+          "sha256": "934a004dd071ab0a4966822d5e3431be7c71f7cb3be860ecb9de65249333b2ef",
+          "size_bytes": 570
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_75.png",
+          "sha256": "32738ed5065881cbfe27d9dd4fad9c29aa3ead0991c6e0a29bd8af7e70ff8e97",
+          "size_bytes": 346
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_76.png",
+          "sha256": "a559c171632abefc808c740bc9fbc3763120fb0e07491f02e0de080c2a4bc1d6",
+          "size_bytes": 584
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_77.png",
+          "sha256": "e8cdffb73ee3d8dc05a936a46e97ae27a7d2d0a5f91fc89b4a9789937be21a39",
+          "size_bytes": 799
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_78.png",
+          "sha256": "5d814ebf5d58c1fbe10cf4af96d77ce8c43413ff776a674fec602e3d484ed05a",
+          "size_bytes": 752
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_79.png",
+          "sha256": "e76ff473b70feebe652ce677d8771d2d2dc3577a148d74bdb77e6132e328ed76",
+          "size_bytes": 580
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_8.png",
+          "sha256": "9ad180f4fc78ae90926b81f91dfe5a357b7f575d5689dca675aa31f72296cff1",
+          "size_bytes": 463
+        },
+        {
+          "path": "viewer/data/sprites/ui/standard_spell_on_9.png",
+          "sha256": "9897c231394e6a41cc09576900152a441eb359cea84adf2b886dc90e6a794688",
+          "size_bytes": 381
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons2_0.png",
+          "sha256": "d2ccdb1d9b1cb90de4680b4156d3b7108ff9cac678821f970f66890ff5f41edd",
+          "size_bytes": 457
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons2_1.png",
+          "sha256": "751fae2bac26cb6ccff86f6dcf2e0ef327b77f4e221163540c24d6678978e98d",
+          "size_bytes": 561
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons2_2.png",
+          "sha256": "21867a26c58e07e32db691630eb9ed75cea7edf2c39464db89ea1a246a559ef7",
+          "size_bytes": 564
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons2_3.png",
+          "sha256": "6482cc2c0ea98ccece151a097d1f17e59adece10c07e89b274a141e3cc58c184",
+          "size_bytes": 436
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons2_4.png",
+          "sha256": "3bc75adb9f01cde83c2c233b5a03d64cd27951afe9982d4a39920310d8e553cd",
+          "size_bytes": 528
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons2_5.png",
+          "sha256": "7532f9b905e2cc267267ead6cccb3760e6d510348e02f6fae8b2fbc21a291972",
+          "size_bytes": 449
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons2_6.png",
+          "sha256": "5148539e73a4d7132cc31f31f988e1d14c5e93695524d32b48b92a623b22df72",
+          "size_bytes": 769
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons2_7.png",
+          "sha256": "4457a743916609923d167304265deeb4ae65862df37593eb9b2e5bd4559b550f",
+          "size_bytes": 448
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_0.png",
+          "sha256": "c5744d2a231c429eac580a6c68e906f1e50a2dd6bca67238ad5ebda4d49d6dcf",
+          "size_bytes": 316
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_1.png",
+          "sha256": "7cbc9737c2223c0c4ad7a3ddda2a1a86c56a05e39c16fb55d2ebf0162f07f59b",
+          "size_bytes": 289
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_10.png",
+          "sha256": "35c74779d5c0e6267b540b48738450bdb1f0b3accf42c32bda47f88132cafcb4",
+          "size_bytes": 343
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_11.png",
+          "sha256": "e5ce5c9c1efaa1664a9003200a6a1b89efae1c8f6a277b59474e0b3a1bbabe89",
+          "size_bytes": 311
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_12.png",
+          "sha256": "bfa9f25356ea830830d69cade09f7b4f7d388910b772884f2b131e89bfa0d573",
+          "size_bytes": 328
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_13.png",
+          "sha256": "d1a278f3299f09b15d0d683850b63dc05a3fdeec8bf92f19dae05eb5596ab7f7",
+          "size_bytes": 328
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_14.png",
+          "sha256": "a8b4e9c0e14a787c712746f910c177d125f6535e0b55fe2cce8c9eba0740c8b2",
+          "size_bytes": 426
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_15.png",
+          "sha256": "9fd77fa16ebd32380c77350860ba974b03980b0414662fdd8f8f1c407e1a21fb",
+          "size_bytes": 335
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_16.png",
+          "sha256": "c86bcea10e3d4b9b67c1d03cf2655d4eac7578c2fc2aef917df2c24bbd962761",
+          "size_bytes": 357
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_17.png",
+          "sha256": "060f605c4b2f3625afeec6fa329752e7d3a1e6b45065e0320aa9d9ad5f53eef6",
+          "size_bytes": 367
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_2.png",
+          "sha256": "4efb1014e9a113cfe770f4f1b928a66f3470ea31f86e9068a6a5716a664eb812",
+          "size_bytes": 245
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_3.png",
+          "sha256": "3b704c00f19af0be4c759e32fe9ed75336a2573f15926e9f064b4df3d4214c44",
+          "size_bytes": 440
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_4.png",
+          "sha256": "b7add8ec27d340178c2058727736e2b7da3d0b7eb43eac543c719ca0fabc19e5",
+          "size_bytes": 297
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_5.png",
+          "sha256": "5ce20c6dacda82c798d7642b10bece741df6360e93ae3171f8a8513925d4bc5f",
+          "size_bytes": 391
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_6.png",
+          "sha256": "f6aa3007628d249d427d25eb6713ea5ce055dc17195efbfda8fd76a927278b67",
+          "size_bytes": 304
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_7.png",
+          "sha256": "65e79b2e4e86e0e04c3e90d2f23f7542791fc1e4831fab8a94000489603c11a0",
+          "size_bytes": 221
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_8.png",
+          "sha256": "353908d824f0885451e02130840a45618343260af31475265675617ab77d5b15",
+          "size_bytes": 283
+        },
+        {
+          "path": "viewer/data/sprites/ui/staticons_9.png",
+          "sha256": "68dcdd85e8d0291a68d31865ea4a31366919e487b873208437ac450951036247",
+          "size_bytes": 167
+        },
+        {
+          "path": "viewer/data/sprites/ui/stats_total_left.png",
+          "sha256": "05e61b63855f61ef4bb188a50ad531f14595e95942e7c5234452a411e3ea76dd",
+          "size_bytes": 206
+        },
+        {
+          "path": "viewer/data/sprites/ui/stats_total_middle.png",
+          "sha256": "84e5f0bb7eb5f19ba4dbc96268fdcd1b2276ba19d83256647944aaf3354f89eb",
+          "size_bytes": 144
+        },
+        {
+          "path": "viewer/data/sprites/ui/stats_total_right.png",
+          "sha256": "47100b390aebdab06fbafb42ad7a5a1bd5bbbd094a39b21ca9c8bd23340167dd",
+          "size_bytes": 201
+        },
+        {
+          "path": "viewer/data/sprites/ui/tli_button01_orbinfo_65x34_0.png",
+          "sha256": "688892cb6bac47c567ba9f3d23cd1dd85fb05a82d300cbbe9caedb766dae29db",
+          "size_bytes": 1496
+        },
+        {
+          "path": "viewer/data/sprites/ui/tli_button01_orbinfo_65x34_1.png",
+          "sha256": "16791f84b1eb6ec0499114106a59b5de6c1f68f2e7bf8c8dafdfcb327cb8e677",
+          "size_bytes": 1418
+        },
+        {
+          "path": "viewer/data/sprites/ui/tli_button01_orbinfo_65x34_2.png",
+          "sha256": "25bda5ea35ba2419a4b6d65760f7f5473f71501c9c5b4b9ec3240363b0ef81f8",
+          "size_bytes": 1493
+        },
+        {
+          "path": "viewer/data/sprites/ui/tradebacking_dark.png",
+          "sha256": "173a1936c05a3938aa0a79efdb4017dbd21f7bae643c5609663d1e7af6d05d39",
+          "size_bytes": 511
+        },
+        {
+          "path": "viewer/data/sprites/ui/whistle.png",
+          "sha256": "678923e0e266880c1d0fc4b0575675a387d8243f0f1d3f8200b666fefb49d47d",
+          "size_bytes": 1097
+        },
+        {
+          "path": "viewer/data/sprites/ui/worldmap_icon_0.png",
+          "sha256": "54be6685771b49e52e7c2891e863e55b46e52fce7253b3eb8ba4e07ccaf5f927",
+          "size_bytes": 1266
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_0.png",
+          "sha256": "ed7512e5426d54585c6be6f23dc5d5b9b4065f0ce00357342a1df83db91f63f5",
+          "size_bytes": 261
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_1.png",
+          "sha256": "6c301d33b5ce2f9b988525dc6335f4f9d6d33b5477cb40f5c1253fabde5f5f31",
+          "size_bytes": 237
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_10.png",
+          "sha256": "7051d87cc92d256903bf8acd9ccec695748b713f62236d5413e961cf58b6e30c",
+          "size_bytes": 232
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_11.png",
+          "sha256": "b0775cba09eadf2fde241b35daa28cdcd03af6d23e99e0decd32b42f13f6d220",
+          "size_bytes": 83
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_2.png",
+          "sha256": "c14308ab216298c35ad011324b8a9dc9a8c2a9aa00218e6feb25de939c50edd5",
+          "size_bytes": 193
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_3.png",
+          "sha256": "498958b5154e4ac3e2f40a247f2740fe6e8163eefe083408fe954e5f0884cd8b",
+          "size_bytes": 218
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_4.png",
+          "sha256": "176a342509d1567eb73931c0e340f44068709aa259ee0c059df0b2f3b178a291",
+          "size_bytes": 207
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_5.png",
+          "sha256": "41ba96ecd0d5a032564885de944cd9262b9161740a681b29cd8b84d1ec0e80f4",
+          "size_bytes": 228
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_6.png",
+          "sha256": "b695ccb8fe2794e4b93b223444112dc7b6b7aa5a2fe0cd27424b7af3e112f5d6",
+          "size_bytes": 290
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_7.png",
+          "sha256": "838bbd621f9d7d087144d8bf168195dbf3ae551f6e24030553fa99f9381873a1",
+          "size_bytes": 278
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_8.png",
+          "sha256": "bbc647ab316643930a1b299b34e11ebed0ccecc230f843d0db0b03f77019e998",
+          "size_bytes": 329
+        },
+        {
+          "path": "viewer/data/sprites/ui/wornicons_9.png",
+          "sha256": "01b96e855df5b9a9cc993f37c6420ee224583c0d156e0cb186a7ceefb9a92f80",
+          "size_bytes": 275
+        },
+        {
+          "path": "viewer/fc_all.anims",
+          "sha256": "d0f62162ff4bc9f9741583c6f0c532e196017d9d48d5f2b7075510915651c63d",
+          "size_bytes": 628271
+        },
+        {
+          "path": "viewer/fc_npcs.models",
+          "sha256": "a6e432a91b89e080303a74904b08663b0a334e61c9436c4b2f1353c100b5535e",
+          "size_bytes": 307950
+        },
+        {
+          "path": "viewer/fc_player.models",
+          "sha256": "d056dd8db14d53a804bbe5a216f1168816d4a947c862a4db9075b9a3b1196641",
+          "size_bytes": 521341
+        },
+        {
+          "path": "viewer/fc_player.parts",
+          "sha256": "8606aabd0ef16d5e4c803994f63a98885435364536e8bf5d2971edcbf69caa11",
+          "size_bytes": 272
+        },
+        {
+          "path": "viewer/fc_projectiles.models",
+          "sha256": "2f6ff97268aad5432223a5d9e955857b9017814db966a05377533d4271da621a",
+          "size_bytes": 698441
+        },
+        {
+          "path": "viewer/fc_spotanims.bin",
+          "sha256": "034b4357f0245f1d933978fb87c42aa670ce4fdd0f403392732611b656a254c1",
+          "size_bytes": 620
+        },
+        {
+          "path": "viewer/fightcaves.atlas",
+          "sha256": "e74a74b371865d2f08108f57cc6fd914bf7a095877ef3414aebb8c482ee55fed",
+          "size_bytes": 14680076
+        },
+        {
+          "path": "viewer/fightcaves.minimap.png",
+          "sha256": "41ff5d66f24c12332233d0e1eaf1c4f9b97e2c2dc62348c6c964801b1d766949",
+          "size_bytes": 4143
+        },
+        {
+          "path": "viewer/fightcaves.oanim",
+          "sha256": "89c3d68e523918828aff2591532b79c2bc7f76299b55301dc1c0fa15173d418c",
+          "size_bytes": 4852
+        },
+        {
+          "path": "viewer/fightcaves.object_anim.models",
+          "sha256": "0f4fb7ec73d9398997c687f816c7641cfbdedbde06b0417a7b75d866f7c54e2a",
+          "size_bytes": 141665
+        },
+        {
+          "path": "viewer/fightcaves.objects",
+          "sha256": "26656332f30f2c7c3b6b68b7dd3ccc1a0bea677deaea9626cd9e951f8bcd9366",
+          "size_bytes": 28576964
+        },
+        {
+          "path": "viewer/fightcaves.tanim",
+          "sha256": "cf09271bdd9e695089259fa87279cef516de8079aaafc6f9ba465abc5d2f8875",
+          "size_bytes": 364
+        },
+        {
+          "path": "viewer/fightcaves.terrain",
+          "sha256": "6aaffb61f6c1efca8fac74b97b8d1c0c6fe76a3c3ce6086f5fe2a26d2f7f30d5",
+          "size_bytes": 409636
+        }
+      ],
+      "install_prefix": "viewer",
+      "sha256": "7f43e3c1a55b43fc791097f3e25c925250bd939d2adc9aa7438018fced247943",
+      "size_bytes": 6150984,
+      "url": "https://github.com/jordanbailey00/fc-rl/releases/download/fight-caves-assets-v3/fight-caves-viewer-assets-v3.tar.gz"
+    }
+  },
+  "release_tag": "fight-caves-assets-v3",
+  "schema_version": 1,
+  "source": {
+    "repository": "https://github.com/jordanbailey00/fc-rl",
+    "revision": "73129580cb7f7aaae9955511ea377b77ab853026"
+  }
+}

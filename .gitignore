@@ -174,3 +174,6 @@ resources/drive/binaries/*
 
 vendor/nle/
 vendor/fast-nle/
+
+# Fight Caves standalone executable (standard --fast/--local build).
+/fight_caves
