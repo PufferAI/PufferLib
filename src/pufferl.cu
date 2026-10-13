@@ -1237,7 +1237,17 @@ static void pufferl_reset_policy_envs(PuffeRL* p, int policy_idx) {
 
     for (int i = 0; i < vec->size; i++) {
         Env* env = &vec->envs[i];
-        if (env->tag != policy_idx) {
+        bool uses_policy = false;
+        for (int a = 0; a < env->num_agents; a++) {
+            int physical = (int)(env->agents[a].rewards - vec->rewards);
+            int in_buf = physical % apb;
+            if (in_buf >= vec->policy_layout[policy_idx]
+                    && in_buf < vec->policy_layout[policy_idx + 1]) {
+                uses_policy = true;
+                break;
+            }
+        }
+        if (!uses_policy) {
             continue;
         }
 
