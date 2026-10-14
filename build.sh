@@ -283,6 +283,11 @@ if [ "$MODE" = "cpu" ]; then
         osrs_*|nethack)
             STANDALONE_SOURCE="$SRC_FILE"
             ;;
+        npole)
+            STANDALONE_SOURCE="$SRC_FILE"
+            STANDALONE_DEFINES=(-fno-fast-math -ffp-contract=off)
+            OMP_FLAGS=()
+            ;;
         *)
             ENV_HEADER="$SRC_DIR/$ENV.h"
             if ! grep -q 'typedef[[:space:]].*obs_t' "$ENV_HEADER" 2>/dev/null; then

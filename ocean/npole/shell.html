@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ten Pendulums</title>
+  <style>
+    :root { color-scheme: dark; font: 15px system-ui,sans-serif; background:#061818; color:#e0f0ea; }
+    * { box-sizing:border-box; }
+    body { margin:0; }
+    main { max-width:960px; margin:auto; }
+    canvas { display:block; width:100%; height:auto; outline:none; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px; align-items:center; }
+    button { background:#163b36; color:#e0f0ea; border:1px solid #42776d; border-radius:6px; padding:10px 16px; font:inherit; touch-action:none; cursor:pointer; }
+    button:hover { background:#20544a; }
+    button:focus-visible { outline:2px solid #32d2b5; outline-offset:2px; }
+    button:disabled { opacity:.5; cursor:wait; }
+    #status { color:#9ac2b8; margin-left:auto; }
+    .hint { margin:0; padding:0 16px 16px; color:#9ac2b8; line-height:1.5; }
+    .sr { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); }
+    @media(max-width:520px) { #status { width:100%; margin-left:0; } button { flex:1; padding:10px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1 class="sr">Ten passive pendulums on one cart</h1>
+  <canvas id="canvas" width="960" height="840" tabindex="0" aria-label="Live ten pendulum simulation. Space pauses. R resets. Hold Shift and an arrow key to control the cart." oncontextmenu="event.preventDefault()"></canvas>
+  <div class="controls" aria-label="Simulation controls">
+    <button id="pause" disabled>Pause</button>
+    <button id="reset" disabled>Reset</button>
+    <button id="left" disabled aria-label="Hold to push the cart left">Hold left</button>
+    <button id="right" disabled aria-label="Hold to push the cart right">Hold right</button>
+    <span id="status" role="status">Loading live simulation…</span>
+  </div>
+  <p class="hint">Swing up from hanging, then keep every link upright and slow for the final five seconds. Reset starts a fresh trial. Hold a direction button to take control of the cart.</p>
+</main>
+<script>
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    print: function(text) { console.log(text); },
+    printErr: function(text) { console.error(text); },
+    setStatus: function(text) {
+      if (text) document.getElementById('status').textContent = text;
+    },
+    onAbort: function() {
+      document.getElementById('status').textContent = 'Simulation could not load. Reload to retry.';
+    },
+    onRuntimeInitialized: function() {
+      setTimeout(function() {
+        var call = function(name, type, types, args) {
+          return Module.ccall(name, type === undefined ? 'number' : type, types || [], args || []);
+        };
+        if (call('np_demo_init') !== 0) { Module.onAbort(); return; }
+        if (!call('np_demo_ready')) { Module.onAbort(); return; }
+        document.querySelectorAll('button').forEach(function(button) { button.disabled = false; });
+        document.getElementById('pause').onclick = function() {
+          call('np_demo_toggle_pause');
+        };
+        document.getElementById('reset').onclick = function() {
+          call('np_demo_reset', null, ['number'], [(call('np_demo_seed_value') + 1) >>> 0]);
+        };
+        ['left','right'].forEach(function(id) {
+          var button = document.getElementById(id);
+          button.onpointerdown = function(event) {
+            button.setPointerCapture(event.pointerId);
+            call('np_demo_set_manual', null, ['number'], [id === 'left' ? -1 : 1]);
+          };
+          button.onpointerup = button.onpointercancel = button.onlostpointercapture = function() {
+            call('np_demo_clear_manual');
+          };
+        });
+        setInterval(function() {
+          var paused = call('np_demo_paused');
+          var success = call('np_demo_success');
+          var failed = call('np_demo_failed');
+          document.getElementById('pause').textContent = paused ? 'Resume' : 'Pause';
+          document.getElementById('status').textContent = failed ? 'Trial failed' : success ? 'Trial passed' : paused ? 'Paused' : 'Live simulation';
+        }, 200);
+        window.npoleReady = true;
+      }, 0);
+    }
+  };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
