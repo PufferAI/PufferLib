@@ -1,0 +1,165 @@
+{
+  "status": "candidate_for_visual_review_not_legal_limits",
+  "units": "source_asset_units",
+  "route_source": "material 6 groove.001 boundary midpoint; original asphalt heights",
+  "direction": "Hamilton Straight toward Abbey; checked against published GP layout",
+  "points": 1171,
+  "closed": true,
+  "length": 5835.062489806172,
+  "elevation_min": -7.223666504407083,
+  "elevation_max": 4.087834697142191,
+  "pavement_width_min": 12.25,
+  "pavement_width_max": 60.0,
+  "flagged_points": 224,
+  "flag_counts": {
+    "1": 0,
+    "2": 79,
+    "4": 0,
+    "8": 194,
+    "16": 72
+  },
+  "flags": {
+    "1": "missing/non-asphalt center support",
+    "2": "edge search reached 30 units",
+    "4": "edge under 2 units from guidance",
+    "8": "wide pavement / junction",
+    "16": "adjacent width changed by more than 5 units"
+  },
+  "landmarks": [
+    {
+      "name": "Start candidate / Hamilton Straight",
+      "index": 0,
+      "s": 0.0,
+      "position": [
+        -340.8499186209143,
+        -5.343308691337601,
+        173.8018872138522
+      ]
+    },
+    {
+      "name": "Abbey / Farm branch review",
+      "index": 50,
+      "s": 247.5029148740625,
+      "position": [
+        -177.10269506503232,
+        -1.9741278246740444,
+        -4.5787953424912775
+      ]
+    },
+    {
+      "name": "Village / Loop",
+      "index": 140,
+      "s": 695.5109380878098,
+      "position": [
+        220.99215681688423,
+        1.9495565588839336,
+        -149.01998030017594
+      ]
+    },
+    {
+      "name": "Aintree / old layout junction",
+      "index": 210,
+      "s": 1054.3600997472531,
+      "position": [
+        346.19789490683564,
+        2.8650630767935152,
+        -213.37903572072423
+      ]
+    },
+    {
+      "name": "Brooklands",
+      "index": 353,
+      "s": 1775.1851373242125,
+      "position": [
+        -210.8095548951486,
+        -0.1393076593876315,
+        -648.8633205320973
+      ]
+    },
+    {
+      "name": "Luffield",
+      "index": 397,
+      "s": 1992.5823271453776,
+      "position": [
+        -327.37037441117684,
+        0.46282403586223453,
+        -508.9875507742562
+      ]
+    },
+    {
+      "name": "National pit straight / pit exit",
+      "index": 527,
+      "s": 2633.5116727722075,
+      "position": [
+        81.75830760092984,
+        0.5851381541151208,
+        -850.2322115324615
+      ]
+    },
+    {
+      "name": "Copse",
+      "index": 577,
+      "s": 2880.968255327835,
+      "position": [
+        323.96154778202356,
+        1.8990239578405592,
+        -846.1330766773606
+      ]
+    },
+    {
+      "name": "Maggotts / Becketts branches",
+      "index": 718,
+      "s": 3581.7507063100616,
+      "position": [
+        462.60089106112287,
+        2.6969621169564943,
+        -180.59767833571073
+      ]
+    },
+    {
+      "name": "Chapel / Hangar Straight",
+      "index": 777,
+      "s": 3874.475238825979,
+      "position": [
+        460.54608310666777,
+        0.28504197090096894,
+        82.73037681961992
+      ]
+    },
+    {
+      "name": "Stowe",
+      "index": 966,
+      "s": 4817.419748909525,
+      "position": [
+        -45.20011793077839,
+        -0.42208309458209103,
+        853.8728717270881
+      ]
+    },
+    {
+      "name": "Vale / pit entry",
+      "index": 1059,
+      "s": 5283.014704397212,
+      "position": [
+        -360.45671046156644,
+        -5.860370767977381,
+        531.9746125197396
+      ]
+    },
+    {
+      "name": "Club / pit lane separation",
+      "index": 1077,
+      "s": 5371.612699343135,
+      "position": [
+        -439.7996425160542,
+        -5.385343298923526,
+        558.602346936641
+      ]
+    }
+  ],
+  "reference": "https://www.fia.com/system/files/decision-document/2025_silverstone_event_-_circuit_map_-_silverstone_2025_0.pdf",
+  "reference_note": "2025 layout reference for a 2024-named asset; not exact survey alignment",
+  "official_reference_length_m": 5891,
+  "scale_note": "Do not scale the racing-line guidance to match official centerline length.",
+  "boundary_note": "First continuous asphalt extent at quarter-unit spacing; not white-line limits."
+}

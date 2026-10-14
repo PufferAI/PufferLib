@@ -1,0 +1,633 @@
+[
+  {
+    "material": "barriers1.001",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "tyreswall.001",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "jersey.001",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "metals1.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "groove2.001",
+    "group": 6,
+    "label": "Groove / decal candidate",
+    "support_candidate": false,
+    "lidar_candidate": false,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Overlay grooves: excluded from support and LiDAR to avoid duplicate surface hits."
+  },
+  {
+    "material": "groove3.001",
+    "group": 6,
+    "label": "Groove / decal candidate",
+    "support_candidate": false,
+    "lidar_candidate": false,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Overlay grooves: excluded from support and LiDAR to avoid duplicate surface hits."
+  },
+  {
+    "material": "groove.001",
+    "group": 6,
+    "label": "Groove / decal candidate",
+    "support_candidate": false,
+    "lidar_candidate": false,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Overlay grooves: excluded from support and LiDAR to avoid duplicate surface hits."
+  },
+  {
+    "material": "marshall.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "fences1.001",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Fence planes currently opaque in GLB; inspect sensor occlusion semantics."
+  },
+  {
+    "material": "serraglio.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "distanz.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "TV_Stuff.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "tractor.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "jersey.003",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "Gazebo_Tent.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "cameraman.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "gstands1.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "structures.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "NewBridge.structure.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "NewBridge.concrete.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "NewBridge.black.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "NewBridge.glasses.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Glass/transparent name but opaque GLB material; define idealized sensor behavior explicitly."
+  },
+  {
+    "material": "Transparent.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Glass/transparent name but opaque GLB material; define idealized sensor behavior explicitly."
+  },
+  {
+    "material": "Hotel.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "HotelConcrete.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "Hotel.glasses.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Glass/transparent name but opaque GLB material; define idealized sensor behavior explicitly."
+  },
+  {
+    "material": "Hotel.balcony.glasses.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Glass/transparent name but opaque GLB material; define idealized sensor behavior explicitly."
+  },
+  {
+    "material": "HotelLogo.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "Transparent.003",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Glass/transparent name but opaque GLB material; define idealized sensor behavior explicitly."
+  },
+  {
+    "material": "glass_transp.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Glass/transparent name but opaque GLB material; define idealized sensor behavior explicitly."
+  },
+  {
+    "material": "top2_refl.001",
+    "group": 0,
+    "label": "Road candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Mixed/unknown top2 surfaces: inspect before enabling wheel support."
+  },
+  {
+    "material": "barriers1.003",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "sand_new.001",
+    "group": 2,
+    "label": "Runoff candidate",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "walls2.001",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "tyreswall.002",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "metals1.003",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "box1_multimap.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "glass.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Glass/transparent name but opaque GLB material; define idealized sensor behavior explicitly."
+  },
+  {
+    "material": "stone.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "box2.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "tile1.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "misc.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "tile1B.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "MB_Sprinter_2014.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "Curb_new.001",
+    "group": 1,
+    "label": "Curb candidate",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "ADV_add.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "gstands1.003",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "objects1.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "marshall.003",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "bridges.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "box1.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Includes the paved strip beside the starting straight. Only faces within 45.6 degrees of horizontal are enabled for wheel support; vertical structure faces are excluded.",
+    "support_min_abs_normal_y": 0.7
+  },
+  {
+    "material": "bridge.001",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "asph_pitlane.001",
+    "group": 0,
+    "label": "Road candidate",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Pit pavement supports wheels but does not belong to the timed route."
+  },
+  {
+    "material": "grass_NM.001",
+    "group": 2,
+    "label": "Runoff candidate",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "top2_NM.001",
+    "group": 0,
+    "label": "Road candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Mixed/unknown top2 surfaces: inspect before enabling wheel support."
+  },
+  {
+    "material": "asphalt.001",
+    "group": 0,
+    "label": "Road candidate",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Asphalt includes aprons and other paved areas; material membership is not route legality."
+  },
+  {
+    "material": "curb.001",
+    "group": 1,
+    "label": "Curb candidate",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "top2.001",
+    "group": 0,
+    "label": "Road candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Mixed/unknown top2 surfaces: inspect before enabling wheel support."
+  },
+  {
+    "material": "grass.001",
+    "group": 2,
+    "label": "Runoff candidate",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "sand-bordini.001",
+    "group": 2,
+    "label": "Runoff candidate",
+    "support_candidate": true,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "flag1b.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Decorative/alpha geometry: provisional opaque LiDAR; inspect before sensor acceptance."
+  },
+  {
+    "material": "flag1.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Decorative/alpha geometry: provisional opaque LiDAR; inspect before sensor acceptance."
+  },
+  {
+    "material": "flag2.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Decorative/alpha geometry: provisional opaque LiDAR; inspect before sensor acceptance."
+  },
+  {
+    "material": "flag3.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Decorative/alpha geometry: provisional opaque LiDAR; inspect before sensor acceptance."
+  },
+  {
+    "material": "flag4.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Decorative/alpha geometry: provisional opaque LiDAR; inspect before sensor acceptance."
+  },
+  {
+    "material": "flag5.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Decorative/alpha geometry: provisional opaque LiDAR; inspect before sensor acceptance."
+  },
+  {
+    "material": "trees.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Decorative/alpha geometry: provisional opaque LiDAR; inspect before sensor acceptance."
+  },
+  {
+    "material": "fences1.003",
+    "group": 3,
+    "label": "Barrier candidate",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Fence planes currently opaque in GLB; inspect sensor occlusion semantics."
+  },
+  {
+    "material": "structures.003",
+    "group": 4,
+    "label": "Structures",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Retained by the initial opaque LiDAR preview; inspect before production sensor acceptance."
+  },
+  {
+    "material": "miscalpha.001",
+    "group": 5,
+    "label": "Other / unclassified",
+    "support_candidate": false,
+    "lidar_candidate": true,
+    "query_status": "selected_for_initial_opaque_preview",
+    "query_note": "Decorative/alpha geometry: provisional opaque LiDAR; inspect before sensor acceptance."
+  }
+]

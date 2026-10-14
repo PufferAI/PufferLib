@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "units": "source_asset_units",
+  "description": "Full detected-pavement training limits; capped task corridor retained as an inspection overlay",
+  "half_width_cap": 5.0,
+  "pavement_inset": 0.5,
+  "gate_spacing": 150.0,
+  "gate_height_tolerance": 2.0,
+  "legal_position": "All four wheel-bottom projections must lie inside the interpolated detected pavement edges and within 2 units of its height; chassis center alone is insufficient.",
+  "progress": "Maintain a local route-segment cursor and accumulate continuous signed route progress. Intermediate gates are optional guidance and statistics; missed gates do not cap race standing.",
+  "start": "First forward crossing of the finite start line arms timing. A later forward finish crossing counts a lap when signed unwrapped route travel identifies a full circuit rather than a local recrossing (more than half the route length).",
+  "invalid_lap": "Crashes end the trajectory. Reversing subtracts route progress; discontinuous cursor jumps add no progress. Intermediate gates are counted once per lap when crossed forward, in any order. Off-road checks affect shaping only."
+}

@@ -6,6 +6,8 @@ set -e
 #   ./build.sh breakout mybin        # Native -> ./mybin (does not clobber ./puffer)
 #   ./build.sh breakout --cu         # CUDA env (ENV_HEADER=ocean/ENV/ENV.cu; exclusive vs .h)
 #   ./build.sh robot_arm             # CUDA-only; implies --cu
+#   ./build.sh racing                # CUDA-only single-car racing
+#   ./build.sh racing_multi          # CUDA-only shared multicar racing
 #   ./build.sh breakout --float      # float32 precision (required for --slowly)
 #   ./build.sh breakout --cpu        # Play/eval binary (optimized) -> ./ENV
 #   ./build.sh osrs_inferno --cpu     # OSRS visual policy viewer -> ./osrs_inferno
@@ -50,11 +52,11 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-if [ "$ENV" = "robot_arm" ]; then
+if [ "$ENV" = "robot_arm" ] || [ "$ENV" = "racing" ] || [ "$ENV" = "racing_multi" ]; then
     USE_GPU_ENV=1
     case "${MODE:-native}" in
         cpu|web)
-            echo "Error: robot_arm physics is CUDA-only; use the native trainer build" >&2
+            echo "Error: $ENV physics is CUDA-only; use the native trainer build" >&2
             exit 1
             ;;
     esac
@@ -445,6 +447,17 @@ NVCC="ccache $CUDA_HOME/bin/nvcc"
 CC="${CC:-$(command -v ccache >/dev/null && echo 'ccache clang' || echo 'clang')}"
 ARCH=${NVCC_ARCH:-native}
 
+if [ "$ENV" = "racing" ] || [ "$ENV" = "racing_multi" ]; then
+    if [ -z "${OPTIX_INCLUDE_DIR:-}" ] || [ ! -f "$OPTIX_INCLUDE_DIR/optix.h" ]; then
+        echo "Set OPTIX_INCLUDE_DIR to the OptiX 9.1 include directory." >&2
+        exit 1
+    fi
+    INCLUDES+=(-I"$OPTIX_INCLUDE_DIR")
+    EXTRA_LDFLAGS+=(-ldl)
+    $NVCC -std=c++17 -O2 -arch=compute_75 --ptx -I"$OPTIX_INCLUDE_DIR" \
+        src/puffysics/raycast_optix.cu -o ocean/racing/raycast_optix.ptx
+fi
+
 # CPU and CUDA envs are separate sources. --cu selects the .cu; default is .h.
 # Only one is compiled in (never both).
 if [ "$USE_GPU_ENV" = "1" ]; then
@@ -457,10 +470,7 @@ else
     ENV_HEADER="$SRC_DIR/$ENV.h"
 fi
 mkdir -p build
-if ! grep -q 'typedef[[:space:]].*obs_t' "$ENV_HEADER" 2>/dev/null; then
-    echo "Error: $ENV_HEADER must typedef obs_t"
-    exit 1
-fi
+# obs_t may be defined by an included header; the compiler validates it.
 
 ENV_COMPILE_FLAGS=(-DENV_HEADER=\"$ENV_HEADER\")
 

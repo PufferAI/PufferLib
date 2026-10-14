@@ -1240,6 +1240,7 @@ struct TrainGraph {
     Prec mb_values;      // view: frozen rollout V (vf-clip)
     Prec mb_returns;     // view: aliases mb_gae_v after GAE (V+A)
     Prec mb_action_mask; // view (B, T, mask_size)
+    Prec mb_loss_mask = {}; // optional view (B, T); null means every sample is active
     Prec mb_imp;         // scratch
     Prec mb_gae_v;       // scratch: live V in, overwritten with returns
 };
@@ -1314,6 +1315,7 @@ struct PPOGraphArgs {
     const precision_t* advantages;
     const precision_t* values;
     const precision_t* returns;
+    const precision_t* loss_mask = NULL;
 };
 
 struct PPOKernelArgs {
@@ -1329,6 +1331,9 @@ struct PPOKernelArgs {
     float clip_coef, vf_clip_coef, vf_coef;
     const float* ent_coef;  // device ptr — host by-value bakes into CUDA graphs
     int T_seq, A_total, N;
+    float sample_count = -1;
+    const float* sample_count_ptr = NULL;
+    float sample_count_divisor = 1;
     bool is_continuous;
 };
 
@@ -1499,14 +1504,15 @@ __global__ void ppo_loss_compute(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = threadIdx.x;
     int total_elements = a.N * a.T_seq;
-    float inv_NT = 1.0f / float(total_elements);
+    float count = a.sample_count_ptr ? *a.sample_count_ptr / a.sample_count_divisor : a.sample_count;
+    float inv_NT = count > 0 ? 1.0f/count : 1.0f/float(total_elements);
 
     __shared__ float block_losses[LOSS_N][PPO_THREADS];
     for (int c = 0; c < LOSS_N; c++) {
         block_losses[c][tid] = 0.0f;
     }
 
-    if (idx < total_elements) {
+    if (idx < total_elements && (!g.loss_mask || to_float(g.loss_mask[idx]) != 0)) {
         int nt = idx;
         int logits_base = nt * (a.A_total + 1);
         int at_base = nt * a.A_total;  // logits-grad + mask base (A_total cols)
@@ -1618,6 +1624,13 @@ __global__ void ppo_loss_compute(
         block_losses[LOSS_CLIPFRAC][tid] =
             (fabsf(ratio - 1.0f) > a.clip_coef ? 1.0f : 0.0f) * inv_NT;
         block_losses[LOSS_IMP][tid] = ratio * inv_NT;
+    } else if (idx < total_elements) {
+        // Explicitly clear scratch left by log-prob preparation; multiplying by zero
+        // would still propagate NaNs and leave entropy/logstd gradients behind.
+        a.grad_values_pred[idx] = 0;
+        for (int j = 0; j < a.A_total; j++) a.grad_logits[idx*a.A_total+j] = 0;
+        if (a.is_continuous)
+            for (int j = 0; j < a.num_atns; j++) a.grad_logstd[idx*a.num_atns+j] = 0;
     }
 
     block_reduce_sum(&block_losses[0][0], &ppo_partials[blockIdx.x * LOSS_N],
@@ -1647,7 +1660,8 @@ void ppo_loss_fwd_bwd(
         int* act_sizes, float* losses_acc,
         float clip_coef, float vf_clip_coef, float vf_coef, const float* ent_coef,
         PPOBufs& bufs, bool is_continuous,
-        cudaStream_t stream) {
+        cudaStream_t stream, float sample_count = -1,
+        const float* sample_count_ptr = NULL, float sample_count_divisor = 1) {
     int N = dec_out.shape[0], T = dec_out.shape[1], fused_cols = dec_out.shape[2];
     int A_total = fused_cols - 1;  // last column is value
     int total = N * T;
@@ -1660,6 +1674,7 @@ void ppo_loss_fwd_bwd(
         .advantages = graph.mb_advantages.data,
         .values = graph.mb_values.data,
         .returns = graph.mb_returns.data,
+        .loss_mask = graph.mb_loss_mask.data,
     };
 
     PPOKernelArgs args = {
@@ -1676,6 +1691,8 @@ void ppo_loss_fwd_bwd(
         .vf_coef = vf_coef,
         .ent_coef = ent_coef,
         .T_seq = T, .A_total = A_total, .N = N,
+        .sample_count = sample_count < 0 ? (float)total : sample_count,
+        .sample_count_ptr = sample_count_ptr, .sample_count_divisor = sample_count_divisor,
         .is_continuous = is_continuous,
     };
     ppo_loss_compute<<<ppo_grid, PPO_THREADS, 0, stream>>>(
@@ -1718,7 +1735,9 @@ __global__ void puff_advantage(const precision_t* values,
         const precision_t* importance, precision_t* advantages,
         precision_t* returns,
         float gamma, float lambda, float rho_clip, float c_clip,
-        int num_steps, int horizon) {
+        int num_steps, int horizon,
+        const precision_t* loss_mask = NULL, const float* tail_rewards = NULL,
+        const float* tail_dones = NULL, int tail_offset = 0) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= num_steps) return;
     int off = row * horizon;
@@ -1726,11 +1745,20 @@ __global__ void puff_advantage(const precision_t* values,
     float next_v = to_float(values[off + horizon - 1]);
     float next_d = to_float(dones[off + horizon - 1]);
     float next_r = to_float(rewards[off + horizon - 1]);
+    float final_adv = 0;
+    if (tail_dones && tail_dones[tail_offset+row] != 0
+            && (!loss_mask || to_float(loss_mask[off+horizon-1]) != 0)) {
+        float rho = importance ? fminf(to_float(importance[off+horizon-1]),rho_clip) : 1;
+        float reward = fminf(1.0f,fmaxf(-1.0f,tail_rewards[tail_offset+row]));
+        final_adv = rho*(reward-next_v);
+        lastlam = final_adv;
+    }
 
     for (int seg = horizon / ADV_VEC_WIDTH - 1; seg >= 0; seg--) {
         int base = off + seg * ADV_VEC_WIDTH;
         float v[ADV_VEC_WIDTH], r[ADV_VEC_WIDTH], d[ADV_VEC_WIDTH], imp[ADV_VEC_WIDTH];
         float adv[ADV_VEC_WIDTH] = {};
+        if (seg+1 == horizon/ADV_VEC_WIDTH) adv[ADV_VEC_WIDTH-1] = final_adv;
         float ret[ADV_VEC_WIDTH];
         adv_ld(values + base, v);
         adv_ld(rewards + base, r);
@@ -1743,7 +1771,7 @@ __global__ void puff_advantage(const precision_t* values,
                 imp[i] = 1.f;
             }
         }
-        // Last index H-1 left 0. First seg starts at width-2.
+        // H-1 is a bootstrap-only sample unless an explicit terminal tail was supplied.
         int i0 = (seg + 1 == horizon / ADV_VEC_WIDTH) ? ADV_VEC_WIDTH - 2 : ADV_VEC_WIDTH - 1;
         #pragma unroll
         for (int i = i0; i >= 0; i--) {

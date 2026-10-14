@@ -1,0 +1,15 @@
+/map.bin
+/map_view
+/route.bin
+/track.bin
+/query_mesh.bin
+/raycast_optix.ptx
+/map_view.o
+/map_visual.bin
+/car.glb
+/car_parts.bin
+/car_materials.bin
+
+/render_materials.bin
+/car_render.bin
+/car_lod.bin

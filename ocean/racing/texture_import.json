@@ -1,0 +1,1472 @@
+{
+  "textures": [
+    {
+      "image": "barriers1",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "barriers1_nm",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "concrete_detail4",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "tyreswall_NM",
+      "source": "embedded",
+      "size": [
+        512,
+        128
+      ]
+    },
+    {
+      "image": "tyreswall",
+      "source": "embedded",
+      "size": [
+        512,
+        128
+      ]
+    },
+    {
+      "image": "jersey_nm",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "jersey",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "metals1",
+      "source": "embedded",
+      "size": [
+        512,
+        128
+      ]
+    },
+    {
+      "image": "metals1_nm",
+      "source": "embedded",
+      "size": [
+        512,
+        128
+      ]
+    },
+    {
+      "image": "metal-detail2",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "tyres_add1",
+      "source": "embedded",
+      "size": [
+        256,
+        512
+      ]
+    },
+    {
+      "image": "tyres_add2",
+      "source": "embedded",
+      "size": [
+        256,
+        512
+      ]
+    },
+    {
+      "image": "groove",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "commissario_NEW",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "fences1",
+      "source": "embedded",
+      "size": [
+        256,
+        512
+      ]
+    },
+    {
+      "image": "poly2",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "curb1G",
+      "source": "embedded",
+      "size": [
+        128,
+        512
+      ]
+    },
+    {
+      "image": "flat_NM",
+      "source": "embedded",
+      "size": [
+        32,
+        32
+      ]
+    },
+    {
+      "image": "TV_Stuff_D",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "Tractor_D",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "Gazebo_Tent_NM",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "Gazebo_Tent_D",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "VideoCAMERA",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "gstands1",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "structures",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "NewBridge.structure",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "NewBridge.concrete",
+      "source": "embedded",
+      "size": [
+        256,
+        256
+      ]
+    },
+    {
+      "image": "NewBridge.black",
+      "source": "embedded",
+      "size": [
+        64,
+        64
+      ]
+    },
+    {
+      "image": "NewBridge.glasses",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "Transparent",
+      "source": "embedded",
+      "size": [
+        32,
+        32
+      ]
+    },
+    {
+      "image": "Hotel",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "HotelConcrete",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "Hotel.glasses",
+      "source": "embedded",
+      "size": [
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Hotel.balcony.glasses",
+      "source": "embedded",
+      "size": [
+        64,
+        64
+      ]
+    },
+    {
+      "image": "HotelLogo",
+      "source": "embedded",
+      "size": [
+        512,
+        64
+      ]
+    },
+    {
+      "image": "glass",
+      "source": "embedded",
+      "size": [
+        256,
+        256
+      ]
+    },
+    {
+      "image": "grass_NM_3_low",
+      "source": "embedded",
+      "size": [
+        128,
+        512
+      ]
+    },
+    {
+      "image": "top2_B",
+      "source": "top2_B.png",
+      "size": [
+        4096,
+        4096
+      ]
+    },
+    {
+      "image": "sand_base",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "sand_base_NM",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "trap_detail",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "walls2b",
+      "source": "embedded",
+      "size": [
+        512,
+        128
+      ]
+    },
+    {
+      "image": "walls2_nm",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "concrete-detail2",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "box1",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "box1_nm",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "box_detail1",
+      "source": "embedded",
+      "size": [
+        64,
+        64
+      ]
+    },
+    {
+      "image": "glass_nm",
+      "source": "embedded",
+      "size": [
+        256,
+        256
+      ]
+    },
+    {
+      "image": "stone_detail_nm",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "stone_detail",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "box2_nm",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "box2",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "tile1",
+      "source": "embedded",
+      "size": [
+        256,
+        256
+      ]
+    },
+    {
+      "image": "tile1_nm",
+      "source": "embedded",
+      "size": [
+        256,
+        256
+      ]
+    },
+    {
+      "image": "metal_detail",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "misc1_nm",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "misc1",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "tile1B",
+      "source": "embedded",
+      "size": [
+        256,
+        256
+      ]
+    },
+    {
+      "image": "amb",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "curb_new1_NM",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "curb_new1",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "ADV_add",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "objects1",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "bridges",
+      "source": "embedded",
+      "size": [
+        256,
+        512
+      ]
+    },
+    {
+      "image": "bridge1",
+      "source": "embedded",
+      "size": [
+        512,
+        64
+      ]
+    },
+    {
+      "image": "asph_pitlane",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "grass2",
+      "source": "embedded",
+      "size": [
+        256,
+        512
+      ]
+    },
+    {
+      "image": "asph-old_new_B",
+      "source": "asph-old_new_B.png",
+      "size": [
+        4096,
+        4096
+      ]
+    },
+    {
+      "image": "grass2_D",
+      "source": "embedded",
+      "size": [
+        256,
+        512
+      ]
+    },
+    {
+      "image": "sand",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "flag1",
+      "source": "embedded",
+      "size": [
+        128,
+        512
+      ]
+    },
+    {
+      "image": "flag2",
+      "source": "embedded",
+      "size": [
+        128,
+        512
+      ]
+    },
+    {
+      "image": "flag3",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "flag4",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "flag5",
+      "source": "embedded",
+      "size": [
+        512,
+        256
+      ]
+    },
+    {
+      "image": "trees_B",
+      "source": "embedded",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "image": "grass-detail19",
+      "source": "grass-detail19.png",
+      "size": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "image": "Meshesblyatcatimport2grvlax0241_diff_12",
+      "source": "Meshesblyatcatimport2grvlax0241_diff_12.png",
+      "size": [
+        512,
+        512
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "material": "barriers1.001",
+      "base": "barriers1",
+      "normal": "barriers1_nm",
+      "normal_strength": 0.65,
+      "detail": "concrete_detail4",
+      "detail_strength": 0.25,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "tyreswall.001",
+      "base": "tyreswall",
+      "normal": "tyreswall_NM",
+      "normal_strength": 0.65,
+      "detail": "tyreswall",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "jersey.001",
+      "base": "jersey",
+      "normal": "jersey_nm",
+      "normal_strength": 0.65,
+      "detail": "jersey",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "metals1.001",
+      "base": "metals1",
+      "normal": "metals1_nm",
+      "normal_strength": 0.65,
+      "detail": "metal-detail2",
+      "detail_strength": 0.25,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "groove2.001",
+      "base": "tyres_add1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "tyres_add1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "groove3.001",
+      "base": "tyres_add2",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "tyres_add2",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "groove.001",
+      "base": "groove",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "groove",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "marshall.001",
+      "base": "commissario_NEW",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "commissario_NEW",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "fences1.001",
+      "base": "fences1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "fences1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "serraglio.001",
+      "base": "poly2",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "poly2",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "distanz.001",
+      "base": "curb1G",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "curb1G",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "TV_Stuff.001",
+      "base": "TV_Stuff_D",
+      "normal": "flat_NM",
+      "normal_strength": 0.65,
+      "detail": "TV_Stuff_D",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "tractor.001",
+      "base": "Tractor_D",
+      "normal": "flat_NM",
+      "normal_strength": 0.65,
+      "detail": "Tractor_D",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "jersey.003",
+      "base": "jersey",
+      "normal": "jersey_nm",
+      "normal_strength": 0.65,
+      "detail": "jersey",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "Gazebo_Tent.001",
+      "base": "Gazebo_Tent_D",
+      "normal": "Gazebo_Tent_NM",
+      "normal_strength": 0.65,
+      "detail": "Gazebo_Tent_D",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "cameraman.001",
+      "base": "VideoCAMERA",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "VideoCAMERA",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "gstands1.001",
+      "base": "gstands1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "gstands1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "structures.001",
+      "base": "structures",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "structures",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "NewBridge.structure.001",
+      "base": "NewBridge.structure",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "NewBridge.structure",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "NewBridge.concrete.001",
+      "base": "NewBridge.concrete",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "NewBridge.concrete",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "NewBridge.black.001",
+      "base": "NewBridge.black",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "NewBridge.black",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "NewBridge.glasses.001",
+      "base": "NewBridge.glasses",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "NewBridge.glasses",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "Transparent.001",
+      "base": "Transparent",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "Transparent",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "Hotel.001",
+      "base": "Hotel",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "Hotel",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "HotelConcrete.001",
+      "base": "HotelConcrete",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "HotelConcrete",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "Hotel.glasses.001",
+      "base": "Hotel.glasses",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "Hotel.glasses",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "Hotel.balcony.glasses.001",
+      "base": "Hotel.balcony.glasses",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "Hotel.balcony.glasses",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "HotelLogo.001",
+      "base": "HotelLogo",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "HotelLogo",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "Transparent.003",
+      "base": "Transparent",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "Transparent",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "glass_transp.001",
+      "base": "glass",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "glass",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "top2_refl.001",
+      "base": "top2_B",
+      "normal": "grass_NM_3_low",
+      "normal_strength": 0.65,
+      "detail": "top2_B",
+      "detail_strength": 0.35,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "barriers1.003",
+      "base": "barriers1",
+      "normal": "barriers1_nm",
+      "normal_strength": 0.65,
+      "detail": "concrete_detail4",
+      "detail_strength": 0.25,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "sand_new.001",
+      "base": "sand_base",
+      "normal": "sand_base_NM",
+      "normal_strength": 0.65,
+      "detail": "trap_detail",
+      "detail_strength": 0.35,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "walls2.001",
+      "base": "walls2b",
+      "normal": "walls2_nm",
+      "normal_strength": 0.65,
+      "detail": "concrete-detail2",
+      "detail_strength": 0.25,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "tyreswall.002",
+      "base": "tyreswall",
+      "normal": "tyreswall_NM",
+      "normal_strength": 0.65,
+      "detail": "tyreswall",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "metals1.003",
+      "base": "metals1",
+      "normal": "metals1_nm",
+      "normal_strength": 0.65,
+      "detail": "metal-detail2",
+      "detail_strength": 0.25,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "box1_multimap.001",
+      "base": "box1",
+      "normal": "box1_nm",
+      "normal_strength": 0.65,
+      "detail": "box_detail1",
+      "detail_strength": 0.25,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "glass.001",
+      "base": "glass",
+      "normal": "glass_nm",
+      "normal_strength": 0.65,
+      "detail": "glass",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "stone.001",
+      "base": "stone_detail",
+      "normal": "stone_detail_nm",
+      "normal_strength": 0.65,
+      "detail": "stone_detail",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "box2.001",
+      "base": "box2",
+      "normal": "box2_nm",
+      "normal_strength": 0.65,
+      "detail": "box2",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "tile1.001",
+      "base": "tile1",
+      "normal": "tile1_nm",
+      "normal_strength": 0.65,
+      "detail": "metal_detail",
+      "detail_strength": 0.25,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "misc.001",
+      "base": "misc1",
+      "normal": "misc1_nm",
+      "normal_strength": 0.65,
+      "detail": "misc1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "tile1B.001",
+      "base": "tile1B",
+      "normal": "tile1_nm",
+      "normal_strength": 0.65,
+      "detail": "metal_detail",
+      "detail_strength": 0.25,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "MB_Sprinter_2014.001",
+      "base": "amb",
+      "normal": "flat_NM",
+      "normal_strength": 0.65,
+      "detail": "amb",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "Curb_new.001",
+      "base": "curb_new1",
+      "normal": "curb_new1_NM",
+      "normal_strength": 0.65,
+      "detail": "curb_new1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "ADV_add.001",
+      "base": "ADV_add",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "ADV_add",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "gstands1.003",
+      "base": "gstands1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "gstands1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "objects1.001",
+      "base": "objects1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "objects1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "marshall.003",
+      "base": "commissario_NEW",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "commissario_NEW",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "bridges.001",
+      "base": "bridges",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "bridges",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "box1.001",
+      "base": "box1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "box1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "bridge.001",
+      "base": "bridge1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "bridge1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "asph_pitlane.001",
+      "base": "asph_pitlane",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "asph_pitlane",
+      "detail_strength": 0.35,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "grass_NM.001",
+      "base": "grass2",
+      "normal": "grass_NM_3_low",
+      "normal_strength": 0.45,
+      "detail": "grass-detail19",
+      "detail_strength": 0.75,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "top2_NM.001",
+      "base": "top2_B",
+      "normal": "grass_NM_3_low",
+      "normal_strength": 0.35,
+      "detail": "top2_B",
+      "detail_strength": 0.35,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "asphalt.001",
+      "base": "asph-old_new_B",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "asph-old_new_B",
+      "detail_strength": 0.35,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "curb.001",
+      "base": "curb1G",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "curb1G",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "top2.001",
+      "base": "top2_B",
+      "normal": "grass_NM_3_low",
+      "normal_strength": 0.35,
+      "detail": "top2_B",
+      "detail_strength": 0.35,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "grass.001",
+      "base": "grass2_D",
+      "normal": "grass_NM_3_low",
+      "normal_strength": 0.45,
+      "detail": "grass-detail19",
+      "detail_strength": 0.75,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "sand-bordini.001",
+      "base": "sand",
+      "normal": "sand_base_NM",
+      "normal_strength": 0.45,
+      "detail": "Meshesblyatcatimport2grvlax0241_diff_12",
+      "detail_strength": 0.35,
+      "detail_scale": 2.0,
+      "detail_coordinates": "world_xz",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "flag1b.001",
+      "base": "flag1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "flag1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "flag1.001",
+      "base": "flag1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "flag1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "flag2.001",
+      "base": "flag2",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "flag2",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "flag3.001",
+      "base": "flag3",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "flag3",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "flag4.001",
+      "base": "flag4",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "flag4",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "flag5.001",
+      "base": "flag5",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "flag5",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "trees.001",
+      "base": "trees_B",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "trees_B",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "fences1.003",
+      "base": "fences1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "fences1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "structures.003",
+      "base": "structures",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "structures",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    },
+    {
+      "material": "miscalpha.001",
+      "base": "misc1",
+      "normal": "flat_NM",
+      "normal_strength": 0,
+      "detail": "misc1",
+      "detail_strength": 0,
+      "detail_scale": 8.0,
+      "detail_coordinates": "uv",
+      "note": "Detail scales and zero-normal-strength overrides are provisional rendering choices."
+    }
+  ],
+  "alpha_modes": {
+    "0": "opaque",
+    "1": "opaque",
+    "2": "opaque",
+    "3": "opaque",
+    "4": "blend",
+    "5": "blend",
+    "6": "blend",
+    "7": "opaque",
+    "8": "cutout",
+    "9": "opaque",
+    "10": "opaque",
+    "11": "opaque",
+    "12": "opaque",
+    "13": "opaque",
+    "14": "opaque",
+    "15": "opaque",
+    "16": "opaque",
+    "17": "cutout",
+    "18": "opaque",
+    "19": "opaque",
+    "20": "opaque",
+    "21": "blend",
+    "22": "blend",
+    "23": "cutout",
+    "24": "opaque",
+    "25": "blend",
+    "26": "blend",
+    "27": "cutout",
+    "28": "blend",
+    "29": "blend",
+    "30": "opaque",
+    "31": "opaque",
+    "32": "opaque",
+    "33": "opaque",
+    "34": "opaque",
+    "35": "opaque",
+    "36": "opaque",
+    "37": "blend",
+    "38": "opaque",
+    "39": "opaque",
+    "40": "opaque",
+    "41": "opaque",
+    "42": "opaque",
+    "43": "opaque",
+    "44": "opaque",
+    "45": "opaque",
+    "46": "opaque",
+    "47": "opaque",
+    "48": "opaque",
+    "49": "opaque",
+    "50": "opaque",
+    "51": "opaque",
+    "52": "opaque",
+    "53": "cutout",
+    "54": "opaque",
+    "55": "opaque",
+    "56": "opaque",
+    "57": "opaque",
+    "58": "opaque",
+    "59": "opaque",
+    "60": "opaque",
+    "61": "opaque",
+    "62": "opaque",
+    "63": "opaque",
+    "64": "opaque",
+    "65": "opaque",
+    "66": "cutout",
+    "67": "cutout",
+    "68": "cutout",
+    "69": "cutout"
+  }
+}
