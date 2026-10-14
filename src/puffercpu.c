@@ -10,7 +10,13 @@
 
 const char* __asan_default_options(void) { return "detect_leaks=0"; }
 
-// File format: flat fp32 tensors.
+// File format: flat fp32 tensors. Native parameter padding depends on the
+// training precision, so use --float for checkpoints from --float training.
+#ifdef PRECISION_FLOAT
+#define PUF_WEIGHT_ALIGNMENT 4
+#else
+#define PUF_WEIGHT_ALIGNMENT 8
+#endif
 typedef struct Weights {
     float* data;
     int size;
@@ -46,12 +52,12 @@ float* get_weights(Weights* weights, int num_weights) {
     return data;
 }
 
-// Advances index to next 8-float (16-byte) boundary after reading, matching
-// the native backend's Allocator which aligns to 16 bytes with bf16 params.
+// Match the native Allocator: 16 bytes is 4 float or 8 bf16 parameters.
 float* get_weights_aligned(Weights* weights, int num_weights) {
     float* data = &weights->data[weights->idx];
     weights->idx += num_weights;
-    weights->idx = (weights->idx + 7) & ~7;
+    weights->idx = (weights->idx + PUF_WEIGHT_ALIGNMENT - 1)
+        & ~(PUF_WEIGHT_ALIGNMENT - 1);
     assert(weights->idx <= weights->size);
     return data;
 }
@@ -612,8 +618,8 @@ void free_puffernet(PufferNet* net) {
 #include ENV_HEADER
 
 #if !defined(PUF_NMMO3_NET) && !defined(PUF_ASTEROIDS_NET) && !defined(PUF_MINIMAL_NET) && !defined(PUF_CRAFTAX_NET)
-static int puf_align8(int n) {
-    return (n + 7) & ~7;
+static int puf_align_weights(int n) {
+    return (n + PUF_WEIGHT_ALIGNMENT - 1) & ~(PUF_WEIGHT_ALIGNMENT - 1);
 }
 
 static int puffernet_weight_count(int input_dim, int hidden, int layers,
@@ -627,13 +633,13 @@ static int puffernet_weight_count(int input_dim, int hidden, int layers,
         }
     }
     int n = 0;
-    n = puf_align8(n + hidden * input_dim);
-    n = puf_align8(n + (atn_sum + 1) * hidden);
+    n = puf_align_weights(n + hidden * input_dim);
+    n = puf_align_weights(n + (atn_sum + 1) * hidden);
     if (continuous) {
-        n = puf_align8(n + num_actions);
+        n = puf_align_weights(n + num_actions);
     }
     for (int l = 0; l < layers; l++) {
-        n = puf_align8(n + 3 * hidden * hidden);
+        n = puf_align_weights(n + 3 * hidden * hidden);
     }
     return n;
 }

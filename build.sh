@@ -8,6 +8,7 @@ set -e
 #   ./build.sh robot_arm             # CUDA-only; implies --cu
 #   ./build.sh breakout --float      # float32 precision (required for --slowly)
 #   ./build.sh breakout --cpu        # Play/eval binary (optimized) -> ./ENV
+#   ./build.sh drone --cpu --float   # Eval a checkpoint from --float training
 #   ./build.sh osrs_inferno --cpu     # OSRS visual policy viewer -> ./osrs_inferno
 #   ./build.sh nethack --cpu          # NetHack TTY demo (ocean/nethack/nethack.c)
 #   ./build.sh breakout myplay --cpu # Play -> ./myplay
@@ -305,6 +306,7 @@ if [ "$MODE" = "cpu" ]; then
         -lm -lpthread "${OMP_FLAGS[@]}"
         -DPLATFORM_DESKTOP
         "${STANDALONE_DEFINES[@]}"
+        $PRECISION
         "${EXTRA_CFLAGS[@]}"
     )
     echo "Compiling $ENV..."
