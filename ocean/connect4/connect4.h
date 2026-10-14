@@ -93,9 +93,14 @@ uint64_t play(int column, uint64_t mask,  uint64_t other_pieces) {
     return other_pieces ^ mask;
 }
 
-// A full board has this specifc value
+// Each column has ROWS occupied cells followed by a clear sentinel bit.
 bool draw(uint64_t mask) {
-    return mask == 4432406249472;
+    uint64_t full_column = (UINT64_C(1) << ROWS) - 1;
+    uint64_t full_board = 0;
+    for (int column = 0; column < COLUMNS; column++) {
+        full_board |= full_column << column * (ROWS + 1);
+    }
+    return mask == full_board;
 }
 
 // Determine if 'pieces' contains at least one line of connected pieces.
