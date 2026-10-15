@@ -84,6 +84,7 @@ int main(void) {{
     subprocess.run(
         [
             compiler,
+            "-D_POSIX_C_SOURCE=200809L",
             "-std=c11",
             "-I",
             str(REPOSITORY_ROOT),
