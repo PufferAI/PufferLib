@@ -19,6 +19,9 @@ set -e
 #   ./build.sh constellation         # Sweep dashboard -> ./seethestars
 #   ./build.sh cache_data            # Sweep log cache -> ./cache_data
 #   ./build.sh trailer               # 5.0 trailer -> ./resources/trailer/trailer (also exports diagrams)
+#   ./build.sh mjc_half_cheetah      # MuJoCo-family envs live in ocean/mujoco/ENV.h
+#   ./build.sh mjc_half_cheetah --cu # ... and ocean/mujoco/ENV.cu (one GPU thread per env)
+#   ./build.sh all                   # Build all envs native and native float32
 #
 # Env is compiled in. Run: ./puffer train|eval|match|sweep [--section.key=value ...]
 
@@ -200,6 +203,8 @@ elif [ "$ENV" = "nethack" ]; then
                     -Xlinker -rpath -Xlinker "$NETHACK_LIB_DIR" -ldl)
 elif [ -d "ocean/$ENV" ]; then
     SRC_DIR="ocean/$ENV"
+elif [ -f "ocean/mujoco/$ENV.h" ]; then
+    SRC_DIR="ocean/mujoco"
 else
     echo "Error: environment '$ENV' not found" && exit 1
 fi
