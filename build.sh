@@ -74,6 +74,7 @@ if [ "$ENV" = "all" ]; then
 
     if [ -n "$FAILED" ]; then
         echo -e "\nFailed builds:$FAILED"
+        exit 1
     fi
     exit 0
 fi
