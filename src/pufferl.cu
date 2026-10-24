@@ -639,8 +639,9 @@ __global__ void sample_logits(
         for (int h = 0; h < num_atns; h++) {
             int A = act_sizes[h];
             float cache[PPO_MAX_HEAD_A];
-            float logsumexp = ppo_discrete_logsumexp(
-                logits, logits_base, logits_offset, A, action_mask, mask_base, cache);
+            float mx;
+            float logsumexp = ppo_discrete_logsumexp(logits, logits_base,
+                logits_offset, A, action_mask, mask_base, cache, &mx);
 #ifdef PUFFER_NETHACK
             float inv_K = 0.0f;
             float eps = h == 0 ? nethack_verb_eps_load(
@@ -652,12 +653,12 @@ __global__ void sample_logits(
             for (int a = 0; a < A; a++) {
 #ifdef PUFFER_NETHACK
                 if (eps > 0.0f) {
-                    cumsum += nethack_verb_eps_mix(expf(cache[a] - logsumexp),
+                    cumsum += nethack_verb_eps_mix(expf((cache[a] - mx) - logsumexp),
                         action_mask[mask_base + logits_offset + a], eps, inv_K);
                 } else
 #endif
                 {
-                    cumsum += expf(cache[a] - logsumexp);
+                    cumsum += expf((cache[a] - mx) - logsumexp);
                 }
                 if (rand_val < cumsum) {
                     sampled = a;
@@ -686,13 +687,13 @@ __global__ void sample_logits(
             if (used) {
                 if (eps > 0.0f) {
                     total_log_prob += logf((1.0f - eps)
-                        * expf(cache[sampled] - logsumexp) + eps * inv_K);
+                        * expf((cache[sampled] - mx) - logsumexp) + eps * inv_K);
                 } else {
-                    total_log_prob += cache[sampled] - logsumexp;
+                    total_log_prob += (cache[sampled] - mx) - logsumexp;
                 }
             }
 #else
-            total_log_prob += cache[sampled] - logsumexp;
+            total_log_prob += (cache[sampled] - mx) - logsumexp;
 #endif
             logits_offset += A;
         }

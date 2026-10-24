@@ -1370,25 +1370,32 @@ __device__ __forceinline__ float load_logit_masked(
     return l;
 }
 
-// Shared by sample_logits + ppo_loss. Fills cache[0..A) (sized PPO_MAX_HEAD_A).
+// Shared by sample_logits + ppo_loss. Fills cache[0..A) (sized PPO_MAX_HEAD_A)
+// and *max_out; returns lse = log(sum(exp(cache - max))), so
+// logp(a) = (cache[a] - max) - lse. The argmax's exp(0) = 1 stays out of the
+// running sum (log1p) and max comes off before lse: a confident head's top logp
+// is ~-exp(-margin), which 1 + rest or max + lse rounds to exactly 0 (Softmax
+// Collapse, arXiv 2610.31642).
 __device__ __forceinline__ float ppo_discrete_logsumexp(
         const precision_t* __restrict__ logits, int logits_base,
         int logits_offset, int A,
         const precision_t* __restrict__ mask, int mask_base,
-        float* __restrict__ cache) {
+        float* __restrict__ cache, float* __restrict__ max_out) {
     float max_logit = -INFINITY;
-    float sum = 0.0f;
+    float rest = 0.0f;  // sum of exp(l - max_logit) over all but the argmax
     for (int a = 0; a < A; ++a) {
         float l = load_logit_masked(
             logits, logits_base, logits_offset, a, mask, mask_base);
         cache[a] = l;
         if (l > max_logit) {
-            sum *= __expf(max_logit - l);
+            rest = (rest + 1.0f) * __expf(max_logit - l);  // old max joins the rest
             max_logit = l;
+        } else {
+            rest += __expf(l - max_logit);
         }
-        sum += __expf(l - max_logit);
     }
-    return max_logit + __logf(sum);
+    *max_out = max_logit;
+    return log1pf(rest);
 }
 
 __device__ __forceinline__ void ppo_continuous_head(
@@ -1402,7 +1409,7 @@ __device__ __forceinline__ void ppo_continuous_head(
     *out_entropy = HALF_1_PLUS_LOG_2PI + log_std;
 }
 
-// After decoder GEMM, before GAE. One logit walk: live V, ρ, logp=logit-lse.
+// After decoder GEMM, before GAE. One logit walk: live V, ρ, logp=logit-max-lse.
 // logp is written into grad_logits (overwritten with grads after GAE).
 __global__ void cache_imp_and_v(
         Prec dec_out,
@@ -1445,11 +1452,12 @@ __global__ void cache_imp_and_v(
         for (int h = 0; h < NUM_ATNS; ++h) {
             int A = act_sizes[h];
             float cache[PPO_MAX_HEAD_A];
+            float mx;
             float lse = ppo_discrete_logsumexp(
                 logits, logits_base, logits_offset, A,
-                action_mask, at_base, cache);
+                action_mask, at_base, cache, &mx);
             for (int a = 0; a < A; ++a) {
-                logps[at_base + logits_offset + a] = cache[a] - lse;
+                logps[at_base + logits_offset + a] = (cache[a] - mx) - lse;
             }
 #ifdef PUFFER_NETHACK
             int used = nethack_head_used(verb, h);
@@ -1459,13 +1467,13 @@ __global__ void cache_imp_and_v(
                     float mix = 1.0f;
                     new_lp += nethack_verb_train_logp(
                         action_mask + at_base + logits_offset, A,
-                        cache[act] - lse, &mix);
+                        (cache[act] - mx) - lse, &mix);
                 } else {
-                    new_lp += cache[act] - lse;
+                    new_lp += (cache[act] - mx) - lse;
                 }
             }
 #else
-            new_lp += cache[(int)actions[idx * NUM_ATNS + h]] - lse;
+            new_lp += (cache[(int)actions[idx * NUM_ATNS + h]] - mx) - lse;
 #endif
             logits_offset += A;
         }
@@ -1598,8 +1606,10 @@ __global__ void ppo_loss_compute(
                 for (int j = 0; j < A; ++j) {
                     float logp = a.grad_logits[at_base + logits_offset + j];
                     float p = __expf(logp);
+                    // 1 - p as -expm1(logp): 1 - p rounds the taken action's
+                    // ~exp(-margin) grad away (to exactly 0 past margin ~17).
                     a.grad_logits[at_base + logits_offset + j] =
-                        ((j == act ? 1.0f : 0.0f) - p) * d_logp
+                        (j == act ? -expm1f(logp) : -p) * d_logp
                         + d_entropy_term * p * (-ent - logp);
                 }
                 logits_offset += A;
