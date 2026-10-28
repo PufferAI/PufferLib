@@ -513,7 +513,7 @@ const char* LOSS_NAMES[] = {
 };
 
 typedef struct {
-    unsigned long long* stamps;  // device [2 * NUM_TE]; globaltimer ns
+    cudaEvent_t train_ev[2 * NUM_TE];  // per async slot
     cudaEvent_t* rollout_ev;  // GPU [EV_T * horizon]; null on CPU
     float accum[NUM_PROF];
     int skip_rollout_time;
@@ -1450,19 +1450,17 @@ __global__ void clamp_precision_kernel(precision_t* dst, float lo, float hi, int
     }
 }
 
-// 1-thread graph node. cudaEventElapsedTime does not timestamp in-graph events.
-__global__ void puf_stamp(unsigned long long* dst) {
-    unsigned long long t;
-    asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(t));
-    *dst = t;
-}
-
 static void train_epoch_gpu(PuffeRL* pufferl, RolloutBuf src, int slot,
         cudaStream_t stream) {
     Hypers* hypers = &pufferl->hypers;
     RolloutBuf* rollouts = &pufferl->train_rollouts;
-    unsigned long long* st = pufferl->profile.stamps + slot * NUM_TE;
-    puf_stamp<<<1, 1, 0, stream>>>(st + TE_S);
+    // External events timestamp on every launch of a captured graph
+    cudaStreamCaptureStatus capture;
+    cudaStreamIsCapturing(stream, &capture);
+    int ev_flags = capture == cudaStreamCaptureStatusActive
+        ? cudaEventRecordExternal : cudaEventRecordDefault;
+    cudaEvent_t* ev = pufferl->profile.train_ev + slot * NUM_TE;
+    cudaEventRecordWithFlags(ev[TE_S], stream, ev_flags);
 
     int T = src.observations.shape[0];
     int B = src.observations.shape[1];
@@ -1497,7 +1495,7 @@ static void train_epoch_gpu(PuffeRL* pufferl, RolloutBuf src, int slot,
             numel(pufferl->train_state.shape) * sizeof(precision_t),
             cudaMemcpyDeviceToDevice, stream);
     }
-    puf_stamp<<<1, 1, 0, stream>>>(st + TE_MID);
+    cudaEventRecordWithFlags(ev[TE_MID], stream, ev_flags);
 
     int batch_size = hypers->total_agents * hypers->horizon;
     int mb_segs = hypers->minibatch_size / hypers->horizon;
@@ -1564,7 +1562,7 @@ static void train_epoch_gpu(PuffeRL* pufferl, RolloutBuf src, int slot,
                 primary->param.data, primary->master_weights.data, n);
         }
     }
-    puf_stamp<<<1, 1, 0, stream>>>(st + TE_E);
+    cudaEventRecordWithFlags(ev[TE_E], stream, ev_flags);
 }
 
 void train_impl(PuffeRL* pufferl, RolloutBuf* src_arg) {
@@ -1632,13 +1630,12 @@ void train_impl(PuffeRL* pufferl, RolloutBuf* src_arg) {
     cudaStreamSynchronize(train_stream);
 
     if (total_minibatches > 0) {
-        unsigned long long h[NUM_TE];
-        cudaMemcpy(h, pufferl->profile.stamps + slot * NUM_TE,
-            sizeof(h), cudaMemcpyDeviceToHost);
-        pufferl->profile.accum[PROF_TRAIN_MISC] +=
-            (float)(h[TE_MID] - h[TE_S]) * 1e-6f;
-        pufferl->profile.accum[PROF_TRAIN_MODEL] +=
-            (float)(h[TE_E] - h[TE_MID]) * 1e-6f;
+        cudaEvent_t* ev = pufferl->profile.train_ev + slot * NUM_TE;
+        float ms;
+        cudaEventElapsedTime(&ms, ev[TE_S], ev[TE_MID]);
+        pufferl->profile.accum[PROF_TRAIN_MISC] += ms;
+        cudaEventElapsedTime(&ms, ev[TE_MID], ev[TE_E]);
+        pufferl->profile.accum[PROF_TRAIN_MODEL] += ms;
     }
     pufferl->epoch += 1;
 }
@@ -1895,8 +1892,9 @@ PuffeRL* create_pufferl(Ini* ini, TrainContext* ctx) {
     env_setup(pufferl, vec, &vec_kwargs, env_kwargs);
     pufferl->vec = vec;
 
-    cudaMalloc((void**)&pufferl->profile.stamps,
-        2 * NUM_TE * sizeof(unsigned long long));
+    for (int i = 0; i < 2 * NUM_TE; i++) {
+        assert(cudaEventCreate(&pufferl->profile.train_ev[i]) == cudaSuccess);
+    }
     if (PUF_BACKEND == PUF_GPU) {
         int H = hypers.horizon;
         pufferl->profile.rollout_ev = (cudaEvent_t*)calloc(
