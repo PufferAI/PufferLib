@@ -8,6 +8,7 @@ ocean/osrs/data/
 
 # Build dir
 build/
+/fight_caves
 
 # hipified cuda extensions dir [HIP/ROCM]
 pufferlib/extensions/hip/

@@ -9,6 +9,7 @@ set -e
 #   ./build.sh breakout --float      # float32 precision (required for --slowly)
 #   ./build.sh breakout --cpu        # Play/eval binary (optimized) -> ./ENV
 #   ./build.sh osrs_inferno --cpu     # OSRS visual policy viewer -> ./osrs_inferno
+#   ./build.sh fight_caves --cpu      # Fight Caves manual/CPU replay -> ./fight_caves
 #   ./build.sh nethack --cpu          # NetHack TTY demo (ocean/nethack/nethack.c)
 #   ./build.sh breakout myplay --cpu # Play -> ./myplay
 #   ./build.sh breakout --debug      # Debug (-O0 -g; sanitizers on --cpu)
@@ -179,6 +180,14 @@ elif [ "$ENV" = "impulse_wars" ]; then
     if [ -z "${MODE:-}" ] || [ "$MODE" = "native" ] || [ "$MODE" = "profile" ]; then
         EXTRA_SRC="ocean/impulse_wars/impulse_wars_api.c"
     fi
+elif [ "$ENV" = "fight_caves" ]; then
+    SRC_DIR="ocean/$ENV"
+    if [ "$USE_GPU_ENV" = "1" ] || [ "$MODE" = "web" ]; then
+        echo "Error: fight_caves supports native train/eval and --cpu play/eval, not --cu or --web" >&2
+        exit 1
+    fi
+    python3 "$SRC_DIR/tools.py" setup
+    EXTRA_SRC="$SRC_DIR/binding.c"
 elif [ "$ENV" = "nethack" ]; then
     SRC_DIR="ocean/$ENV"
     EXTRA_CFLAGS+=(-DPUFFER_NETHACK)
@@ -280,7 +289,7 @@ if [ "$MODE" = "cpu" ]; then
     STANDALONE_SOURCE="src/puffercpu.c"
     STANDALONE_DEFINES=()
     case "$ENV" in
-        osrs_*|nethack)
+        osrs_*|nethack|fight_caves)
             STANDALONE_SOURCE="$SRC_FILE"
             ;;
         *)
@@ -466,6 +475,17 @@ ENV_COMPILE_FLAGS=(-DENV_HEADER=\"$ENV_HEADER\")
 
 MODE=${MODE:-native}
 
+# Keep Fight Caves simulation/viewer implementations in C; NVCC sees declarations.
+FC_BINDING_OBJECT=""
+if [ "$ENV" = "fight_caves" ]; then
+    $CC $LINK_OPT "${CLANG_WARN[@]}" "${SIMD_FLAGS[@]}" -std=c11 \
+        -D_POSIX_C_SOURCE=200809L -DPLATFORM_DESKTOP \
+        -I. -Isrc -I$SRC_DIR -Ivendor "${INCLUDES[@]}" \
+        -c "$SRC_DIR/binding.c" -o build/fight_caves_binding.o
+    FC_BINDING_OBJECT="build/fight_caves_binding.o"
+    EXTRA_SRC="$FC_BINDING_OBJECT"
+fi
+
 # Brace-init narrowing (host -Wno-narrowing + nvcc #2361) and unreachable
 # code in env headers (clang -Wunreachable-code, nvcc #111/#128).
 NVCC_NARROW=(
@@ -543,6 +563,7 @@ elif [ "$MODE" = "profile" ]; then
         $PRECISION \
         -Xcompiler=-fopenmp \
         tests/profile_kernels.cu \
+        $FC_BINDING_OBJECT \
         "$RAYLIB_A" \
         -L$CUDA_HOME/lib64 \
         -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand \
