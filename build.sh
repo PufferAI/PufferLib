@@ -15,6 +15,7 @@ set -e
 #   ./build.sh breakout --debug      # Debug (-O0 -g; sanitizers on --cpu)
 #   ./build.sh breakout --dry-run    # Print the compile commands instead of running them
 #   ./build.sh breakout --check      # Syntax-only compile with the --cpu flags; no binary
+#   ./build.sh breakout --test       # Env test harness with sanitisers -> build/test_breakout
 #   ./build.sh breakout --web        # Emscripten web build -> build/web/breakout
 #                                    # packs website 1M-cap policy + *_web.ini
 #                                    # copy build/web/ENV/* to ../docker/puffer.ai/docs/assets/ENV/
@@ -34,7 +35,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 START_DIR=$PWD
 if [ -z "$1" ]; then
     echo "Usage: ./build.sh ENV|ENV_DIR [OUT] [--cu] [--float] [--debug] [--cpu] [--web]" \
-        "[--profile] [--dry-run] [--check]"
+        "[--profile] [--dry-run] [--check] [--test]"
     exit 1
 fi
 ENV=$1
@@ -64,6 +65,7 @@ USE_GPU_ENV=0
 SNAKE_RAW=0
 DRY_RUN=""
 CHECK=""
+TEST=""
 while [ $# -gt 0 ]; do
     case $1 in
         --cu) USE_GPU_ENV=1 ;;
@@ -72,6 +74,7 @@ while [ $# -gt 0 ]; do
         --debug) DEBUG=1 ;;
         --dry-run) DRY_RUN=1 ;;
         --check) CHECK=1 ;;
+        --test)  TEST=1; DEBUG=1 ;;
         --web)   MODE=web ;;
         --profile) MODE=profile ;;
         --cpu)   MODE=cpu ;;
@@ -80,7 +83,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 MODE=${MODE:-native}
-[ -z "$CHECK" ] || MODE=cpu
+[ -z "$CHECK$TEST" ] || MODE=cpu
 
 invoke() {
     if [ -n "$DRY_RUN" ]; then printf '%q ' "$@"; echo; else "$@"; fi
@@ -121,7 +124,6 @@ if [ "$PLATFORM" = "Linux" ]; then
     RAYLIB_NAME='raylib-5.5_linux_amd64'
     OMP_FLAGS=(-fopenmp)
     OMP_LIB=-lomp5
-    SANITIZE_FLAGS=(-fsanitize=address,undefined,bounds,pointer-overflow -fno-omit-frame-pointer)
     STANDALONE_LDFLAGS=(-lGL)
 else
     OS=macos
@@ -129,9 +131,11 @@ else
     OMP_PREFIX="$(brew --prefix libomp)"
     OMP_FLAGS=(-Xclang -fopenmp -I"$OMP_PREFIX/include" -L"$OMP_PREFIX/lib" -lomp)
     OMP_LIB=-lomp
-    SANITIZE_FLAGS=()
     STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
 fi
+# Debug builds on Linux and every --test build (the harness relies on ASan).
+SANITIZE_FLAGS=(-fsanitize=address,undefined,bounds,pointer-overflow -fno-omit-frame-pointer)
+[ "$OS" = linux ] || [ -n "$TEST" ] || SANITIZE_FLAGS=()
 
 CLANG_WARN=(
     -Wall
@@ -306,7 +310,11 @@ case "$ENV" in
 esac
 
 USER_OUTPUT_NAME=${OUTPUT_NAME-}
-# Outputs are relative to the caller's directory; OUT overrides.
+# Outputs are relative to the caller's directory, --test under build/ like
+# --profile. OUT overrides.
+if [ -n "$TEST" ]; then
+    OUTPUT_NAME=${OUTPUT_NAME:-$START_DIR/build/test_$ENV}
+fi
 OUTPUT_NAME=${OUTPUT_NAME:-$START_DIR/$ENV}
 if [ -n "$OUT" ]; then
     OUTPUT_NAME=$OUT
@@ -333,7 +341,7 @@ else
 fi
 # Dashboard / cache / trailer: compile SRC_FILE only (not puffercpu / CUDA / obs_t).
 if [ "$STANDALONE" = "1" ]; then
-    if [ "$MODE" = "web" ] || [ "$MODE" = "profile" ] || [ -n "$CHECK" ]; then
+    if [ "$MODE" = "web" ] || [ "$MODE" = "profile" ] || [ -n "$CHECK" ] || [ -n "$TEST" ]; then
         echo "Error: $ENV is a standalone app, not an env" >&2
         exit 1
     fi
@@ -372,7 +380,31 @@ fi
 if [ "$MODE" = "cpu" ]; then
     STANDALONE_SOURCE="src/puffercpu.c"
     STANDALONE_DEFINES=()
-    if [ -f "$SRC_FILE" ]; then
+    if [ -n "$TEST" ]; then
+        # The harness drives the env header directly, even when the env has its own main.
+        ENV_HEADER="$SRC_DIR/$ENV.h"
+        if [ ! -f "$ENV_HEADER" ]; then
+            echo "Error: no $ENV_HEADER; GPU-only envs have no CPU test build"
+            exit 1
+        fi
+        STANDALONE_SOURCE="src/puffertest.c"
+        STANDALONE_DEFINES=(
+            "-DENV_HEADER=\"$ENV_HEADER\""
+            "-DPUFFER_ENV_NAME=\"$ENV\""
+        )
+        # Only tests that use puf_test.h join the harness.
+        TEST_FILES=()
+        for f in "$ENV_DIR"/tests/*.c; do
+            grep -qs 'puf_test\.h' "$f" && TEST_FILES+=("$f")
+        done
+        if [ ${#TEST_FILES[@]} -gt 0 ]; then
+            TESTS_INC="$OUTPUT_NAME.inc"
+            if [ -z "$DRY_RUN" ]; then
+                printf '#include "%s"\n' "${TEST_FILES[@]}" > "$TESTS_INC"
+            fi
+            STANDALONE_DEFINES+=("-DPUF_TEST_INCLUDE=\"$TESTS_INC\"")
+        fi
+    elif [ -f "$SRC_FILE" ]; then
         # The env ships its own standalone main (osrs_* visual sim, nethack TTY demo).
         STANDALONE_SOURCE="$SRC_FILE"
     else
