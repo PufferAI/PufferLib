@@ -1,0 +1,362 @@
+#!/usr/bin/env bash
+set -e
+
+# puffer: build and run PufferLib envs from any directory.
+#
+# Usage:
+#   puffer new NAME [DIR]                 # scaffold from ocean/template into DIR (default NAME)
+#   puffer build [ENV] [build.sh flags]   # ENV: a directory or an Ocean name
+#   puffer train [ENV] [args]             # build on demand, then ENV_DIR/build/puffer train ...
+#   puffer eval [ENV] [args]              # build on demand, then ENV_DIR/build/puffer eval ...
+#   puffer eval [ENV] --cpu [args]        # the --cpu standalone instead: ENV_DIR/build/ENV ...
+#   puffer check [ENV]                    # syntax-only compile of the env, no binary
+#   puffer test [ENV|all] [--test.key=v]  # sanitiser build of src/puffertest.c, then run it
+#
+# Binaries go to the env directory's build/, so an env is compiled once and
+# shared by every run folder; checkpoints and logs go to the current directory,
+# which remembers its env in build/puffer.env. The toolchain (a PufferLib
+# checkout) is, in order: $PUFFER_TOOLCHAIN, the [puffer] rev pinned in the env
+# ini (cloned into $PUFFER_HOME/toolchains on first use), the checkout holding
+# the current directory or this script, branch 5.0.
+
+PUFFER_HOME=${PUFFER_HOME:-$HOME/.puffer}
+PUFFER_REPO=${PUFFER_REPO:-https://github.com/PufferAI/PufferLib.git}
+DEFAULT_REV=5.0
+RECORD=build/puffer.env
+if command -v shasum > /dev/null; then SHA256=(shasum -a 256); else SHA256=(sha256sum); fi
+
+die() {
+    echo "puffer: $*" >&2
+    exit 1
+}
+
+usage() {
+    sed -n '/^# puffer:/,/^$/p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit "${1:-1}"
+}
+
+# This script's directory with symlinks resolved (an installed launcher is a link).
+self_dir() {
+    local p=${BASH_SOURCE[0]} d
+    while [ -L "$p" ]; do
+        d=$(cd "$(dirname "$p")" && pwd)
+        p=$(readlink "$p")
+        [[ $p != /* ]] && p="$d/$p"
+    done
+    cd "$(dirname "$p")" && pwd
+}
+SELF_DIR=$(self_dir)
+
+# Nearest PufferLib checkout containing a directory, or nothing.
+enclosing_checkout() {
+    local d=$1
+    while [ "$d" != "/" ]; do
+        if [ -f "$d/build.sh" ] && [ -d "$d/ocean" ] && [ -f "$d/src/pufferenv.h" ]; then
+            echo "$d"
+            return
+        fi
+        d=$(dirname "$d")
+    done
+}
+
+# ini_get FILE SECTION KEY: the value, comments stripped.
+ini_get() {
+    awk -v sec="$2" -v key="$3" '
+    /^[ \t]*\[/ { in_sec = ($0 ~ "^[ \t]*\\[[ \t]*" sec "[ \t]*\\][ \t]*$"); next }
+    in_sec && index($0, "=") {
+        line = $0; sub(/[#;].*/, "", line)
+        k = substr(line, 1, index(line, "=") - 1); gsub(/[ \t]/, "", k)
+        if (k == key) {
+            v = substr(line, index(line, "=") + 1); gsub(/^[ \t]+|[ \t]+$/, "", v)
+            print v; exit
+        }
+    }' "$1"
+}
+
+# checkout_at_rev DIR REV: DIR's HEAD is the branch REV or a sha REV prefixes.
+checkout_at_rev() {
+    local head branch
+    head=$(git -C "$1" rev-parse HEAD 2> /dev/null) || return 1
+    branch=$(git -C "$1" rev-parse --abbrev-ref HEAD 2> /dev/null)
+    [ "$branch" = "$2" ] || [ "${head#$2}" != "$head" ]
+}
+
+# The clone lands under its final name only once the checkout succeeded, so a
+# failed install is retried rather than used at the wrong revision.
+install_toolchain() {
+    local rev=$1 dir=$2
+    echo "puffer: installing toolchain $rev into $dir" >&2
+    rm -rf "$dir.partial"
+    mkdir -p "$(dirname "$dir")"
+    git clone --quiet "$PUFFER_REPO" "$dir.partial" \
+        && git -C "$dir.partial" checkout --quiet "$rev" \
+        && mv "$dir.partial" "$dir" \
+        || { rm -rf "$dir.partial"; die "could not install toolchain $rev from $PUFFER_REPO"; }
+}
+
+# toolchain_for ENV_DIR ENV_NAME: the toolchain directory. Its build.sh must
+# take an env directory, an output path and --dry-run; older revisions do not.
+toolchain_for() {
+    local env_dir=$1 name=$2 rev="" local_tc tc=${PUFFER_TOOLCHAIN:-}
+    if [ -z "$tc" ]; then
+        if [ -n "$env_dir" ] && [ -f "$env_dir/$name.ini" ]; then
+            rev=$(ini_get "$env_dir/$name.ini" puffer rev)
+        fi
+        local_tc=$(enclosing_checkout "$PWD")
+        [ -n "$local_tc" ] || local_tc=$(enclosing_checkout "$SELF_DIR")
+        if [ -n "$local_tc" ] && { [ -z "$rev" ] || checkout_at_rev "$local_tc" "$rev"; }; then
+            tc=$local_tc
+        else
+            tc="$PUFFER_HOME/toolchains/${rev:-$DEFAULT_REV}"
+            [ -d "$tc" ] || install_toolchain "${rev:-$DEFAULT_REV}" "$tc"
+        fi
+    fi
+    grep -q -- '--dry-run' "$tc/build.sh" 2> /dev/null \
+        || die "toolchain $tc predates the launcher (build.sh has no --dry-run); pin a newer rev"
+    echo "$tc"
+}
+
+# resolve_env ARG: ENV_DIR and ENV_NAME from a directory or an Ocean name.
+resolve_env() {
+    local x=$1 tc
+    if [ -d "$x" ]; then
+        ENV_DIR=$(cd "$x" && pwd)
+    else
+        tc=$(toolchain_for "" "")
+        [ -d "$tc/ocean/$x" ] || die "no env '$x': not a directory or an env in $tc/ocean"
+        ENV_DIR="$tc/ocean/$x"
+    fi
+    ENV_NAME=${ENV_DIR##*/}
+}
+
+# A first argument naming an env, read the way puffercpu does: a directory or a
+# bare word that is not latest, a weights file or a key=value.
+env_arg() {
+    [[ $1 != -* && $1 != *=* && $1 != *.bin && $1 != latest ]] || return 1
+    [ -d "$1" ] || [[ $1 != */* ]]
+}
+
+# select_env ENV: ENV_DIR, ENV_NAME, TOOLCHAIN and FLAGS, the last from this
+# folder's record when it is for the same env.
+select_env() {
+    resolve_env "$1"
+    TOOLCHAIN=$(toolchain_for "$ENV_DIR" "$ENV_NAME")
+    FLAGS=""
+    if [ -f "$RECORD" ] && [ "$(ini_get "$RECORD" puffer env)" = "$ENV_DIR" ]; then
+        FLAGS=$(ini_get "$RECORD" puffer flags)
+    fi
+}
+
+# load_record: ENV_DIR, ENV_NAME, TOOLCHAIN and FLAGS from the last build here,
+# else from the current directory being an env.
+load_record() {
+    if [ -f "$RECORD" ]; then
+        ENV_DIR=$(ini_get "$RECORD" puffer env)
+        TOOLCHAIN=$(ini_get "$RECORD" puffer toolchain)
+        FLAGS=$(ini_get "$RECORD" puffer flags)
+        ENV_NAME=${ENV_DIR##*/}
+    elif [ -f "$PWD/${PWD##*/}.h" ] || [ -f "$PWD/${PWD##*/}.cu" ]; then
+        ENV_DIR=$PWD
+        ENV_NAME=${PWD##*/}
+        TOOLCHAIN=$(toolchain_for "$ENV_DIR" "$ENV_NAME")
+        FLAGS=""
+    else
+        die "no env here: run 'puffer build ENV' first, or cd into an env directory"
+    fi
+}
+
+save_record() {
+    mkdir -p build
+    printf '[puffer]\nenv = %s\ntoolchain = %s\nflags = %s\n' \
+        "$ENV_DIR" "$TOOLCHAIN" "$FLAGS" > "$RECORD"
+}
+
+# Fingerprint of everything a build depends on: env sources (not outputs),
+# the toolchain's revision and uncommitted changes, and the flags.
+build_hash() {
+    {
+        (cd "$ENV_DIR" && find . -type f ! -path './build/*' ! -path './checkpoints/*' \
+            ! -path './logs/*' -print0 | LC_ALL=C sort -z | xargs -0 "${SHA256[@]}")
+        echo "$TOOLCHAIN"
+        git -C "$TOOLCHAIN" rev-parse HEAD 2> /dev/null || echo no-git
+        git -C "$TOOLCHAIN" diff HEAD -- build.sh src config 2> /dev/null || true
+        echo "$*"
+    } | "${SHA256[@]}" | cut -d' ' -f1
+}
+
+# do_build KIND FLAGS...: KIND is trainer, cpu or test. Skips the compile
+# when the fingerprint matches the last build.
+do_build() {
+    local kind=$1 bin hash hashfile
+    shift
+    case $kind in
+        cpu) bin="$ENV_DIR/build/$ENV_NAME"; set -- --cpu "$@" ;;
+        test) bin="$ENV_DIR/build/test"; set -- --test "$@" ;;
+        *) bin="$ENV_DIR/build/puffer" ;;
+    esac
+    hashfile="$bin.hash"
+    hash=$(build_hash "$@")
+    # The hash is written right after the binary; a newer binary came from build.sh.
+    if [ -x "$bin" ] && [ -f "$hashfile" ] && [ ! "$bin" -nt "$hashfile" ] \
+            && [ "$(cat "$hashfile")" = "$hash" ]; then
+        echo "puffer: $bin is up to date"
+        return
+    fi
+    "$TOOLCHAIN/build.sh" "$ENV_DIR" "$bin" "$@"
+    case " $* " in
+        *" --dry-run "*|*" --check "*) ;;
+        *) echo "$hash" > "$hashfile" ;;
+    esac
+}
+
+cmd_build() {
+    local env="" kind=trainer
+    if [ $# -gt 0 ] && [[ $1 != -* ]]; then
+        env=$1
+        shift
+    fi
+    # Flags are recorded for later runs, except --dry-run and --check, which
+    # are for this invocation only.
+    local persistent=() transient=()
+    for f in "$@"; do
+        case $f in
+            --cpu) kind=cpu ;;
+            --dry-run|--check) transient+=("$f") ;;
+            *) persistent+=("$f") ;;
+        esac
+    done
+    if [ -n "$env" ]; then
+        resolve_env "$env"
+        TOOLCHAIN=$(toolchain_for "$ENV_DIR" "$ENV_NAME")
+        FLAGS="${persistent[*]}"
+    else
+        load_record
+        [ ${#persistent[@]} -eq 0 ] || FLAGS="${persistent[*]}"
+    fi
+    # shellcheck disable=SC2086
+    do_build "$kind" $FLAGS "${transient[@]}"
+    # Recorded only once the build succeeded, so a failed attempt at another env
+    # does not redirect later train and eval runs from this folder.
+    [ ${#transient[@]} -gt 0 ] || save_record
+}
+
+# cmd_run KIND [ENV] ARGS...: with ENV, record it here so later runs can leave
+# it out. eval --cpu runs the standalone binary (./ENV) instead of the trainer.
+cmd_run() {
+    local kind=$1 a args=()
+    shift
+    for a in "$@"; do
+        if [ "$kind $a" = "eval --cpu" ]; then kind=cpu; else args+=("$a"); fi
+    done
+    set -- "${args[@]}"
+    local record=""
+    if [ $# -gt 0 ] && env_arg "$1"; then
+        select_env "$1"
+        shift
+        record=1
+    else
+        load_record
+    fi
+    # shellcheck disable=SC2086
+    do_build "$kind" $FLAGS
+    [ -z "$record" ] || save_record
+    if [ "$kind" = cpu ]; then
+        exec "$ENV_DIR/build/$ENV_NAME" "$@"
+    fi
+    exec "$ENV_DIR/build/puffer" "$kind" "$@"
+}
+
+# scaffold DIR NAME: ocean/template renamed to NAME, with its ini pinned.
+scaffold() {
+    local dir=$1 name=$2 tc camel rev
+    [[ $name =~ ^[a-z][a-z0-9_]*$ ]] || die "env name must match [a-z][a-z0-9_]*: $name"
+    [ -z "$(ls -A "$dir" 2> /dev/null)" ] || die "$dir is not empty"
+    tc=$(toolchain_for "" "")
+    camel="$(echo "${name:0:1}" | tr a-z A-Z)${name:1}"
+    mkdir -p "$dir"
+    sed "s/Template/$camel/g; s/template/$name/g" "$tc/ocean/template/template.h" > "$dir/$name.h"
+    sed "s/template/$name/g" "$tc/config/template.ini" > "$dir/$name.ini"
+    # The exact commit, so the env keeps building the same way.
+    rev=$(git -C "$tc" rev-parse HEAD 2> /dev/null || true)
+    if [ -n "$rev" ]; then
+        printf '\n[puffer]\nrev = %s\n' "$rev" >> "$dir/$name.ini"
+    fi
+    printf 'build/\ncheckpoints/\nlogs/\n' > "$dir/.gitignore"
+    echo "puffer: created $dir/$name.h and $dir/$name.ini (toolchain $tc)"
+    echo "next: cd $dir && puffer check && puffer eval --cpu"
+}
+
+cmd_new() {
+    [ $# -ge 1 ] || die "usage: puffer new NAME [DIR]"
+    scaffold "${2:-$1}" "$1"
+}
+
+cmd_check() {
+    if [ $# -gt 0 ] && [[ $1 != -* ]]; then
+        select_env "$1"
+    else
+        load_record
+    fi
+    "$TOOLCHAIN/build.sh" "$ENV_DIR" --check
+}
+
+# cmd_test [ENV|all] ARGS...: build the harness and run it; ARGS go to it.
+cmd_test() {
+    if [ "${1:-}" = all ]; then
+        shift
+        test_all "$@"
+        return
+    fi
+    if [ $# -gt 0 ] && env_arg "$1"; then
+        select_env "$1"
+        shift
+    else
+        load_record
+    fi
+    # shellcheck disable=SC2086
+    do_build test $FLAGS
+    exec "$ENV_DIR/build/test" "$@"
+}
+
+# Every env in the toolchain's ocean/ with a header, one line each, logs in
+# $PUFFER_HOME/test-logs. An env ini with [test] skip = 1 is left out.
+test_all() {
+    local tc logs failed=0 total=0 name ini
+    tc=$(toolchain_for "" "")
+    logs="$PUFFER_HOME/test-logs"
+    mkdir -p "$logs"
+    for dir in "$tc"/ocean/*/; do
+        name=$(basename "$dir")
+        [ -f "$dir/$name.h" ] || continue
+        ini="$dir/$name.ini"
+        [ -f "$ini" ] || ini="$tc/config/$name.ini"
+        if [ -f "$ini" ] && [ "$(ini_get "$ini" test skip)" = 1 ]; then
+            echo "skip $name"
+            continue
+        fi
+        total=$((total + 1))
+        if "$0" test "$dir" "$@" > "$logs/$name.log" 2>&1; then
+            echo "ok   $name"
+        else
+            failed=$((failed + 1))
+            echo "FAIL $name  ($logs/$name.log)"
+            { grep -m1 '^FAIL\|AddressSanitizer\|runtime error\|^Error' "$logs/$name.log" \
+                || tail -3 "$logs/$name.log"; } | sed 's/^/     /'
+        fi
+    done
+    echo "puffer test all: $failed of $total envs failed"
+    [ $failed -eq 0 ]
+}
+
+[ $# -gt 0 ] || usage
+cmd=$1
+shift
+case $cmd in
+    new) cmd_new "$@" ;;
+    build) cmd_build "$@" ;;
+    train|eval) cmd_run "$cmd" "$@" ;;
+    check) cmd_check "$@" ;;
+    test) cmd_test "$@" ;;
+    -h|--help|help) usage 0 ;;
+    *) die "unknown command '$cmd' (try: puffer help)" ;;
+esac
