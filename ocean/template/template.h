@@ -13,6 +13,7 @@ const Color PUFF_WHITE = (Color){241, 241, 241, 241};
 const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
 struct Log {
+    float perf;
     float score;
     float n;
 };
@@ -48,6 +49,7 @@ void puf_step(Template* env) {
         puf_reset(env);
         env->agents[0].rewards[0] = 1;
         env->agents[0].terminals[0] = 1;
+        env->log.perf += 1;
         env->log.score += 1;
         env->log.n += 1;
     } else if (env->x == -env->goal) {
@@ -100,6 +102,7 @@ void puf_init(Env* env, Dict* kwargs) {
 }
 
 void puf_log(Log* log, Dict* out) {
+    dict_set(out, "perf", log->perf);
     dict_set(out, "score", log->score);
     dict_set(out, "n", log->n);
 }
