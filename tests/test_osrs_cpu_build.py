@@ -53,6 +53,9 @@ def test_osrs_cpu_build_selects_visual_entrypoint(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     arguments = compiler_arguments.read_text().splitlines()
-    assert "ocean/osrs_inferno/osrs_inferno.c" in arguments
+    # build.sh resolves sources from its own directory (symlinks resolved) and
+    # writes the binary to the directory it was run from.
+    root = tmp_path.resolve()
+    assert str(root / "ocean/osrs_inferno/osrs_inferno.c") in arguments
     assert "src/puffercpu.c" not in arguments
-    assert arguments[arguments.index("-o") + 1] == "osrs_inferno"
+    assert arguments[arguments.index("-o") + 1] == str(root / "osrs_inferno")

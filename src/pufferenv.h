@@ -4,6 +4,7 @@
 #include <immintrin.h>
 #endif
 #include <math.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,31 @@ static void puf_web_vsync(void) {
 
 typedef struct Env Env;
 typedef struct Log Log;
+
+// Path of an asset: ENV_DIR/resources/rel if it exists, else ROOT/resources/rel
+// (both roots are defined by build.sh), so binaries run from any directory.
+// printf-style, returning one of a few rotating buffers.
+static inline const char* puf_resource(const char* fmt, ...) {
+    static char bufs[8][2048];
+    static int next = 0;
+    char* buf = bufs[next];
+    next = (next + 1) % 8;
+    char rel[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(rel, sizeof(rel), fmt, args);
+    va_end(args);
+#ifdef PUFFER_ENV_DIR
+    snprintf(buf, sizeof(bufs[0]), PUFFER_ENV_DIR "/resources/%s", rel);
+    FILE* fp = fopen(buf, "r");
+    if (fp) {
+        fclose(fp);
+        return buf;
+    }
+#endif
+    snprintf(buf, sizeof(bufs[0]), PUFFER_ROOT "/resources/%s", rel);
+    return buf;
+}
 
 typedef struct Agent {
     obs_t* observations;

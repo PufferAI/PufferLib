@@ -501,13 +501,28 @@ static void puf_ini_load_file(Ini* ini, const char* path) {
     fclose(fp);
 }
 
+// Config roots from build.sh: default.ini under PUFFER_ROOT/config, the env's
+// ini under PUFFER_ENV_DIR (or PUFFER_ROOT/config). Web builds use the cwd.
+#ifndef PUFFER_ROOT
+#define PUFFER_ROOT "."
+#endif
+
 static inline void puf_ini_load_env(Ini* ini, const char* env_name,
         int argc, char** argv) {
-    puf_ini_load_file(ini, "config/default.ini");
+    puf_ini_load_file(ini, PUFFER_ROOT "/config/default.ini");
 
     if (strcmp(env_name, "default") != 0) {
         char path[1024];
-        snprintf(path, sizeof(path), "config/%s.ini", env_name);
+        snprintf(path, sizeof(path), PUFFER_ROOT "/config/%s.ini", env_name);
+#ifdef PUFFER_ENV_DIR
+        char env_path[1024];
+        snprintf(env_path, sizeof(env_path), PUFFER_ENV_DIR "/%s.ini", env_name);
+        FILE* env_fp = fopen(env_path, "r");
+        if (env_fp) {
+            fclose(env_fp);
+            snprintf(path, sizeof(path), "%s", env_path);
+        }
+#endif
         puf_ini_load_file(ini, path);
     }
 

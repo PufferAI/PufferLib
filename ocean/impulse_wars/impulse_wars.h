@@ -54,16 +54,23 @@ void puf_init(Env* env, Dict* kwargs) {
     bool sitting_duck = dict_get(kwargs, "sitting_duck");
     bool is_training = dict_get(kwargs, "is_training");
     bool continuous = dict_get(kwargs, "continuous");
-    initEnv(env, num_drones, num_agents, map_idx, seed, enable_teams,
-        sitting_duck, is_training, continuous);
+    // initMaps builds every map inside the env it is given, which would leave
+    // the first env in a different state from the rest; give it a scratch env.
     static pthread_mutex_t maps_mu = PTHREAD_MUTEX_INITIALIZER;
     static int maps_ready = 0;
     pthread_mutex_lock(&maps_mu);
     if (!maps_ready) {
-        initMaps(env);
+        iwEnv* scratch = calloc(1, sizeof(iwEnv));
+        initEnv(scratch, num_drones, num_agents, map_idx, seed, enable_teams,
+            sitting_duck, is_training, continuous);
+        initMaps(scratch);
+        puf_close(scratch);
+        free(scratch);
         maps_ready = 1;
     }
     pthread_mutex_unlock(&maps_mu);
+    initEnv(env, num_drones, num_agents, map_idx, seed, enable_teams,
+        sitting_duck, is_training, continuous);
     setRewards(
         env,
         dict_get(kwargs, "reward_win"),

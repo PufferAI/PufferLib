@@ -16,22 +16,24 @@ static double accumulator = 0.0;
 static const uint8_t THREE_BIT_MASK = 0x7;
 static const uint8_t FOUR_BIT_MASK = 0xf;
 
+// Per-agent buffers from the trainer, else the env's own flat buffers. Drones
+// past num_agents (scripted) have neither; return NULL rather than offset it.
 static inline uint8_t* iw_obs(iwEnv* e, uint8_t i) {
-    if (e->agents[i].observations) {
+    if (e->agents[i].observations || !e->observations) {
         return e->agents[i].observations;
     }
     return e->observations + (size_t)i * e->obsBytes;
 }
 
 static inline float* iw_act(iwEnv* e, uint8_t i) {
-    if (e->agents[i].actions) {
+    if (e->agents[i].actions || !e->actions) {
         return e->agents[i].actions;
     }
     return e->actions + (size_t)i * CONTINUOUS_ACTION_SIZE;
 }
 
 static inline float* iw_rew(iwEnv* e, uint8_t i) {
-    if (e->agents[i].rewards) {
+    if (e->agents[i].rewards || !e->rewards) {
         return e->agents[i].rewards;
     }
     return &e->rewards[i];
