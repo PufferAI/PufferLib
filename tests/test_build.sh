@@ -81,6 +81,20 @@ has_arg "$TMP/out.txt" "-DENV_HEADER=\"$TMP/fx/breakout/breakout.h\""
 not "$ROOT/build.sh" "$TMP/fx/bad.name" --check > "$TMP/out.txt" 2>&1
 grep -q identifier "$TMP/out.txt"
 EOF
+# A lone ini beside the directory's own header does not rename it (ocean/nethack/depth.ini).
+fixture named ''
+mkdir "$TMP/fx/named/src"
+mv "$TMP/fx/named/named.h" "$TMP/fx/named/src/"
+mv "$TMP/fx/named" "$TMP/fx/puffer-named"
+fixture stray ''
+mv "$TMP/fx/stray/stray.ini" "$TMP/fx/stray/other.ini"
+t "the one NAME.ini names a directory called otherwise; NAME.h may sit in src/" <<'EOF'
+cd "$TMP"
+"$ROOT/build.sh" fx/puffer-named --cpu --dry-run > "$TMP/out.txt"
+has_arg "$TMP/out.txt" "-DENV_HEADER=\"$TMP/fx/puffer-named/src/named.h\""
+"$ROOT/build.sh" fx/stray --cpu --dry-run > "$TMP/out.txt"
+has_arg "$TMP/out.txt" '-DPUFFER_ENV_NAME="stray"'
+EOF
 
 # An out-of-tree env with every [build] hook kind; [build.cpu] applies to the
 # cpu build only.

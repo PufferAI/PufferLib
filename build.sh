@@ -4,6 +4,7 @@ set -e
 # Usage:
 #   ./build.sh breakout              # Native train/eval -> ./puffer
 #   ./build.sh path/to/my_env        # Any env directory holding my_env.h (or .cu) and my_env.ini
+#   ./build.sh path/to/my-repo       # Otherwise its one NAME.ini names it; NAME.h may be in src/
 #   ./build.sh breakout mybin        # Native -> ./mybin (relative to the caller)
 #   ./build.sh breakout --cu         # CUDA env (ENV_HEADER=ENV_DIR/ENV.cu; exclusive vs .h)
 #   ./build.sh robot_arm             # CUDA-only; implies --cu
@@ -52,6 +53,11 @@ ENV_DIR=""
 if [[ $ENV == */* ]]; then
     ENV_DIR=$(cd "$ENV" && pwd)
     ENV=${ENV_DIR##*/}
+    inis=("$ENV_DIR"/*.ini)
+    if [ ! -f "$ENV_DIR/$ENV.h" ] && [ ! -f "$ENV_DIR/$ENV.cu" ] && [ -f "${inis[0]}" ] \
+        && [ ${#inis[@]} -eq 1 ]; then
+        ENV=$(basename "${inis[0]}" .ini)
+    fi
 elif [ -d "$ROOT/ocean/$ENV" ]; then
     ENV_DIR="$ROOT/ocean/$ENV"
 fi
@@ -206,6 +212,9 @@ elif [ "$ENV" = "trailer" ]; then
     CLANG_WARN+=(-Wno-unused-function)
 elif [ -n "$ENV_DIR" ]; then
     SRC_DIR="$ENV_DIR"
+    if [ -f "$ENV_DIR/src/$ENV.h" ] || [ -f "$ENV_DIR/src/$ENV.cu" ]; then
+        SRC_DIR="$ENV_DIR/src"
+    fi
 else
     echo "Error: environment '$ENV' not found" && exit 1
 fi

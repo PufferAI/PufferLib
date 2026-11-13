@@ -116,6 +116,16 @@ toolchain_for() {
     echo "$tc"
 }
 
+# env_name DIR: the env name build.sh resolves DIR to.
+env_name() {
+    local name=${1##*/} inis=("$1"/*.ini)
+    if [ ! -f "$1/$name.h" ] && [ ! -f "$1/$name.cu" ] && [ -f "${inis[0]}" ] \
+        && [ ${#inis[@]} -eq 1 ]; then
+        name=$(basename "${inis[0]}" .ini)
+    fi
+    echo "$name"
+}
+
 # resolve_env ARG: ENV_DIR and ENV_NAME from a directory or an Ocean name.
 resolve_env() {
     local x=$1 tc
@@ -126,7 +136,7 @@ resolve_env() {
         [ -d "$tc/ocean/$x" ] || die "no env '$x': not a directory or an env in $tc/ocean"
         ENV_DIR="$tc/ocean/$x"
     fi
-    ENV_NAME=${ENV_DIR##*/}
+    ENV_NAME=$(env_name "$ENV_DIR")
 }
 
 # A first argument naming an env, read the way puffercpu does: a directory or a
@@ -154,14 +164,15 @@ load_record() {
         ENV_DIR=$(ini_get "$RECORD" puffer env)
         TOOLCHAIN=$(ini_get "$RECORD" puffer toolchain)
         FLAGS=$(ini_get "$RECORD" puffer flags)
-        ENV_NAME=${ENV_DIR##*/}
-    elif [ -f "$PWD/${PWD##*/}.h" ] || [ -f "$PWD/${PWD##*/}.cu" ]; then
+        ENV_NAME=$(env_name "$ENV_DIR")
+    else
         ENV_DIR=$PWD
-        ENV_NAME=${PWD##*/}
+        ENV_NAME=$(env_name "$PWD")
+        [ -f "$ENV_NAME.h" ] || [ -f "$ENV_NAME.cu" ] || [ -f "src/$ENV_NAME.h" ] \
+            || [ -f "src/$ENV_NAME.cu" ] \
+            || die "no env here: run 'puffer build ENV' first, or cd into an env directory"
         TOOLCHAIN=$(toolchain_for "$ENV_DIR" "$ENV_NAME")
         FLAGS=""
-    else
-        die "no env here: run 'puffer build ENV' first, or cd into an env directory"
     fi
 }
 

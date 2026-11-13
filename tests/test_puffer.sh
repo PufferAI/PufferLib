@@ -100,6 +100,14 @@ echo '// touched' >> myenv.h
 "$PUFFER" build --cpu | grep -q Compiling
 "$PUFFER" eval --headless --cpu --eval_episodes=1 | grep -q CPU_EVAL
 EOF
+t "a directory named otherwise is an env through its NAME.ini" <<'EOF'
+mkdir -p "$TMP/puffer-flat"
+cd "$TMP/puffer-flat"
+"$PUFFER" new flat .
+"$PUFFER" build --cpu
+test -x build/flat
+"$PUFFER" eval --headless --cpu --eval_episodes=1 | grep -q 'up to date'
+EOF
 
 # Toolchains: a pinned rev this checkout is not at gets cloned into PUFFER_HOME;
 # PUFFER_TOOLCHAIN overrides the pin; a checkout already at the rev is used as is.
@@ -141,6 +149,9 @@ grep -qi usage "$TMP/out.txt"
 "$PUFFER" help > /dev/null 2>&1
 mkdir -p "$TMP/nothing"
 cd "$TMP/nothing"
+not "$PUFFER" train > "$TMP/out.txt" 2>&1
+grep -qi 'no env' "$TMP/out.txt"
+cp "$ROOT/config/breakout.ini" .
 not "$PUFFER" train > "$TMP/out.txt" 2>&1
 grep -qi 'no env' "$TMP/out.txt"
 not "$PUFFER" build no_such_env --cpu
